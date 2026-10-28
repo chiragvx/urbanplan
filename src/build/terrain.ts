@@ -135,67 +135,71 @@ export function buildWater(tile: TileData, hf: Heightfield): THREE.BufferGeometr
   return gb.build();
 }
 
-export interface TerrainChunk { cx: number; cz: number; radius: number; high: THREE.BufferGeometry; low: THREE.BufferGeometry }
 
-/**
- * Terrain as chunks with two levels of detail (full grid near, every 4th vertex far).
- * Each chunk gets a short skirt so LOD seams never show cracks.
- */
-export function buildTerrainChunks(hf: Heightfield, cellsPerChunk = 40, lowStep = 4): TerrainChunk[] {
+/** One terrain chunk over grid vertices [i0..i1] × [j0..j1] (every `step`-th vertex), with a 3 m skirt. */
+export function buildTerrainPatch(hf: Heightfield, i0: number, j0: number, i1: number, j1: number, step: number): THREE.BufferGeometry {
   const n = hf.n, cell = hf.cell, half = hf.half, h = hf.surface;
-  const out: TerrainChunk[] = [];
   const normal = (i: number, j: number): [number, number, number] => {
     const hl = h[j * n + Math.max(0, i - 1)], hr = h[j * n + Math.min(n - 1, i + 1)];
     const hu = h[Math.max(0, j - 1) * n + i], hd = h[Math.min(n - 1, j + 1) * n + i];
     const nx = hl - hr, ny = 2 * cell, nz = hu - hd, L = Math.hypot(nx, ny, nz);
     return [nx / L, ny / L, nz / L];
   };
-  const make = (i0: number, j0: number, i1: number, j1: number, step: number) => {
-    const is: number[] = [], js: number[] = [];
-    for (let i = i0; i < i1; i += step) is.push(i);
-    is.push(i1);
-    for (let j = j0; j < j1; j += step) js.push(j);
-    js.push(j1);
-    const W = is.length, Hh = js.length;
-    const pos: number[] = [], nor: number[] = [], uv: number[] = [], idx: number[] = [];
-    for (const j of js) for (const i of is) {
-      pos.push(-half + i * cell, h[j * n + i], -half + j * cell);
-      nor.push(...normal(i, j));
-      uv.push(i / (n - 1), 1 - j / (n - 1));
+  const is: number[] = [], js: number[] = [];
+  for (let i = i0; i < i1; i += step) is.push(i);
+  is.push(i1);
+  for (let j = j0; j < j1; j += step) js.push(j);
+  js.push(j1);
+  const W = is.length, Hh = js.length;
+  const pos: number[] = [], nor: number[] = [], uv: number[] = [], idx: number[] = [];
+  for (const j of js) for (const i of is) {
+    pos.push(-half + i * cell, h[j * n + i], -half + j * cell);
+    nor.push(...normal(i, j));
+    uv.push(i / (n - 1), 1 - j / (n - 1));
+  }
+  for (let b = 0; b < Hh - 1; b++) for (let a = 0; a < W - 1; a++) {
+    const p = b * W + a, q = p + 1, r = p + W, s = r + 1;
+    idx.push(p, r, q, q, r, s);
+  }
+  // skirt: drop the border 3 m so LOD seams are hidden
+  const border: number[] = [];
+  for (let a = 0; a < W; a++) border.push(a);
+  for (let b = 1; b < Hh; b++) border.push(b * W + W - 1);
+  for (let a = W - 2; a >= 0; a--) border.push((Hh - 1) * W + a);
+  for (let b = Hh - 2; b >= 1; b--) border.push(b * W);
+  border.push(0);
+  for (let k = 0; k < border.length - 1; k++) {
+    const v0 = border[k], v1 = border[k + 1];
+    const base = pos.length / 3;
+    for (const v of [v0, v1]) {
+      pos.push(pos[v * 3], pos[v * 3 + 1] - 3, pos[v * 3 + 2]);
+      nor.push(nor[v * 3], nor[v * 3 + 1], nor[v * 3 + 2]);
+      uv.push(uv[v * 2], uv[v * 2 + 1]);
     }
-    for (let b = 0; b < Hh - 1; b++) for (let a = 0; a < W - 1; a++) {
-      const p = b * W + a, q = p + 1, r = p + W, s = r + 1;
-      idx.push(p, r, q, q, r, s);
-    }
-    // skirt: drop the border 3 m so LOD seams are hidden
-    const border: number[] = [];
-    for (let a = 0; a < W; a++) border.push(a);
-    for (let b = 1; b < Hh; b++) border.push(b * W + W - 1);
-    for (let a = W - 2; a >= 0; a--) border.push((Hh - 1) * W + a);
-    for (let b = Hh - 2; b >= 1; b--) border.push(b * W);
-    border.push(0);
-    for (let k = 0; k < border.length - 1; k++) {
-      const v0 = border[k], v1 = border[k + 1];
-      const base = pos.length / 3;
-      for (const v of [v0, v1]) {
-        pos.push(pos[v * 3], pos[v * 3 + 1] - 3, pos[v * 3 + 2]);
-        nor.push(nor[v * 3], nor[v * 3 + 1], nor[v * 3 + 2]);
-        uv.push(uv[v * 2], uv[v * 2 + 1]);
-      }
-      idx.push(v0, base, v1, v1, base, base + 1);
-    }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
-    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-    g.setIndex(pos.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(idx, 1) : new THREE.Uint16BufferAttribute(idx, 1));
-    g.computeBoundingSphere();
-    return g;
-  };
+    idx.push(v0, base, v1, v1, base, base + 1);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(pos.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(idx, 1) : new THREE.Uint16BufferAttribute(idx, 1));
+  g.computeBoundingSphere();
+  return g;
+}
+
+export interface TerrainChunk { cx: number; cz: number; radius: number; high: THREE.BufferGeometry; low: THREE.BufferGeometry; i0: number; j0: number; i1: number; j1: number }
+
+/**
+ * Terrain as chunks with two levels of detail (full grid near, every 4th vertex far).
+ * Each chunk gets a short skirt so LOD seams never show cracks.
+ */
+export function buildTerrainChunks(hf: Heightfield, cellsPerChunk = 40, lowStep = 4): TerrainChunk[] {
+  const n = hf.n, cell = hf.cell, half = hf.half;
+  const out: TerrainChunk[] = [];
   for (let j0 = 0; j0 < n - 1; j0 += cellsPerChunk) for (let i0 = 0; i0 < n - 1; i0 += cellsPerChunk) {
     const i1 = Math.min(n - 1, i0 + cellsPerChunk), j1 = Math.min(n - 1, j0 + cellsPerChunk);
-    const high = make(i0, j0, i1, j1, 1);
-    out.push({ cx: -half + ((i0 + i1) / 2) * cell, cz: -half + ((j0 + j1) / 2) * cell, radius: high.boundingSphere!.radius, high, low: make(i0, j0, i1, j1, lowStep) });
+    const high = buildTerrainPatch(hf, i0, j0, i1, j1, 1);
+    out.push({ cx: -half + ((i0 + i1) / 2) * cell, cz: -half + ((j0 + j1) / 2) * cell, radius: high.boundingSphere!.radius, high, low: buildTerrainPatch(hf, i0, j0, i1, j1, lowStep), i0, j0, i1, j1 });
   }
   return out;
 }

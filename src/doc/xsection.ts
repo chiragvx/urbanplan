@@ -56,8 +56,53 @@ function vergeIdx(P: Part[]): Set<number> {
   return out;
 }
 
-/** Resize the whole road: verges keep their width, the carriageway parts scale (never below their minimums). */
+/**
+ * Resize the whole road. Footpaths / planters at the edges keep their width; medians, parking, bus and cycle lanes keep
+ * theirs; the traffic lanes take up the rest — adding or dropping lanes so each stays 2.75–3.75 m wide (Indian practice).
+ * Only when even one narrow lane won't fit do the other parts give way.
+ */
 export function setTotalWidth(parts: Part[], w: number): Part[] {
+  const vi = vergeIdx(parts);
+  const vergeW = parts.reduce((a, p, i) => a + (vi.has(i) ? p.width : 0), 0);
+  const lanes = parts.filter((p, i) => !vi.has(i) && p.kind === 'lane');
+  const fixedW = parts.reduce((a, p, i) => a + (!vi.has(i) && p.kind !== 'lane' ? p.width : 0), 0);
+  const space = w - vergeW - fixedW;
+  if (!lanes.length) return scaleAll(parts, w);
+  const twoWayNow = lanes.some((p) => p.dir === 1) && lanes.some((p) => p.dir === -1);
+  const nMin = twoWayNow ? 2 : 1;
+  if (space < nMin * 2.75) {
+    // too narrow for even the minimum lanes: fewest lanes at 2.75 m, everything else shares what's left
+    let P = isOneway(parts) ? setLanes(parts, 1, 0) : twoWayNow ? setLanes(parts, 1, 1) : setLanes(parts, 1, 0);
+    const laneW = Math.min(2.75, w / nMin);
+    const rest = Math.max(0, w - laneW * nMin);
+    const others = P.filter((p) => p.kind !== 'lane');
+    const otherW = others.reduce((a, p) => a + p.width, 0);
+    const k = otherW > 0 ? rest / otherW : 0;
+    P = P.map((p) => (p.kind === 'lane' ? { ...p, width: r2(laneW) } : { ...p, width: r2(p.width * k) })).filter((p) => p.width >= 0.3);
+    const lanesP = P.filter((p) => p.kind === 'lane');
+    const fix = w - totalWidth(P);
+    if (lanesP.length) lanesP[0].width = r2(lanesP[0].width + fix);
+    return P;
+  }
+  let n = lanes.length;
+  const lw = space / n;
+  if (lw < 2.75 || lw > 3.75) {
+    const twoWay = lanes.some((p) => p.dir === 1) && lanes.some((p) => p.dir === -1) || (lanes.length === 1 && lanes[0].dir === 0 && space >= 5.5);
+    n = Math.max(1, Math.min(10, Math.round(space / 3.3)));
+    if (twoWay) n = Math.max(2, n - (n % 2));
+    if (space / n < 2.5) n = Math.max(twoWay ? 2 : 1, Math.floor(space / 2.75));
+  }
+  const oneway = isOneway(parts);
+  let P = n === lanes.length ? clone(parts) : oneway ? setLanes(parts, n, 0) : n === 1 ? setLanes(parts, 1, 0) : setLanes(parts, Math.ceil(n / 2), Math.floor(n / 2));
+  if (oneway) P = P.map((p) => (p.kind === 'lane' ? { ...p, dir: 1 as const } : p));
+  const each = r2(space / n);
+  let k = 0;
+  P = P.map((p) => (p.kind === 'lane' && !VERGE_KINDS.includes(p.kind) ? { ...p, width: k++ === n - 1 ? r2(space - each * (n - 1)) : each } : p));
+  return P;
+}
+
+/** Proportional resize of everything inside the verges (minimums honoured; verges give way last). */
+function scaleAll(parts: Part[], w: number): Part[] {
   const P = clone(parts);
   const vi = vergeIdx(P);
   const verge = P.filter((_, i) => vi.has(i)), inner = P.filter((_, i) => !vi.has(i));
@@ -66,13 +111,11 @@ export function setTotalWidth(parts: Part[], w: number): Part[] {
   const minInner = inner.reduce((a, p) => a + PART_MIN_W[p.kind], 0);
   let target = w - vergeW;
   if (target < minInner) {
-    // not enough room: the verges give way too
     const k = Math.max(0, (w - minInner) / (vergeW || 1));
     for (const p of verge) p.width = r2(p.width * k);
     target = minInner;
   }
   if (innerW > 0) {
-    // proportional, with minimums honoured
     let k = target / innerW;
     for (let it = 0; it < 4; it++) {
       let fixed = 0, free = 0;

@@ -12,6 +12,10 @@ export class Engine {
   renderer: THREE.WebGPURenderer;
   scene = new THREE.Scene();
   camera: THREE.PerspectiveCamera;
+  /** top-down orthographic camera for the 2D plan view */
+  planCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 9000);
+  private planPipeline: THREE.RenderPipeline | null = null;
+  plan = false;
   sun = new THREE.DirectionalLight(0xfff1dc, 3.2);
   hemi = new THREE.HemisphereLight(0xc4d6ec, 0x6b5f48, 1.15);
   sky: SkyMesh;
@@ -144,8 +148,27 @@ export class Engine {
   }
 
   render() {
-    this.pipeline.render();
+    if (this.plan) {
+      if (!this.planPipeline) {
+        const p = new THREE.RenderPipeline(this.renderer);
+        p.outputColorTransform = false;
+        p.outputNode = renderOutput(pass(this.scene, this.planCamera), THREE.NoToneMapping, THREE.SRGBColorSpace);
+        this.planPipeline = p;
+      }
+      this.planPipeline.render();
+    } else this.pipeline.render();
   }
+
+  /** Switch between the plan view (flat, unlit, no sky / fog / shadows) and the 3D view. */
+  setPlan(on: boolean) {
+    this.plan = on;
+    this.sky.visible = !on;
+    this.scene.background = on ? new THREE.Color(0xebe7df) : null;
+    this.sun.castShadow = !on && this.quality.shadows;
+    if (on) this.savedFog = this.scene.fog;
+    this.scene.fog = on ? null : this.savedFog ?? this.scene.fog;
+  }
+  private savedFog: THREE.Fog | THREE.FogExp2 | null = null;
 
   /** Poll GPU timestamps (cheap; call ~once a second). */
   async sampleGpuTime() {

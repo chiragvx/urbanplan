@@ -57,13 +57,35 @@ export class CityDoc {
     if (!o) return undefined;
     if (p?.set) o = { ...o, ...p.set } as Obj;
     if (o.kind === 'section') {
-      const rp = this.patch.get(o.road)?.set;
+      const rp = this.roadOverrides(o.road);
       if (rp) {
-        const own = p?.set ?? (p?.add ? null : null);
-        for (const k of INHERITED) if (k in rp && !(own && k in own)) (o as unknown as Record<string, unknown>)[k] = rp[k];
+        const own = this.ownKeys(id);
+        for (const k of INHERITED) if (k in rp && !own.has(k)) (o as unknown as Record<string, unknown>)[k] = rp[k];
       }
     }
     return o;
+  }
+
+  /** Inheritable values set on a road by the user (patch on a base road; the object itself for a created road). */
+  private roadOverrides(road: Id): Record<string, unknown> | undefined {
+    const e = this.patch.get(road);
+    if (!e) return undefined;
+    if (e.add) {
+      const a = e.add as unknown as Record<string, unknown>;
+      const out: Record<string, unknown> = {};
+      for (const k of INHERITED) if (k !== 'name' && k !== 'cls' && a[k] !== undefined) out[k] = a[k];
+      for (const k of (a.own as string[] | undefined) ?? []) out[k] = a[k];
+      return Object.keys(out).length ? out : undefined;
+    }
+    return e.set;
+  }
+
+  /** Inheritable keys a section sets itself (so road-level edits don't override them). */
+  private ownKeys(id: Id): Set<string> {
+    const e = this.patch.get(id);
+    const out = new Set<string>(Object.keys(e?.set ?? {}));
+    for (const k of ((e?.add as unknown as Record<string, unknown>)?.own as string[] | undefined) ?? []) out.add(k);
+    return out;
   }
 
   /** Base value (before any edit) — for "reset" and for showing what changed. */
@@ -72,10 +94,10 @@ export class CityDoc {
   /** Is this property edited on the object itself? ('road' = inherited from a road-level edit) */
   editState(id: Id, key: string): 'base' | 'own' | 'road' | 'new' {
     const p = this.patch.get(id);
-    if (p?.add) return 'new';
     if (p?.set && key in p.set) return 'own';
     const o = this.get(id);
-    if (o?.kind === 'section' && (INHERITED as string[]).includes(key) && this.patch.get(o.road)?.set && key in this.patch.get(o.road)!.set!) return 'road';
+    if (o?.kind === 'section' && (INHERITED as string[]).includes(key) && !this.ownKeys(id).has(key) && key in (this.roadOverrides(o.road) ?? {})) return 'road';
+    if (p?.add) return ((p.add as unknown as Record<string, unknown>).own as string[] | undefined)?.includes(key) ? 'own' : 'new';
     return 'base';
   }
 
@@ -157,7 +179,7 @@ export class CityDoc {
     this.collect(id, prev);
     if (e && (e.set || e.add || e.del)) this.patch.set(id, e); else this.patch.delete(id);
     this.cache.delete(id);
-    if (prev?.kind === 'road' || this.base.get(id)?.kind === 'road') for (const s of this.roadSecs.get(id) ?? []) this.cache.delete(s);
+    if (prev?.kind === 'road' || this.base.get(id)?.kind === 'road' || e?.add?.kind === 'road') for (const s of this.roadSecs.get(id) ?? []) this.cache.delete(s);
     this.index(id);
     this.collect(id, this.get(id));
   }
@@ -185,7 +207,12 @@ export class CityDoc {
     if (!cur?.add && !base) throw new Error(`CityDoc.set: no object ${id}`);
     this.touch(id);
     const e: PatchEntry = clone(cur) ?? {};
-    if (e.add) (e.add as unknown as Record<string, unknown>)[key] = clone(value);
+    if (e.add) {
+      const a = e.add as unknown as Record<string, unknown>;
+      a[key] = clone(value);
+      // a user-set inheritable value on a created section / road is its own (wins over / passes down road values)
+      if ((a.kind === 'section' || a.kind === 'road') && (INHERITED as string[]).includes(key) && !((a.own as string[] | undefined) ?? []).includes(key)) a.own = [...((a.own as string[]) ?? []), key];
+    }
     else {
       e.set ??= {};
       if (base && eq((base as unknown as Record<string, unknown>)[key], value) && !(base.kind === 'road' && (INHERITED as string[]).includes(key))) delete e.set[key];
@@ -202,6 +229,15 @@ export class CityDoc {
   /** Remove a property override (back to the road's / base value). */
   reset(id: Id, key?: string) {
     const cur = this.patch.get(id);
+    if (cur?.add) {
+      const own = ((cur.add as unknown as Record<string, unknown>).own as string[] | undefined) ?? [];
+      if (!own.length) return;
+      this.touch(id);
+      const e = clone(cur);
+      (e.add as unknown as Record<string, unknown>).own = key ? own.filter((k) => k !== key) : [];
+      this.writeEntry(id, e);
+      return;
+    }
     if (!cur?.set) return;
     this.touch(id);
     const e = clone(cur);

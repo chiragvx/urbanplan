@@ -33,6 +33,8 @@ export interface SectionObj {
   note?: string;
   /** where the width came from */
   widthSrc?: Source;
+  /** (created sections) inheritable keys set on the section itself */
+  own?: string[];
 }
 
 export interface JunctionObj {
@@ -57,6 +59,8 @@ export interface RoadObj {
   /** road-level cross-section / surface (set only by edits; passed down to sections that don't override them) */
   parts?: Part[];
   surface?: 'asphalt' | 'dirt';
+  /** (created roads) inheritable keys set by the user */
+  own?: string[];
 }
 
 export type LineKind = 'sewer' | 'storm' | 'water' | 'power' | 'gas' | 'telecom' | 'metro' | 'rail' | 'path' | 'other';
