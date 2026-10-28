@@ -1,13 +1,68 @@
 # Pune Remix
 
-Cities: Skylines–style redesigner for real Pune, in the browser. Illustrative concept, not engineering advice.
-Current tile: **Koregaon Park · Kalyani Nagar**, 5×5 km.
+Edit real Pune like a Figma file, see it in 3D like Cities: Skylines. A personal map editor for making a more
+accurate map of the city — roads, junctions, utilities, metro — that you can publish and others can copy and edit.
+Illustrative concept, not engineering advice. Current tile: **Koregaon Park · Kalyani Nagar**, 5×5 km.
 
 ## Run
 
 ```bash
 npm install
 npm run dev     # http://localhost:5173 (Chrome/Edge; three.js WebGPU with WebGL2 fallback)
+npm test        # headless document + cross-section tests
+```
+
+## The editor
+
+- **2D plan** (default) for editing, **3D** with <kbd>Tab</kbd> — the same generated city, a camera flight apart.
+- **Select** (<kbd>V</kbd>): click a road → the whole road; double-click → one section (junction to junction); <kbd>Esc</kbd> steps out.
+  Drag a road to bend it, a junction to move it (drop it on another junction / road to connect), the □ handles to
+  change width (<kbd>Alt</kbd> = one side; snaps to DP standard widths). Shift-drag moves the selection.
+- **Road vs section edits**: a road-level change reaches every section of the road; a section's own change wins
+  (blue dot = set here, purple = inherited from the road). Inspector → cross-section strip (Streetmix-style):
+  drag part edges, click a part for kind / width / direction, presets per road class.
+- **Edit points** (<kbd>A</kbd>): Bézier anchors + handles; double-click a road to add a point. **Draw road** (<kbd>P</kbd>): click
+  points, drag for curves, end on a road to connect. **Split / join** (<kbd>K</kbd>). **Lines** (<kbd>L</kbd>) for utilities / rail.
+  **Measure** (<kbd>M</kbd>): distances, and road / building-to-building widths on hover.
+- **Layers**: reference (georeferenced DP sheets <kbd>D</kbd>, OSM / your own XYZ imagery), surface, elevated (metro),
+  underground (PMC sewer, stormwater, nallas — <kbd>X</kbd> x-ray in 3D). Each can be hidden, locked, faded.
+- **Accuracy** view colours roads by where their width comes from (DP sheet / OSM / edited / verified);
+  **Review** walks the roads most likely to be wrong (<kbd>N</kbd> next, <kbd>Y</kbd> looks right); **Issues** finds overlaps,
+  roads crossing without a junction, near-miss dead ends, narrow lanes, tight curves, widths beyond the DP reserve.
+- <kbd>Ctrl K</kbd> command palette (commands, road names, `lat, lon` / `x, z`), <kbd>?</kbd> all shortcuts. Everything undoes.
+
+### Maps: save, publish, copy
+
+A map is **only your edits** (`.punemap.json`): one line per edited object, so `git diff` reads like "this road's
+cross-section changed". Edits sit on top of the baked base map and are re-attached by locator (OSM ways + position)
+when the base is re-imported; anything that no longer matches is kept and listed under Issues.
+
+- Autosaves in the browser. **Save** (<kbd>Ctrl S</kbd>) writes `maps/<name>.punemap.json` in this repo when running `npm run dev`
+  (elsewhere: a file on disk / download).
+- **Publish** copies the map into `public/maps/` and its gallery; `npm run build` → upload `dist/` to any static host.
+  `?map=<url>` opens any hosted map read-only with **Edit a copy** (a fork that remembers where it came from).
+- Export **GeoJSON** (WGS84, for QGIS / JOSM) or the edited **network.json** for the offline tools.
+- The base data is © OpenStreetMap contributors (ODbL): a published map built on it is shared under the ODbL too.
+
+### Edit with code
+
+`city` in the browser console and `npm run map -- apply <map> <script.mjs>` share one API (and the editor's undo):
+
+```js
+city.roads({ name: /North Main/ }).width(24)               // whole road, lanes re-flowed to 2.75–3.75 m
+city.sections({ cls: 'residential' }).filter((s) => city.width(s) < 5).footpaths(1)
+city.junctions({ signals: true }).cornerRadius(10)
+city.road([[0, 0], [120, 40]], 'tertiary', 'New Link Road') // metres from the tile centre
+city.help()
+```
+
+```bash
+npm run map -- new maps/my.punemap.json "My map" "Me"
+npm run map -- apply maps/my.punemap.json scripts/widen.mjs    # export default (city) => { … }
+npm run map -- check maps/my.punemap.json                       # exit code 2 if there are errors
+npm run map -- geojson maps/my.punemap.json out.geojson
+npm run map -- network maps/my.punemap.json out/network.json
+npm run map -- publish maps/my.punemap.json
 ```
 
 ## Data pipeline (offline)
@@ -69,6 +124,16 @@ curved kerb corners fit, raised footpath corners, roundabout rings with filleted
 zebras, decks and pillars. Terrain is carved under ground-level roads; buildings are shrunk away from roads.
 
 ## Layout
+
+```
+src/doc/      City Document: types, base (bake → sections / junctions / roads / layers), CityDoc (patch, inheritance,
+              undo), compile (→ road mesher), ops (split / join / bend / pen …), xsection, format, issues, api, export
+src/editor/   editor controller + tools, plan view, hit index, overlay, commands (menus / palette / shortcuts)
+src/scene/    World (road chunks per edit, lazy terrain / buildings / trees / rail / pipes), reference imagery
+src/ui/       Preact panels: top bar, layers / roads / issues / review, inspector, cross-section, dialogs
+src/app/      boot, files (autosave, repo, publish, fork), review queue, frame loop
+tools/map-cli.ts  maps from the command line
+```
 
 ```
 tools/        bake pipeline (Node)        src/geo/     streets, curves, elevation, terrain, road raster

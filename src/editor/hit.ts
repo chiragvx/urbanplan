@@ -101,8 +101,9 @@ export class HitIndex {
       if (o.kind === 'junction' && can('junction')) {
         const r = this.C.junctionRing(id);
         const dc = Math.hypot(o.x - x, o.z - z);
-        if (r && inPoly(r, x, z)) offer({ kind: 'junction', id, d: -1000 + dc });
-        else if (dc < tol + 2) offer({ kind: 'junction', id, d: -500 + dc });
+        // the centre handle wins (small junctions sit inside big junction surfaces), then the surface
+        if (dc < tol + 2) offer({ kind: 'junction', id, d: -2000 + dc });
+        else if (r && inPoly(r, x, z)) offer({ kind: 'junction', id, d: -1000 + dc });
       } else if (o.kind === 'section' && can('section')) {
         const sd = this.sectionDist(id, x, z);
         if (sd && sd.d <= sd.hw + tol) offer({ kind: 'section', id, d: sd.d - sd.hw, p: sd.p });

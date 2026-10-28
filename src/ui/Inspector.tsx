@@ -111,7 +111,7 @@ function RoadPanel(p: { id: Id }) {
           {secs.sort((a, b) => len(b.id) - len(a.id)).map((s) => (
             <button key={s.id} class="list-item" onClick={() => select([{ kind: 'section', id: s.id }])} onDblClick={() => { select([{ kind: 'section', id: s.id }]); ui.E.zoomToSelection(); }}>
               {d.patch.has(s.id) && <i class="dot own" />}
-              <span>{xs.totalWidth(s.parts).toFixed(1)} m · {xs.laneCount(s.parts).all} lanes</span>
+              <span class="grow-left">{xs.totalWidth(s.parts).toFixed(1)} m · {xs.laneCount(s.parts).all} lane{xs.laneCount(s.parts).all === 1 ? '' : 's'}</span>
               <span class="muted">{fmtLen(len(s.id))}{s.verified ? ' ✓' : ''}</span>
             </button>
           ))}
