@@ -1,0 +1,13 @@
+import fs from 'node:fs';
+import { Heightfield } from '../../src/geo/heightfield';
+import { generateNetwork } from '../../src/net/generate';
+const dir = 'public/tiles/kp/';
+const hdr = JSON.parse(fs.readFileSync(dir + 'tile.json', 'utf8'));
+const bin = fs.readFileSync(dir + 'tile.bin');
+const sec = hdr.sections.find((s: any) => s.name === 'terrain');
+const hf = new Heightfield(hdr.terrain.n, hdr.terrain.cell, new Float32Array(bin.buffer.slice(bin.byteOffset + sec.offset, bin.byteOffset + sec.offset + sec.length * 4)));
+const net = JSON.parse(fs.readFileSync(dir + 'network.json', 'utf8'));
+const t = Date.now();
+const m = generateNetwork(net, hf);
+let bad = 0; for (const v of m.asphalt.pos) if (!Number.isFinite(v)) bad++;
+console.log('generate', Date.now() - t, 'ms', JSON.stringify(m.stats), 'verts asphalt', m.asphalt.vertexCount, 'paving', m.paving.vertexCount, 'markings', m.markings.vertexCount, 'concrete', m.concrete.vertexCount, 'non-finite', bad);

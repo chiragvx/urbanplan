@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pune Remix</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <canvas id="gl"></canvas>
+
+    <div id="loading">
+      <div class="load-card">
+        <div class="logo big">Pune<span>Remix</span></div>
+        <div class="load-sub">Koregaon Park · Kalyani Nagar — built from open data</div>
+        <div class="bar"><div id="load-bar"></div></div>
+        <div id="load-msg">Starting engine…</div>
+      </div>
+    </div>
+
+    <div id="hud" hidden>
+      <header class="top">
+        <div class="brand"><div class="logo">Pune<span>Remix</span></div><div class="tile-name" id="tile-name"></div></div>
+        <div class="spacer"></div>
+        <div class="time">
+          <button id="play" title="Run the day">▶</button>
+          <div class="clock" id="clock">09:30</div>
+          <input type="range" id="tod" min="0" max="1439" step="1" value="570" title="Time of day" />
+        </div>
+        <div class="quality">
+          <label><input type="checkbox" id="q-shadows" /> Shadows</label>
+          <label><input type="checkbox" id="q-ao" /> AO</label>
+          <label><input type="checkbox" id="q-bloom" /> Bloom</label>
+        </div>
+      </header>
+      <div class="info" id="info" hidden></div>
+      <footer class="bottom">
+        <span id="stats"></span>
+        <span class="hint">Drag to pan · Right-drag to rotate · Wheel to zoom · WASD / QE · Click to inspect</span>
+        <span id="fps"></span>
+      </footer>
+      <div class="attrib" id="attrib"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

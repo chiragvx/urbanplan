@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pune Remix</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <canvas id="gpu"></canvas>
+
+    <div id="loading">
+      <div class="load-card">
+        <div class="logo big">Pune<span>Remix</span></div>
+        <div class="load-sub">Building real Pune from open data…</div>
+        <div class="bar"><div id="load-bar"></div></div>
+        <div id="load-msg">Starting engine…</div>
+      </div>
+    </div>
+
+    <div id="hud" hidden>
+      <header class="top">
+        <div class="brand">
+          <div class="logo">Pune<span>Remix</span></div>
+          <div class="tile-name" id="tile-name"></div>
+        </div>
+        <div class="search">
+          <input id="search" list="road-names" placeholder="Jump to a road… e.g. Baner Road" autocomplete="off" />
+          <datalist id="road-names"></datalist>
+        </div>
+        <div class="time">
+          <div class="clock" id="clock">08:30</div>
+          <input type="range" id="tod" min="0" max="1439" step="1" title="Time of day" />
+          <div class="speeds" id="speeds">
+            <button data-speed="0" title="Pause (Space)">⏸</button>
+            <button data-speed="1" class="on" title="Normal">▶</button>
+            <button data-speed="3" title="Fast">⏩</button>
+            <button data-speed="8" title="Very fast">⏭</button>
+          </div>
+        </div>
+      </header>
+
+      <aside class="panel report" id="report">
+        <div class="panel-title">
+          <span>Area report card</span>
+          <span class="grade" id="grade">–</span>
+        </div>
+        <div id="score-rows"></div>
+        <div class="live">
+          <div><b id="st-veh">0</b><span>vehicles</span></div>
+          <div><b id="st-kmh">0</b><span>avg km/h</span></div>
+          <div><b id="st-bus">0</b><span>bus km/h</span></div>
+          <div><b id="st-ped">0%</b><span>walk on road</span></div>
+        </div>
+        <label class="density">Traffic <input type="range" id="density" min="0.2" max="1.6" step="0.05" value="1" /></label>
+      </aside>
+
+      <aside class="panel inspector" id="inspector" hidden>
+        <div class="panel-title"><span id="ins-name">Road</span><button class="x" id="ins-close">✕</button></div>
+        <div class="ins-class" id="ins-class"></div>
+        <div class="ins-grid" id="ins-grid"></div>
+        <div class="ins-quick" id="ins-quick"></div>
+      </aside>
+
+      <div class="tooltip" id="tooltip" hidden></div>
+      <div class="toast" id="toast" hidden></div>
+      <div class="compare-badge" id="compare-badge" hidden>ORIGINAL · release to see your design</div>
+
+      <footer class="bottom">
+        <div class="options" id="options"></div>
+        <div class="toolbar" id="toolbar"></div>
+        <div class="actions">
+          <label class="toggle" title="Apply edits to the whole street, not just one block"><input type="checkbox" id="whole" checked /> Whole street</label>
+          <button id="undo" title="Undo (Ctrl+Z)">↶</button>
+          <button id="redo" title="Redo (Ctrl+Y)">↷</button>
+          <button id="compare" title="Hold to see the original (C)">Before / After</button>
+          <button id="shot" title="Save screenshot (P)">📸</button>
+          <button id="reset" title="Reset all edits">Reset</button>
+        </div>
+        <div class="hint" id="hint"></div>
+      </footer>
+
+      <div class="attrib">Map data © OpenStreetMap contributors · Buildings: OSM · Illustrative concept, not engineering advice</div>
+      <div class="fps" id="fps"></div>
+    </div>
+
+    <div id="nogpu" hidden>
+      <div class="load-card">
+        <div class="logo big">Pune<span>Remix</span></div>
+        <p id="nogpu-msg"></p>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

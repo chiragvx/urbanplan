@@ -1,0 +1,29 @@
+{
+  "name": "pune-remix",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pune Remix \u2014 a web city redesigner built on real open data. Custom WebGPU engine prototype.",
+  "scripts": {
+    "fetch": "node tools/fetch-osm.mjs",
+    "bake": "node tools/bake.mjs",
+    "data": "npm run fetch && npm run bake",
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "bake:network": "esbuild tools/bake-network.ts --bundle --platform=node --format=esm --outfile=tools/dev/bake-network.mjs --log-level=warning && node tools/dev/bake-network.mjs"
+  },
+  "dependencies": {
+    "@types/three": "^0.186.0",
+    "earcut": "^3.0.1",
+    "geotiff": "^3.0.5",
+    "osm2streets-js": "^0.1.4",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@webgpu/types": "^0.1.51",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}

@@ -1,0 +1,5 @@
+node_modules
+dist
+data/raw
+tools/dev/*.mjs
+tools/dp/__pycache__
