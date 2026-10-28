@@ -50,15 +50,28 @@ export class Heightfield {
    * Neighbouring terrain is blended with a 1:2 cut/fill slope so there are no cliffs.
    */
   conform(targets: Float32Array, slope = 0.5, radiusCells = 3) {
+    this.conformRegion(targets, 0, 0, this.n - 1, this.n - 1, slope, radiusCells);
+  }
+
+  /** Grid index range [i0..i1] × [j0..j1] covering a metric region (clamped to the grid). */
+  gridRange(x0: number, z0: number, x1: number, z1: number) {
+    const c = this.cell, h = this.half, n = this.n;
+    return {
+      i0: Math.max(0, Math.floor((x0 + h) / c)), j0: Math.max(0, Math.floor((z0 + h) / c)),
+      i1: Math.min(n - 1, Math.ceil((x1 + h) / c)), j1: Math.min(n - 1, Math.ceil((z1 + h) / c)),
+    };
+  }
+
+  /** `conform`, limited to grid vertices [i0..i1] × [j0..j1] (targets outside are still read for the slopes). */
+  conformRegion(targets: Float32Array, i0: number, j0: number, i1: number, j1: number, slope = 0.5, radiusCells = 3) {
     const n = this.n, cell = this.cell;
     const out = this.surface;
-    out.set(this.ground);
     const offs: [number, number, number][] = [];
     for (let dj = -radiusCells; dj <= radiusCells; dj++) for (let di = -radiusCells; di <= radiusCells; di++) {
       const d = Math.hypot(di, dj) * cell;
       if (d <= radiusCells * cell + 1e-6) offs.push([di, dj, d * slope]);
     }
-    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
       const k = j * n + i;
       const t = targets[k];
       if (!Number.isNaN(t)) { out[k] = t; continue; }

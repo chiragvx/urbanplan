@@ -5,8 +5,13 @@ export type V2 = [number, number];
 
 // ---------------- Road types ----------------
 
-export type PartKind = 'lane' | 'median' | 'sidewalk' | 'shoulder';
+export type PartKind = 'lane' | 'median' | 'sidewalk' | 'shoulder' | 'parking' | 'cycle' | 'bus' | 'planter';
 export interface Part { kind: PartKind; width: number; dir: 1 | -1 | 0 } // dir relative to segment a→b; 0 = shared
+
+/** Parts that sit outside the kerb (raised, at the road edge). */
+export const VERGE_KINDS: PartKind[] = ['sidewalk', 'planter'];
+/** Parts that carry moving traffic. */
+export const TRAFFIC_KINDS: PartKind[] = ['lane', 'bus'];
 
 export interface RoadType {
   id: string;
@@ -57,6 +62,27 @@ export function makeRoadType(s: RoadTypeSpec): RoadType {
     id: roadTypeId(s), parts, oneway: s.oneway, surface: s.surface, major: s.major, lanesF: s.lanesF, lanesB: s.lanesB,
     cwL: cw, cwR: cw, hwL: cw + s.sidewalkL, hwR: cw + s.sidewalkR,
   };
+}
+
+/**
+ * Road type from an explicit left→right cross-section (the editor's representation).
+ * The centre line is the middle of the carriageway: everything between the outer verges (footpaths / planters).
+ */
+export function typeFromParts(parts: Part[], opts: { surface?: 'asphalt' | 'dirt'; major?: boolean } = {}): RoadType {
+  const P = parts.filter((p) => p.width > 0.01).map((p) => ({ kind: p.kind, width: Math.round(p.width * 100) / 100, dir: p.dir }));
+  let vl = 0, vr = 0, i = 0, j = P.length - 1;
+  while (i <= j && VERGE_KINDS.includes(P[i].kind)) vl += P[i++].width;
+  while (j >= i && VERGE_KINDS.includes(P[j].kind)) vr += P[j--].width;
+  const total = P.reduce((a, p) => a + p.width, 0);
+  const cw = Math.max(0.5, total - vl - vr) / 2;
+  const lanes = P.filter((p) => TRAFFIC_KINDS.includes(p.kind));
+  const lanesF = lanes.filter((p) => p.dir >= 0).length, lanesB = lanes.filter((p) => p.dir === -1).length;
+  const oneway = lanes.length > 0 && lanes.every((p) => p.dir === 1);
+  const surface = opts.surface ?? 'asphalt';
+  const major = opts.major ?? false;
+  const code = (k: PartKind) => ({ lane: 'L', median: 'M', sidewalk: 'S', shoulder: 'H', parking: 'P', cycle: 'C', bus: 'B', planter: 'T' })[k];
+  const id = 'x' + P.map((p) => `${code(p.kind)}${p.width}${p.dir === 1 ? '+' : p.dir === -1 ? '-' : ''}`).join('') + surface[0] + (major ? 'M' : '');
+  return { id, parts: P, oneway, surface, major, lanesF, lanesB, cwL: cw, cwR: cw, hwL: cw + vl, hwR: cw + vr };
 }
 
 /** Lateral offsets (left-positive) of each part: [outerLeft, outerRight]. */

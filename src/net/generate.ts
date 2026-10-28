@@ -7,7 +7,7 @@
 //  Heights: ground surfaces follow the terrain per vertex; elevated chains interpolate between node heights;
 //           shared edges use identical positions → identical heights → no cracks.
 import { GeomBuilder, drapePolygon, rgbHex } from '../build/geom';
-import { type Network, type NetNode, type NetSegment, type RoadType, type V2, sampleBez, bezD, partOffsets } from './model';
+import { type Network, type NetSegment, type RoadType, type V2, type BridgeKind, type PartKind, sampleBez, bezD, partOffsets } from './model';
 import type { Heightfield } from '../geo/heightfield';
 import { RoadRaster } from '../geo/roadraster';
 
@@ -16,22 +16,9 @@ const LIFT = 0.06, KERB = 0.15, SLAB = 1.3;
 const COL = {
   asphalt: rgbHex(0x4b4d51), asphaltMajor: rgbHex(0x45474b), junction: rgbHex(0x484a4e), dirt: rgbHex(0x8a7558),
   sidewalk: rgbHex(0xbdb4a4), kerb: rgbHex(0x9d9a93), median: rgbHex(0x8f8c84), island: rgbHex(0x6f9446),
+  bus: rgbHex(0x7a4a44), cycle: rgbHex(0x4f6f52), parking: rgbHex(0x55585d),
   white: rgbHex(0xe9e9e4), yellow: rgbHex(0xe2bd3f), concrete: rgbHex(0xa8a49b), concreteDark: rgbHex(0x8e8a82), path: rgbHex(0xb3a88f),
 };
-
-export interface SegGeo {
-  s: NetSegment; t: RoadType;
-  pts: Float32Array; cum: Float32Array; len: number; nrm: Float32Array; // full-length samples + left normals
-  trimA: number; trimB: number;
-}
-
-export interface NetMeshes {
-  asphalt: GeomBuilder; paving: GeomBuilder; markings: GeomBuilder; concrete: GeomBuilder;
-  targets: Float32Array; raster: RoadRaster; geos: SegGeo[];
-  /** junction surfaces (closed kerb polygons), for analysis / picking */
-  junctions: { node: number; ring: V2[]; hull: boolean }[];
-  stats: { junctions: number; roundabouts: number; seamless: number; ends: number };
-}
 
 // ---------------- sampling helpers ----------------
 
@@ -298,25 +285,159 @@ function polyWall(gb: GeomBuilder, P: V2[], zb: (x: number, z: number) => number
   }
 }
 
-// ---------------- main ----------------
+// ---------------- incremental mesher ----------------
+
+/** A network node as the mesher sees it (junction, shape point, roundabout or dead end). */
+export interface MNode {
+  id: string; x: number; z: number; lift: number;
+  R?: number; ringLanes?: number; signals?: boolean;
+  /** kerb corner radius override (m) */
+  rc?: number;
+  /** zebra crossings: force on/off (default: signals or a major arm) */
+  crossings?: boolean;
+}
+
+/** One cubic piece of road. */
+export interface MSeg {
+  id: string; a: string; b: string;
+  /** cubic Bézier control points x0,z0,x1,z1,x2,z2,x3,z3 */
+  p: number[];
+  t: RoadType; cls: string; bridge: BridgeKind;
+  elevated?: boolean; viaduct?: boolean;
+  /** raster / picking code (> 0) */
+  code: number;
+  /** the editor object this piece belongs to (section id) */
+  owner?: string;
+  src?: NetSegment;
+}
+
+export type MeshLayer = 'asphalt' | 'paving' | 'markings' | 'concrete';
+export const MESH_LAYERS: MeshLayer[] = ['asphalt', 'paving', 'markings', 'concrete'];
+
+export interface Packed { pos: Float32Array; nor: Float32Array; col: Float32Array; uv: Float32Array; idx: Uint32Array }
+
+/** Terrain carving / footprint stamp of one item: a swept centre line or a closed polygon. */
+export interface Stamp { line?: Float32Array; hw?: number; ring?: Float32Array; carve: boolean; code: number }
+
+export interface MeshItem {
+  key: string; // 's:<seg id>' | 'n:<node id>'
+  layers: Partial<Record<MeshLayer, Packed>>;
+  x0: number; z0: number; x1: number; z1: number;
+  stamps: Stamp[];
+}
+
+export interface SegGeo {
+  s: MSeg; t: RoadType;
+  pts: Float32Array; cum: Float32Array; len: number; nrm: Float32Array; // full-length samples + left normals
+  trimA: number; trimB: number;
+  rawA: number; rawB: number; // trims wanted by each junction before the segment is shared out
+}
 
 interface End {
-  g: SegGeo; atA: boolean; node: NetNode;
+  g: SegGeo; atA: boolean; node: MNode;
   ux: number; uz: number; ang: number; // outward direction at the node
   hwL: number; hwR: number; cwL: number; cwR: number; // relative to outward direction
   trim: number; rc: number;
 }
 
-export function generateNetwork(net: Network, hf: Heightfield): NetMeshes {
-  const asphalt = new GeomBuilder(), paving = new GeomBuilder(), markings = new GeomBuilder(), concrete = new GeomBuilder();
-  const targets = new Float32Array(hf.n * hf.n).fill(NaN);
-  const raster = new RoadRaster(net.half);
-  const T = (x: number, z: number) => hf.sample(x, z);
-  const junctionPolys: NetMeshes['junctions'] = [];
-  const stats = { junctions: 0, roundabouts: 0, seamless: 0, ends: 0 };
+type NodeKind = 'seamless' | 'junction' | 'roundabout' | 'end' | 'shape';
 
-  // ---- sample every segment ----
-  const geos: SegGeo[] = net.segments.map((s) => {
+function pack(gb: GeomBuilder): Packed | undefined {
+  if (!gb.idx.length) return undefined;
+  return { pos: new Float32Array(gb.pos), nor: new Float32Array(gb.nor), col: new Float32Array(gb.col), uv: new Float32Array(gb.uv), idx: new Uint32Array(gb.idx) };
+}
+
+/**
+ * Builds road geometry item by item (one item per segment, one per node) so an edit only rebuilds what it touched:
+ * the edited pieces, the junctions at their ends and the neighbouring arms whose trims those junctions set.
+ */
+export class RoadMesher {
+  readonly nodes = new Map<string, MNode>();
+  readonly segs = new Map<string, MSeg>();
+  readonly geos = new Map<string, SegGeo>();
+  readonly items = new Map<string, MeshItem>();
+  readonly junctions = new Map<string, { ring: V2[]; hull: boolean }>();
+  readonly kinds = new Map<string, NodeKind>();
+  private nodeSegs = new Map<string, Set<string>>();
+  private ends = new Map<string, End[]>();
+  private nodeCodes = new Map<string, number>();
+  private nextNodeCode = 1;
+  private T: (x: number, z: number) => number;
+
+  constructor(readonly hf: Heightfield) {
+    this.T = (x, z) => hf.sample(x, z);
+  }
+
+  nodeCode(id: string) {
+    let c = this.nodeCodes.get(id);
+    if (c === undefined) { c = -this.nextNodeCode++; this.nodeCodes.set(id, c); }
+    return c;
+  }
+
+  get stats() {
+    const s = { junctions: 0, roundabouts: 0, seamless: 0, ends: 0 };
+    for (const k of this.kinds.values()) {
+      if (k === 'junction') s.junctions++; else if (k === 'roundabout') s.roundabouts++; else if (k === 'seamless') s.seamless++; else if (k === 'end') s.ends++;
+    }
+    return s;
+  }
+
+  /**
+   * Apply a change set. Nodes and segments are upserted by id; a moved node must come with its re-shaped segments.
+   * Returns the keys of every item that was rebuilt or removed.
+   */
+  apply(ch: { nodes?: MNode[]; segs?: MSeg[]; removeNodes?: string[]; removeSegs?: string[] }): Set<string> {
+    const changed = new Set<string>();
+    const dirtyNodes = new Set<string>();
+    const link = (s: MSeg) => { for (const n of [s.a, s.b]) (this.nodeSegs.get(n) ?? this.nodeSegs.set(n, new Set()).get(n)!).add(s.id); };
+    const unlink = (s: MSeg) => { for (const n of [s.a, s.b]) { this.nodeSegs.get(n)?.delete(s.id); dirtyNodes.add(n); } };
+    for (const id of ch.removeSegs ?? []) {
+      const s = this.segs.get(id);
+      if (!s) continue;
+      unlink(s);
+      this.segs.delete(id); this.geos.delete(id);
+      if (this.items.delete('s:' + id)) changed.add('s:' + id);
+    }
+    for (const n of ch.nodes ?? []) { this.nodes.set(n.id, n); dirtyNodes.add(n.id); }
+    for (const s of ch.segs ?? []) {
+      const old = this.segs.get(s.id);
+      if (old) unlink(old);
+      this.segs.set(s.id, s);
+      link(s);
+      dirtyNodes.add(s.a); dirtyNodes.add(s.b);
+      this.geos.set(s.id, this.sample(s));
+    }
+    for (const id of ch.removeNodes ?? []) {
+      if (this.nodeSegs.get(id)?.size) continue; // still in use
+      this.nodes.delete(id); this.nodeSegs.delete(id); this.ends.delete(id); this.kinds.delete(id); this.junctions.delete(id);
+      dirtyNodes.delete(id);
+      if (this.items.delete('n:' + id)) changed.add('n:' + id);
+    }
+    // 1. junction trims at every touched node
+    for (const n of dirtyNodes) this.computeEnds(n);
+    // 2. share each touched segment out between its two junctions
+    const dirtySegs = new Set<string>();
+    for (const n of dirtyNodes) for (const s of this.nodeSegs.get(n) ?? []) dirtySegs.add(s);
+    const rebuildNodes = new Set<string>(dirtyNodes);
+    for (const id of dirtySegs) {
+      const g = this.geos.get(id)!;
+      const sum = g.rawA + g.rawB, max = g.len * 0.9;
+      const k = sum > max ? max / sum : 1;
+      g.trimA = g.rawA * k; g.trimB = g.rawB * k;
+      rebuildNodes.add(g.s.a); rebuildNodes.add(g.s.b);
+    }
+    // 3. rebuild
+    for (const id of dirtySegs) { this.buildSeg(this.geos.get(id)!); changed.add('s:' + id); }
+    for (const n of rebuildNodes) {
+      if (!this.nodes.has(n)) continue;
+      for (const e of this.ends.get(n) ?? []) e.trim = e.atA ? e.g.trimA : e.g.trimB;
+      this.buildNode(n);
+      changed.add('n:' + n);
+    }
+    return changed;
+  }
+
+  private sample(s: MSeg): SegGeo {
     const { pts, cum, len } = sampleBez(s.p, 4, 3); // 4 m on straights, ≤3° per step on curves
     const nrm = leftNormals(pts);
     // exact end tangents from the Bézier, so G1 joins between pieces stay seamless
@@ -324,45 +445,49 @@ export function generateNetwork(net: Network, hf: Heightfield): NetMeshes {
       const d = bezD(s.p, t), l = Math.hypot(d[0], d[1]) || 1;
       nrm[i * 2] = d[1] / l; nrm[i * 2 + 1] = -d[0] / l;
     }
-    return { s, t: net.types[s.type], pts, cum, len, nrm, trimA: 0, trimB: 0 };
-  });
-
-  // ---- ends per node ----
-  const ends: End[][] = net.nodes.map(() => []);
-  for (const g of geos) {
-    for (const atA of [true, false]) {
-      const node = net.nodes[atA ? g.s.a : g.s.b];
-      const f = frameAt(g, atA ? 0 : g.len, atA);
-      const t = g.t;
-      ends[node.id].push({
-        g, atA, node, ux: f.ux, uz: f.uz, ang: Math.atan2(f.uz, f.ux),
-        hwL: atA ? t.hwL : t.hwR, hwR: atA ? t.hwR : t.hwL, cwL: atA ? t.cwL : t.cwR, cwR: atA ? t.cwR : t.cwL,
-        trim: 0, rc: t.major ? 9 : 5,
-      });
-    }
+    return { s, t: s.t, pts, cum, len, nrm, trimA: 0, trimB: 0, rawA: 0, rawB: 0 };
   }
 
-  const nodeLifted = (n: NetNode) => n.lift > 0.25;
-  const nodeZc = (n: NetNode) => T(n.x, n.z) + n.lift;
-  const nodeZ = (n: NetNode, x: number, z: number) => (nodeLifted(n) ? nodeZc(n) : T(x, z)) + LIFT;
+  private nodeLifted = (n: MNode) => n.lift > 0.25;
+  private nodeZc = (n: MNode) => this.T(n.x, n.z) + n.lift;
+  private nodeZ = (n: MNode, x: number, z: number) => (this.nodeLifted(n) ? this.nodeZc(n) : this.T(x, z)) + LIFT;
 
-  // ---- trims ----
-  const kindOf: ('seamless' | 'junction' | 'roundabout' | 'end')[] = net.nodes.map(() => 'end');
-  for (const node of net.nodes) {
-    const E = ends[node.id].sort((p, q) => p.ang - q.ang);
+  private computeEnds(id: string) {
+    const node = this.nodes.get(id);
+    const E: End[] = [];
+    if (!node) { this.ends.delete(id); return; }
+    for (const sid of this.nodeSegs.get(id) ?? []) {
+      const g = this.geos.get(sid)!;
+      for (const atA of [true, false]) {
+        if ((atA ? g.s.a : g.s.b) !== id) continue;
+        const f = frameAt(g, atA ? 0 : g.len, atA);
+        const t = g.t;
+        E.push({
+          g, atA, node, ux: f.ux, uz: f.uz, ang: Math.atan2(f.uz, f.ux),
+          hwL: atA ? t.hwL : t.hwR, hwR: atA ? t.hwR : t.hwL, cwL: atA ? t.cwL : t.cwR, cwR: atA ? t.cwR : t.cwL,
+          trim: 0, rc: node.rc ?? (t.major ? 9 : 5),
+        });
+      }
+    }
+    E.sort((p, q) => p.ang - q.ang);
+    this.ends.set(id, E);
+    const setRaw = () => { for (const e of E) { if (e.atA) e.g.rawA = e.trim; else e.g.rawB = e.trim; } };
     if (node.R && E.length) {
-      kindOf[node.id] = 'roundabout';
+      this.kinds.set(id, 'roundabout');
       const rw = ringHalfWidth(node);
       const Ro = node.R + rw;
       for (const e of E) {
         const w = Math.max(e.hwL, e.hwR);
         e.trim = Math.sqrt(Math.max(0, Ro * Ro - Math.min(w, Ro - 0.5) ** 2)) + 3;
       }
-      continue;
+      setRaw();
+      return;
     }
-    if (E.length <= 1) { kindOf[node.id] = 'end'; continue; }
-    if (E.length === 2 && E[0].g.t.id === E[1].g.t.id && E[0].ux * E[1].ux + E[0].uz * E[1].uz < -0.99) { kindOf[node.id] = 'seamless'; continue; }
-    kindOf[node.id] = 'junction';
+    if (E.length <= 1) { this.kinds.set(id, 'end'); setRaw(); return; }
+    if (E.length === 2 && E[0].g.t.id === E[1].g.t.id && E[0].ux * E[1].ux + E[0].uz * E[1].uz < -0.99) {
+      this.kinds.set(id, 'seamless'); setRaw(); return;
+    }
+    this.kinds.set(id, 'junction');
     const n = E.length;
     for (let i = 0; i < n; i++) {
       const e = E[i], f = E[(i + 1) % n];
@@ -401,188 +526,294 @@ export function generateNetwork(net: Network, hf: Heightfield): NetMeshes {
         B.trim = Math.max(B.trim, Math.max(0, tb) + L, 1);
       }
     }
+    setRaw();
   }
-  // write trims to segments and keep them inside the segment
-  for (const E of ends) for (const e of E) { if (e.atA) e.g.trimA = e.trim; else e.g.trimB = e.trim; }
-  for (const g of geos) {
-    const sum = g.trimA + g.trimB, max = g.len * 0.9;
-    if (sum > max) { const k = max / sum; g.trimA *= k; g.trimB *= k; }
-  }
-  for (const E of ends) for (const e of E) e.trim = e.atA ? e.g.trimA : e.g.trimB;
 
-  // ---- heights along segments ----
-  const segZ = (g: SegGeo) => {
-    const na = net.nodes[g.s.a], nb = net.nodes[g.s.b];
+  private segZ(g: SegGeo) {
+    const T = this.T;
+    const na = this.nodes.get(g.s.a)!, nb = this.nodes.get(g.s.b)!;
     if (!g.s.elevated) return (_s: number, x: number, z: number) => T(x, z) + LIFT;
     const span = Math.max(0.01, g.len - g.trimA - g.trimB);
     const valley = g.s.bridge === 'valley';
-    const za = nodeZc(na), zb = nodeZc(nb);
+    const za = this.nodeZc(na), zb = this.nodeZc(nb);
+    const la = this.nodeLifted(na), lb = this.nodeLifted(nb);
     return (s: number, x: number, z: number) => {
       const t = Math.max(0, Math.min(1, (s - g.trimA) / span));
       if (valley) return Math.max(za + (zb - za) * t, T(x, z)) + LIFT;
-      const ea = nodeLifted(na) ? za : T(x, z), eb = nodeLifted(nb) ? zb : T(x, z);
+      const ea = la ? za : T(x, z), eb = lb ? zb : T(x, z);
       return ea + (eb - ea) * t + LIFT;
     };
-  };
+  }
 
-  // ---- segments ----
-  for (const g of geos) {
+  private buildSeg(g: SegGeo) {
+    const key = 's:' + g.s.id;
     const t = g.t;
     const s0 = g.trimA, s1 = g.len - g.trimB;
-    if (s1 - s0 < 1.5) continue; // stub fully inside its junctions — the junction surface covers it
+    if (s1 - s0 < 1.5) { this.items.delete(key); return; } // stub fully inside its junctions — the junction surface covers it
+    const asphalt = new GeomBuilder(), paving = new GeomBuilder(), markings = new GeomBuilder(), concrete = new GeomBuilder();
     const S = subRange(g, s0, s1);
-    const zfn = segZ(g);
+    const zfn = this.segZ(g);
     const z = (i: number, x: number, zz: number) => zfn(S.s[i], x, zz);
     const offs = partOffsets(t);
-    // one asphalt strip per run of adjacent lanes/shoulders (not one per lane)
+    // one asphalt strip per run of adjacent same-coloured flat parts (not one per lane)
     const roadCol = t.surface === 'dirt' ? COL.dirt : t.major ? COL.asphaltMajor : COL.asphalt;
-    let run: [number, number] | null = null;
-    const flush = () => { if (run) sweep(asphalt, S, run[0], run[1], z, roadCol); run = null; };
+    const flatCol = (k: PartKind) => (k === 'bus' ? COL.bus : k === 'cycle' ? COL.cycle : k === 'parking' ? COL.parking : roadCol);
+    let run: { o: [number, number]; col: [number, number, number] } | null = null;
+    const flush = () => { if (run) sweep(asphalt, S, run.o[0], run.o[1], z, run.col); run = null; };
     t.parts.forEach((p, k) => {
       const [o0, o1] = offs[k];
-      if (p.kind === 'lane' || p.kind === 'shoulder') { run = run ? [run[0], o1] : [o0, o1]; return; }
-      flush();
-      if (p.kind === 'sidewalk' || p.kind === 'median') {
-        const top = (i: number, x: number, zz: number) => z(i, x, zz) + KERB;
-        sweep(paving, S, o0, o1, top, p.kind === 'median' ? COL.median : COL.sidewalk);
-        // kerb faces: towards the carriageway on both sides of a median; inner face of a footpath
-        const isLeftWalk = p.kind === 'sidewalk' && k === 0;
-        const isRightWalk = p.kind === 'sidewalk' && k === t.parts.length - 1;
-        if (!isLeftWalk) wallAlong(paving, S, o0, (i, x, zz) => z(i, x, zz) - 0.05, top, true, COL.kerb);
-        if (!isRightWalk) wallAlong(paving, S, o1, (i, x, zz) => z(i, x, zz) - 0.05, top, false, COL.kerb);
-        if (isLeftWalk) wallAlong(paving, S, o0, (i, x, zz) => z(i, x, zz) - 0.4, top, true, COL.kerb);
-        if (isRightWalk) wallAlong(paving, S, o1, (i, x, zz) => z(i, x, zz) - 0.4, top, false, COL.kerb);
+      if (p.kind === 'lane' || p.kind === 'shoulder' || p.kind === 'bus' || p.kind === 'cycle' || p.kind === 'parking') {
+        const col = flatCol(p.kind);
+        if (run && run.col === col) run.o[1] = o1;
+        else { flush(); run = { o: [o0, o1], col }; }
+        return;
       }
+      flush();
+      const top = (i: number, x: number, zz: number) => z(i, x, zz) + KERB;
+      sweep(paving, S, o0, o1, top, p.kind === 'median' ? COL.median : p.kind === 'planter' ? COL.island : COL.sidewalk);
+      // kerb faces: towards the carriageway on both sides of a median; inner face of a footpath
+      const isLeftWalk = k === 0;
+      const isRightWalk = k === t.parts.length - 1;
+      if (!isLeftWalk) wallAlong(paving, S, o0, (i, x, zz) => z(i, x, zz) - 0.05, top, true, COL.kerb);
+      if (!isRightWalk) wallAlong(paving, S, o1, (i, x, zz) => z(i, x, zz) - 0.05, top, false, COL.kerb);
+      if (isLeftWalk) wallAlong(paving, S, o0, (i, x, zz) => z(i, x, zz) - 0.4, top, true, COL.kerb);
+      if (isRightWalk) wallAlong(paving, S, o1, (i, x, zz) => z(i, x, zz) - 0.4, top, false, COL.kerb);
     });
     flush();
     segmentMarkings(markings, g, S, z, offs);
-    // ground: carve terrain + raster; elevated: structure
+    if (g.s.elevated) structure(concrete, g, S, z, t, this.T);
     const hw = Math.max(t.hwL, t.hwR);
-    if (!g.s.elevated) stampLine(hf, targets, S, hw, (i) => z(i, S.pts[i * 2], S.pts[i * 2 + 1]) - LIFT - 0.3);
-    else structure(concrete, g, S, z, t, T);
-    raster.stampRoad(new Float32Array(S.pts), hw, g.s.id + 1);
-  }
-
-  // ---- junctions ----
-  for (const node of net.nodes) {
-    const E = ends[node.id];
-    const kind = kindOf[node.id];
-    if (kind === 'roundabout') { roundabout(node, E); stats.roundabouts++; continue; }
-    if (kind !== 'junction') { if (kind === 'seamless') stats.seamless++; else stats.ends++; continue; }
-    stats.junctions++;
-    const zf = (x: number, z: number) => nodeZ(node, x, z);
-    const F = E.map((e) => {
-      const fr = frameAt(e.g, e.atA ? e.trim : e.g.len - e.trim, e.atA);
-      const P = (o: number): V2 => [fr.x + fr.lx * o, fr.z + fr.lz * o];
-      return { e, fr, CL: P(e.cwL), CR: P(-e.cwR), OL: P(e.hwL), OR: P(-e.hwR) };
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (let i = 0; i < S.pts.length; i += 2) {
+      x0 = Math.min(x0, S.pts[i]); x1 = Math.max(x1, S.pts[i]); z0 = Math.min(z0, S.pts[i + 1]); z1 = Math.max(z1, S.pts[i + 1]);
+    }
+    this.items.set(key, {
+      key, layers: { asphalt: pack(asphalt), paving: pack(paving), markings: pack(markings), concrete: pack(concrete) },
+      x0: x0 - hw, z0: z0 - hw, x1: x1 + hw, z1: z1 + hw,
+      stamps: [{ line: new Float32Array(S.pts), hw, carve: !g.s.elevated, code: g.s.code }],
     });
-    let poly: V2[] = [];
-    const n = F.length;
-    const corners: { curb: V2[]; wa: number; wb: number }[] = [];
-    for (let i = 0; i < n; i++) {
-      const a = F[i], b = F[(i + 1) % n];
-      poly.push(a.CL, a.CR);
-      const curb = corner(a.CR, [-a.fr.ux, -a.fr.uz], b.CL, [b.fr.ux, b.fr.uz]);
-      for (let k = 1; k < curb.length - 1; k++) poly.push(curb[k]);
-      corners.push({ curb, wa: Math.max(0, a.e.hwR - a.e.cwR), wb: Math.max(0, b.e.hwL - b.e.cwL) });
-    }
-    const bad = selfIntersects(poly);
-    if (bad) poly = convexHull(poly);
-    // raised footpath corners: the outer edge is an offset of the kerb curve, pushed away from the junction,
-    // so the two edges can never cross (skipped where the junction outline had to be simplified)
-    if (!bad) for (const c of corners) {
-      if (Math.max(c.wa, c.wb) < 0.1 || c.curb.length < 2) continue;
-      if (!saneCorner(c.curb)) continue; // looping / overshooting kerb curve: leave it to the junction asphalt
-      const outer = offsetAway(c.curb, node.x, node.z, c.wa, c.wb);
-      // folded band, or footpath pushing > 0.5 m into the junction asphalt: leave the corner flat
-      if (!bandClean(outer, c.curb) || outer.some((q) => insidePoly(poly, q) && distToRing(poly, q) > 0.5)) continue;
-      const top = (x: number, z: number) => zf(x, z) + KERB;
-      bandBetween(paving, outer, c.curb, top, COL.sidewalk);
-      polyWall(paving, c.curb, (x, z) => zf(x, z) - 0.05, top, COL.kerb);
-    }
-    junctionPolys.push({ node: node.id, ring: poly, hull: bad });
-    const ring = new Float32Array(poly.flat());
-    drapePolygon(asphalt, ring, [], zf, COL.junction, 4);
-    if (!nodeLifted(node)) stampPolygon(hf, targets, ring, (x, z) => zf(x, z) - LIFT - 0.3);
-    else {
-      // raised junction platform: slab underside + edge walls
-      drapePolygon(concrete, ring, [], (x, z) => zf(x, z) - SLAB, COL.concreteDark, 4);
-      polyWall(concrete, [...poly, poly[0]], (x, z) => zf(x, z) - SLAB, (x, z) => zf(x, z), COL.concrete);
-    }
-    raster.stampPolygon(ring, -(node.id + 1));
-    junctionMarkings(markings, node, F, zf);
   }
 
-  // ---- footpaths / trails ----
-  for (const p of net.paths) pathRibbon(paving, p.pts, p.width, T);
-
-  return { asphalt, paving, markings, concrete, targets, raster, geos, junctions: junctionPolys, stats };
-
-  // ===== local helpers that need closure state =====
-
-  function roundabout(node: NetNode, E: End[]) {
-    const rw = ringHalfWidth(node);
-    const R = node.R!, Ro = R + rw, Ri = Math.max(2.5, R - rw);
-    const cx = node.x, cz = node.z;
-    const zf = (x: number, z: number) => nodeZ(node, x, z);
-    const angOf = (p: V2) => Math.atan2(p[1] - cz, p[0] - cx);
-    const circ = (a: number, r: number): V2 => [cx + Math.cos(a) * r, cz + Math.sin(a) * r];
-    const F = E.map((e) => {
-      const fr = frameAt(e.g, e.atA ? e.trim : e.g.len - e.trim, e.atA);
-      const P = (o: number): V2 => [fr.x + fr.lx * o, fr.z + fr.lz * o];
-      return { e, fr, CL: P(e.cwL), CR: P(-e.cwR) };
-    }).sort((p, q) => angOf([p.fr.x, p.fr.z]) - angOf([q.fr.x, q.fr.z]));
-    const poly: V2[] = [];
-    const d = 4 / Ro;
-    if (!F.length) {
-      for (let k = 0; k < 48; k++) poly.push(circ((k / 48) * Math.PI * 2, Ro));
-    }
-    for (let i = 0; i < F.length; i++) {
-      const a = F[i], b = F[(i + 1) % F.length];
-      poly.push(a.CL, a.CR);
-      let a1 = angOf(a.CR) + d, a2 = angOf(b.CL) - d;
-      while (a2 <= a1) a2 += Math.PI * 2;
-      if (F.length === 1) a2 = a1 + Math.PI * 2 - 2 * d;
-      const q1 = circ(a1, Ro), q2 = circ(a2, Ro);
-      const tan = (a: number): V2 => [-Math.sin(a), Math.cos(a)];
-      const c1 = corner(a.CR, [-a.fr.ux, -a.fr.uz], q1, tan(a1));
-      for (let k = 1; k < c1.length; k++) poly.push(c1[k]);
-      const steps = Math.max(2, Math.ceil((a2 - a1) / 0.08));
-      for (let k = 1; k < steps; k++) poly.push(circ(a1 + ((a2 - a1) * k) / steps, Ro));
-      const c2 = corner(q2, tan(a2), b.CL, [b.fr.ux, b.fr.uz]);
-      for (let k = 0; k < c2.length - 1; k++) poly.push(c2[k]);
-    }
-    const island: V2[] = [];
-    for (let k = 0; k < 48; k++) island.push(circ((-k / 48) * Math.PI * 2, Ri));
-    drapePolygon(asphalt, new Float32Array(poly.flat()), [new Float32Array(island.flat())], zf, COL.junction, 4);
-    // central island: raised grass with a kerb
-    const isl = new Float32Array(island.flat());
-    drapePolygon(paving, isl, [], (x, z) => zf(x, z) + 0.25, COL.island, 4);
-    polyWall(paving, [...island, island[0]].reverse(), (x, z) => zf(x, z) - 0.05, (x, z) => zf(x, z) + 0.25, COL.kerb);
-    // ring markings: inner edge line + lane divider
-    ringLine(markings, cx, cz, Ri + 0.35, 0.14, zf, false, COL.white);
-    if ((node.ringLanes ?? 1) >= 2) ringLine(markings, cx, cz, R, 0.12, zf, true, COL.white);
-    // give-way lines across incoming lanes
-    for (const f of F) {
-      const offs = partOffsets(f.e.g.t);
-      f.e.g.t.parts.forEach((p, k) => {
-        if (p.kind !== 'lane') return;
-        const incoming = f.e.atA ? p.dir === -1 : p.dir === 1;
-        if (!incoming && p.dir !== 0) return;
-        const [o0, o1] = offs[k];
-        const side = f.e.atA ? 1 : -1; // outward-left = segment-left at A, segment-right at B
-        dashedAcross(markings, f.fr, side * o0, side * o1, 0.6, zf);
+  private buildNode(id: string) {
+    const key = 'n:' + id;
+    const node = this.nodes.get(id)!;
+    const E = this.ends.get(id) ?? [];
+    const kind = this.kinds.get(id);
+    this.junctions.delete(id);
+    if (kind !== 'junction' && kind !== 'roundabout') { this.items.delete(key); return; }
+    const asphalt = new GeomBuilder(), paving = new GeomBuilder(), markings = new GeomBuilder(), concrete = new GeomBuilder();
+    const zf = (x: number, z: number) => this.nodeZ(node, x, z);
+    let ring: V2[];
+    let island: Float32Array | null = null;
+    if (kind === 'roundabout') {
+      const r = roundabout(node, E, zf, asphalt, paving, markings);
+      ring = r.poly; island = r.island;
+    } else {
+      const F = E.map((e) => {
+        const fr = frameAt(e.g, e.atA ? e.trim : e.g.len - e.trim, e.atA);
+        const P = (o: number): V2 => [fr.x + fr.lx * o, fr.z + fr.lz * o];
+        return { e, fr, CL: P(e.cwL), CR: P(-e.cwR), OL: P(e.hwL), OR: P(-e.hwR) };
       });
+      let poly: V2[] = [];
+      const n = F.length;
+      const corners: { curb: V2[]; wa: number; wb: number }[] = [];
+      for (let i = 0; i < n; i++) {
+        const a = F[i], b = F[(i + 1) % n];
+        poly.push(a.CL, a.CR);
+        const curb = corner(a.CR, [-a.fr.ux, -a.fr.uz], b.CL, [b.fr.ux, b.fr.uz]);
+        for (let k = 1; k < curb.length - 1; k++) poly.push(curb[k]);
+        corners.push({ curb, wa: Math.max(0, a.e.hwR - a.e.cwR), wb: Math.max(0, b.e.hwL - b.e.cwL) });
+      }
+      const bad = selfIntersects(poly);
+      if (bad) poly = convexHull(poly);
+      // raised footpath corners: the outer edge is an offset of the kerb curve, pushed away from the junction,
+      // so the two edges can never cross (skipped where the junction outline had to be simplified)
+      if (!bad) for (const c of corners) {
+        if (Math.max(c.wa, c.wb) < 0.1 || c.curb.length < 2) continue;
+        if (!saneCorner(c.curb)) continue; // looping / overshooting kerb curve: leave it to the junction asphalt
+        const outer = offsetAway(c.curb, node.x, node.z, c.wa, c.wb);
+        // folded band, or footpath pushing > 0.5 m into the junction asphalt: leave the corner flat
+        if (!bandClean(outer, c.curb) || outer.some((q) => insidePoly(poly, q) && distToRing(poly, q) > 0.5)) continue;
+        const top = (x: number, z: number) => zf(x, z) + KERB;
+        bandBetween(paving, outer, c.curb, top, COL.sidewalk);
+        polyWall(paving, c.curb, (x, z) => zf(x, z) - 0.05, top, COL.kerb);
+      }
+      this.junctions.set(id, { ring: poly, hull: bad });
+      ring = poly;
+      drapePolygon(asphalt, new Float32Array(poly.flat()), [], zf, COL.junction, 4);
+      if (this.nodeLifted(node)) {
+        // raised junction platform: slab underside + edge walls
+        drapePolygon(concrete, new Float32Array(poly.flat()), [], (x, z) => zf(x, z) - SLAB, COL.concreteDark, 4);
+        polyWall(concrete, [...poly, poly[0]], (x, z) => zf(x, z) - SLAB, (x, z) => zf(x, z), COL.concrete);
+      }
+      junctionMarkings(markings, node, F, zf);
     }
-    if (!nodeLifted(node)) {
-      stampPolygon(hf, targets, new Float32Array(poly.flat()), (x, z) => zf(x, z) - LIFT - 0.3);
-      stampPolygon(hf, targets, isl, (x, z) => zf(x, z) - LIFT - 0.3);
+    if (kind === 'roundabout') this.junctions.set(id, { ring, hull: false });
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (const [x, z] of ring) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+    const code = this.nodeCode(id);
+    const carve = !this.nodeLifted(node);
+    const stamps: Stamp[] = [{ ring: new Float32Array(ring.flat()), carve, code }];
+    if (island) stamps.push({ ring: island, carve, code });
+    this.items.set(key, { key, layers: { asphalt: pack(asphalt), paving: pack(paving), markings: pack(markings), concrete: pack(concrete) }, x0, z0, x1, z1, stamps });
+  }
+
+  /** Footpaths / trails (paved ribbons, no junction logic). */
+  setPath(id: string, pts: number[] | null, width = 1.8) {
+    const key = 'p:' + id;
+    if (!pts || pts.length < 4) { this.items.delete(key); return key; }
+    const paving = new GeomBuilder();
+    pathRibbon(paving, pts, width, this.T);
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (let i = 0; i < pts.length; i += 2) { x0 = Math.min(x0, pts[i]); x1 = Math.max(x1, pts[i]); z0 = Math.min(z0, pts[i + 1]); z1 = Math.max(z1, pts[i + 1]); }
+    this.items.set(key, { key, layers: { paving: pack(paving) }, x0, z0, x1, z1, stamps: [] });
+    return key;
+  }
+
+  /** Items whose bounding box touches a region. */
+  itemsIn(x0: number, z0: number, x1: number, z1: number): MeshItem[] {
+    const out: MeshItem[] = [];
+    for (const it of this.items.values()) if (it.x1 >= x0 && it.x0 <= x1 && it.z1 >= z0 && it.z0 <= z1) out.push(it);
+    return out;
+  }
+
+  /** Terrain targets (desired heights under ground-level roads) for every grid vertex in a region (all if omitted). */
+  stampTargets(targets: Float32Array, region?: [number, number, number, number]) {
+    const hf = this.hf;
+    const items = region ? this.itemsIn(...region) : [...this.items.values()];
+    const T = this.T;
+    for (const it of items) for (const st of it.stamps) {
+      if (!st.carve) continue;
+      if (st.line) stampLine(hf, targets, st.line, st.hw!, T, region);
+      else if (st.ring) stampPolygon(hf, targets, st.ring, (x, z) => T(x, z) - 0.3, region);
     }
-    raster.stampPolygon(new Float32Array(poly.flat()), -(node.id + 1));
+  }
+
+  /** Road footprint raster (for building conflicts and trees) in a region (all if omitted). */
+  stampRaster(raster: RoadRaster, region?: [number, number, number, number]) {
+    const items = region ? this.itemsIn(...region) : [...this.items.values()];
+    for (const it of items) for (const st of it.stamps) {
+      if (st.line) raster.stampRoad(st.line, st.hw!, st.code, region);
+      else if (st.ring) raster.stampPolygon(st.ring, st.code, region);
+    }
   }
 }
 
-function ringHalfWidth(n: NetNode) { return ((n.ringLanes ?? 1) * 4.0) / 2 + 0.5; }
+/** Merge packed items into one builder per layer (whole-network build, offline tools). */
+export function mergeItems(items: Iterable<MeshItem>): Record<MeshLayer, GeomBuilder> {
+  const out = { asphalt: new GeomBuilder(), paving: new GeomBuilder(), markings: new GeomBuilder(), concrete: new GeomBuilder() };
+  for (const it of items) for (const L of MESH_LAYERS) {
+    const p = it.layers[L];
+    if (!p) continue;
+    const gb = out[L], base = gb.vertexCount;
+    for (const v of p.pos) gb.pos.push(v);
+    for (const v of p.nor) gb.nor.push(v);
+    for (const v of p.col) gb.col.push(v);
+    for (const v of p.uv) gb.uv.push(v);
+    for (const i of p.idx) gb.idx.push(i + base);
+  }
+  return out;
+}
+
+// ---------------- whole-network build (viewer + offline tools) ----------------
+
+export interface NetMeshes {
+  asphalt: GeomBuilder; paving: GeomBuilder; markings: GeomBuilder; concrete: GeomBuilder;
+  targets: Float32Array; raster: RoadRaster; geos: (Omit<SegGeo, 's'> & { s: NetSegment })[];
+  /** junction surfaces (closed kerb polygons), for analysis / picking */
+  junctions: { node: number; ring: V2[]; hull: boolean }[];
+  stats: { junctions: number; roundabouts: number; seamless: number; ends: number };
+}
+
+/** Mesher inputs for a baked network (node ids = array index, segment ids = segment id). */
+export function networkToMesher(net: Network): { nodes: MNode[]; segs: MSeg[] } {
+  const nodes: MNode[] = net.nodes.map((n) => ({ id: String(n.id), x: n.x, z: n.z, lift: n.lift, R: n.R, ringLanes: n.ringLanes, signals: n.signals }));
+  const segs: MSeg[] = net.segments.map((s) => ({
+    id: String(s.id), a: String(s.a), b: String(s.b), p: s.p, t: net.types[s.type], cls: s.cls, bridge: s.bridge,
+    elevated: s.elevated, viaduct: s.viaduct, code: s.id + 1, src: s,
+  }));
+  return { nodes, segs };
+}
+
+export function generateNetwork(net: Network, hf: Heightfield): NetMeshes {
+  const m = new RoadMesher(hf);
+  const { nodes, segs } = networkToMesher(net);
+  // keep the viewer's raster convention: junction code = −(node index + 1)
+  for (const n of nodes) m.nodeCode(n.id);
+  m.apply({ nodes, segs });
+  net.paths.forEach((p, i) => m.setPath(String(i), p.pts, p.width));
+  const L = mergeItems(m.items.values());
+  const targets = new Float32Array(hf.n * hf.n).fill(NaN);
+  m.stampTargets(targets);
+  const raster = new RoadRaster(net.half);
+  m.stampRaster(raster);
+  return {
+    ...L, targets, raster,
+    geos: [...m.geos.values()].map((g) => ({ ...g, s: g.s.src! })),
+    junctions: [...m.junctions].map(([id, j]) => ({ node: Number(id), ...j })),
+    stats: m.stats,
+  };
+}
+
+// ===== roundabout surface =====
+
+function roundabout(node: MNode, E: End[], zf: (x: number, z: number) => number, asphalt: GeomBuilder, paving: GeomBuilder, markings: GeomBuilder) {
+  const rw = ringHalfWidth(node);
+  const R = node.R!, Ro = R + rw, Ri = Math.max(2.5, R - rw);
+  const cx = node.x, cz = node.z;
+  const angOf = (p: V2) => Math.atan2(p[1] - cz, p[0] - cx);
+  const circ = (a: number, r: number): V2 => [cx + Math.cos(a) * r, cz + Math.sin(a) * r];
+  const F = E.map((e) => {
+    const fr = frameAt(e.g, e.atA ? e.trim : e.g.len - e.trim, e.atA);
+    const P = (o: number): V2 => [fr.x + fr.lx * o, fr.z + fr.lz * o];
+    return { e, fr, CL: P(e.cwL), CR: P(-e.cwR) };
+  }).sort((p, q) => angOf([p.fr.x, p.fr.z]) - angOf([q.fr.x, q.fr.z]));
+  const poly: V2[] = [];
+  const d = 4 / Ro;
+  if (!F.length) {
+    for (let k = 0; k < 48; k++) poly.push(circ((k / 48) * Math.PI * 2, Ro));
+  }
+  for (let i = 0; i < F.length; i++) {
+    const a = F[i], b = F[(i + 1) % F.length];
+    poly.push(a.CL, a.CR);
+    let a1 = angOf(a.CR) + d, a2 = angOf(b.CL) - d;
+    while (a2 <= a1) a2 += Math.PI * 2;
+    if (F.length === 1) a2 = a1 + Math.PI * 2 - 2 * d;
+    const q1 = circ(a1, Ro), q2 = circ(a2, Ro);
+    const tan = (a: number): V2 => [-Math.sin(a), Math.cos(a)];
+    const c1 = corner(a.CR, [-a.fr.ux, -a.fr.uz], q1, tan(a1));
+    for (let k = 1; k < c1.length; k++) poly.push(c1[k]);
+    const steps = Math.max(2, Math.ceil((a2 - a1) / 0.08));
+    for (let k = 1; k < steps; k++) poly.push(circ(a1 + ((a2 - a1) * k) / steps, Ro));
+    const c2 = corner(q2, tan(a2), b.CL, [b.fr.ux, b.fr.uz]);
+    for (let k = 0; k < c2.length - 1; k++) poly.push(c2[k]);
+  }
+  const island: V2[] = [];
+  for (let k = 0; k < 48; k++) island.push(circ((-k / 48) * Math.PI * 2, Ri));
+  drapePolygon(asphalt, new Float32Array(poly.flat()), [new Float32Array(island.flat())], zf, COL.junction, 4);
+  // central island: raised grass with a kerb
+  const isl = new Float32Array(island.flat());
+  drapePolygon(paving, isl, [], (x, z) => zf(x, z) + 0.25, COL.island, 4);
+  polyWall(paving, [...island, island[0]].reverse(), (x, z) => zf(x, z) - 0.05, (x, z) => zf(x, z) + 0.25, COL.kerb);
+  // ring markings: inner edge line + lane divider
+  ringLine(markings, cx, cz, Ri + 0.35, 0.14, zf, false, COL.white);
+  if ((node.ringLanes ?? 1) >= 2) ringLine(markings, cx, cz, R, 0.12, zf, true, COL.white);
+  // give-way lines across incoming lanes
+  for (const f of F) {
+    const offs = partOffsets(f.e.g.t);
+    f.e.g.t.parts.forEach((p, k) => {
+      if (p.kind !== 'lane' && p.kind !== 'bus') return;
+      const incoming = f.e.atA ? p.dir === -1 : p.dir === 1;
+      if (!incoming && p.dir !== 0) return;
+      const [o0, o1] = offs[k];
+      const side = f.e.atA ? 1 : -1; // outward-left = segment-left at A, segment-right at B
+      dashedAcross(markings, f.fr, side * o0, side * o1, 0.6, zf);
+    });
+  }
+  return { poly, island: isl };
+}
+
+function ringHalfWidth(n: MNode) { return ((n.ringLanes ?? 1) * 4.0) / 2 + 0.5; }
 
 /** Kerb-style corner from point a (heading da) to point b (heading db). */
 function corner(a: V2, da: V2, b: V2, db: V2): V2[] {
@@ -619,7 +850,7 @@ function segmentMarkings(gb: GeomBuilder, g: SegGeo, S: Sub, z: (i: number, x: n
     const sub = cutSub(S, S.s[0] + 0.8, S.s[S.s.length - 1] - 0.8);
     strip(gb, sub.S, center, width, (i, x, zz) => z(sub.map(i), x, zz), rgb);
   };
-  const lanes = t.parts.map((p, k) => ({ p, o: offs[k] })).filter((x) => x.p.kind === 'lane');
+  const lanes = t.parts.map((p, k) => ({ p, o: offs[k] })).filter((x) => x.p.kind === 'lane' || x.p.kind === 'bus');
   for (let k = 1; k < lanes.length; k++) {
     const a = lanes[k - 1], b = lanes[k];
     const at = a.o[1];
@@ -672,7 +903,7 @@ function dashedAcross(gb: GeomBuilder, fr: Frame, o0: number, o1: number, inset:
   }
 }
 
-function junctionMarkings(gb: GeomBuilder, node: NetNode, F: { e: End; fr: Frame }[], zf: (x: number, z: number) => number) {
+function junctionMarkings(gb: GeomBuilder, node: MNode, F: { e: End; fr: Frame }[], zf: (x: number, z: number) => number) {
   const major = F.filter((f) => f.e.g.t.major).length;
   if (F.length < 3) return;
   for (const f of F) {
@@ -683,7 +914,7 @@ function junctionMarkings(gb: GeomBuilder, node: NetNode, F: { e: End; fr: Frame
     // stop line across incoming lanes
     let lo = Infinity, hi = -Infinity;
     t.parts.forEach((p, k) => {
-      if (p.kind !== 'lane') return;
+      if (p.kind !== 'lane' && p.kind !== 'bus') return;
       const incoming = f.e.atA ? p.dir === -1 : p.dir === 1;
       if (!incoming && p.dir !== 0) return;
       const [o0, o1] = offs[k];
@@ -691,7 +922,7 @@ function junctionMarkings(gb: GeomBuilder, node: NetNode, F: { e: End; fr: Frame
     });
     if (hi > lo) dashedAcross(gb, f.fr, lo, hi, major >= 2 || node.signals ? 4.4 : 0.8, zf, !(node.signals || t.major));
     // zebra crossing on bigger junctions
-    if (node.signals || t.major) {
+    if (node.crossings ?? (node.signals || t.major)) {
       const cw = Math.max(f.e.cwL, f.e.cwR);
       for (let o = -cw + 0.4; o < cw - 0.5; o += 1.0) {
         const p = (oo: number, along: number): V2 => [f.fr.x + f.fr.lx * oo + f.fr.ux * along, f.fr.z + f.fr.lz * oo + f.fr.uz * along];
@@ -717,14 +948,23 @@ function ringLine(gb: GeomBuilder, cx: number, cz: number, r: number, w: number,
 
 // ---------------- terrain stamping ----------------
 
-function stampLine(hf: Heightfield, targets: Float32Array, S: Sub, hw: number, zAt: (i: number) => number) {
+/** Region clamp for grid loops: [i0, i1] × [j0, j1] of a regular grid, optionally limited to a metric region. */
+function gridRange(cell: number, half: number, gn: number, x0: number, z0: number, x1: number, z1: number, region?: [number, number, number, number]) {
+  if (region) { x0 = Math.max(x0, region[0]); z0 = Math.max(z0, region[1]); x1 = Math.min(x1, region[2]); z1 = Math.min(z1, region[3]); }
+  return {
+    i0: Math.max(0, Math.ceil((x0 + half) / cell)), i1: Math.min(gn - 1, Math.floor((x1 + half) / cell)),
+    j0: Math.max(0, Math.ceil((z0 + half) / cell)), j1: Math.min(gn - 1, Math.floor((z1 + half) / cell)),
+  };
+}
+
+/** Terrain target under a ground-level road: 0.3 m below the road surface along the centre line. */
+function stampLine(hf: Heightfield, targets: Float32Array, line: Float32Array, hw: number, T: (x: number, z: number) => number, region?: [number, number, number, number]) {
   const cell = hf.cell, half = hf.half, gn = hf.n;
   const rad = hw + cell * 0.75, rad2 = rad * rad;
-  for (let i = 0; i < S.s.length; i++) {
-    const x = S.pts[i * 2], z = S.pts[i * 2 + 1], tz = zAt(i);
-    const i0 = Math.max(0, Math.ceil((x - rad + half) / cell)), i1 = Math.min(gn - 1, Math.floor((x + rad + half) / cell));
-    const j0 = Math.max(0, Math.ceil((z - rad + half) / cell)), j1 = Math.min(gn - 1, Math.floor((z + rad + half) / cell));
-    for (let jj = j0; jj <= j1; jj++) for (let ii = i0; ii <= i1; ii++) {
+  for (let i = 0; i < line.length / 2; i++) {
+    const x = line[i * 2], z = line[i * 2 + 1], tz = T(x, z) - 0.3;
+    const r = gridRange(cell, half, gn, x - rad, z - rad, x + rad, z + rad, region);
+    for (let jj = r.j0; jj <= r.j1; jj++) for (let ii = r.i0; ii <= r.i1; ii++) {
       const dx = -half + ii * cell - x, dz = -half + jj * cell - z;
       if (dx * dx + dz * dz > rad2) continue;
       const k = jj * gn + ii;
@@ -733,13 +973,14 @@ function stampLine(hf: Heightfield, targets: Float32Array, S: Sub, hw: number, z
   }
 }
 
-function stampPolygon(hf: Heightfield, targets: Float32Array, ring: Float32Array, zf: (x: number, z: number) => number) {
+function stampPolygon(hf: Heightfield, targets: Float32Array, ring: Float32Array, zf: (x: number, z: number) => number, region?: [number, number, number, number]) {
   const cell = hf.cell, half = hf.half, gn = hf.n, m = ring.length / 2;
   let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
   for (let i = 0; i < ring.length; i += 2) { x0 = Math.min(x0, ring[i]); x1 = Math.max(x1, ring[i]); z0 = Math.min(z0, ring[i + 1]); z1 = Math.max(z1, ring[i + 1]); }
   const pad = cell * 0.75;
-  for (let jj = Math.max(0, Math.floor((z0 - pad + half) / cell)); jj <= Math.min(gn - 1, Math.ceil((z1 + pad + half) / cell)); jj++)
-    for (let ii = Math.max(0, Math.floor((x0 - pad + half) / cell)); ii <= Math.min(gn - 1, Math.ceil((x1 + pad + half) / cell)); ii++) {
+  const r = gridRange(cell, half, gn, x0 - pad - cell, z0 - pad - cell, x1 + pad + cell, z1 + pad + cell, region);
+  for (let jj = r.j0; jj <= r.j1; jj++)
+    for (let ii = r.i0; ii <= r.i1; ii++) {
       const x = -half + ii * cell, z = -half + jj * cell;
       let inside = false, best = Infinity, px = x, pz = z;
       for (let a = 0, b = m - 1; a < m; b = a++) {

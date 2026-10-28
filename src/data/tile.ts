@@ -33,11 +33,16 @@ type Typed = Float32Array | Uint32Array | Uint8Array;
 export async function loadTile(id: string, progress: (f: number, msg: string) => void): Promise<TileData> {
   const base = `${import.meta.env.BASE_URL}tiles/${id}/`;
   progress(0.02, 'Downloading Pune…');
-  const [hdr, bin, roadsOsm] = await Promise.all([
+  const [hdr, bin] = await Promise.all([
     fetch(base + 'tile.json').then((r) => r.json()),
     fetch(base + 'tile.bin').then((r) => r.arrayBuffer()),
-    fetch(base + 'roads.osm').then((r) => r.text()),
   ]);
+  return parseTile(hdr, bin);
+}
+
+/** Decode a baked tile (header JSON + binary sections). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function parseTile(hdr: any, bin: ArrayBuffer, roadsOsm = ''): TileData {
   const S: Record<string, Typed> = {};
   for (const s of hdr.sections) {
     const C = s.type === 'Float32Array' ? Float32Array : s.type === 'Uint32Array' ? Uint32Array : Uint8Array;

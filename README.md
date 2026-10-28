@@ -36,6 +36,21 @@ python tools/dp/overlay.py S2-06 out.png 150 x0,z0,x1,z1   # visual check of any
 Sheets live in `data/raw/dp/` (downloaded from PMC's public file store). Sector II–VI sheets are 1:10,000
 (≈0.84 m/px at 300 dpi). Cantonment areas are not part of the PMC plan and keep estimated widths.
 
+**DP underlay for the editor**: `python tools/dp/tiles.py [sheet ...] [--res 0.5]` resamples every registered sheet
+(default: all with a `.reg.json`) through its registration into 500 m × 500 m RGBA WebP blocks at 0.5 m/px under
+`public/tiles/kp/dp/` (`index.json` lists each block's `x0`/`z0` in tile metres; legend and uncovered areas are
+transparent; overlaps take the sheet farther from its frame edge). ≈45 s, ≈13 MB for S2-06 + S2-07.
+
+### Underground utilities (free, optional)
+
+`npm run import:utilities -- kp` downloads PMC's public-domain sewer and stormwater datasets from OpenCity
+(`pune-sewage-network`, `pune-stormwater-drains`; resource URLs resolved via the CKAN API, cached with a
+`.meta.json` under `data/raw/utilities/`), clips them to the tile and writes `public/tiles/kp/utilities.json`
+(layers `sewer`, `sewer-swd` = sewer pipes only in the SWD file, `storm`, `nalla`; lines in tile metres with
+`diameter_mm` ← `pipeline_d`, `material` ← `material_o`/`descriptio`, `depth_m` ← mean(ground − invert)).
+`--offline` reuses the cache, `--no-raw` drops the raw attributes (16 MB → 2 MB for kp), and
+`--file x.kmz|x.kml|x.geojson --layer id [--kind water] [--source .. --url .. --license ..]` adds a layer from a local file.
+
 The elevation tile lives at `data/raw/dem/cop30_N18_E073.tif` (Copernicus GLO-30 on AWS open data).
 
 ## How roads are made (Cities: Skylines style)
