@@ -5,12 +5,12 @@ import type { StreetNet } from './streets';
 export class RoadRaster {
   readonly cell = 2;
   readonly n: number;
-  /** >0: road id + 1 · <0: −(junction id + 1) · 0: nothing */
-  readonly code: Int32Array;
+  /** 1: road or junction · 0: nothing (a byte a cell: callers only ask "is there a road here") */
+  readonly code: Uint8Array;
 
   constructor(readonly half: number) {
     this.n = Math.ceil((half * 2) / this.cell) + 1;
-    this.code = new Int32Array(this.n * this.n);
+    this.code = new Uint8Array(this.n * this.n);
   }
 
   private idx(x: number, z: number) {
@@ -36,7 +36,7 @@ export class RoadRaster {
         const j0 = Math.max(0, Math.floor((Math.max(z - r, rz0) + h) / c)), j1 = Math.min(this.n - 1, Math.floor((Math.min(z + r, rz1) + h) / c));
         for (let jj = j0; jj <= j1; jj++) for (let ii = i0; ii <= i1; ii++) {
           const cx = -h + (ii + 0.5) * c - x, cz = -h + (jj + 0.5) * c - z;
-          if (cx * cx + cz * cz <= r2) this.code[jj * this.n + ii] = code;
+          if (cx * cx + cz * cz <= r2) this.code[jj * this.n + ii] = 1;
         }
       }
     }
@@ -60,7 +60,7 @@ export class RoadRaster {
       xs.sort((p, q) => p - q);
       for (let k = 0; k + 1 < xs.length; k += 2) {
         const i0 = Math.max(0, Math.floor((Math.max(xs[k], rx0) + h) / c)), i1 = Math.min(this.n - 1, Math.floor((Math.min(xs[k + 1], rx1) + h) / c));
-        for (let i = i0; i <= i1; i++) this.code[j * this.n + i] = code;
+        for (let i = i0; i <= i1; i++) this.code[j * this.n + i] = 1;
       }
     }
   }

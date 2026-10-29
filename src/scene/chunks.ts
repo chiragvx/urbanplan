@@ -2,6 +2,7 @@
 // chunks it left and entered, so edits upload a few small buffers instead of the whole city.
 import * as THREE from 'three/webgpu';
 import type { Packed } from '../net/generate';
+import { releaseAfterUpload } from '../render/release';
 
 export interface ChunkItem { layers: Partial<Record<string, Packed>>; x0: number; z0: number; x1: number; z1: number }
 
@@ -86,6 +87,7 @@ export class ChunkSet<L extends string> {
       g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
       g.setIndex(new THREE.BufferAttribute(idx, 1));
       g.computeBoundingSphere();
+      releaseAfterUpload(g);
       const s = g.boundingSphere!;
       if (cur) {
         cur.mesh.geometry.dispose();

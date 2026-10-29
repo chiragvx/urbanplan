@@ -58,12 +58,14 @@ export interface Settings {
   terrainOp: import('../doc/types').EarthworkOp; brushRadius: number; brushStrength: number;
   levelHeight: number | null; levelBalanced: boolean; embankOffset: number; embankWidth: number; pondDepth: number;
   /** 3D vertical exaggeration in the terrain view */ exaggeration: number;
+  /** 3D look: simple (light, the default) or high (sky, ambient occlusion, sharper shadows) */ graphics: 'simple' | 'high';
 }
 function loadSettings(): Settings {
   const def: Settings = {
     author: '', wheel: 'zoom', snap: true, showGrid: false, units: 'm',
     roadMode: 'straight', elevStep: 2.5, snapGeometry: true, snapAngles: true, snapGuides: true, snapLength: 1, grade: 0.05, roadGraded: false,
     terrainOp: 'shift', brushRadius: 40, brushStrength: 0.5, levelHeight: null, levelBalanced: true, embankOffset: 2, embankWidth: 10, pondDepth: 2, exaggeration: 1,
+    graphics: 'simple',
   };
   // key keeps the old name so settings survive the rename
   try { return { ...def, ...JSON.parse(localStorage.getItem('pune-remix:settings') ?? '{}') }; } catch { return def; }

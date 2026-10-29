@@ -93,12 +93,15 @@ export class DPRegions {
   /** A loaded sheet image block (null until it has loaded; `onLoad` fires when it has). */
   image(file: string): HTMLImageElement | null {
     let im = this.images.get(file);
-    if (!im) {
+    if (im) this.images.delete(file); // most recent last
+    else {
       im = new Image();
       im.onload = () => this.onLoad();
       im.src = `${this.base}dp/${file}`;
-      this.images.set(file, im);
     }
+    this.images.set(file, im);
+    // keep a few decoded blocks (each is a 1000 px sheet image)
+    while (this.images.size > 8) { const [k, old] = this.images.entries().next().value!; old.src = ''; this.images.delete(k); }
     return im.complete && im.naturalWidth ? im : null;
   }
 

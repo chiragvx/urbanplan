@@ -1,6 +1,7 @@
 // App shell: boot, files (open / save / autosave / publish / fork), review queue, exports, frame loop.
 import * as THREE from 'three/webgpu';
-import { Engine } from '../render/engine';
+import { Engine, PERF_URL, type Graphics } from '../render/engine';
+import { releaseUploaded } from '../render/release';
 import { CityControls } from '../render/controls';
 import { createMaterials } from '../render/materials';
 import { loadTile, type TileData } from '../data/tile';
@@ -25,7 +26,7 @@ import { Reference } from '../scene/reference';
 import { Editor, type AppApi } from '../editor/editor';
 import { bindShortcuts } from '../editor/commands';
 import {
-  dialog, docVersion, dpRegionsOn, lineLayer, mode, readOnly, select, selection, settings, stale3d, status, surveyFilter, toast, tool,
+  dialog, docVersion, dpRegionsOn, lineLayer, mode, readOnly, saveSettings, select, selection, settings, stale3d, status, surveyFilter, toast, tool,
 } from '../editor/state';
 
 /** A region in the survey list. */
@@ -52,7 +53,8 @@ export class App implements AppApi {
   async boot(tileId: string, progress: (f: number, msg: string) => void) {
     const $ = (id: string) => document.getElementById(id) as HTMLCanvasElement;
     this.engine = new Engine($('gl'));
-    await this.engine.init();
+    this.engine.onLost = () => void this.recoverGpu();
+    await this.engine.init(settings.value.graphics);
     this.engine.setTimeOfDay(10.5 * 60);
     const base = `${import.meta.env.BASE_URL}tiles/${tileId}/`;
     this.tile = await loadTile(tileId, progress);
@@ -73,6 +75,7 @@ export class App implements AppApi {
     const M = createMaterials(landuse);
     this.world = new World(this.engine.scene, this.tile, this.hf, this.doc, this.C, M, landuse);
     this.world.build((f, m) => progress(f, m));
+    this.world.setGraphics(settings.value.graphics);
     this.controls = new CityControls(this.engine.canvas, this.engine.camera, (x, z) => this.hf.sampleSurface(x, z) * (this.E?.exag ?? 1));
     this.controls.bounds = this.tile.half;
     this.E = new Editor(this.engine, this.controls, this.doc, this.C, this.world, this.hf, $('overlay'));
@@ -114,12 +117,102 @@ export class App implements AppApi {
     this.E.view.goTo(-350, 150, 0.5, 1);
     progress(0.97, 'Opening your map…');
     await this.restore();
+    this.resumeView();
     (window as unknown as Record<string, unknown>).city = new CityApi(this.doc, {
       select: (ids) => select(ids.map((id) => ({ kind: this.doc.get(id)!.kind, id }))),
       zoom: () => this.E.zoomToSelection(),
     });
     console.info('%cUrbanPlan editor', 'font-weight:bold;color:#ff8a3d', '— script edits with `city`, e.g. city.help()');
     this.loop();
+  }
+
+  /** The 3D look (Settings): simple (light) or high. */
+  setGraphics(g: Graphics) {
+    if (settings.value.graphics !== g) saveSettings({ graphics: g });
+    this.engine.setGraphics(g);
+    this.world.setGraphics(g);
+    this.world.frame(this.engine.camera.position, this.controls.focus);
+    this.world.needsRender = true;
+  }
+
+  // ---------------- GPU loss ----------------
+
+  /** performance panel hook (Ctrl+Shift+P) */
+  perfFrame: ((now: number) => void) | null = null;
+  private perfEl: HTMLElement | null = null;
+
+  /** A small live readout: frame rate while rendering, CPU / GPU time, draw calls, triangles, GPU objects, memory. */
+  togglePerf() {
+    if (this.perfEl) { this.perfEl.remove(); this.perfEl = null; this.perfFrame = null; return; }
+    const el = document.createElement('div');
+    el.className = 'perf-panel';
+    el.style.cssText = 'position:fixed;left:50%;bottom:34px;transform:translateX(-50%);z-index:50;background:rgba(20,22,26,.86);color:#e8e6e1;font:11px/1.45 ui-monospace,Menlo,Consolas,monospace;padding:6px 10px;border-radius:6px;pointer-events:none;white-space:pre';
+    document.body.appendChild(el);
+    this.perfEl = el;
+    let frames = 0, since = performance.now(), cpu = 0, draws = 0, tris = 0;
+    const show = (now: number) => {
+      const e = this.engine, r = e.renderer, info = r.info, mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
+      const secs = (now - since) / 1000;
+      const fps = frames / Math.max(secs, 1e-3);
+      if (PERF_URL) void e.sampleGpuTime();
+      el.textContent =
+        `${mode.value.toUpperCase()} · ${settings.value.graphics} · ${(r.getPixelRatio()).toFixed(2)}× px · ${frames ? `${fps.toFixed(0)} fps while drawing` : 'idle (not drawing)'}
+` +
+        `CPU ${(cpu / Math.max(frames, 1)).toFixed(1)} ms${PERF_URL ? ` · GPU ${e.gpuMs.toFixed(1)} ms` : ' · GPU time: add ?perf to the URL'} · ${draws} draws · ${(tris / 1000).toFixed(0)}k triangles (last frame)
+` +
+        `GPU objects: ${info.memory.geometries} geometries, ${info.memory.textures} textures · imagery ${(this.ref.bytes / 1e6).toFixed(0)} MB (${this.ref.count} tiles)` +
+        (mem ? ` · JS heap ${(mem.usedJSHeapSize / 1e6).toFixed(0)} MB` : '');
+      frames = 0; cpu = 0; since = now;
+    };
+    this.perfFrame = (now) => {
+      const ri = this.engine.renderer.info.render;
+      frames++; cpu += this.engine.cpuMs; draws = ri.drawCalls; tris = ri.triangles;
+      if (now - since > 1000) show(now);
+    };
+    const idle = () => { if (!this.perfEl) return; const now = performance.now(); if (now - since > 1000) show(now); setTimeout(idle, 1000); };
+    show(performance.now());
+    idle();
+  }
+
+  /**
+   * The GPU dropped the page (driver reset, or the system ran short of graphics memory): save, remember the view and
+   * reload — the document is the source of truth, so everything is rebuilt. A second loss within a minute stops
+   * auto-reloading and offers the light look instead.
+   */
+  private async recoverGpu() {
+    const KEY = 'urbanplan:gpu-lost';
+    let recent = false;
+    try { recent = Date.now() - Number(sessionStorage.getItem(KEY) ?? 0) < 60000; sessionStorage.setItem(KEY, String(Date.now())); } catch { /* storage off */ }
+    clearTimeout(this.saveTimer);
+    try { await this.persist(); } catch (e) { console.error(e); }
+    this.rememberView();
+    if (recent) {
+      if (settings.value.graphics !== 'simple') saveSettings({ graphics: 'simple' });
+      toast('The graphics card stopped responding again. Your edits are saved.', 'error', { label: 'Reload', run: () => location.reload() }, 600000);
+      return;
+    }
+    toast('Graphics reset — recovering the view… (your edits are saved)', 'warn', undefined, 10000);
+    setTimeout(() => location.reload(), 600);
+  }
+
+  private rememberView() {
+    const E = this.E, c = this.controls;
+    if (!E || !c) return;
+    const v = { mode: mode.value, cx: E.view.cx, cz: E.view.cz, scale: E.view.scale, t: [c.target.x, c.target.y, c.target.z], yaw: c.yaw, pitch: c.pitch, dist: c.dist };
+    try { sessionStorage.setItem('urbanplan:view', JSON.stringify(v)); } catch { /* storage off */ }
+  }
+
+  /** After a recovery reload: back to the same view. */
+  private resumeView() {
+    let v: { mode: '2d' | '3d'; cx: number; cz: number; scale: number; t: number[]; yaw: number; pitch: number; dist: number } | null = null;
+    try { v = JSON.parse(sessionStorage.getItem('urbanplan:view') ?? 'null'); sessionStorage.removeItem('urbanplan:view'); } catch { /* storage off */ }
+    if (!v) return;
+    this.E.view.cx = v.cx; this.E.view.cz = v.cz; this.E.view.scale = v.scale; this.E.view.apply();
+    if (v.mode === '3d') {
+      this.E.setMode('3d');
+      const c = this.controls;
+      c.target.set(v.t[0], v.t[1], v.t[2]); c.yaw = v.yaw; c.pitch = v.pitch; c.dist = v.dist; c.snap();
+    }
   }
 
   // ---------------- startup: which map ----------------
@@ -452,16 +545,29 @@ export class App implements AppApi {
   }
 
   private loop() {
-    let last = performance.now(), acc = 0, n = 0;
+    let last = performance.now();
+    // dynamic resolution: frame rate over continuous 3D rendering only (an idle 3D view doesn't render at all)
+    let busy = 0, busyFrames = 0, lastStep = 0, rendered = false, settle = 0;
+    const camSig = new Float32Array(17);
     const tick = (now: number) => {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       const E = this.E, W = this.world;
+      let draw = false;
       if (mode.value === '3d') {
         this.controls.update(dt);
+        const cam = this.engine.camera;
+        cam.updateMatrixWorld();
+        // did the camera move since the last frame? (the controls ease forever: ignore sub-millimetre drift)
+        const m = cam.matrixWorld.elements;
+        let moved = Math.abs(camSig[16] - cam.aspect) > 1e-4;
+        for (let i = 0; i < 15 && !moved; i++) if (Math.abs(camSig[i] - m[i]) > (i >= 12 ? 1e-3 : 2e-5)) moved = true;
+        if (moved) { camSig.set(m); camSig[16] = cam.aspect; settle = 6; }
         const focus = this.controls.focus;
-        this.engine.updateShadows(focus, Math.min(2600, Math.max(160, this.controls.currentDist * 1.1)));
-        W.frame(this.engine.camera.position, focus);
+        if (this.engine.updateShadows(focus, Math.min(2600, Math.max(160, this.controls.currentDist * 1.1)), false, moved)) draw = true;
+        if (moved) { W.frame(cam.position, focus); E.overlayDirty = true; }
+        // a few more frames after the camera stops, so LOD and shadows catch up
+        if (moved || settle > 0) { draw = true; settle--; }
       }
       E.frame(now);
       if (mode.value === '2d') {
@@ -470,18 +576,25 @@ export class App implements AppApi {
         // keep the 3D view ready: refresh terrain / buildings around edits while idle
         if (W.stale && now - this.lastChange > 1500 && !E.drag) { W.sync(); stale3d.value = false; }
       } else if (this.lastView) { this.ref.update(E.view.rect, E.view.scale, false); this.lastView = ''; }
-      if (mode.value === '3d' || W.needsRender) {
+      if (draw || W.needsRender) {
         W.needsRender = false;
         this.engine.render();
-      }
-      // dynamic resolution in 3D
-      acc += dt; n++;
-      if (acc > 1 && mode.value === '3d') {
-        const fps = n / acc, q = this.engine.quality;
-        if (fps < 50 && q.scale > 0.6) { q.scale = Math.max(0.6, q.scale - 0.1); this.engine.resize(); }
-        else if (fps > 58 && q.scale < this.engine.maxScale) { q.scale = Math.min(this.engine.maxScale, q.scale + 0.05); this.engine.resize(); }
-      }
-      if (acc > 1) { acc = 0; n = 0; }
+        releaseUploaded(this.engine.renderer);
+        this.perfFrame?.(now);
+        // dynamic resolution in 3D: few fixed steps, decided over ≥2 s of continuous rendering, at most every 4 s
+        if (mode.value === '3d' && rendered) {
+          busy += dt; busyFrames++;
+          if (busy > 2) {
+            const fps = busyFrames / busy;
+            if (now - lastStep > 4000) {
+              if (fps < 42 && this.engine.stepResolution(1)) lastStep = now;
+              else if (fps > 57 && this.engine.stepResolution(-1)) lastStep = now;
+            }
+            busy = 0; busyFrames = 0;
+          }
+        }
+        rendered = true;
+      } else rendered = false;
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);

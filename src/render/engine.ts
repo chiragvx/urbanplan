@@ -1,12 +1,26 @@
-// three.js WebGPU engine: renderer, sky, sun + shadows, haze, post-processing (GTAO + bloom + FXAA).
+// three.js WebGPU engine: renderer, sky, sun + shadows, haze, post-processing.
+// Two looks: "simple" (the default — flat sky, shadows re-rendered only once the camera settles, FXAA only, 1× pixels:
+// light enough for laptops) and "high" (physical sky with clouds, GTAO, live shadows, up to 1.5× pixels). The 3D pipeline's render targets only
+// exist while the 3D view is open; the 2D plan view has its own single-pass pipeline.
 import * as THREE from 'three/webgpu';
-import { pass, mrt, output, normalView, vec4, renderOutput, screenUV } from 'three/tsl';
+import { pass, mrt, output, normalView, vec4, renderOutput, screenUV, convertToTexture, uniform, mix, smoothstep, positionWorldDirection } from 'three/tsl';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { fxaa } from 'three/addons/tsl/display/FXAANode.js';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 
-export interface Quality { ao: boolean; bloom: boolean; shadows: boolean; scale: number }
+export type Graphics = 'simple' | 'high';
+export interface Quality { ao: boolean; bloom: boolean; shadows: boolean; clouds: boolean; scale: number }
+
+const PRESETS: Record<Graphics, Omit<Quality, 'scale' | 'bloom'> & { maxScale: number }> = {
+  simple: { ao: false, shadows: true, clouds: false, maxScale: 1 },
+  high: { ao: true, shadows: true, clouds: true, maxScale: Math.min(window.devicePixelRatio || 1, 1.5) },
+};
+/** dynamic resolution steps, as a share of the preset's pixel ratio */
+const STEPS = [1, 0.85, 0.7];
+
+/** ?perf in the URL: GPU timestamps for the performance panel (they cost a little, so off by default) */
+export const PERF_URL = new URLSearchParams(location.search).has('perf');
 
 export class Engine {
   renderer: THREE.WebGPURenderer;
@@ -19,22 +33,38 @@ export class Engine {
   sun = new THREE.DirectionalLight(0xfff1dc, 3.2);
   hemi = new THREE.HemisphereLight(0xc4d6ec, 0x6b5f48, 1.15);
   sky: SkyMesh;
-  pipeline!: THREE.RenderPipeline;
-  quality: Quality = { ao: true, bloom: false, shadows: true, scale: 1 };
-  readonly maxScale = Math.min(window.devicePixelRatio || 1, 1.5);
-  /** last measured GPU time per frame (ms), from timestamp queries */
+  /** 3D post-processing; built on the first 3D frame, released in the plan view */
+  pipeline: THREE.RenderPipeline | null = null;
+  private passes: { dispose(): void }[] = [];
+  graphics: Graphics = 'simple';
+  quality: Quality = { ao: false, bloom: false, shadows: true, clouds: false, scale: 1 };
+  maxScale = 1;
+  /** index into STEPS (dynamic resolution) */
+  step = 0;
+  /** last measured GPU time per frame (ms), from timestamp queries (?perf only) */
   gpuMs = 0;
+  /** the GPU device was lost (driver reset, out of memory): nothing renders until the page reloads */
+  lost = false;
+  onLost: (message: string) => void = () => {};
   private shadowState = { x: 1e9, z: 1e9, r: 0, sx: 0, sy: 0, sz: 0 };
   sunDir = new THREE.Vector3(0.4, 0.8, 0.3).normalize();
-  private aoNode: ReturnType<typeof ao> | null = null;
+  /** flat sky (simple look): haze at the horizon to blue overhead */
+  private skyTop = uniform(new THREE.Color(0x5f93d6));
+  private skyHorizon = uniform(new THREE.Color(0xb9c3c9));
+  private skyNode = mix(this.skyHorizon, this.skyTop, smoothstep(0.0, 0.3, positionWorldDirection.y));
 
   constructor(public canvas: HTMLCanvasElement) {
-    this.renderer = new THREE.WebGPURenderer({ canvas, antialias: false, powerPreference: 'high-performance', trackTimestamp: true });
+    this.renderer = new THREE.WebGPURenderer({ canvas, antialias: false, powerPreference: 'high-performance', trackTimestamp: PERF_URL });
     this.camera = new THREE.PerspectiveCamera(40, 1, 1, 30000);
     this.sky = new SkyMesh();
+    this.renderer.onDeviceLost = (info: { message?: string; reason?: string | null }) => {
+      this.lost = true;
+      console.error(`UrbanPlan: GPU device lost (${info.reason ?? 'unknown'}): ${info.message ?? ''}`);
+      this.onLost(info.message ?? '');
+    };
   }
 
-  async init() {
+  async init(graphics: Graphics = 'simple') {
     const r = this.renderer;
     await r.init();
     r.toneMapping = THREE.AgXToneMapping;
@@ -44,7 +74,7 @@ export class Engine {
 
     const s = this.scene;
     this.sky.scale.setScalar(40000);
-    this.sky.turbidity.value = 6.5;   // Pune haze
+    this.sky.turbidity.value = 6.5;   // haze
     this.sky.rayleigh.value = 1.6;
     this.sky.mieCoefficient.value = 0.006;
     this.sky.mieDirectionalG.value = 0.82;
@@ -55,20 +85,50 @@ export class Engine {
 
     const sun = this.sun;
     sun.castShadow = true;
+    // one size for both looks: three can't shrink a shadow map in place (the simple look re-renders it only when
+    // the camera settles, so its cost is small)
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.bias = -0.0004;
     sun.shadow.normalBias = 0.35;
     sun.shadow.autoUpdate = false;
     s.add(sun, sun.target, this.hemi);
 
-    this.buildPipeline();
+    this.setGraphics(graphics);
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
 
-  buildPipeline() {
+  /** Switch the look (simple / high). */
+  setGraphics(g: Graphics) {
+    this.graphics = g;
+    const p = PRESETS[g], q = this.quality;
+    q.ao = p.ao; q.shadows = p.shadows; q.clouds = p.clouds;
+    this.maxScale = p.maxScale;
+    this.step = 0;
+    q.scale = this.maxScale;
+    this.shadowState.r = 0; // re-render the shadow map
+    // a closer haze in the simple look hides where small detail stops being drawn
+    const fog = (this.scene.fog ?? this.savedFog) as THREE.Fog | null;
+    if (fog) { fog.near = g === 'simple' ? 1800 : 2500; fog.far = g === 'simple' ? 8000 : 11000; }
+    this.applySky();
+    this.releasePipeline();
+    this.resize();
+  }
+
+  private applySky() {
+    const on3d = !this.plan;
+    this.sky.visible = on3d && this.quality.clouds;
+    this.scene.backgroundNode = on3d && !this.quality.clouds ? this.skyNode : null;
+    this.scene.background = this.plan ? new THREE.Color(0xebe7df) : null;
+    // never toggled off: three frees the light's shadow node when a material is built without it while other
+    // objects still use it. The plan view's unlit materials never render the shadow map anyway.
+    this.sun.castShadow = this.quality.shadows;
+  }
+
+  private buildPipeline() {
     const q = this.quality;
     const scenePass = pass(this.scene, this.camera);
+    this.passes = [scenePass];
     let color: any;
     if (q.ao) {
       scenePass.setMRT(mrt({ output, normal: normalView }));
@@ -82,26 +142,57 @@ export class Engine {
       aoPass.distanceExponent.value = 1.2;
       aoPass.scale.value = 1.25;
       aoPass.samples.value = 8;
-      this.aoNode = aoPass;
+      this.passes.push(aoPass);
       const occl = aoPass.getTextureNode().sample(screenUV).r;
       color = vec4(col.rgb.mul(occl.mul(0.85).add(0.15)), col.a);
     } else {
       color = scenePass.getTextureNode('output');
-      this.aoNode = null;
     }
     if (q.bloom) color = color.add(bloom(color, 0.18, 0.35, 0.92));
-    this.pipeline = new THREE.RenderPipeline(this.renderer);
-    this.pipeline.outputColorTransform = false;
-    this.pipeline.outputNode = fxaa(renderOutput(color));
+    const p = new THREE.RenderPipeline(this.renderer);
+    p.outputColorTransform = false;
+    // FXAA samples a render-to-texture copy of the graded image: keep it, so releasing the pipeline frees it too
+    const graded = convertToTexture(renderOutput(color));
+    this.passes.push(graded as unknown as { dispose(): void });
+    p.outputNode = fxaa(graded);
+    this.pipeline = p;
   }
+
+  /** Free the 3D pipeline's render targets (colour, depth, normals, AO). Rebuilt on the next 3D frame. */
+  releasePipeline() {
+    if (!this.pipeline) return;
+    for (const n of this.passes) n.dispose();
+    this.passes = [];
+    this.pipeline.dispose();
+    this.pipeline = null;
+  }
+
+  private releasePlanPipeline() {
+    if (!this.planPipeline) return;
+    this.planPass?.dispose();
+    this.planPass = null;
+    this.planPipeline.dispose();
+    this.planPipeline = null;
+  }
+  private planPass: ReturnType<typeof pass> | null = null;
 
   resize() {
     const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
-    // quality.scale is the absolute pixel ratio: 1 = CSS pixels; dynamic resolution may go up to the device's
+    // quality.scale is the absolute pixel ratio: 1 = CSS pixels
     this.renderer.setPixelRatio(this.quality.scale);
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+  }
+
+  /** Dynamic resolution: one step down / up (few fixed steps, so render targets aren't reallocated every second). */
+  stepResolution(dir: 1 | -1): boolean {
+    const s = Math.max(0, Math.min(STEPS.length - 1, this.step + dir));
+    if (s === this.step) return false;
+    this.step = s;
+    this.quality.scale = this.maxScale * STEPS[s];
+    this.resize();
+    return true;
   }
 
   /** Time of day in minutes → sun, sky, light colours, haze. Returns night factor 0..1. */
@@ -121,18 +212,25 @@ export class Engine {
     this.hemi.groundColor.set(0x6b5f48).lerp(new THREE.Color(0x0c0c10), 1 - day);
     const fog = new THREE.Color(0xb9c3c9).lerp(new THREE.Color(0xd9a77f), golden * 0.6).lerp(new THREE.Color(0x0d1220), 1 - day);
     (this.scene.fog as THREE.Fog).color.copy(fog);
+    this.skyHorizon.value.copy(fog);
+    this.skyTop.value.set(0x5f93d6).lerp(new THREE.Color(0x070b16), 1 - day);
     this.renderer.toneMappingExposure = 1.05 + (1 - day) * 0.6;
     return 1 - day;
   }
 
-  /** Keep the shadow frustum around what the camera looks at; re-render shadows only when needed. */
-  updateShadows(focus: THREE.Vector3, radius: number, force = false) {
+  /**
+   * Keep the shadow frustum around what the camera looks at; re-render shadows only when needed. In the simple look
+   * the shadow map waits until the camera settles (`moving`). Returns true when the shadows changed.
+   */
+  updateShadows(focus: THREE.Vector3, radius: number, force = false, moving = false): boolean {
+    if (this.plan || !this.sun.castShadow) return false;
     const s = this.shadowState;
     const moved = Math.hypot(focus.x - s.x, focus.z - s.z) > radius * 0.1;
     const zoomed = Math.abs(radius - s.r) > s.r * 0.15;
     const d = this.sunDir;
     const sunMoved = Math.abs(d.x - s.sx) + Math.abs(d.y - s.sy) + Math.abs(d.z - s.sz) > 0.003;
-    if (!(force || moved || zoomed || sunMoved)) return;
+    if (!(force || moved || zoomed || sunMoved)) return false;
+    if (moving && !force && this.graphics === 'simple' && s.r > 0) return false;
     const R = radius * 1.2;
     const sun = this.sun;
     sun.target.position.copy(focus);
@@ -145,33 +243,52 @@ export class Engine {
     sun.updateMatrixWorld();
     sun.shadow.needsUpdate = true;
     this.shadowState = { x: focus.x, z: focus.z, r: radius, sx: d.x, sy: d.y, sz: d.z };
+    return true;
   }
 
+  /** CPU time of the last render() call (ms) */
+  cpuMs = 0;
+
   render() {
+    if (this.lost) return;
+    const t0 = performance.now();
+    // three only resets its counters in its own animation loop, which isn't used here
+    this.renderer.info.reset();
+    this.renderOnce();
+    this.cpuMs = performance.now() - t0;
+  }
+
+  private renderOnce() {
     if (this.plan) {
       if (!this.planPipeline) {
         const p = new THREE.RenderPipeline(this.renderer);
         p.outputColorTransform = false;
-        p.outputNode = renderOutput(pass(this.scene, this.planCamera), THREE.NoToneMapping, THREE.SRGBColorSpace);
+        this.planPass = pass(this.scene, this.planCamera);
+        p.outputNode = renderOutput(this.planPass, THREE.NoToneMapping, THREE.SRGBColorSpace);
         this.planPipeline = p;
       }
       this.planPipeline.render();
-    } else this.pipeline.render();
+    } else {
+      if (!this.pipeline) this.buildPipeline();
+      this.pipeline!.render();
+    }
   }
 
   /** Switch between the plan view (flat, unlit, no sky / fog / shadows) and the 3D view. */
   setPlan(on: boolean) {
     this.plan = on;
-    this.sky.visible = !on;
-    this.scene.background = on ? new THREE.Color(0xebe7df) : null;
-    this.sun.castShadow = !on && this.quality.shadows;
     if (on) this.savedFog = this.scene.fog;
     this.scene.fog = on ? null : this.savedFog ?? this.scene.fog;
+    this.applySky();
+    // only one view's render targets live at a time
+    if (on) this.releasePipeline(); else this.releasePlanPipeline();
+    this.shadowState.r = 0;
   }
   private savedFog: THREE.Fog | THREE.FogExp2 | null = null;
 
-  /** Poll GPU timestamps (cheap; call ~once a second). */
+  /** Poll GPU timestamps (?perf only; call ~once a second). */
   async sampleGpuTime() {
+    if (!PERF_URL) return;
     try {
       await this.renderer.resolveTimestampsAsync('render');
       const t = this.renderer.info.render.timestamp;

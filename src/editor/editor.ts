@@ -49,6 +49,8 @@ export interface AppApi {
   reviewNext(): void;
   surveyNext(): void;
   setSurvey(ids: Id[], status: import('../doc/types').SurveyStatus): void;
+  setGraphics(g: 'simple' | 'high'): void;
+  togglePerf(): void;
 }
 
 export interface PenState { pts: ops.PenPoint[]; cursor: [number, number] | null; snap: Snap | null }
@@ -921,7 +923,6 @@ export class Editor {
 
   frame(now: number) {
     if (mode.value === '2d' && this.view.tick(now)) { this.world.needsRender = true; this.overlayDirty = true; zoomScale.value = this.view.scale; }
-    if (mode.value === '3d') this.overlayDirty = true; // camera moves continuously
     if (this.overlayDirty) { this.overlayDirty = false; drawOverlay(this); }
   }
 

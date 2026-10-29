@@ -97,6 +97,20 @@ npm run map -- network maps/my.urbanplan.json out/network.json
 npm run map -- publish maps/my.urbanplan.json
 ```
 
+### Graphics and performance
+
+- **3D looks** (Settings → 3D graphics): *Simple* (default: flat sky, shadows re-rendered once the camera settles, FXAA
+  only, 1× pixels, closer haze with small detail dropped in the distance) or *High* (physical sky with clouds, ambient
+  occlusion, live shadows, up to 1.5× pixels).
+- The 3D view only draws when something changes (camera, edits, layers); an idle view costs nothing. Dynamic
+  resolution steps between 100 / 85 / 70 % of the look's pixel ratio.
+- Only one view's render targets exist at a time. Reference imagery (DP sheets, XYZ tiles) is decoded at the size
+  the zoom needs, kept within ~96 MB and released when 3D opens. Chunk geometry's JS copies are freed once uploaded.
+- If the GPU drops the page (driver reset, out of graphics memory), the map is saved and the page reloads into the same
+  view.
+- **Ctrl+Shift+P**: performance panel (frame rate while drawing, CPU time, draw calls, triangles, GPU objects, imagery
+  and JS memory). Add `?perf` to the URL for GPU timings.
+
 ## Data pipeline (offline)
 
 ```bash

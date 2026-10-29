@@ -128,6 +128,8 @@ function SettingsDialog() {
       <Toggle label="Snap to junctions and roads at the same level" checked={s.snapGeometry} onChange={(v) => saveSettings({ snapGeometry: v })} />
       <Toggle label="Snap to 90° / 45° from the road you start on" checked={s.snapAngles} onChange={(v) => saveSettings({ snapAngles: v })} />
       <Toggle label="Snap to guide lines from road ends" checked={s.snapGuides} onChange={(v) => saveSettings({ snapGuides: v })} />
+      <div class="field">3D graphics<Seg value={s.graphics} options={[{ value: 'simple', label: 'Simple (fast)' }, { value: 'high', label: 'High (sky, soft shading)' }]} onChange={(v) => ui.app.setGraphics(v)} /></div>
+      <p class="muted small">Simple is light enough for laptops: flat sky, fewer shadows, less detail in the distance. Ctrl+Shift+P shows frame time and memory.</p>
       <label class="field">Flyover ramp gradient (%)<input class="text" type="number" min={1} max={12} step={0.5} value={s.grade * 100} onChange={(e) => saveSettings({ grade: Math.max(0.01, Math.min(0.12, Number((e.currentTarget as HTMLInputElement).value) / 100)) })} /></label>
     </Modal>
   );

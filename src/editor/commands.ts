@@ -305,6 +305,8 @@ export const COMMANDS: Command[] = [
   { id: 'view.toggle3d', label: 'Switch 2D / 3D', group: 'View', keys: 'Tab', run: (E) => E.setMode(mode.value === '2d' ? '3d' : '2d') },
   { id: 'view.xray', label: 'X-ray (see underground)', group: 'View', keys: 'X', run: (E) => { E.setXray(!xray.value); if (xray.value && mode.value === '2d') E.setMode('3d'); } },
   { id: 'view.dp', label: 'Development Plan sheets', group: 'View', keys: 'D', run: (E) => E.app.toggleLayer('dp') },
+  { id: 'view.graphics', label: '3D graphics: simple (fast) / high', group: 'View', run: (E) => E.app.setGraphics(settings.value.graphics === 'simple' ? 'high' : 'simple') },
+  { id: 'view.perf', label: 'Performance panel (frame time, draw calls, memory)', group: 'View', keys: 'Ctrl+Shift+P', run: (E) => E.app.togglePerf() },
   {
     id: 'view.terrain', label: 'Terrain view (heights, contours, cut & fill; height exaggeration in 3D)', group: 'View', keys: 'Shift+T',
     run: (E) => { terrainView.value = !terrainView.value; E.applyExaggeration(); E.overlayDirty = true; },

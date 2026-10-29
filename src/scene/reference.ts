@@ -1,28 +1,42 @@
 // Reference imagery under / over the plan view: the georeferenced Development Plan sheets (tiles/<id>/dp) and XYZ
 // map tiles (OpenStreetMap, or imagery the user is entitled to use). Loaded lazily for what's on screen.
+// GPU memory is bounded: DP tiles are decoded at the resolution the zoom needs (1000 px down to 125 px a tile),
+// without mipmaps; the least recently seen tiles go once the budget is reached, and everything is released when
+// the 3D view opens (the plan view's imagery isn't drawn there).
 import * as THREE from 'three/webgpu';
 import type { CityDoc } from '../doc/doc';
 import type { LayerObj } from '../doc/types';
 
 interface DpIndex { res: number; size: number; tiles: { file: string; x0: number; z0: number; size: number }[]; attribution: string }
-interface Quad { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; layer: string; used: number }
+interface Quad {
+  mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; layer: string; used: number;
+  /** decoded width of the texture shown / being loaded (px) */
+  shown: number; loading: number; bytes: number; dead: boolean; bitmap?: ImageBitmap;
+}
 
 const Y = 3000; // above the city, below the plan camera (4000)
+/** GPU budget for reference imagery (RGBA bytes) */
+const BUDGET = 96e6;
+/** decode sizes for a DP tile (px a side) */
+const LEVELS = [125, 250, 500, 1000];
 
 export class Reference {
   readonly group = new THREE.Group();
   private dpIndex: DpIndex | null | undefined;
   private quads = new Map<string, Quad>();
-  private loader = new THREE.TextureLoader();
   private frame = 0;
   onLoad: () => void = () => {};
 
   constructor(readonly doc: CityDoc, readonly base: string, readonly origin: { lat: number; lon: number; kx: number; kz: number }) {
     this.group.renderOrder = 10;
-    this.loader.setCrossOrigin('anonymous');
   }
 
-  private quad(key: string, layer: string, corners: [number, number][], url: string, opacity: number, order: number) {
+  /** bytes of imagery on the GPU (for the performance panel) */
+  get bytes() { let s = 0; for (const q of this.quads.values()) s += q.bytes; return s; }
+  get count() { return this.quads.size; }
+
+  /** `px`: the decode size wanted (0 = the image's own size). */
+  private quad(key: string, layer: string, corners: [number, number][], url: string, opacity: number, order: number, px = 0) {
     let q = this.quads.get(key);
     if (!q) {
       const g = new THREE.BufferGeometry();
@@ -35,22 +49,64 @@ export class Reference {
       const mesh = new THREE.Mesh(g, mat);
       mesh.renderOrder = 10 + order;
       mesh.frustumCulled = false;
-      q = { mesh, mat, layer, used: this.frame };
+      q = { mesh, mat, layer, used: this.frame, shown: 0, loading: 0, bytes: 0, dead: false };
       this.quads.set(key, q);
       this.group.add(mesh);
-      const qq = q;
-      this.loader.load(url, (t) => {
-        t.colorSpace = THREE.SRGBColorSpace;
-        t.anisotropy = 4;
-        qq.mat.map = t; qq.mat.needsUpdate = true;
-        qq.mat.opacity = this.opacityOf(layer);
-        this.onLoad();
-      }, undefined, () => { /* missing tile: leave transparent */ });
     }
     q.used = this.frame;
     q.mesh.visible = true;
     if (q.mat.map) q.mat.opacity = opacity;
+    // (re)load at the size the zoom needs; the current texture stays up until the new one arrives
+    const want = px || -1;
+    if (q.shown !== want && q.loading !== want) this.load(q, url, want);
   }
+
+  private async load(q: Quad, url: string, px: number) {
+    q.loading = px;
+    try {
+      const res = await fetch(url, { mode: 'cors' });
+      if (!res.ok) throw new Error(String(res.status));
+      const blob = await res.blob();
+      if (q.dead || q.loading !== px) return;
+      const bmp = await createImageBitmap(blob, px > 0 ? { resizeWidth: px, resizeHeight: px, resizeQuality: 'medium' } : {});
+      if (q.dead || q.loading !== px) { bmp.close(); return; }
+      const t = new THREE.Texture(bmp as unknown as HTMLImageElement);
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.generateMipmaps = false;
+      t.minFilter = THREE.LinearFilter;
+      t.needsUpdate = true;
+      this.dropTexture(q);
+      q.mat.map = t; q.mat.needsUpdate = true;
+      q.mat.opacity = this.opacityOf(q.layer);
+      q.bitmap = bmp;
+      q.shown = px; q.loading = 0;
+      q.bytes = bmp.width * bmp.height * 4;
+      this.onLoad();
+    } catch {
+      /* missing tile: leave transparent */
+      if (q.loading === px) q.loading = 0;
+      q.shown = px;
+    }
+  }
+
+  private dropTexture(q: Quad) {
+    q.mat.map?.dispose();
+    q.mat.map = null;
+    // close the decoded image a little later: a frame already queued may still upload from it
+    const b = q.bitmap;
+    if (b) setTimeout(() => b.close(), 2000);
+    q.bitmap = undefined;
+    q.bytes = 0;
+  }
+
+  private remove(k: string, q: Quad) {
+    q.dead = true;
+    this.group.remove(q.mesh); q.mesh.geometry.dispose(); this.dropTexture(q); q.mat.dispose();
+    this.quads.delete(k);
+  }
+
+  /** Free all imagery (the 3D view doesn't show it; the browser's HTTP cache makes coming back cheap). */
+  release() { for (const [k, q] of this.quads) this.remove(k, q); }
 
   private opacityOf(layer: string) { return this.doc.get<'layer'>(layer)?.opacity ?? 1; }
 
@@ -59,28 +115,36 @@ export class Reference {
     this.frame++;
     for (const q of this.quads.values()) q.mesh.visible = false;
     this.group.visible = plan;
-    if (!plan) return;
+    if (!plan) { this.release(); return; }
     const layers = this.doc.all('layer').filter((l) => l.visible && (l.type === 'dp' || (l.type === 'xyz' && l.url)));
-    layers.forEach((L, order) => (L.type === 'dp' ? this.dp(L, rect) : this.xyz(L, rect, scale, order)));
-    // forget tiles not used for a while
-    if (this.quads.size > 300) {
-      for (const [k, q] of [...this.quads].sort((a, b) => a[1].used - b[1].used).slice(0, this.quads.size - 250)) {
-        this.group.remove(q.mesh); q.mesh.geometry.dispose(); q.mat.map?.dispose(); q.mat.dispose(); this.quads.delete(k);
+    layers.forEach((L, order) => (L.type === 'dp' ? this.dp(L, rect, scale) : this.xyz(L, rect, scale, order)));
+    // over budget: forget the tiles seen least recently (never the ones on screen)
+    let bytes = this.bytes;
+    if (bytes > BUDGET || this.quads.size > 200) {
+      for (const [k, q] of [...this.quads].sort((a, b) => a[1].used - b[1].used)) {
+        if (q.used === this.frame || (bytes <= BUDGET && this.quads.size <= 200)) break;
+        bytes -= q.bytes;
+        this.remove(k, q);
       }
     }
   }
 
-  private dp(L: LayerObj, r: [number, number, number, number]) {
+  private dp(L: LayerObj, r: [number, number, number, number], scale: number) {
     if (this.dpIndex === undefined) {
       this.dpIndex = null;
       fetch(`${this.base}dp/index.json`).then((x) => (x.ok ? x.json() : null)).then((j) => { this.dpIndex = j; this.onLoad(); }).catch(() => {});
       return;
     }
     if (!this.dpIndex) return;
+    const dpr = window.devicePixelRatio || 1;
     for (const t of this.dpIndex.tiles) {
       if (t.x0 > r[2] || t.x0 + t.size < r[0] || t.z0 > r[3] || t.z0 + t.size < r[1]) continue;
+      // device pixels the tile covers on screen → the smallest decode size that still looks sharp
+      const onScreen = t.size * scale * dpr;
+      const full = Math.round(t.size / this.dpIndex.res);
+      const px = Math.min(full, LEVELS.find((l) => l >= onScreen * 0.9) ?? full);
       const c: [number, number][] = [[t.x0, t.z0], [t.x0 + t.size, t.z0], [t.x0 + t.size, t.z0 + t.size], [t.x0, t.z0 + t.size]];
-      this.quad(`dp/${t.file}`, L.id, c, `${this.base}dp/${t.file}`, L.opacity, 0);
+      this.quad(`dp/${t.file}`, L.id, c, `${this.base}dp/${t.file}`, L.opacity, 0, px);
     }
   }
 
