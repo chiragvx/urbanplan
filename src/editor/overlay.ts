@@ -1,7 +1,7 @@
 // Canvas overlay: everything interactive drawn crisply on top of the rendered city — hover / selection outlines,
 // width handles, Bézier anchors, pen and line previews, vector utility lines (2D), measure, snaps, issue markers.
 import type { Editor } from './editor';
-import { accuracyView, anchorSel, dpRegionsOn, hover, mode, penClass, penLift, readOnly, selection, settings, tool } from './state';
+import { accuracyView, anchorSel, dpRegionsOn, hover, mode, terrainShow, terrainView, penClass, penLift, readOnly, selection, settings, tool } from './state';
 import { anchorsOf, FLYOVER_DECK } from '../doc/ops';
 import { LINE_COLOR } from '../doc/base';
 import { template, totalWidth } from '../doc/xsection';
@@ -31,6 +31,7 @@ export function drawOverlay(E: Editor) {
   const P = (x: number, z: number, lift = 0) => at(E, x, z, lift);
 
   if (is2d) {
+    if (terrainView.value) E.tview.draw(terrainShow.value);
     if (dpRegionsOn.value) drawDPRegions(E);
     drawLines(E);
     if (accuracyView.value) drawAccuracy(E);
@@ -85,6 +86,9 @@ export function drawOverlay(E: Editor) {
     else if (sn.kind === 'section') { ctx.beginPath(); ctx.moveTo(p[0] - 6, p[1] - 6); ctx.lineTo(p[0] + 6, p[1] + 6); ctx.moveTo(p[0] + 6, p[1] - 6); ctx.lineTo(p[0] - 6, p[1] + 6); ctx.stroke(); }
     if (sn.label) label(ctx, p, sn.label, 12, 18);
   }
+  if (terrainView.value) earthworks(E);
+  if (tool.value === 'terrain') terrainTool(E);
+  else if (terrainView.value && is2d && !E.drag && tool.value === 'select') terrainReadout(E);
   // marquee
   const d = E.drag;
   if (d?.kind === 'marquee') {
@@ -110,6 +114,73 @@ export function drawOverlay(E: Editor) {
     dot(ctx, p, 6, m.sev === 'error' ? WARN : '#f5a524', '#fff');
   }
   if (is2d) scaleBar(E);
+}
+
+// ---------------- terrain ----------------
+
+/** Earthwork footprints in the terrain view (dashed), the selected one highlighted. */
+function earthworks(E: Editor) {
+  const ctx = E.ctx, sel = new Set(selection.value.map((s) => s.id));
+  for (const o of E.doc.all('earthwork')) {
+    const on = sel.has(o.id) || hover.value?.id === o.id;
+    const P = o.pts;
+    ctx.strokeStyle = on ? ACCENT : 'rgba(120,72,30,0.8)'; ctx.lineWidth = on ? 2.5 : 1.25; ctx.setLineDash(on ? [] : [5, 4]);
+    ctx.beginPath();
+    if (o.op === 'pad' || o.op === 'pond') { for (let i = 0; i < P.length; i += 2) { const p = at(E, P[i], P[i + 1]); if (i) ctx.lineTo(p[0], p[1]); else ctx.moveTo(p[0], p[1]); } ctx.closePath(); }
+    else if (o.op === 'slope') { const a = at(E, P[0], P[1]), b = at(E, P[2], P[3]); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
+    else for (let i = 0; i + 1 < P.length; i += 3) { const p = at(E, P[i], P[i + 1]); if (i) ctx.lineTo(p[0], p[1]); else ctx.moveTo(p[0], p[1]); }
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+}
+
+/** Height (and cut / fill) under the cursor. */
+function heightLines(E: Editor, w: [number, number]) {
+  const hf = E.hf;
+  const s = hf.sampleSurface(w[0], w[1]), g = hf.sample(w[0], w[1], hf.ground);
+  const d = s - g;
+  return [`${(s + hf.base).toFixed(1)} m above sea level`, Math.abs(d) >= 0.05 ? `${d > 0 ? 'fill' : 'cut'} ${Math.abs(d).toFixed(1)} m vs the original ground` : ''];
+}
+
+function terrainReadout(E: Editor) {
+  const w = E.toWorld(...E.mouse);
+  readout(E, w, heightLines(E, w));
+}
+
+function terrainTool(E: Editor) {
+  const T = E.terra, ctx = E.ctx, c = T.cursor;
+  const st = settings.value, op = st.terrainOp;
+  // shape being clicked
+  if (T.pts.length) {
+    ctx.strokeStyle = '#b45309'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    for (let i = 0; i < T.pts.length; i += 2) { const p = at(E, T.pts[i], T.pts[i + 1]); if (i) ctx.lineTo(p[0], p[1]); else ctx.moveTo(p[0], p[1]); }
+    if (c) { const p = at(E, c[0], c[1]); ctx.lineTo(p[0], p[1]); }
+    if (op !== 'embank') ctx.closePath();
+    ctx.stroke(); ctx.setLineDash([]);
+    for (let i = 0; i < T.pts.length; i += 2) dot(ctx, at(E, T.pts[i], T.pts[i + 1]), 3.5, '#fff', '#b45309');
+  }
+  if (!c) return;
+  // brush circle (a ring of points so it follows the ground in 3D)
+  const r = op === 'embank' ? st.embankWidth / 2 : st.brushRadius;
+  if (op !== 'pad' && op !== 'pond') {
+    ctx.strokeStyle = 'rgba(180,83,9,0.95)'; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let k = 0; k <= 48; k++) { const a = (k / 48) * Math.PI * 2, p = at(E, c[0] + Math.cos(a) * r, c[1] + Math.sin(a) * r); if (k) ctx.lineTo(p[0], p[1]); else ctx.moveTo(p[0], p[1]); }
+    ctx.stroke();
+  }
+  // slope preview
+  const s = T.stroke;
+  if (s?.op === 'slope') {
+    const a = at(E, s.start[0], s.start[1]), b = at(E, c[0], c[1]);
+    ctx.strokeStyle = '#b45309'; ctx.lineWidth = Math.max(2, r * 2 * E.ppm); ctx.globalAlpha = 0.25; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+    ctx.globalAlpha = 1; ctx.lineWidth = 2; ctx.stroke();
+    const hA = st.levelHeight ?? T.heightAt(s.start[0], s.start[1]), hB = T.heightAt(c[0], c[1]), L = Math.hypot(c[0] - s.start[0], c[1] - s.start[1]);
+    readout(E, c, [`Slope ${L.toFixed(0)} m`, `${hA.toFixed(1)} → ${hB.toFixed(1)} m · ${L > 1 ? (((hB - hA) / L) * 100).toFixed(1) : '0'} %`]);
+    return;
+  }
+  const lines = heightLines(E, c);
+  if (op === 'level') lines.unshift(st.levelBalanced ? 'Level: balanced (cut = fill)' : `Level to ${st.levelHeight ?? 'the height where you start'}${st.levelHeight !== null ? ' m' : ''}`);
+  readout(E, c, lines);
 }
 
 // ---------------- road tool ----------------

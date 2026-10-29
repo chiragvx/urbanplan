@@ -744,3 +744,46 @@ export function editRegion(doc: CityDoc, id: Id, patch: Partial<RegionObj>, from
   if (!from) return;
   doc.create({ ...structuredClone(from), ...patch, kind: 'region', id } as RegionObj);
 }
+
+// ---------------- graded roads ----------------
+
+/** Cities: Skylines road segments are at most 96 m (12 terrain cells of 8 m): grade stations at most this far apart. */
+export const GRADE_STEP = 96;
+
+/**
+ * Grade sections (Cities: Skylines style): a fixed profile with stations ≤ `step` apart, heights taken from the
+ * ground under them (averaged ±12 m) and eased so no grade is steeper than `maxGrade`; the ground is then cut and
+ * filled to the road. `ground(x, z)` = designed terrain height above sea level.
+ */
+export function gradeSections(doc: CityDoc, ids: Id[], ground: (x: number, z: number) => number, step = GRADE_STEP, maxGrade = 0.08) {
+  for (const id of ids) {
+    const s = doc.get<'section'>(id);
+    if (!s) continue;
+    const S = samplePath(anchorsOf(doc, s), 24);
+    if (S.len < 2) continue;
+    const m = Math.max(2, Math.ceil(S.len / step) + 1);
+    const at = (u: number): V2 => {
+      u = Math.max(0, Math.min(S.len, u));
+      let i = 1;
+      while (i < S.s.length - 1 && S.s[i] < u) i++;
+      const f = (u - S.s[i - 1]) / (S.s[i] - S.s[i - 1] || 1);
+      return [S.pts[i - 1][0] + (S.pts[i][0] - S.pts[i - 1][0]) * f, S.pts[i - 1][1] + (S.pts[i][1] - S.pts[i - 1][1]) * f];
+    };
+    const ds = S.len / (m - 1);
+    const z: number[] = [];
+    for (let i = 0; i < m; i++) {
+      const u = i * ds;
+      const h = [u - 12, u, u + 12].map((v) => { const p = at(v); return ground(p[0], p[1]); });
+      z.push((h[0] + 2 * h[1] + h[2]) / 4);
+    }
+    // ease to the grade limit both ways
+    for (let i = 1; i < m; i++) z[i] = Math.max(z[i - 1] - maxGrade * ds, Math.min(z[i - 1] + maxGrade * ds, z[i]));
+    for (let i = m - 2; i >= 0; i--) z[i] = Math.max(z[i + 1] - maxGrade * ds, Math.min(z[i + 1] + maxGrade * ds, z[i]));
+    doc.set(id, 'grade', { step, z: z.map(r2) });
+  }
+}
+
+/** Back to following the terrain. */
+export function ungradeSections(doc: CityDoc, ids: Id[]) {
+  for (const id of ids) if (doc.get<'section'>(id)?.grade) doc.set(id, 'grade', undefined);
+}

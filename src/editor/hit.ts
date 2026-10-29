@@ -4,6 +4,7 @@ import type { CityDoc } from '../doc/doc';
 import type { Compiler } from '../doc/compile';
 import type { Id, Kind } from '../doc/types';
 import { anchorsOf } from '../doc/ops';
+import { earthworkBox } from '../doc/terrain';
 
 export interface Pick { kind: Kind; id: Id; d: number; p?: [number, number] }
 
@@ -27,6 +28,7 @@ export class HitIndex {
       for (const [x, z] of r) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
       return [x0, z0, x1, z1];
     }
+    if (o.kind === 'earthwork') return earthworkBox(o);
     const pts = o.kind === 'line' ? o.pts : o.kind === 'building' ? o.outer : o.kind === 'region' ? o.ring : null;
     if (!pts || pts.length < 2) return null;
     let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
@@ -54,7 +56,7 @@ export class HitIndex {
 
   rebuild() {
     this.cells.clear(); this.idCells.clear();
-    for (const k of ['section', 'junction', 'line', 'building', 'region'] as Kind[]) for (const id of this.doc.ids(k)) this.add(id);
+    for (const k of ['section', 'junction', 'line', 'building', 'region', 'earthwork'] as Kind[]) for (const id of this.doc.ids(k)) this.add(id);
   }
 
   update(ids: Iterable<Id>) {
@@ -112,6 +114,9 @@ export class HitIndex {
         if (d <= o.size / 2 + tol) offer({ kind: 'line', id, d: d - o.size / 2 + 0.5 });
       } else if (o.kind === 'building' && can('building')) {
         if (inRing(o.outer, x, z)) offer({ kind: 'building', id, d: 5 });
+      } else if (o.kind === 'earthwork' && can('earthwork')) {
+        const d = earthworkDist(o, x, z);
+        if (d <= tol) offer({ kind: 'earthwork', id, d: 40 + d });
       } else if (o.kind === 'region' && can('region')) {
         // the land under everything else: anything on it wins
         if (inRing(o.ring, x, z) && !o.holes?.some((h) => inRing(h, x, z))) offer({ kind: 'region', id, d: 50 + Math.sqrt(o.area) / 1000 });
@@ -188,4 +193,15 @@ function inPoly(P: [number, number][], x: number, z: number) {
     if ((a[1] > z) !== (b[1] > z) && x < ((b[0] - a[0]) * (z - a[1])) / (b[1] - a[1]) + a[0]) c = !c;
   }
   return c;
+}
+
+/** Distance from a point to an earthwork's footprint (0 inside). */
+export function earthworkDist(o: import('../doc/types').EarthworkObj, x: number, z: number): number {
+  const P = o.pts;
+  if (o.op === 'pad' || o.op === 'pond') return inRing(P, x, z) ? 0 : polyDist([...P, P[0], P[1]], x, z);
+  if (o.op === 'slope') return Math.max(0, polyDist(P.slice(0, 4), x, z) - o.radius);
+  const stride = 3, line: number[] = [];
+  for (let i = 0; i + 1 < P.length; i += stride) line.push(P[i], P[i + 1]);
+  if (line.length === 2) return Math.max(0, Math.hypot(x - line[0], z - line[1]) - o.radius);
+  return Math.max(0, polyDist(line, x, z) - o.radius);
 }

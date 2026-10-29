@@ -149,6 +149,7 @@ function HelpDialog() {
             <li><kbd>P</kbd> is the road tool, as in Cities: Skylines: <kbd>1</kbd> straight · <kbd>2</kbd> simple curve · <kbd>3</kbd> complex curve · <kbd>4</kbd> continuous · <kbd>5</kbd> freeform pen · <kbd>6</kbd> replace. Each click builds a stretch and carries on; right-click steps back.</li>
             <li><b>Bridges and tunnels</b>: <kbd>PgUp</kbd>/<kbd>PgDn</kbd> set the height while drawing (below zero = underground) — crossings at the same level become junctions, others pass over or under. With a road selected, <kbd>Shift</kbd>+<kbd>PgUp</kbd> makes it a flyover, <kbd>Shift</kbd>+<kbd>PgDn</kbd> an underpass / tunnel (both with ramps), <kbd>Home</kbd> brings it back to the ground. <kbd>X</kbd> sees tunnels in 3D.</li>
             <li><b>Snapping</b>: junctions, roads at your level, 90° / 45° to the road you start from, guide lines from road ends, round lengths. <kbd>Shift</kbd> = 15° steps, hold <kbd>Ctrl</kbd> to skip, <kbd>S</kbd> toggles. <kbd>B</kbd> bulldozes; <kbd>K</kbd> splits a road so part of it can differ.</li>
+            <li><b>Terrain</b> (<kbd>T</kbd>): raise, level, soften, slope, restore, pad, embankment, pond — <kbd>1</kbd>–<kbd>8</kbd>, <kbd>[</kbd> <kbd>]</kbd> brush. <kbd>Shift</kbd>+<kbd>T</kbd> terrain view. <kbd>G</kbd> grades selected roads (fixed profile, 96 m stations), <kbd>Shift</kbd>+<kbd>G</kbd> back to following the terrain.</li>
             <li><kbd>Tab</kbd> flips between 2D and 3D — all tools work in both; in 3D drag empty ground to pan, right-drag to orbit. <kbd>X</kbd> x-ray shows pipes underground. <kbd>D</kbd> shows the DP sheets underneath.</li>
             <li>Everything is undoable. Your work autosaves in this browser; <b>Save</b> writes a <code>.urbanplan.json</code> file.</li>
             <li>In the browser console, <code>city</code> scripts the same edits: <code>city.roads(&#123; name: /Nagar/ &#125;).width(30)</code> — try <code>city.help()</code>.</li>
@@ -203,8 +204,16 @@ function ProfileChart(p: { id: string }) {
   const S = samplePath(P, 24);
   const hf = ui.E.hf;
   const ground = S.pts.map(([x, z]) => hf.sample(x, z) + hf.base);
-  const road = S.pts.map(([x, z], i) => hf.sample(x, z) + hf.base + S.lift[i]);
-  const lo = Math.min(...ground, ...road) - 2, hi = Math.max(...road, ...ground) + 3;
+  const orig = S.pts.map(([x, z]) => hf.sample(x, z, hf.ground) + hf.base);
+  const terraformed = orig.some((v, i) => Math.abs(v - ground[i]) > 0.05);
+  // graded: straight grades between the stations (the ends meet the junctions on the ground)
+  const G = s.grade && !P.some((a) => Math.abs(a.lift) > 0.25) ? s.grade : undefined;
+  const m = G?.z.length ?? 0;
+  const stS = G ? G.z.map((_, i) => ((S.len || 1) * i) / (m - 1)) : [];
+  const stZ = G ? G.z.map((v, i) => (i === 0 ? ground[0] + P[0].lift : i === m - 1 ? ground[ground.length - 1] + P[P.length - 1].lift : v)) : [];
+  const gradeAt = (u: number) => { let i = 1; while (i < m - 1 && stS[i] < u) i++; const f = Math.max(0, Math.min(1, (u - stS[i - 1]) / (stS[i] - stS[i - 1] || 1))); return stZ[i - 1] + (stZ[i] - stZ[i - 1]) * f; };
+  const road = G ? S.s.map(gradeAt) : S.pts.map(([x, z], i) => hf.sample(x, z) + hf.base + S.lift[i]);
+  const lo = Math.min(...ground, ...road, ...orig) - 2, hi = Math.max(...road, ...ground, ...orig) + 3;
   const W = 900, H = 150, L = S.len || 1;
   const X = (sv: number) => (sv / L) * (W - 40) + 30, Y = (v: number) => H - 20 - ((v - lo) / (hi - lo)) * (H - 35);
   const path = (vals: number[]) => vals.map((v, i) => `${i ? 'L' : 'M'}${X(S.s[i]).toFixed(1)},${Y(v).toFixed(1)}`).join('');
@@ -224,11 +233,29 @@ function ProfileChart(p: { id: string }) {
     const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
   };
+  const dragStation = (i: number, e: PointerEvent) => {
+    if (readOnly.value || !G || i === 0 || i === m - 1) return;
+    const svg = (e.currentTarget as SVGElement).ownerSVGElement!;
+    const r = svg.getBoundingClientRect();
+    const key = 'grade' + Math.random();
+    const move = (mv: PointerEvent) => {
+      const v = lo + ((H - 20 - ((mv.clientY - r.top) / r.height) * H) / (H - 35)) * (hi - lo);
+      const z = G.z.map((q, k) => (k === i ? Math.round(v * 20) / 20 : q));
+      ui.E.edit('Road grade', () => ui.doc.set(s.id, 'grade', { ...G, z }), key);
+    };
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+  };
   return (
     <svg class="profile-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
       <path d={`${path(ground)}L${X(L)},${H}L${X(0)},${H}Z`} fill="rgba(160,120,80,0.25)" stroke="#a07850" stroke-width="1.5" />
+      {terraformed && <path d={path(orig)} fill="none" stroke="#a07850" stroke-width="1" stroke-dasharray="4 3" opacity="0.8" />}
       <path d={path(road)} fill="none" stroke="#2f7cf6" stroke-width="2.5" />
-      {P.map((a, k) => (
+      {G && stS.map((u, i) => (
+        <rect key={'g' + i} x={X(u) - 5} y={Y(stZ[i]) - 5} width={10} height={10} fill={i === 0 || i === m - 1 ? '#ff8a3d' : '#fff'} stroke="#2f7cf6" stroke-width="2"
+          style={{ cursor: i === 0 || i === m - 1 ? 'default' : 'ns-resize' }} onPointerDown={(e) => dragStation(i, e as unknown as PointerEvent)}><title>{`station ${i} · ${stZ[i].toFixed(2)} m`}</title></rect>
+      ))}
+      {!G && P.map((a, k) => (
         <circle key={k} cx={X(anchorS[k])} cy={Y(hf.sample(a.x, a.z) + hf.base + a.lift)} r={k === 0 || k === P.length - 1 ? 4 : 6} fill={k === 0 || k === P.length - 1 ? '#ff8a3d' : '#fff'} stroke="#2f7cf6" stroke-width="2"
           style={{ cursor: k === 0 || k === P.length - 1 ? 'default' : 'ns-resize' }} onPointerDown={(e) => drag(k, e as unknown as PointerEvent)} />
       ))}

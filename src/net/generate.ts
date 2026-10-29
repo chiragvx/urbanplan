@@ -305,6 +305,8 @@ export interface MSeg {
   t: RoadType; cls: string; bridge: BridgeKind;
   elevated?: boolean; viaduct?: boolean;
   /** below the ground (a trench, underpass or tunnel) */ sunk?: boolean;
+  /** graded road: [pieceLength, s0, z0, s1, z1, …] — a fixed height profile (scene metres) the ground is cut / filled to */
+  grade?: number[];
   /** raster / picking code (> 0) */
   code: number;
   /** the editor object this piece belongs to (section id) */
@@ -544,6 +546,18 @@ export class RoadMesher {
   private segZ(g: SegGeo) {
     const T = this.T;
     const na = this.nodes.get(g.s.a)!, nb = this.nodes.get(g.s.b)!;
+    const G = g.s.grade;
+    if (G) {
+      // fixed profile, straight grades between stations (the piece's own length may differ a hair from the compiler's)
+      const k = G[0] / Math.max(1e-6, g.len);
+      return (s: number) => {
+        const u = s * k;
+        let i = 3;
+        while (i < G.length - 2 && G[i] < u) i += 2;
+        const f = Math.max(0, Math.min(1, (u - G[i - 2]) / (G[i] - G[i - 2] || 1)));
+        return G[i - 1] + (G[i + 1] - G[i - 1]) * f + LIFT;
+      };
+    }
     if (!g.s.elevated && !g.s.sunk) return (_s: number, x: number, z: number) => T(x, z) + LIFT;
     const span = Math.max(0.01, g.len - g.trimA - g.trimB);
     const valley = g.s.bridge === 'valley';
@@ -603,7 +617,9 @@ export class RoadMesher {
     this.items.set(key, {
       key, layers: { asphalt: pack(asphalt), paving: pack(paving), markings: pack(markings), concrete: pack(concrete) },
       x0: x0 - hw, z0: z0 - hw, x1: x1 + hw, z1: z1 + hw,
-      stamps: g.s.sunk && !g.s.elevated ? trenchStamps(S, z, hw, g.s.code, this.T) : [{ line: new Float32Array(S.pts), hw, carve: !g.s.elevated, code: g.s.code }],
+      stamps: g.s.grade
+        ? [{ line: new Float32Array(S.pts), hw, carve: true, code: g.s.code, z: Float32Array.from({ length: S.pts.length / 2 }, (_, i) => z(i, S.pts[i * 2], S.pts[i * 2 + 1]) - LIFT) }]
+        : g.s.sunk && !g.s.elevated ? trenchStamps(S, z, hw, g.s.code, this.T) : [{ line: new Float32Array(S.pts), hw, carve: !g.s.elevated, code: g.s.code }],
     });
   }
 

@@ -9,6 +9,7 @@ import * as ops from '../doc/ops';
 import { CLASS_LABEL, ROAD_CLASSES, type Id, type SectionObj } from '../doc/types';
 import { COVER } from '../net/generate';
 import { RegionPanel } from './RegionPanel';
+import { EarthworkPanel } from './EarthworkPanel';
 import { LINE_LABEL } from '../doc/base';
 import { COMMANDS, setDeck } from '../editor/commands';
 import type { Part } from '../net/model';
@@ -34,6 +35,7 @@ export function Inspector() {
     case 'junction': return <JunctionPanel id={o.id} />;
     case 'line': return <LinePanel id={o.id} />;
     case 'building': return <BuildingPanel id={o.id} />;
+    case 'earthwork': return <EarthworkPanel id={o.id} />;
     default: return <Empty />;
   }
 }
@@ -135,8 +137,28 @@ function LevelControls(p: { ids: Id[] }) {
   const deck = ops.deckOf(d, p.ids);
   const up = deck > 0.25, down = deck < -0.25;
   const grade = settings.value.grade;
+  const secs = p.ids.map((id) => d.get<'section'>(id)).filter((s): s is SectionObj => !!s);
+  const graded = secs.filter((s) => s.grade).length;
+  const stations = secs.reduce((a, s) => a + (s.grade?.z.length ?? 0), 0);
   return (
-    <Section title="Level" open={up || down}>
+    <Section title="Level" open={up || down || graded > 0}>
+      {!up && !down && (
+        <>
+          <Seg small value={graded === secs.length && graded ? 'graded' : graded ? 'mixed' : 'follow'} options={[
+            { value: 'follow', label: 'Follow terrain', title: 'Shift+G' }, ...(graded && graded < secs.length ? [{ value: 'mixed' as const, label: 'Mixed' }] : []), { value: 'graded', label: `Graded (${ops.GRADE_STEP} m)`, title: 'G' },
+          ]} onChange={(v) => {
+            if (ro || v === 'mixed') return;
+            if (v === 'follow') ui.E.edit('Follow terrain', () => ops.ungradeSections(d, p.ids));
+            else ui.E.edit('Grade', () => ops.gradeSections(d, p.ids, (x, z) => ui.E.hf.sample(x, z) + ui.E.hf.base));
+          }} />
+          {graded > 0 && (
+            <div class="btns">
+              <button disabled={ro} title="Re-take the grade from the ground as it is now" onClick={() => ui.E.edit('Regrade', () => ops.gradeSections(d, p.ids, (x, z) => ui.E.hf.sample(x, z) + ui.E.hf.base))}>Regrade</button>
+              <span class="muted small">{stations} station{stations === 1 ? '' : 's'} ≤ {ops.GRADE_STEP} m apart · drag them in the height profile (<kbd>Shift P</kbd>)</span>
+            </div>
+          )}
+        </>
+      )}
       <Seg small value={up ? 'bridge' : down ? 'tunnel' : 'ground'} options={[
         { value: 'ground', label: 'At ground', title: 'Home' }, { value: 'bridge', label: 'Flyover', title: 'Shift+PageUp' }, { value: 'tunnel', label: 'Underpass / tunnel', title: 'Shift+PageDown' },
       ]}

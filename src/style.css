@@ -251,6 +251,8 @@ code { font: 12px ui-monospace, Menlo, Consolas, monospace; background: var(--pa
 .roadbar .rb-hint { font-size: 12.5px; padding: 2px 6px; }
 .roadbar .select.small { font-size: 12px; padding: 3px 6px; }
 .roadbar .icon-btn { width: 24px; height: 24px; font-size: 10px; }
+.roadbar .text.small { font-size: 12px; padding: 3px 6px; width: 64px; }
+.roadbar .range { width: 90px; }
 @media (max-width: 1100px) { .roadbar .rb-modes button span { display: none; } }
 
 /* DP region inspector */

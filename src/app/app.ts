@@ -14,6 +14,7 @@ import type { SurveyStatus } from '../doc/types';
 import { editRegion } from '../doc/ops';
 import { FILE_EXT, newMeta, openMap, parse, serialize } from '../doc/format';
 import { IssueIndex, type RegionLike } from '../doc/issues';
+import { earthworkBox } from '../doc/terrain';
 import { toGeoJSON, toNetwork } from '../doc/export';
 import { CityApi } from '../doc/api';
 import type { Id, LayerObj, MapMeta } from '../doc/types';
@@ -72,7 +73,7 @@ export class App implements AppApi {
     const M = createMaterials(landuse);
     this.world = new World(this.engine.scene, this.tile, this.hf, this.doc, this.C, M, landuse);
     this.world.build((f, m) => progress(f, m));
-    this.controls = new CityControls(this.engine.canvas, this.engine.camera, (x, z) => this.hf.sampleSurface(x, z));
+    this.controls = new CityControls(this.engine.canvas, this.engine.camera, (x, z) => this.hf.sampleSurface(x, z) * (this.E?.exag ?? 1));
     this.controls.bounds = this.tile.half;
     this.E = new Editor(this.engine, this.controls, this.doc, this.C, this.world, this.hf, $('overlay'));
     this.E.app = this;
@@ -88,6 +89,16 @@ export class App implements AppApi {
     };
     this.engine.scene.add(this.ref.group);
     this.issues = new IssueIndex(this.doc, this.C, (x0, z0, x1, z1) => this.E.hit.query(x0, z0, x1, z1));
+    // water pooling in terraformed ground (not inside ponds, which hold water on purpose)
+    this.issues.terrainIssues = () => {
+      const ponds = this.doc.all('earthwork').filter((o) => o.op === 'pond');
+      const inPond = (x: number, z: number) => ponds.some((o) => { let c = false; const P = o.pts; for (let i = 0, j = P.length / 2 - 1; i < P.length / 2; j = i++) { const xi = P[i * 2], zi = P[i * 2 + 1], xj = P[j * 2], zj = P[j * 2 + 1]; if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) c = !c; } return c; });
+      return this.E.terrain.pits().filter((p) => !inPond(p.x, p.z)).map((p) => ({
+        key: `pit:${Math.round(p.x)}:${Math.round(p.z)}`, sev: 'warn' as const, title: 'Water would pool here',
+        detail: `A ${p.depth.toFixed(1)} m deep hollow (${Math.round(p.area).toLocaleString()} m²) with no way out — soften it, or make it a pond`, x: p.x, z: p.z,
+        ids: this.doc.all('earthwork').filter((o) => { const b = earthworkBox(o); return p.x >= b[0] && p.x <= b[2] && p.z >= b[1] && p.z <= b[3]; }).map((o) => o.id),
+      }));
+    };
     // DP regions for the checks: survey region objects, and traced regions not surveyed yet
     this.issues.regions = () => {
       const D = this.E.dpr;

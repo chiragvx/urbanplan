@@ -62,6 +62,39 @@ function sectionChecks(doc: CityDoc, C: Compiler, s: SectionObj, near: Near, out
     }
     return;
   }
+  // gradient: steeper than 8 % over 24 m (after terraforming, or a graded profile)
+  {
+    const hf = C.hf, n2 = g.pts.length / 2;
+    const zs = new Float32Array(n2);
+    const G = s.grade;
+    for (let i = 0; i < n2; i++) zs[i] = hf.sample(g.pts[i * 2], g.pts[i * 2 + 1]);
+    let deep = 0, dx = 0, dz = 0;
+    if (G && G.z.length >= 2) {
+      const m = G.z.length, ground = Float32Array.from(zs);
+      const st = G.z.map((_, i) => (g.len * i) / (m - 1)), zz = G.z.map((v) => v - hf.base);
+      zz[0] = zs[0]; zz[m - 1] = zs[n2 - 1];
+      for (let i = 0; i < n2; i++) {
+        let k = 1; while (k < m - 1 && st[k] < g.cum[i]) k++;
+        const f = Math.max(0, Math.min(1, (g.cum[i] - st[k - 1]) / (st[k] - st[k - 1] || 1)));
+        zs[i] = zz[k - 1] + (zz[k] - zz[k - 1]) * f;
+        const d = Math.abs(zs[i] - ground[i]);
+        if (d > deep) { deep = d; dx = g.pts[i * 2]; dz = g.pts[i * 2 + 1]; }
+      }
+      if (deep > 6) out.push({ key: `gradedepth:${s.id}`, sev: 'info', title: 'Deep cut or high fill on a graded road', detail: `${name}: the road is ${deep.toFixed(1)} m ${zs.some((v, i) => v - ground[i] > 6) ? 'above' : 'below'} the ground — a bridge or tunnel may suit`, x: dx, z: dz, ids: [s.id] });
+    }
+    let worst = 0, wx = 0, wz = 0;
+    for (let i = 0, j = 0; i < n2; i++) {
+      while (j < n2 - 1 && g.cum[j] - g.cum[i] < 24) j++;
+      const L = g.cum[j] - g.cum[i];
+      if (L < 20) break;
+      const gr = Math.abs(zs[j] - zs[i]) / L;
+      if (gr > worst) { worst = gr; wx = g.pts[i * 2]; wz = g.pts[i * 2 + 1]; }
+    }
+    // only where someone shaped it (graded, or on terraformed ground): the 30 m elevation model alone is too coarse
+    let shaped = !!G;
+    for (let i = 0; i < n2 && !shaped; i += 4) shaped = Math.abs(hf.sample(g.pts[i * 2], g.pts[i * 2 + 1]) - hf.sample(g.pts[i * 2], g.pts[i * 2 + 1], hf.ground)) > 0.1;
+    if (shaped && worst > 0.08 && g.len > 30) out.push({ key: `steep:${s.id}`, sev: 'warn', title: 'Steep road', detail: `${name}: ${(worst * 100).toFixed(1)} % (more than 8 %)${G ? ' — drag its stations in the height profile' : ' — grade it (G) or soften the ground'}`, x: wx, z: wz, ids: [s.id] });
+  }
   // buildings standing where the Development Plan widens the road
   if (s.reserve && s.reserve > w + 1.5) {
     const half = s.reserve / 2;
@@ -194,6 +227,15 @@ export class IssueIndex {
 
   /** DP regions to check (set by the app once they're loaded) */
   regions: () => RegionLike[] = () => [];
+  /** terrain checks (water pooling where the ground was terraformed), set by the app */
+  terrainIssues: () => Issue[] = () => [];
+
+  /** Re-run the terrain checks. */
+  terrainPass() {
+    for (const k of [...this.byKey.keys()]) if (k.startsWith('pit:')) { const i = this.byKey.get(k)!; this.byKey.delete(k); for (const o of i.ids) this.byObj.get(o)?.delete(k); }
+    for (const i of this.terrainIssues()) this.add(i);
+    this.version++;
+  }
 
   constructor(readonly doc: CityDoc, readonly C: Compiler, readonly near: Near) {}
 
@@ -226,6 +268,7 @@ export class IssueIndex {
     for (const id of this.doc.ids('junction')) { const out: Issue[] = []; junctionChecks(this.doc, this.C, id, this.near, out); out.forEach((i) => this.add(i)); }
     this.version++;
     this.regionPass();
+    this.terrainPass();
   }
 
   /** Re-check changed objects and their neighbourhood. */
@@ -248,6 +291,7 @@ export class IssueIndex {
     }
     this.version++;
     if ([...todo].some((id) => this.doc.get(id)?.kind === 'region' || this.doc.get(id)?.kind === 'building')) this.regionPass();
+    if ([...todo].some((id) => this.doc.get(id)?.kind === 'earthwork' || id.startsWith('ew'))) this.terrainPass();
   }
 
   list(): Issue[] {

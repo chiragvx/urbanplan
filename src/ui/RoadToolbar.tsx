@@ -53,6 +53,9 @@ export function RoadToolbar() {
           </select>
         </div>
       )}
+      {st.roadMode !== 'replace' && st.roadMode !== 'freeform' && (
+        <button class={`chip ${st.roadGraded ? 'on' : ''}`} title={`Graded roads: a fixed profile with stations every ≤ 96 m (12 cells of 8 m), the ground cut and filled to it — like Cities: Skylines. Off: roads follow the terrain.`} onClick={() => saveSettings({ roadGraded: !st.roadGraded })}>Graded</button>
+      )}
       {st.roadMode !== 'replace' && (
         <div class="rb-group">
           <span class="rb-label">Snap</span>

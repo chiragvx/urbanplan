@@ -253,6 +253,9 @@ export class RoadTool {
     const res = E.edit('Draw road', () => {
       const r = ops.drawStretch(E.doc, S.pt, end, pieces, penClass.value, { road: this.road ?? undefined });
       const c = r.section ? ops.autoConnect(E.doc, [r.section]) : { joined: 0, bridged: 0 };
+      // Cities: Skylines style: a graded road (fixed profile, the ground cut / filled to it) on ground level
+      if (settings.value.roadGraded && Math.abs(S.lift) < 0.25 && Math.abs(end.lift ?? 0) < 0.25)
+        ops.gradeSections(E.doc, E.doc.sectionsOf(r.road).filter((q) => !q.grade && !ops.offGrade(q)).map((q) => q.id), (x, z) => E.hf.sample(x, z) + E.hf.base);
       return { ...r, ...c };
     });
     if (!res) return;

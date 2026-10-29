@@ -1,7 +1,7 @@
 // Top bar (file menu, tools, view switches), status bar, command palette, toasts, read-only banner.
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
-  cursor, dialog, docVersion, dpRegionsOn, lineLayer, mode, paletteOpen, readOnly, selection, stale3d, status, toasts, tool, xray, zoomScale, accuracyView, select,
+  cursor, dialog, docVersion, dpRegionsOn, terrainView, lineLayer, mode, paletteOpen, readOnly, selection, stale3d, status, toasts, tool, xray, zoomScale, accuracyView, select,
 } from '../editor/state';
 import { COMMANDS, type Command } from '../editor/commands';
 import { ui } from './ctx';
@@ -19,6 +19,7 @@ const TOOLS: { t: Tool; icon: (p: { size?: number }) => preact.JSX.Element; labe
   { t: 'hand', icon: Icon.hand, label: 'Pan', key: 'H' },
   { t: 'bulldoze', icon: Icon.bulldoze, label: 'Bulldozer', key: 'B' },
   { t: 'wand', icon: Icon.wand, label: 'Fill: trace a DP plot as a survey region', key: 'W' },
+  { t: 'terrain', icon: Icon.terrain, label: 'Terrain: raise, level, soften, slope, pads, ponds', key: 'T' },
 ];
 
 const cmd = (id: string) => COMMANDS.find((c) => c.id === id)!;
@@ -46,7 +47,7 @@ export function TopBar() {
       </div>
       <div class="tb-tools">
         {TOOLS.map((x) => (
-          <button key={x.t} class={`tool ${tool.value === x.t ? 'on' : ''}`} title={`${x.label} (${x.key})`} disabled={(ro && ['pen', 'knife', 'line', 'direct', 'bulldoze', 'wand'].includes(x.t))} onClick={() => ui.E.setTool(x.t)}>
+          <button key={x.t} class={`tool ${tool.value === x.t ? 'on' : ''}`} title={`${x.label} (${x.key})`} disabled={(ro && ['pen', 'knife', 'line', 'direct', 'bulldoze', 'wand', 'terrain'].includes(x.t))} onClick={() => ui.E.setTool(x.t)}>
             <x.icon />
           </button>
         ))}
@@ -60,6 +61,7 @@ export function TopBar() {
       <div class="tb-right">
         <button class={`chip ${accuracyView.value ? 'on' : ''}`} title="Accuracy view: colour roads by where their width comes from (Shift+A)" onClick={() => cmd('view.accuracy').run(ui.E)}>Accuracy</button>
         <button class={`chip ${ui.doc.get<'layer'>('dp')?.visible ? 'on' : ''}`} title="Development Plan sheets (D)" onClick={() => ui.app.toggleLayer('dp')}>DP</button>
+        <button class={`chip ${terrainView.value ? 'on' : ''}`} title="Terrain view: heights, contours, cut & fill (Shift+T)" onClick={() => cmd('view.terrain').run(ui.E)}>Terrain</button>
         <button class={`chip ${dpRegionsOn.value ? 'on' : ''}`} title="DP regions: land use and reserved sites traced from the DP sheets — hover a region to read it (Shift+D)" onClick={() => cmd('view.dpregions').run(ui.E)}>DP regions</button>
         <div class="seg">
           <button class={mode.value === '2d' ? 'on' : ''} onClick={() => ui.E.setMode('2d')} title="2D plan (Tab)"><Icon.map /> 2D</button>

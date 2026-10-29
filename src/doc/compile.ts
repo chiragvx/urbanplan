@@ -6,6 +6,7 @@ import type { Heightfield } from '../geo/heightfield';
 import type { CityDoc } from './doc';
 import type { Id, JunctionObj, SectionObj } from './types';
 import { isMajorClass } from './xsection';
+import { samplePath } from './ops';
 
 export interface SectionGeo {
   id: Id;
@@ -25,8 +26,35 @@ export class Compiler {
   private geoCache = new Map<Id, SectionGeo | null>();
   readonly types = new Map<string, RoadType>();
 
-  constructor(readonly doc: CityDoc, hf: Heightfield) {
+  constructor(readonly doc: CityDoc, readonly hf: Heightfield) {
     this.mesher = new RoadMesher(hf);
+  }
+
+  /**
+   * A graded section's height profile split per cubic piece: [pieceLength, s0, z0, s1, z1, …] with s along the piece
+   * and z in scene metres. Stations are evenly spaced (≤ step apart); the ends meet the junctions on the ground.
+   */
+  private gradePieces(s: SectionObj, P: ReturnType<Compiler['anchors']>): number[][] | null {
+    const G = s.grade;
+    if (!G || G.z.length < 2) return null;
+    const S = samplePath(P, 24);
+    const L = S.len;
+    if (L < 1) return null;
+    const m = G.z.length;
+    const st = G.z.map((_, i) => (L * i) / (m - 1));
+    const z = G.z.map((v) => v - this.hf.base);
+    const a = P[0], b = P[P.length - 1];
+    z[0] = this.hf.sample(a.x, a.z) + a.lift; z[m - 1] = this.hf.sample(b.x, b.z) + b.lift;
+    const at = (u: number) => { let i = 1; while (i < m - 1 && st[i] < u) i++; const f = Math.max(0, Math.min(1, (u - st[i - 1]) / (st[i] - st[i - 1] || 1))); return z[i - 1] + (z[i] - z[i - 1]) * f; };
+    const out: number[][] = [];
+    for (let k = 0; k < P.length - 1; k++) {
+      const s0 = S.s[k * 24], s1 = S.s[Math.min(S.s.length - 1, (k + 1) * 24)];
+      const piece = [s1 - s0, 0, at(s0)];
+      for (let i = 0; i < m; i++) if (st[i] > s0 + 0.01 && st[i] < s1 - 0.01) piece.push(st[i] - s0, z[i]);
+      piece.push(s1 - s0, at(s1));
+      out.push(piece);
+    }
+    return out;
   }
 
   /** Section id for a raster / pick code. */
@@ -71,6 +99,8 @@ export class Compiler {
     const P = this.anchors(s, A, B);
     const t = this.typeOf(s);
     const elevated = s.elevated || P.some((p) => p.lift > 0.25);
+    // graded (fixed profile, ground cut / filled to it) unless it's a bridge or tunnel
+    const grade = !elevated && !P.some((p) => p.lift < -0.25) ? this.gradePieces(s, P) : null;
     const code = this.code(s.id);
     const segs: MSeg[] = [], shapes: MNode[] = [];
     for (let k = 1; k < P.length - 1; k++) shapes.push({ id: `${s.id}^${k}`, x: P[k].x, z: P[k].z, lift: P[k].lift });
@@ -81,6 +111,7 @@ export class Compiler {
         id: `${s.id}~${k}`, a: k === 0 ? s.a : `${s.id}^${k}`, b: k === P.length - 2 ? s.b : `${s.id}^${k + 1}`,
         p: [a.x, a.z, a.x + a.ox, a.z + a.oz, b.x + b.ix, b.z + b.iz, b.x, b.z],
         t, cls: s.cls, bridge: s.bridge, elevated, viaduct: s.viaduct, code, owner: s.id, sunk: Math.min(a.lift, b.lift) < -0.25,
+        ...(grade ? { grade: grade[k] } : {}),
       });
     }
     return { segs, shapes };

@@ -4,10 +4,11 @@ import { isTyping } from './editor';
 import * as ops from '../doc/ops';
 import * as xs from '../doc/xsection';
 import {
-  accuracyView, anchorSel, dialog, dpRegionsOn, leftTab, mode, paletteOpen, penLift, profileOpen, readOnly, saveSettings, select, selection, settings, status, toast, tool, xray,
+  accuracyView, anchorSel, dialog, dpRegionsOn, terrainView, leftTab, mode, paletteOpen, penLift, profileOpen, readOnly, saveSettings, select, selection, settings, status, toast, tool, xray,
   type RoadMode,
 } from './state';
 import { MODE_LABEL } from './roadtool';
+import { TERRAIN_OPS } from './terraintool';
 import { SURVEY_LABEL, type Id, type SectionObj } from '../doc/types';
 import type { Part } from '../net/model';
 
@@ -126,6 +127,16 @@ function setRoadMode(E: Editor, m: RoadMode) {
 }
 
 const ROAD_MODES: RoadMode[] = ['straight', 'curve', 'complex', 'continuous', 'freeform', 'replace'];
+const BRUSH_SIZES = [10, 20, 40, 80, 160, 320];
+/** [ ] in the terrain tool: brush size (Shift: strength) */
+function brushBy(E: Editor, dir: 1 | -1, strength: boolean) {
+  const st = settings.value;
+  if (strength) saveSettings({ brushStrength: Math.max(0.05, Math.min(1, Math.round((st.brushStrength + dir * 0.1) * 100) / 100)) });
+  else { const i = BRUSH_SIZES.findIndex((s) => s >= st.brushRadius); saveSettings({ brushRadius: BRUSH_SIZES[Math.max(0, Math.min(BRUSH_SIZES.length - 1, (i < 0 ? BRUSH_SIZES.length - 1 : i) + dir))] }); }
+  status.value = `Brush ${settings.value.brushRadius} m · strength ${Math.round(settings.value.brushStrength * 100)} %`;
+  E.overlayDirty = true;
+}
+const terrainTool = () => tool.value === 'terrain';
 
 export const COMMANDS: Command[] = [
   // ---- File ----
@@ -153,7 +164,7 @@ export const COMMANDS: Command[] = [
           if (s.kind === 'road') ops.deleteRoad(E.doc, s.id);
           else if (s.kind === 'section') ops.deleteSections(E.doc, [s.id]);
           else if (s.kind === 'junction') ops.deleteJunction(E.doc, s.id);
-          else if (s.kind === 'line' || s.kind === 'building') E.doc.remove(s.id);
+          else if (s.kind === 'line' || s.kind === 'building' || s.kind === 'earthwork' || (s.kind === 'region' && E.doc.get(s.id))) E.doc.remove(s.id);
         }
       });
       select([]);
@@ -172,6 +183,7 @@ export const COMMANDS: Command[] = [
     run: (E) => {
       if (E.pen.pts.length || E.linePts.length) { if (tool.value === 'pen' && E.pen.pts.length >= 2) E.finishPen(); else E.cancelPen(); return; }
       if (E.road.active) { E.road.cancel(); status.value = E.road.hint(); return; }
+      if (tool.value === 'terrain' && E.terra.pts.length) { E.terra.cancel(); status.value = E.terra.hint(); E.overlayDirty = true; return; }
       if (tool.value !== 'select') { E.setTool('select'); return; }
       const s = sel1();
       if (s?.kind === 'section') { const o = E.doc.get<'section'>(s.id); if (o) { select([{ kind: 'road', id: o.road }]); return; } }
@@ -182,6 +194,7 @@ export const COMMANDS: Command[] = [
     id: 'edit.enter', label: 'Finish drawing / step into road', group: 'Edit', keys: 'Enter',
     run: (E) => {
       if (tool.value === 'pen') { if (E.road.active) { E.road.cancel(); status.value = E.road.hint(); } else E.finishPen(); return; }
+      if (tool.value === 'terrain') { E.terra.finish(); return; }
       if (tool.value === 'line') { E.finishLine(); return; }
       const s = sel1();
       if (s?.kind === 'road') select(E.doc.sectionsOf(s.id).map((x) => ({ kind: 'section' as const, id: x.id })));
@@ -193,10 +206,10 @@ export const COMMANDS: Command[] = [
   ]),
 
   // ---- Road ----
-  { id: 'road.widen', label: 'Widen by 0.5 m', group: 'Road', keys: ']', enabled: hasRoads, run: (E) => editParts(E, 'Widen', (p) => xs.setTotalWidth(p, xs.totalWidth(p) + 0.5)) },
-  { id: 'road.narrow', label: 'Narrow by 0.5 m', group: 'Road', keys: '[', enabled: hasRoads, run: (E) => editParts(E, 'Narrow', (p) => xs.setTotalWidth(p, Math.max(3, xs.totalWidth(p) - 0.5))) },
-  { id: 'road.widen.big', label: 'Widen by 3 m', group: 'Road', keys: 'Shift+]', enabled: hasRoads, run: (E) => editParts(E, 'Widen', (p) => xs.setTotalWidth(p, xs.totalWidth(p) + 3)) },
-  { id: 'road.narrow.big', label: 'Narrow by 3 m', group: 'Road', keys: 'Shift+[', enabled: hasRoads, run: (E) => editParts(E, 'Narrow', (p) => xs.setTotalWidth(p, Math.max(3, xs.totalWidth(p) - 3))) },
+  { id: 'road.widen', label: 'Widen by 0.5 m', group: 'Road', keys: ']', enabled: (E) => terrainTool() || hasRoads(E), run: (E) => { if (terrainTool()) { brushBy(E, 1, false); return; } editParts(E, 'Widen', (p) => xs.setTotalWidth(p, xs.totalWidth(p) + 0.5)); } },
+  { id: 'road.narrow', label: 'Narrow by 0.5 m', group: 'Road', keys: '[', enabled: (E) => terrainTool() || hasRoads(E), run: (E) => { if (terrainTool()) { brushBy(E, -1, false); return; } editParts(E, 'Narrow', (p) => xs.setTotalWidth(p, Math.max(3, xs.totalWidth(p) - 0.5))); } },
+  { id: 'road.widen.big', label: 'Widen by 3 m', group: 'Road', keys: 'Shift+]', enabled: (E) => terrainTool() || hasRoads(E), run: (E) => { if (terrainTool()) { brushBy(E, 1, true); return; } editParts(E, 'Widen', (p) => xs.setTotalWidth(p, xs.totalWidth(p) + 3)); } },
+  { id: 'road.narrow.big', label: 'Narrow by 3 m', group: 'Road', keys: 'Shift+[', enabled: (E) => terrainTool() || hasRoads(E), run: (E) => { if (terrainTool()) { brushBy(E, -1, true); return; } editParts(E, 'Narrow', (p) => xs.setTotalWidth(p, Math.max(3, xs.totalWidth(p) - 3))); } },
   { id: 'road.lane.add', label: 'Add a lane each way', group: 'Road', keys: 'Alt+]', enabled: hasRoads, run: (E) => editParts(E, 'Add lane', (p) => { const n = xs.laneCount(p); return xs.isOneway(p) ? xs.setLanes(p, n.f + 1, 0) : xs.setLanes(p, n.f + 1, n.b + 1); }) },
   { id: 'road.lane.remove', label: 'Remove a lane each way', group: 'Road', keys: 'Alt+[', enabled: hasRoads, run: (E) => editParts(E, 'Remove lane', (p) => { const n = xs.laneCount(p); return xs.isOneway(p) ? xs.setLanes(p, Math.max(1, n.f - 1), 0) : xs.setLanes(p, Math.max(1, n.f - 1), Math.max(n.f > 1 ? 1 : 0, n.b - 1)); }) },
   { id: 'road.oneway', label: 'Toggle one-way', group: 'Road', enabled: hasRoads, run: (E) => editParts(E, 'One-way', (p) => xs.makeOneway(p, !xs.isOneway(p))) },
@@ -267,10 +280,21 @@ export const COMMANDS: Command[] = [
   { id: 'tool.measure', label: 'Measure tool', group: 'Tools', keys: 'M', run: (E) => E.setTool('measure') },
   { id: 'tool.hand', label: 'Hand (pan) tool', group: 'Tools', keys: 'H', run: (E) => E.setTool('hand') },
   { id: 'tool.bulldoze', label: 'Bulldozer', group: 'Tools', keys: 'B', enabled: editable, run: (E) => E.setTool('bulldoze') },
+  {
+    id: 'tool.terrain', label: 'Terrain tool (raise, level, soften, slope, restore, pad, embankment, pond)', group: 'Tools', keys: 'T', enabled: editable,
+    run: (E) => { E.setTool('terrain'); E.overlayDirty = true; },
+  },
   { id: 'tool.wand', label: 'Fill tool: trace a plot on the DP sheet as a survey region', group: 'Tools', keys: 'W', enabled: editable, run: (E) => E.setTool('wand') },
+  ...[7, 8].map((k) => ({
+    id: `terrain.op.${k}`, label: `Terrain tool: ${TERRAIN_OPS[k - 1].label}`, group: 'Tools' as const, keys: String(k), enabled: terrainTool,
+    run: (E: Editor) => { const t = TERRAIN_OPS[k - 1]; E.terra.cancel(); saveSettings({ terrainOp: t.op }); status.value = t.hint; E.overlayDirty = true; },
+  })),
   ...ROAD_MODES.map((m, i) => ({
     id: `road.mode.${m}`, label: `Road tool: ${MODE_LABEL[m]}`, group: 'Tools' as const, keys: String(i + 1),
-    enabled: editable, run: (E: Editor) => setRoadMode(E, m),
+    enabled: editable, run: (E: Editor) => {
+      if (tool.value === 'terrain') { const t = TERRAIN_OPS[i]; if (t) { E.terra.cancel(); saveSettings({ terrainOp: t.op }); status.value = t.hint; E.overlayDirty = true; } return; }
+      setRoadMode(E, m);
+    },
   })),
   {
     id: 'snap.toggle', label: 'Snapping on / off (hold Ctrl to skip it once)', group: 'Tools', keys: 'S',
@@ -281,6 +305,18 @@ export const COMMANDS: Command[] = [
   { id: 'view.toggle3d', label: 'Switch 2D / 3D', group: 'View', keys: 'Tab', run: (E) => E.setMode(mode.value === '2d' ? '3d' : '2d') },
   { id: 'view.xray', label: 'X-ray (see underground)', group: 'View', keys: 'X', run: (E) => { E.setXray(!xray.value); if (xray.value && mode.value === '2d') E.setMode('3d'); } },
   { id: 'view.dp', label: 'Development Plan sheets', group: 'View', keys: 'D', run: (E) => E.app.toggleLayer('dp') },
+  {
+    id: 'view.terrain', label: 'Terrain view (heights, contours, cut & fill; height exaggeration in 3D)', group: 'View', keys: 'Shift+T',
+    run: (E) => { terrainView.value = !terrainView.value; E.applyExaggeration(); E.overlayDirty = true; },
+  },
+  {
+    id: 'road.grade', label: 'Grade roads (fixed profile, 96 m stations; the ground is cut / filled to it)', group: 'Road', keys: 'G', enabled: (E) => hasRoads(E) && editable(),
+    run: (E) => { const ids = E.selectedSections().map((s) => s.id); E.edit('Grade', () => ops.gradeSections(E.doc, ids, (x, z) => E.hf.sample(x, z) + E.hf.base)); toast(`${ids.length} section${ids.length > 1 ? 's' : ''} graded — stations every ≤ ${ops.GRADE_STEP} m`, 'ok'); },
+  },
+  {
+    id: 'road.ungrade', label: 'Roads follow the terrain again', group: 'Road', keys: 'Shift+G', enabled: (E) => E.selectedSections().some((s) => s.grade) && editable(),
+    run: (E) => { const ids = E.selectedSections().map((s) => s.id); E.edit('Follow terrain', () => ops.ungradeSections(E.doc, ids)); toast('Following the terrain', 'ok'); },
+  },
   {
     id: 'view.dpregions', label: 'DP regions (land use and reserved sites from the DP sheets)', group: 'View', keys: 'Shift+D',
     run: (E) => { dpRegionsOn.value = !dpRegionsOn.value; if (dpRegionsOn.value) { E.dpr.load(); if (E.dpr.missing) toast('No DP regions for this map yet (tools/dp/regions.py)', 'warn'); } E.dpHover = null; E.overlayDirty = true; },

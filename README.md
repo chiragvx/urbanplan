@@ -37,6 +37,17 @@ npm test        # headless document + cross-section tests
   than 6.5 m is an open cut (the ground is dug out, retaining walls); deeper is a covered tunnel box under untouched
   ground — buildings and trees above stay — with portals where the cut goes under. Roads meet underground at the same
   level (underground junctions); 2D shows tunnels dashed green, <kbd>X</kbd> x-ray shows them in 3D. Issues checks headroom.
+- **Terrain** (<kbd>T</kbd>), Cities: Skylines' landscaping: brushes *raise / lower* (right-drag or Alt lowers), *level*
+  (right-click picks the height; **Balanced** levels to the average so cut = fill), *soften*, *restore*; shapes *slope*
+  (drag top → bottom), *pad* (flat platform, 1:2 sides), *embankment / cutting* along a line, *pond* (with water). Keys
+  <kbd>1</kbd>–<kbd>8</kbd>, <kbd>[</kbd> <kbd>]</kbd> brush size, <kbd>Shift</kbd>+<kbd>[</kbd> <kbd>]</kbd> strength. Each stroke or shape is an *earthwork* object
+  (saved, undoable, editable in the inspector with its own cut / fill); they apply in order on the original terrain
+  (Copernicus GLO-30 on an 8 m grid) to make the designed ground. **Terrain view** (<kbd>Shift T</kbd>): heights, hill shade and
+  contours, or cut & fill; in 3D, height ×1–5 (buildings and trees hidden). Checks: steep roads, water pooling.
+- **Roads and terrain**: roads, flyovers and tunnels follow the (terraformed) ground by default. **Graded** roads
+  (<kbd>G</kbd> on a selection, Shift+<kbd>G</kbd> back; or the **Graded** chip in the road tool for new roads) get a fixed
+  profile with stations every ≤ 96 m (12 cells of 8 m, Cities: Skylines' segment length), eased to ≤ 8 %; the ground is
+  cut and filled to them at 1:2. Drag the stations in the height profile (<kbd>Shift P</kbd>); **Regrade** re-takes them.
 - **Snapping** (<kbd>S</kbd> toggles, hold <kbd>Ctrl</kbd> to skip once, <kbd>Shift</kbd> = 15° steps): junctions and roads at your
   level, 90° / 45° to the road you start from or the last stretch, guide lines from nearby road ends (and where two
   meet), lengths rounded to 1 / 5 / 8 / 10 m.

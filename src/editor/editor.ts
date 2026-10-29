@@ -13,12 +13,15 @@ import { DP_WIDTHS, setSideWidth, setTotalWidth, totalWidth } from '../doc/xsect
 import { HitIndex, type Pick } from './hit';
 import { PlanView } from './view2d';
 import {
-  anchorSel, cursor, docVersion, dpRegionsOn, hover, lineLayer, mode, penClass, readOnly, select, selection, settings, stale3d, status, toast, tool, xray, zoomScale,
+  anchorSel, cursor, docVersion, dpRegionsOn, terrainView, hover, lineLayer, mode, penClass, readOnly, select, selection, settings, stale3d, status, toast, tool, xray, zoomScale,
   type Sel, type Tool,
 } from './state';
 import { RoadTool, type SnapResult } from './roadtool';
 import { DPRegions, type DPRegion } from './dpregions';
 import { traceAt } from './wand';
+import { TerrainCompiler, type Region } from '../doc/terrain';
+import { TerrainTool } from './terraintool';
+import { TerrainView } from './terrainview';
 import { newId } from '../doc/ids';
 import { drawOverlay, type Handle } from './overlay';
 import { DEFAULT_DEPTH, DEFAULT_SIZE } from '../doc/base';
@@ -26,6 +29,7 @@ import { DEFAULT_DEPTH, DEFAULT_SIZE } from '../doc/base';
 type Drag =
   | { kind: 'pan'; last: [number, number]; start: [number, number]; right: boolean }
   | { kind: 'bulldoze'; n: number }
+  | { kind: 'terrain'; n: number }
   | { kind: 'marquee'; a: [number, number]; b: [number, number]; add: boolean; deep: boolean }
   | { kind: 'junction'; id: Id; start: [number, number]; orig: [number, number]; moved: boolean; n: number }
   | { kind: 'bend'; id: Id; base: Anchor[]; grab: [number, number]; start: [number, number]; moved: boolean; n: number }
@@ -57,6 +61,12 @@ export class Editor {
   readonly view: PlanView;
   readonly road: RoadTool;
   readonly dpr = new DPRegions();
+  /** terraforming: earthworks → designed ground */
+  readonly terrain: TerrainCompiler;
+  readonly terra: TerrainTool;
+  readonly tview: TerrainView;
+  /** terrain changed under a brush stroke: roads re-drape there when it ends */
+  private pendingTerrain: Region | null = null;
   /** DP region under the cursor (when the overlay is on) */
   dpHover: DPRegion | null = null;
   readonly ctx: CanvasRenderingContext2D;
@@ -82,6 +92,9 @@ export class Editor {
     this.hit = new HitIndex(doc, C);
     this.hit.rebuild();
     this.road = new RoadTool(this);
+    this.terrain = new TerrainCompiler(doc, hf);
+    this.terra = new TerrainTool(this);
+    this.tview = new TerrainView(this);
     this.dpr.onLoad = () => { this.overlayDirty = true; };
     this.view = new PlanView(engine.planCamera, world.tile.half);
     this.ctx = overlay.getContext('2d')!;
@@ -106,11 +119,20 @@ export class Editor {
   // ---------------- document changes ----------------
 
   private onChange(c: Change) {
+    // terraforming first, so roads changed in the same step sit on the new ground
+    const ew = [...c.ids].filter((id) => this.doc.get(id)?.kind === 'earthwork' || this.terrain.has(id));
+    const tr = ew.length ? this.terrain.update(ew) : null;
     const items = this.C.update(c.ids);
     this.world.onChange(c, items);
     this.hit.update(c.ids);
-    // drop selection of things that no longer exist
-    const sel = selection.value.filter((s) => this.doc.get(s.id));
+    if (tr) this.terrainChanged(tr);
+    else if (terrainView.value) {
+      // the terrain view shows road cut / fill: keep it current in 2D
+      const r = this.regionOf(c.ids);
+      if (r) this.world.syncTerrain(r);
+    }
+    // drop selection of things that no longer exist (traced DP regions aren't map objects until surveyed)
+    const sel = selection.value.filter((s) => this.doc.get(s.id) || (s.kind === 'region' && this.dpr.get(s.id)));
     if (sel.length !== selection.value.length) selection.value = sel;
     if (anchorSel.value && !this.doc.get(anchorSel.value.owner)) anchorSel.value = null;
     docVersion.value++;
@@ -119,6 +141,48 @@ export class Editor {
     if (mode.value === '3d' && !this.drag) this.syncSoon();
     this.onAfterChange(c);
   }
+
+  /** Extent of changed sections / junctions (padded), or null. */
+  private regionOf(ids: Iterable<Id>): Region | null {
+    let r: Region | null = null;
+    for (const id of ids) {
+      const o = this.doc.get(id);
+      const g = o?.kind === 'section' ? this.C.geo(id) : null;
+      const b: Region | null = g ? [g.x0, g.z0, g.x1, g.z1] : o?.kind === 'junction' ? [o.x, o.z, o.x, o.z] : null;
+      if (b) r = r ? [Math.min(r[0], b[0]), Math.min(r[1], b[1]), Math.max(r[2], b[2]), Math.max(r[3], b[3])] : b;
+    }
+    return r && [r[0] - 40, r[1] - 40, r[2] + 40, r[3] + 40];
+  }
+
+  /** The designed ground changed in a region: terrain now, roads there when no brush stroke is under way. */
+  private terrainChanged(r: Region) {
+    this.world.syncTerrain(r);
+    this.world.buildPonds();
+    this.terrainVersion++;
+    if (this.drag?.kind === 'terrain') { const p = this.pendingTerrain; this.pendingTerrain = p ? [Math.min(p[0], r[0]), Math.min(p[1], r[1]), Math.max(p[2], r[2]), Math.max(p[3], r[3])] : r; return; }
+    this.redrape(r);
+  }
+
+  /** Roads in a region follow the new ground (graded ones keep their profile; the ground is re-cut to them). */
+  redrape(r: Region) {
+    const ids = new Set<Id>();
+    for (const id of this.hit.query(r[0], r[1], r[2], r[3])) if (this.doc.get(id)?.kind === 'section') ids.add(id);
+    if (ids.size) {
+      const items = this.C.update(ids);
+      const c: Change = { ids, structural: false, origin: 'edit', label: 'Terrain' };
+      this.world.onChange(c, items);
+      this.hit.update(ids);
+      this.world.syncTerrain(r);
+      this.onAfterChange({ ...c, ids: new Set([...ids, ...this.doc.ids('earthwork')]) });
+    }
+    this.world.markDirty(r);
+    stale3d.value = this.world.stale;
+    if (mode.value === '3d') this.syncSoon(0);
+    this.overlayDirty = true;
+  }
+
+  /** bumps when the designed ground changes (terrain view caches) */
+  terrainVersion = 0;
 
   private syncTimer = 0;
   /** In 3D, bring terrain / buildings / trees up to date with the roads shortly after an edit. */
@@ -152,6 +216,7 @@ export class Editor {
 
   canPick = (kind: Kind, layer?: Id) => {
     if (kind === 'region') return dpRegionsOn.value;
+    if (kind === 'earthwork') return terrainView.value;
     const L = this.doc.get<'layer'>(layer ?? (kind === 'section' || kind === 'junction' ? 'roads' : kind === 'building' ? 'buildings' : ''));
     return !L || (L.visible && !L.locked);
   };
@@ -222,6 +287,14 @@ export class Editor {
   }
 
   setXray(on: boolean) { xray.value = on; this.world.setXray(on); }
+
+  /** vertical exaggeration in effect (terrain view in 3D) */
+  exag = 1;
+  applyExaggeration() {
+    this.exag = terrainView.value ? settings.value.exaggeration : 1;
+    this.world.setExaggeration(this.exag);
+    this.overlayDirty = true;
+  }
 
   zoomToSelection() {
     const b = this.selectionBox();
@@ -300,6 +373,10 @@ export class Editor {
     this.overlay.setPointerCapture(e.pointerId);
     this.mouse = s;
     const is3d = mode.value === '3d';
+    if (tool.value === 'terrain' && e.button === 2 && !this.spaceDown && (settings.value.terrainOp === 'shift' || settings.value.terrainOp === 'level')) {
+      const n = ++dragSeq;
+      if (this.terra.down(w, 2, e.altKey, n)) { if (this.terra.stroke) this.drag = { kind: 'terrain', n }; return; }
+    }
     if (e.button === 1 || e.button === 2 || this.spaceDown || tool.value === 'hand' || (is3d && e.button === 0 && e.altKey && tool.value !== 'pen')) {
       this.drag = { kind: 'pan', last: s, start: s, right: e.button === 2 };
       // 3D: right / Alt drag orbits, middle / Space / hand pans
@@ -315,6 +392,7 @@ export class Editor {
     const t = tool.value;
     if (t === 'pen') { if (settings.value.roadMode === 'freeform') return this.penDown(w, e); this.road.click(w, e.ctrlKey || e.metaKey, e.shiftKey, e.altKey); return; }
     if (t === 'wand') { void this.fillAt(w); return; }
+    if (t === 'terrain') { const n = ++dragSeq; if (this.terra.down(w, 0, e.altKey, n) && this.terra.stroke) this.drag = { kind: 'terrain', n }; this.overlayDirty = true; return; }
     if (t === 'bulldoze') { const n = ++dragSeq; this.drag = { kind: 'bulldoze', n }; this.bulldozeAt(w, e.shiftKey, n); return; }
     if (t === 'line') return this.lineDown(w);
     if (t === 'measure') { this.drag = { kind: 'measure', a: w, b: w }; this.measure = { a: w, b: w }; return; }
@@ -371,6 +449,7 @@ export class Editor {
       case 'pan': if (mode.value === '2d') this.view.pan(s[0] - d.last[0], s[1] - d.last[1]); d.last = s; this.world.needsRender = true; break;
       case 'marquee': d.b = w; break;
       case 'bulldoze': this.bulldozeAt(w, e.shiftKey, d.n); break;
+      case 'terrain': this.terra.move(w); break;
       case 'measure': d.b = this.snapPoint(w, e.shiftKey ? d.a : null).p; this.measure = { a: d.a, b: d.b }; break;
       case 'junction': {
         if (!d.moved && !moved(d.start)) break;
@@ -415,6 +494,13 @@ export class Editor {
     if (!d) return;
     if (mode.value === '3d' && d.kind !== 'pan') this.syncSoon(0);
     const w = this.toWorld(...this.local(e));
+    if (d.kind === 'terrain') {
+      this.terra.up(w);
+      const p = this.pendingTerrain;
+      this.pendingTerrain = null;
+      if (p) this.redrape(p);
+      return;
+    }
     // right-click without dragging: step back, as in Cities: Skylines
     if (d.kind === 'pan' && d.right && Math.hypot(d.last[0] - d.start[0], d.last[1] - d.start[1]) < 4) { this.stepBack(); return; }
     if (d.kind === 'marquee') {
@@ -455,6 +541,7 @@ export class Editor {
 
   private doubleClick(w: [number, number], e: PointerEvent) {
     const t = tool.value;
+    if (t === 'terrain') { this.terra.finish(); return; }
     if (t === 'pen') { this.finishPen(); return; }
     if (t === 'line') { this.finishLine(); return; }
     const p = this.pickAt(w[0], w[1]);
@@ -486,6 +573,7 @@ export class Editor {
       else this.road.hover(w, ctrl, shift);
       return;
     }
+    if (tool.value === 'terrain') { this.terra.cursor = w; this.overlayDirty = true; return; }
     if (tool.value === 'bulldoze') {
       const p = this.pickAt(w[0], w[1]);
       const next: Sel | null = !p ? null : p.kind === 'section' ? (shift ? { kind: 'road', id: this.doc.get<'section'>(p.id)!.road } : { kind: 'section', id: p.id }) : { kind: p.kind, id: p.id };
@@ -504,7 +592,7 @@ export class Editor {
   }
 
   private baseCursor() {
-    return { select: 'default', direct: 'default', pen: 'crosshair', knife: 'crosshair', line: 'crosshair', measure: 'crosshair', hand: 'grab', bulldoze: 'crosshair', wand: 'cell' }[tool.value];
+    return { select: 'default', direct: 'default', pen: 'crosshair', knife: 'crosshair', line: 'crosshair', measure: 'crosshair', hand: 'grab', bulldoze: 'crosshair', wand: 'cell', terrain: 'crosshair' }[tool.value];
   }
   updateCursor() { this.overlay.style.cursor = this.spaceDown ? 'grab' : this.baseCursor(); }
 
@@ -824,7 +912,7 @@ export class Editor {
   /** World → screen for the active view. */
   project(x: number, z: number, lift = 0): [number, number] | null {
     if (mode.value === '2d') return this.view.toScreen(x, z);
-    const v = new THREE.Vector3(x, this.hf.sampleSurface(x, z) + 0.4 + lift, z).project(this.engine.camera);
+    const v = new THREE.Vector3(x, (this.hf.sampleSurface(x, z) + 0.4 + lift) * this.exag, z).project(this.engine.camera);
     if (v.z > 1) return null;
     return [(v.x + 1) / 2 * this.view.w, (1 - v.y) / 2 * this.view.h];
   }
@@ -841,6 +929,8 @@ export class Editor {
     if (t !== 'pen' && t !== 'line') this.cancelPen();
     hover.value = null;
     if (t === 'wand') { this.dpr.load(); if (!this.doc.get<'layer'>('dp')?.visible) this.app.toggleLayer('dp'); }
+    if (t !== 'terrain') this.terra.cancel();
+    if (t === 'terrain' && !terrainView.value) { terrainView.value = true; this.applyExaggeration(); }
     if (t !== 'measure') this.measure = null;
     tool.value = t;
     this.updateCursor();
@@ -851,6 +941,7 @@ export class Editor {
       pen: this.road.hint(),
       bulldoze: 'Click a road section to remove it · Shift = the whole road · drag to sweep',
       wand: 'Click a coloured plot on the DP sheet to trace it as a survey region',
+      terrain: this.terra.hint(),
       knife: 'Click a road to split it · click a junction between two sections to join them',
       line: 'Click points to draw a line in the chosen layer · Enter to finish',
       measure: 'Drag to measure · hover a road to read its width',

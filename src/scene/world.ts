@@ -18,6 +18,7 @@ import type { CityDoc, Change } from '../doc/doc';
 import type { BuildingObj, Id, LineObj } from '../doc/types';
 import { LINE_COLOR } from '../doc/base';
 import { ChunkSet, type ChunkItem } from './chunks';
+import earcut from 'earcut';
 
 type Region = [number, number, number, number];
 
@@ -53,6 +54,8 @@ export class World {
   metro = new THREE.Group();
   trees = new THREE.Group();
   utilities = new THREE.Group();
+  /** pond water surfaces (terraforming) */
+  ponds = new THREE.Group();
   private utilityLayers = new Map<Id, THREE.Mesh>();
   private treeChunks: { list: TreeInstance[]; hi: THREE.InstancedMesh; lo: THREE.InstancedMesh; cx: number; cz: number; x0: number; z0: number }[] = [];
   readonly raster: RoadRaster;
@@ -77,7 +80,7 @@ export class World {
     this.targets = new Float32Array(hf.n * hf.n).fill(NaN);
     this.planM = planMaterials(landuse);
     scene.add(this.root);
-    this.root.add(this.rail, this.metro, this.trees, this.utilities);
+    this.root.add(this.rail, this.metro, this.trees, this.utilities, this.ponds);
   }
 
   /** Initial build of everything (after compiler.full()). */
@@ -276,6 +279,69 @@ export class World {
     if (region[0] < Infinity) this.dirty.push([region[0] - 20, region[1] - 20, region[2] + 20, region[3] + 20]);
     this.needsRender = true;
   }
+  /**
+   * Terrain only, for a region: road cut / fill on the designed ground, then the terrain patches (fast enough to run
+   * while a terraforming brush is dragged). Returns the grid range it touched.
+   */
+  /** bumps whenever the rendered terrain surface changes */
+  terrainRev = 0;
+
+  syncTerrain(r: Region) {
+    this.terrainRev++;
+    const { hf, C } = this;
+    const g = hf.gridRange(r[0], r[1], r[2], r[3]);
+    const pad = 3;
+    // road targets are read up to `radius` cells around a vertex: stamp a little wider than we conform
+    const s0 = Math.max(0, g.i0 - pad * 2), t0 = Math.max(0, g.j0 - pad * 2), s1 = Math.min(hf.n - 1, g.i1 + pad * 2), t1 = Math.min(hf.n - 1, g.j1 + pad * 2);
+    for (let j = t0; j <= t1; j++) this.targets.fill(NaN, j * hf.n + s0, j * hf.n + s1 + 1);
+    C.mesher.stampTargets(this.targets, [-hf.half + s0 * hf.cell - 0.01, -hf.half + t0 * hf.cell - 0.01, -hf.half + s1 * hf.cell + 0.01, -hf.half + t1 * hf.cell + 0.01]);
+    hf.conformRegion(this.targets, Math.max(0, g.i0 - pad), Math.max(0, g.j0 - pad), Math.min(hf.n - 1, g.i1 + pad), Math.min(hf.n - 1, g.j1 + pad));
+    for (const t of this.terrain) {
+      if (t.i1 < g.i0 - pad || t.i0 > g.i1 + pad || t.j1 < g.j0 - pad || t.j0 > g.j1 + pad) continue;
+      t.hi.geometry.dispose(); t.lo.geometry.dispose();
+      t.hi.geometry = t.high = buildTerrainPatch(hf, t.i0, t.j0, t.i1, t.j1, 1);
+      t.lo.geometry = t.low = buildTerrainPatch(hf, t.i0, t.j0, t.i1, t.j1, 4);
+    }
+    this.needsRender = true;
+    return g;
+  }
+
+  /** Queue a region for the full sync (buildings, trees, road footprint) the next time 3D needs it. */
+  markDirty(r: Region) { this.dirty.push(r); }
+
+  /** Pond water surfaces from the pond earthworks. */
+  buildPonds() {
+    for (const c of [...this.ponds.children]) { this.ponds.remove(c); (c as THREE.Mesh).geometry.dispose(); }
+    for (const o of this.doc.all('earthwork')) {
+      if (o.op !== 'pond' || o.pts.length < 6 || o.height === undefined) continue;
+      const tris = earcut(o.pts);
+      const y = o.height - this.hf.base;
+      const pos = new Float32Array((o.pts.length / 2) * 3);
+      for (let i = 0; i < o.pts.length / 2; i++) { pos[i * 3] = o.pts[i * 2]; pos[i * 3 + 1] = y; pos[i * 3 + 2] = o.pts[i * 2 + 1]; }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(pos.length).map((_, k) => (k % 3 === 1 ? 1 : 0)), 3));
+      geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.length).fill(1), 3));
+      // earcut winds by input order; make the triangles face up
+      const idx: number[] = [];
+      for (let k = 0; k < tris.length; k += 3) {
+        const [a, b, c] = [tris[k], tris[k + 1], tris[k + 2]];
+        const cross = (o.pts[b * 2] - o.pts[a * 2]) * (o.pts[c * 2 + 1] - o.pts[a * 2 + 1]) - (o.pts[b * 2 + 1] - o.pts[a * 2 + 1]) * (o.pts[c * 2] - o.pts[a * 2]);
+        if (cross > 0) idx.push(a, c, b); else idx.push(a, b, c);
+      }
+      geo.setIndex(idx);
+      const m = new THREE.Mesh(geo, this.plan ? this.planM.water : this.M.water);
+      m.receiveShadow = true;
+      this.ponds.add(m);
+    }
+    this.needsRender = true;
+  }
+
+  /** Vertical exaggeration of everything (terrain view in 3D: Pune's relief is gentle). */
+  setExaggeration(k: number) { this.exag = k; this.root.scale.y = k; this.root.updateMatrixWorld(true); this.applyLayers(); }
+  /** vertical exaggeration (buildings and trees are hidden while it's on: stretched they'd hide the ground) */
+  private exag = 1;
+
   get stale() { return this.dirty.length > 0 || this.railDirty || this.utilDirty.size > 0; }
 
   /** Bring terrain, buildings, trees, rail and pipes up to date with the roads. */
@@ -285,18 +351,7 @@ export class World {
     this.dirty = [];
     const { hf, C } = this;
     for (const r of regions) {
-      // terrain carving
-      const g = hf.gridRange(r[0], r[1], r[2], r[3]);
-      for (let j = g.j0; j <= g.j1; j++) this.targets.fill(NaN, j * hf.n + g.i0, j * hf.n + g.i1 + 1);
-      C.mesher.stampTargets(this.targets, [-hf.half + g.i0 * hf.cell - 0.01, -hf.half + g.j0 * hf.cell - 0.01, -hf.half + g.i1 * hf.cell + 0.01, -hf.half + g.j1 * hf.cell + 0.01]);
-      const pad = 3;
-      hf.conformRegion(this.targets, Math.max(0, g.i0 - pad), Math.max(0, g.j0 - pad), Math.min(hf.n - 1, g.i1 + pad), Math.min(hf.n - 1, g.j1 + pad));
-      for (const t of this.terrain) {
-        if (t.i1 < g.i0 - pad || t.i0 > g.i1 + pad || t.j1 < g.j0 - pad || t.j0 > g.j1 + pad) continue;
-        t.hi.geometry.dispose(); t.lo.geometry.dispose();
-        t.hi.geometry = t.high = buildTerrainPatch(hf, t.i0, t.j0, t.i1, t.j1, 1);
-        t.lo.geometry = t.low = buildTerrainPatch(hf, t.i0, t.j0, t.i1, t.j1, 4);
-      }
+      this.syncTerrain(r);
       // road footprint
       this.raster.clear(r);
       C.mesher.stampRaster(this.raster, r);
@@ -330,6 +385,7 @@ export class World {
     this.buildings.setMaterial('roofs', on ? P.roofs : M.roofs);
     for (const t of this.terrain) { t.hi.material = on ? P.terrain : M.terrain; t.lo.material = on ? P.terrain : M.terrain; }
     this.water.material = on ? P.water : M.water;
+    for (const c of this.ponds.children) (c as THREE.Mesh).material = on ? P.water : M.water;
     if (on) { this.roads.showAll(); this.paths.showAll(); for (const t of this.terrain) { t.hi.visible = true; t.lo.visible = false; } }
     this.applyLayers();
     this.needsRender = true;
@@ -352,8 +408,8 @@ export class World {
     this.water.visible = vis('water');
     this.roads.group.visible = vis('roads');
     this.paths.group.visible = vis('paths');
-    this.buildings.group.visible = vis('buildings');
-    this.trees.visible = vis('trees') && !this.plan;
+    this.buildings.group.visible = vis('buildings') && this.exag === 1;
+    this.trees.visible = vis('trees') && !this.plan && this.exag === 1;
     this.rail.visible = vis('rail') && !this.plan;
     this.metro.visible = vis('metro') && !this.plan;
     // underground pipes: 3D only (2D draws them as vector lines)

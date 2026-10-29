@@ -26,6 +26,12 @@ export interface SectionObj {
   elevated: boolean;
   /** below the ground somewhere (an underpass, trench or tunnel; heights are negative) */
   tunnel?: boolean;
+  /**
+   * Graded road (Cities: Skylines style): a fixed height profile instead of following the terrain — straight grades
+   * between stations at most `step` m apart (96 m = 12 terrain cells of 8 m), heights in metres above sea level. The
+   * ground is cut and filled to it. Undefined = the road follows the terrain.
+   */
+  grade?: { step: number; z: number[] };
   viaduct: boolean;
   /** Development Plan road reserve (m), when measured */
   reserve?: number;
@@ -152,7 +158,39 @@ export interface RegionObj {
   surveyedAt?: string;
 }
 
-export type Obj = SectionObj | JunctionObj | RoadObj | LineObj | BuildingObj | LayerObj | RegionObj;
+export type EarthworkOp = 'shift' | 'level' | 'soften' | 'restore' | 'slope' | 'pad' | 'embank' | 'pond';
+export const EARTHWORK_LABEL: Record<EarthworkOp, string> = {
+  shift: 'Raise / lower', level: 'Level', soften: 'Soften', restore: 'Restore', slope: 'Slope', pad: 'Pad', embank: 'Embankment / cutting', pond: 'Pond',
+};
+
+/**
+ * Terraforming, applied in `seq` order on top of the original terrain (the designed ground roads then sit on).
+ * Brushes (shift / level / soften / restore) store their dabs; shapes (slope / pad / embank / pond) their geometry.
+ * Heights are metres above sea level.
+ */
+export interface EarthworkObj {
+  kind: 'earthwork';
+  id: Id;
+  op: EarthworkOp;
+  seq: number;
+  /**
+   * shift: x,z,metres per dab · level / soften / restore: x,z,strength (0–1) per dab · slope: xA,zA,xB,zB ·
+   * pad / pond: polygon x,z,… · embank: x,z,height,…
+   */
+  pts: number[];
+  /** brush radius / slope or embankment half-width (m) */
+  radius: number;
+  /** level target / pad height / pond water level (m above sea level); slope: the two end heights */
+  height?: number;
+  heights?: [number, number];
+  /** pond depth below its water level (m) */
+  depth?: number;
+  /** side slopes as rise per metre (0.5 = 1:2) */
+  sideSlope?: number;
+  name?: string;
+}
+
+export type Obj = SectionObj | JunctionObj | RoadObj | LineObj | BuildingObj | LayerObj | RegionObj | EarthworkObj;
 export type Kind = Obj['kind'];
 export type ObjOf<K extends Kind> = Extract<Obj, { kind: K }>;
 

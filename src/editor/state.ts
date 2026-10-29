@@ -2,7 +2,7 @@
 import { signal, computed } from '@preact/signals';
 import type { Id, Kind } from '../doc/types';
 
-export type Tool = 'select' | 'direct' | 'pen' | 'knife' | 'line' | 'measure' | 'hand' | 'bulldoze' | 'wand';
+export type Tool = 'select' | 'direct' | 'pen' | 'knife' | 'line' | 'measure' | 'hand' | 'bulldoze' | 'wand' | 'terrain';
 /** Road tool modes, as in Cities: Skylines (freeform = the Bézier pen; replace = CS's upgrade tool). */
 export type RoadMode = 'straight' | 'curve' | 'complex' | 'continuous' | 'freeform' | 'replace';
 export type ViewMode = '2d' | '3d';
@@ -22,6 +22,9 @@ export const docVersion = signal(0);
 export const readOnly = signal(false);
 export const xray = signal(false);
 export const accuracyView = signal(false);
+/** terrain view: heights, hill shade and contours (or cut / fill) over the plan */
+export const terrainView = signal(false);
+export const terrainShow = signal<'height' | 'cutfill'>('height');
 /** DP regions overlay (land-use plots / reservations from the DP sheets) */
 export const dpRegionsOn = signal(false);
 export const leftTab = signal<'layers' | 'roads' | 'issues' | 'review' | 'survey'>('layers');
@@ -50,11 +53,17 @@ export interface Settings {
   /** what the road tool snaps to */ snapGeometry: boolean; snapAngles: boolean; snapGuides: boolean;
   /** round lengths to this many metres (0 = off) */ snapLength: number;
   /** ramp gradient for flyovers (0.05 = 5 %) */ grade: number;
+  /** new roads from the road tool are graded (Cities: Skylines style) instead of following the terrain */ roadGraded: boolean;
+  /** terrain tool */
+  terrainOp: import('../doc/types').EarthworkOp; brushRadius: number; brushStrength: number;
+  levelHeight: number | null; levelBalanced: boolean; embankOffset: number; embankWidth: number; pondDepth: number;
+  /** 3D vertical exaggeration in the terrain view */ exaggeration: number;
 }
 function loadSettings(): Settings {
   const def: Settings = {
     author: '', wheel: 'zoom', snap: true, showGrid: false, units: 'm',
-    roadMode: 'straight', elevStep: 2.5, snapGeometry: true, snapAngles: true, snapGuides: true, snapLength: 1, grade: 0.05,
+    roadMode: 'straight', elevStep: 2.5, snapGeometry: true, snapAngles: true, snapGuides: true, snapLength: 1, grade: 0.05, roadGraded: false,
+    terrainOp: 'shift', brushRadius: 40, brushStrength: 0.5, levelHeight: null, levelBalanced: true, embankOffset: 2, embankWidth: 10, pondDepth: 2, exaggeration: 1,
   };
   // key keeps the old name so settings survive the rename
   try { return { ...def, ...JSON.parse(localStorage.getItem('pune-remix:settings') ?? '{}') }; } catch { return def; }

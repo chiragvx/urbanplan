@@ -49,7 +49,8 @@ export class PlanView {
   tick(now: number): boolean {
     const a = this.anim;
     if (!a) return false;
-    const t = Math.min(1, (now - a.t0) / a.dur), e = 1 - Math.pow(1 - t, 3);
+    // the frame's timestamp can be a little older than the moment the animation started: never run it backwards
+    const t = Math.max(0, Math.min(1, (now - a.t0) / a.dur)), e = 1 - Math.pow(1 - t, 3);
     // zoom in log space so it feels even
     this.scale = Math.exp(Math.log(a.from[2]) + (Math.log(a.scale) - Math.log(a.from[2])) * e);
     this.cx = a.from[0] + (a.cx - a.from[0]) * e;

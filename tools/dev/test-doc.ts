@@ -9,6 +9,7 @@ import { Compiler } from '../../src/doc/compile';
 import { newMeta, serialize, parse, openMap } from '../../src/doc/format';
 import { setTotalWidth, totalWidth, describe } from '../../src/doc/xsection';
 import * as OPS from '../../src/doc/ops';
+import { TerrainCompiler } from '../../src/doc/terrain';
 
 const dir = 'public/tiles/kp/';
 const hdr = JSON.parse(fs.readFileSync(dir + 'tile.json', 'utf8'));
@@ -224,6 +225,49 @@ check(!!doc.get(s0.id) && C.mesher.segs.has(`${s0.id}~0`), 'undo delete restores
   while (doc.canUndo) doc.undo();
   check(doc.patch.size === 0, 'undo all → clean base');
 }
+// ---------------- terraforming and graded roads ----------------
+{
+  const O = OPS;
+  const T = new TerrainCompiler(doc, hf);
+  T.full();
+  check(T.cut === 0 && T.fill === 0, 'no earthworks: designed ground = original');
+  const raise = { kind: 'earthwork' as const, id: 'ewt1', op: 'shift' as const, seq: 1, pts: [100, 100, 2, 110, 100, 2], radius: 30 };
+  doc.transact('Raise', () => doc.create(raise)); T.update(['ewt1']);
+  const h0 = hf.sample(100, 100, hf.ground), h1 = hf.sample(100, 100);
+  check(h1 - h0 > 3 && T.fill > 0 && T.cut === 0, `raise: +${(h1 - h0).toFixed(2)} m, fill ${T.fill.toFixed(0)} m³`);
+  const v = T.volumeOf('ewt1');
+  check(Math.abs(v.fill - T.fill) < 1 && v.cut === 0, `its own volume = the total (${v.fill.toFixed(0)} m³)`);
+  const H = Math.round(hf.sample(400, 400) + hf.base + 3);
+  const pad = { kind: 'earthwork' as const, id: 'ewt2', op: 'pad' as const, seq: 2, pts: [380, 380, 420, 380, 420, 420, 380, 420], radius: 0, height: H, sideSlope: 0.5 };
+  doc.transact('Pad', () => doc.create(pad)); T.update(['ewt2']);
+  check(Math.abs(hf.sample(400, 400) + hf.base - H) < 0.01 && Math.abs(hf.sample(404, 396) + hf.base - H) < 0.01, `pad: flat at ${H} m above sea level`);
+  const edge = hf.sample(440, 400) + hf.base;
+  check(edge < H && edge > H - 20 * 0.5 - 0.5, `pad side slope 1:2 (${(H - edge).toFixed(1)} m down 20 m out)`);
+  doc.transact('Pad higher', () => doc.update('ewt2', { height: H + 2 })); T.update(['ewt2']);
+  check(Math.abs(hf.sample(400, 400) + hf.base - (H + 2)) < 0.01, 'editing an earthwork re-applies it');
+  doc.undo(); doc.undo(); doc.undo(); T.update(['ewt1', 'ewt2']);
+  let diff = 0;
+  for (let k = 0; k < hf.designed.length; k++) diff = Math.max(diff, Math.abs(hf.designed[k] - hf.ground[k]));
+  check(diff === 0 && T.cut < 1e-3 && T.fill < 1e-3, `undo all earthworks → the original ground (max diff ${diff})`);
+
+  // graded road, stations every ≤ 96 m
+  const X = doc.all('section').filter((s) => !s.elevated && s.bridge === 'none' && (C.geo(s.id)?.len ?? 0) > 320 && s.path.length <= 3)
+    .sort((a, b) => C.geo(b.id)!.len - C.geo(a.id)!.len)[0];
+  const L = C.geo(X.id)!.len;
+  doc.transact('Grade', () => O.gradeSections(doc, [X.id], (x, z) => hf.sample(x, z) + hf.base));
+  const gr = doc.get<'section'>(X.id)!.grade!;
+  const ds = L / (gr.z.length - 1);
+  let steep = 0;
+  for (let i = 1; i < gr.z.length; i++) steep = Math.max(steep, Math.abs(gr.z[i] - gr.z[i - 1]) / ds);
+  check(gr.z.length === Math.ceil(L / O.GRADE_STEP) + 1 && ds <= O.GRADE_STEP + 1e-6 && steep <= 0.08 + 1e-3, `graded: ${gr.z.length} stations ${ds.toFixed(1)} m apart on ${L.toFixed(0)} m, steepest ${(steep * 100).toFixed(1)} %`);
+  check(!!C.mesher.segs.get(`${X.id}~0`)?.grade, 'graded pieces carry their profile to the mesher');
+  check((C.mesher.items.get(`s:${X.id}~0`)?.stamps[0]?.z?.length ?? 0) > 0, 'graded pieces cut / fill the ground to the road');
+  doc.transact('Follow', () => O.ungradeSections(doc, [X.id]));
+  check(!doc.get<'section'>(X.id)!.grade && !C.mesher.segs.get(`${X.id}~0`)?.grade, 'back to following the terrain');
+  while (doc.canUndo) doc.undo();
+  check(doc.patch.size === 0, 'undo all → clean base');
+}
+
 // ---------------- survey regions ----------------
 {
   const O = OPS;

@@ -6,6 +6,8 @@ export class Heightfield {
   readonly half: number;
   /** Original smoothed terrain (with river carved). Never modified after load. */
   readonly ground: Float32Array;
+  /** The ground after terraforming (earthworks, src/doc/terrain.ts) — what roads sit on. Equals `ground` until edited. */
+  readonly designed: Float32Array;
   /** Terrain after road carving — what gets rendered. */
   readonly surface: Float32Array;
   readonly base: number;
@@ -18,11 +20,12 @@ export class Heightfield {
     for (const h of heights) if (h < min) min = h;
     this.base = Math.floor(min) - 2;
     this.ground = Float32Array.from(heights, (h) => h - this.base);
+    this.designed = Float32Array.from(this.ground);
     this.surface = Float32Array.from(this.ground);
   }
 
-  /** Bilinear sample of a grid (default: original ground). */
-  sample(x: number, z: number, grid: Float32Array = this.ground): number {
+  /** Bilinear sample of a grid (default: the designed ground, i.e. after terraforming). */
+  sample(x: number, z: number, grid: Float32Array = this.designed): number {
     const n = this.n;
     let fx = (x + this.half) / this.cell, fz = (z + this.half) / this.cell;
     fx = Math.min(Math.max(fx, 0), n - 1.0001);
@@ -84,7 +87,7 @@ export class Heightfield {
         if (tt + rise < hi) hi = tt + rise; // can't be higher than the cut slope
         if (tt - rise > lo) lo = tt - rise; // can't be lower than the fill slope
       }
-      const g = this.ground[k];
+      const g = this.designed[k];
       out[k] = Math.min(Math.max(g, lo), hi);
     }
   }
