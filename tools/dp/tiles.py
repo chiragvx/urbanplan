@@ -55,7 +55,7 @@ class Sheet:
         self.name = name
         self.Ainv, self.cps, _ = load_reg(name)
         self.k = dpi / 300
-        self.img = align.sheet_image(os.path.join(DP, name + '.pdf'), dpi)  # RGB
+        self.img = align.sheet_image(align.sheet_pdf(name), dpi)  # RGB
         self.H, self.W = self.img.shape[:2]
         self.fw = FRAME * self.W  # frame right edge in pixels
 

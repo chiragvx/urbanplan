@@ -28,10 +28,8 @@ def metre_raster(img_dpi, dpi, A300, x0, z0, size_m, res):
     return cv2.remap(img_dpi, u.astype(np.float32), v.astype(np.float32), cv2.INTER_LINEAR, borderValue=0)
 
 def ref_window(x0, z0, size_m, res):
-    full = align.ref_feature(res)
-    i0 = int((x0 + align.EXT) / res); j0 = int((z0 + align.EXT) / res)
     n = int(size_m / res)
-    return full[j0:j0 + n, i0:i0 + n]
+    return align.ref_window_feature(res, x0, z0, x0 + n * res, z0 + n * res)
 
 def register(name, iters=3):
     al = json.load(open(os.path.join(DP, name + '.align.json')))
@@ -45,7 +43,7 @@ def register(name, iters=3):
 
 def register_once(name, al, A, it):
     dpi = 150
-    img = align.sheet_image(os.path.join(DP, name + '.pdf'), dpi)
+    img = align.sheet_image(align.sheet_pdf(name), dpi)
     w, r = align.sheet_masks(img, dpi, al['m_per_px300'])
     feat = align.combine(w, r, 1.7)  # sheet px ≈ 1.7 m at 150 dpi
     # sheet coverage in metres (map frame only)

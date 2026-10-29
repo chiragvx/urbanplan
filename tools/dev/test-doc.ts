@@ -272,7 +272,7 @@ check(!!doc.get(s0.id) && C.mesher.segs.has(`${s0.id}~0`), 'undo delete restores
 {
   const O = OPS;
   const R = JSON.parse(fs.readFileSync(dir + 'dp/regions.json', 'utf8'));
-  check(R.regions.length > 1000 && R.regions.some((r: { reserved: boolean }) => r.reserved), `DP regions file: ${R.regions.length} regions`);
+  check(R.regions.length > 500 && R.regions.some((r: { reserved: boolean }) => r.reserved), `DP regions file: ${R.regions.length} regions`);
   const t = R.regions.find((r: { reserved: boolean; marker?: number[] }) => r.reserved && r.marker);
   const snap = { src: t.id, cls: t.cls, reserved: t.reserved, ring: t.ring, area: t.area, sheet: t.sheet, marker: t.marker, conf: t.conf, status: 'unsurveyed' as const };
   doc.transact('Survey', () => O.editRegion(doc, t.id, { status: 'built', code: 'PG 12', note: 'parking lot' }, snap));

@@ -1,0 +1,73 @@
+{
+  "id": "pune",
+  "name": "Pune",
+  "state": "Maharashtra",
+  "frame": {
+    "about": "City frame: metres from the origin, x east, z south (equirectangular, the same convention as the tiles; tile frames are an exact per-axis scale + offset of it)",
+    "lat": 18.52,
+    "lon": 73.86,
+    "ext": 13500
+  },
+  "bbox": { "s": 18.40, "w": 73.73, "n": 18.645, "e": 73.995 },
+  "plans": [
+    {
+      "id": "pmc-dp-2017",
+      "authority": "Pune Municipal Corporation",
+      "name": "Development Plan for the old limits of PMC (2007–2027), sanctioned with modifications",
+      "status": "sanctioned",
+      "sanction": "TPS-1815/209/CR-69/15/DP-Pune/Sanction/UD-13, 5 Jan 2017 (and corrigenda to 9 Oct 2017, per the legend sheet)",
+      "coverage": "Old PMC limits (Sector I: 10 sheets at 1:2,000; Sectors II–VI: 11 sheets at 1:10,000). Not cantonments, not the merged villages.",
+      "sources": [
+        {
+          "kind": "scanned-sheets",
+          "priority": 3,
+          "where": "data/raw/dp/S1-01..S1-10.pdf, S2-01..S2-11.pdf, Legend.pdf, Starting.pdf (index)",
+          "origin": "PMC public file store (DP sheets as PDF scans)",
+          "licence": "Public document (government development plan); attribute Pune Municipal Corporation"
+        },
+        {
+          "kind": "georeferenced-raster",
+          "priority": 4,
+          "where": "https://github.com/datameet-pune/datameet-pune.github.io/wiki/Pune-Development-Plan",
+          "note": "Volunteers georeferenced the March 2017 *draft* DP on Mapwarper; usable only as a cross-check of our registration",
+          "licence": "unknown"
+        },
+        {
+          "kind": "vector-gis",
+          "priority": 1,
+          "where": "not public",
+          "note": "If PMC holds the DP as GIS (AMRUT-standard geodatabase or shapefiles), it would replace the tracing entirely: request under RTI from PMC Town Planning",
+          "licence": "to be confirmed"
+        }
+      ]
+    },
+    {
+      "id": "pmc-merged-villages-dp",
+      "authority": "Pune Municipal Corporation",
+      "name": "Draft Development Plan for villages merged into PMC",
+      "status": "draft (objections invited, 2025)",
+      "coverage": "Merged villages (9–11 villages per reports)",
+      "sources": [{ "kind": "scanned-sheets", "priority": 3, "where": "to fetch: PMC Building Development Department notices", "licence": "Public document" }]
+    },
+    {
+      "id": "pmrda-rp",
+      "authority": "Pune Metropolitan Region Development Authority",
+      "name": "Regional Plan, Town Planning schemes, ring roads, TOD zones",
+      "status": "approved / proposed",
+      "coverage": "PMRDA region (outside PMC / PCMC)",
+      "sources": [{ "kind": "web-gis", "priority": 2, "where": "PMRDA public GIS portal (launched Aug 2026; address and data services to confirm)", "licence": "to be confirmed" }]
+    },
+    {
+      "id": "pcmc-dp",
+      "authority": "Pimpri Chinchwad Municipal Corporation",
+      "name": "Development Plan (2041 draft)",
+      "status": "draft",
+      "coverage": "PCMC (a separate corporation, north-west)",
+      "sources": [{ "kind": "scanned-sheets", "priority": 3, "where": "to fetch", "licence": "Public document" }]
+    }
+  ],
+  "notes": [
+    "Cantonments (Pune, Khadki) are planned by the Cantonment Boards, not in the PMC DP.",
+    "Land-use classes follow the sheet legend (Legend.pdf); they map onto URDPFI classes."
+  ]
+}

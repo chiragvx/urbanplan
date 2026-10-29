@@ -48,7 +48,7 @@ EDGE_LINE = 1.0  # metres of boundary line counted inside the reserve on each si
 
 def measure_sheet(name, samples_by_way):
     Ainv, cps, reg = load_reg(name)
-    page_img = align.sheet_image(os.path.join(DP, name + '.pdf'), DPI)
+    page_img = align.sheet_image(align.sheet_pdf(name), DPI)
     road = classify(page_img)
     del page_img
     H, W = road.shape

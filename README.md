@@ -128,6 +128,29 @@ Sheets live in `data/raw/dp/` (downloaded from PMC's public file store). Sector 
 `public/tiles/kp/dp/` (`index.json` lists each block's `x0`/`z0` in tile metres; legend and uncovered areas are
 transparent; overlaps take the sheet farther from its frame edge). ≈45 s, ≈13 MB for S2-06 + S2-07.
 
+**Whole-city DP (Pune)** — `cities/pune/city.json` catalogues the plans and their sources (PMC's sanctioned DP for the
+old limits: 21 scanned sheets; the merged-villages draft; PMRDA's regional plan; PCMC) and defines a city frame. The
+sheets are registered once to the city, and any tile takes its part of the plan from there:
+
+```bash
+node tools/dp/cityref.mjs pune                                  # OSM roads + water for the city (reference)
+DP_CITY=pune python tools/dp/align.py S2-01 …                    # coarse fit per sheet (1:10,000: free scale search)
+DP_CITY=pune python tools/dp/align.py --scale=0.1685 --seed=0,0,4000 S1-01 …   # 1:2,000 old city: seeded window
+DP_CITY=pune python tools/dp/register.py S2-01 …                 # block-wise local registration (≈2–4 m RMS)
+DP_CITY=pune python tools/dp/qa.py                               # per sheet: OSM roads on the sheet's corridors vs shifted
+DP_CITY=pune python tools/dp/trace.py                            # line-based tracing → plots per sheet
+DP_CITY=pune python tools/dp/plan.py --tiles kp                  # merge → plan.json / plan.geojson, export tile regions
+```
+
+The tracer (`trace.py`) follows how a sheet is drawn rather than colour blobs: black plot lines, red verges, blue
+modification lines and every change of fill cut the sheet into faces; each line pixel goes to its nearest face, so
+neighbouring polygons share their edges exactly (no gaps, no overlaps); faces take the land use most of their pixels
+show; neighbouring faces of one land use merge into a parcel, except reserved sites (enclosed by a red verge), which keep
+their own outline. Sector I's 1:2,000 sheets shade every building grey over the plot colour, so they're classified by
+hue family. Polygons are simplified as one coverage (edges stay shared). Overlaps between sheets: the more detailed
+sheet wins, then the one the plot sits deepest in. For Pune: 21 sheets → ≈7,900 parcels (≈600 reserved) over the old
+limits. Cantonments aren't in the PMC plan. Codes / road widths printed on the sheets aren't read yet (OCR next).
+
 **DP regions** (no vector DP is public, so they're traced from the sheets): `python tools/dp/regions.py [sheet ...]`
 mosaics the registered sheets at 1 m, calibrates the legend's land-use colours on the sheets, classifies pixels
 (CIELAB), bridges thin plot / building lines within a land use (never across a red verge), and traces each patch into
