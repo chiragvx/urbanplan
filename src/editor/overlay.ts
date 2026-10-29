@@ -6,7 +6,8 @@ import { anchorsOf, FLYOVER_DECK } from '../doc/ops';
 import { LINE_COLOR } from '../doc/base';
 import { template, totalWidth } from '../doc/xsection';
 import { bearing, MODE_LABEL, type SnapResult } from './roadtool';
-import type { Id, LineKind } from '../doc/types';
+import { SURVEY_COLOR, SURVEY_LABEL, type Id, type LineKind, type SurveyStatus } from '../doc/types';
+import { parseCode } from '../doc/dpcodes';
 
 export interface Handle {
   kind: 'width' | 'anchor' | 'in' | 'out';
@@ -325,7 +326,10 @@ function drawLines(E: Editor) {
   ctx.globalAlpha = 1; ctx.setLineDash([]);
 }
 
-/** DP regions: land-use fill, reservations in a red verge, the hovered one outlined with its details. */
+/**
+ * DP regions: land-use fill, reserved sites in a red verge, survey status as a coloured edge (green matches, amber
+ * differs, red built over), the selected one highlighted and the hovered one read out.
+ */
 function drawDPRegions(E: Editor) {
   const D = E.dpr;
   D.load();
@@ -333,28 +337,50 @@ function drawDPRegions(E: Editor) {
   const ctx = E.ctx, s = E.view.scale;
   const [x0, z0, x1, z1] = E.view.rect;
   const path = (r: number[]) => { for (let i = 0; i < r.length; i += 2) { const p = E.view.toScreen(r[i], r[i + 1]); if (i) ctx.lineTo(p[0], p[1]); else ctx.moveTo(p[0], p[1]); } ctx.closePath(); };
-  const list = D.inRect(x0, z0, x1, z1);
+  const sel = new Set(selection.value.filter((x) => x.kind === 'region').map((x) => x.id));
+  // what to draw: each traced region, or its survey object once it has one; plus hand-made regions
+  type R = { id: string; cls: string; ring: number[]; holes?: number[][]; reserved: boolean; marker?: [number, number]; status: SurveyStatus; box: number[] };
+  const list: R[] = [];
+  for (const r of D.inRect(x0, z0, x1, z1)) {
+    const o = E.doc.get<'region'>(r.id);
+    list.push(o ? { ...o, box: r.box! } : { ...r, status: 'unsurveyed', box: r.box! });
+  }
+  for (const o of E.doc.all('region')) {
+    if (D.get(o.id)) continue;
+    let bx0 = Infinity, bz0 = Infinity, bx1 = -Infinity, bz1 = -Infinity;
+    for (let i = 0; i < o.ring.length; i += 2) { bx0 = Math.min(bx0, o.ring[i]); bx1 = Math.max(bx1, o.ring[i]); bz0 = Math.min(bz0, o.ring[i + 1]); bz1 = Math.max(bz1, o.ring[i + 1]); }
+    if (bx1 >= x0 && bx0 <= x1 && bz1 >= z0 && bz0 <= z1) list.push({ ...o, box: [bx0, bz0, bx1, bz1] });
+  }
   for (const r of list) {
-    const b = r.box!;
+    const b = r.box;
     if ((b[2] - b[0]) * s < 1.5 && (b[3] - b[1]) * s < 1.5) continue;
     ctx.beginPath(); path(r.ring); for (const h of r.holes ?? []) path(h);
-    ctx.globalAlpha = 0.42; ctx.fillStyle = D.color(r); ctx.fill('evenodd');
+    ctx.globalAlpha = sel.has(r.id) ? 0.6 : 0.42; ctx.fillStyle = D.classColor(r.cls); ctx.fill('evenodd');
     ctx.globalAlpha = 1;
+    if (r.status !== 'unsurveyed') { ctx.strokeStyle = SURVEY_COLOR[r.status]; ctx.lineWidth = s > 1 ? 4 : 3; ctx.stroke(); }
     if (r.reserved) { ctx.strokeStyle = 'rgba(214,40,40,0.9)'; ctx.lineWidth = s > 1 ? 2 : 1.25; ctx.stroke(); }
-    else if (s > 0.8) { ctx.strokeStyle = 'rgba(60,60,60,0.25)'; ctx.lineWidth = 1; ctx.stroke(); }
+    else if (s > 0.8 && r.status === 'unsurveyed') { ctx.strokeStyle = 'rgba(60,60,60,0.25)'; ctx.lineWidth = 1; ctx.stroke(); }
   }
-  // circled reservation codes (read in a later step): a small ring where the code sits on the sheet
+  // circled reservation codes: a small ring where the code sits on the sheet
   if (s > 0.35) for (const r of list) if (r.marker) {
     const p = E.view.toScreen(r.marker[0], r.marker[1]);
     ctx.strokeStyle = 'rgba(214,40,40,0.95)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(p[0], p[1], Math.max(4, 12 * s), 0, Math.PI * 2); ctx.stroke();
   }
+  for (const r of list) if (sel.has(r.id)) {
+    ctx.beginPath(); path(r.ring);
+    ctx.strokeStyle = ACCENT; ctx.lineWidth = 2.5; ctx.setLineDash([7, 4]); ctx.stroke(); ctx.setLineDash([]);
+  }
   const h = E.dpHover;
-  if (h) {
-    ctx.beginPath(); path(h.ring); for (const q of h.holes ?? []) path(q);
+  if (h && !sel.has(h.id)) {
+    const o = E.doc.get<'region'>(h.id);
+    const r = o ?? h;
+    ctx.beginPath(); path(r.ring); for (const q of r.holes ?? []) path(q);
     ctx.strokeStyle = '#111'; ctx.lineWidth = 2; ctx.setLineDash([]); ctx.stroke();
+    const code = parseCode(o?.code);
     readout(E, E.toWorld(...E.mouse), [
-      `${D.label(h)}${h.reserved ? ` · reserved site${h.marker ? ' (code on the sheet)' : ''}` : ''}`,
-      `${h.area >= 10000 ? `${(h.area / 10000).toFixed(2)} ha` : `${h.area.toLocaleString()} m²`} · DP sheet ${h.sheet} · confidence ${Math.round(h.conf * 100)} %`,
+      `${D.classLabel(r.cls)}${r.reserved ? ` · reserved site${code ? ` ${o!.code}${code.purpose ? ` (${code.purpose})` : ''}` : h.marker ? ' (code on the sheet)' : ''}` : ''}`,
+      `${r.area >= 10000 ? `${(r.area / 10000).toFixed(2)} ha` : `${r.area.toLocaleString()} m²`} · DP sheet ${h.sheet} · confidence ${Math.round(h.conf * 100)} %`,
+      o && o.status !== 'unsurveyed' ? `Survey: ${SURVEY_LABEL[o.status]}${o.note ? ` — ${o.note.slice(0, 60)}` : ''}` : 'Click to survey it',
     ]);
   }
 }

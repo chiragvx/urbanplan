@@ -10,6 +10,8 @@ import type { Network } from '../net/model';
 import { buildBase, baseFingerprint, type UtilitiesFile } from '../doc/base';
 import { CityDoc, type Change } from '../doc/doc';
 import { Compiler } from '../doc/compile';
+import type { SurveyStatus } from '../doc/types';
+import { editRegion } from '../doc/ops';
 import { FILE_EXT, newMeta, openMap, parse, serialize } from '../doc/format';
 import { IssueIndex } from '../doc/issues';
 import { toGeoJSON, toNetwork } from '../doc/export';
@@ -22,8 +24,11 @@ import { Reference } from '../scene/reference';
 import { Editor, type AppApi } from '../editor/editor';
 import { bindShortcuts } from '../editor/commands';
 import {
-  dialog, docVersion, lineLayer, mode, readOnly, select, selection, settings, stale3d, status, toast, tool,
+  dialog, docVersion, dpRegionsOn, lineLayer, mode, readOnly, select, selection, settings, stale3d, status, surveyFilter, toast, tool,
 } from '../editor/state';
+
+/** A region in the survey list. */
+export interface SurveyItem { id: string; cls: string; reserved: boolean; area: number; code?: string; status: SurveyStatus; x: number; z: number }
 import { download, local, pickFile, repo, saveToDisk, slug } from './storage';
 
 export class App implements AppApi {
@@ -75,6 +80,7 @@ export class App implements AppApi {
     this.ref = new Reference(this.doc, base, { lat, lon, kx: this.tile.proj.kx, kz: this.tile.proj.kz });
     this.ref.onLoad = () => { this.world.needsRender = true; this.lastView = ''; };
     this.E.dpr.base = base;
+    this.E.dpr.onLoad = () => { this.E.overlayDirty = true; docVersion.value++; };
     this.engine.scene.add(this.ref.group);
     this.issues = new IssueIndex(this.doc, this.C, (x0, z0, x1, z1) => this.E.hit.query(x0, z0, x1, z1));
     this.E.onAfterChange = (c) => this.afterChange(c);
@@ -335,6 +341,64 @@ export class App implements AppApi {
     this.E.zoomToSelection();
     if (tool.value !== 'select') this.E.setTool('select');
     status.value = `Review: ${next.name} — ${next.why}. Fix it, or press Y if it's right.`;
+  }
+
+  // ---------------- survey (DP regions) ----------------
+
+  private surveyCache: { key: string; q: SurveyItem[] } = { key: '', q: [] };
+
+  /** Regions to survey (reserved sites, or every region but water), in a walking order: 300 m bands, snaking. */
+  surveyQueue(): SurveyItem[] {
+    const D = this.E.dpr;
+    if (!D.ready || !D.data) return [];
+    const key = `${this.doc.version}:${surveyFilter.value}`;
+    if (this.surveyCache.key === key) return this.surveyCache.q;
+    const q: SurveyItem[] = [];
+    const add = (id: string, r: { cls: string; reserved: boolean; area: number; ring: number[]; code?: string; status?: SurveyStatus }) => {
+      // slivers under 400 m² are mostly tracing noise along roads: not worth a visit
+      if (r.cls === 'water' || r.area < 400 || (surveyFilter.value === 'reserved' && !r.reserved)) return;
+      let x = 0, z = 0;
+      for (let i = 0; i < r.ring.length; i += 2) { x += r.ring[i]; z += r.ring[i + 1]; }
+      const n = r.ring.length / 2;
+      q.push({ id, cls: r.cls, reserved: r.reserved, area: r.area, code: r.code, status: r.status ?? 'unsurveyed', x: x / n, z: z / n });
+    };
+    for (const t of D.data.regions) add(t.id, this.doc.get<'region'>(t.id) ?? t);
+    for (const o of this.doc.all('region')) if (!D.get(o.id)) add(o.id, o);
+    q.sort((a, b) => {
+      const ba = Math.floor(a.z / 300), bb = Math.floor(b.z / 300);
+      return ba !== bb ? ba - bb : (ba % 2 ? b.x - a.x : a.x - b.x);
+    });
+    this.surveyCache = { key, q };
+    return q;
+  }
+
+  /** Set survey status on regions (their survey objects are created on first edit). */
+  setSurvey(ids: Id[], st: SurveyStatus) {
+    const D = this.E.dpr;
+    this.E.edit(`Survey: ${st}`, () => {
+      for (const id of ids) {
+        const t = D.get(id);
+        editRegion(this.doc, id, { status: st, surveyedBy: settings.value.author || undefined, surveyedAt: new Date().toISOString().slice(0, 10) }, t ? D.snapshot(t) : undefined);
+      }
+    });
+  }
+
+  /** Select and frame the next region not surveyed yet (after the selected one, in walking order). */
+  surveyNext() {
+    if (!dpRegionsOn.value) { dpRegionsOn.value = true; this.E.overlayDirty = true; }
+    const D = this.E.dpr;
+    D.load();
+    if (!D.ready) { toast('Loading DP regions…', 'info', undefined, 1500); return; }
+    const q = this.surveyQueue();
+    const cur = selection.value.find((s) => s.kind === 'region')?.id;
+    const at = cur ? q.findIndex((x) => x.id === cur) : -1;
+    const order = [...q.slice(at + 1), ...q.slice(0, at + 1)];
+    const next = order.find((x) => x.status === 'unsurveyed' && x.id !== cur);
+    if (!next) { toast('Every region in the list is surveyed 🎉', 'ok'); return; }
+    if (tool.value !== 'select') this.E.setTool('select');
+    select([{ kind: 'region', id: next.id }]);
+    this.E.zoomToSelection();
+    status.value = `Survey: ${next.reserved ? 'reserved site' : 'region'} — Y matches the plan · or pick a status in the inspector · N next`;
   }
 
   // ---------------- coordinates ----------------

@@ -1,9 +1,10 @@
 // Left panel tabs: Layers, Roads (search), Issues, Review queue.
-import { useMemo, useState } from 'preact/hooks';
-import { docVersion, leftTab, readOnly, select, selection } from '../editor/state';
+import { useEffect, useMemo, useState } from 'preact/hooks';
+import { docVersion, dpRegionsOn, leftTab, readOnly, select, selection, surveyFilter } from '../editor/state';
 import { ui } from './ctx';
-import { Icon, Toggle, Menu } from './components';
-import { CLASS_LABEL, CLASS_RANK, type Id, type LayerGroup, type LayerObj, type LineKind } from '../doc/types';
+import { Icon, Toggle, Menu, Seg } from './components';
+import { CLASS_LABEL, CLASS_RANK, SURVEY_COLOR, SURVEY_LABEL, type Id, type LayerGroup, type LayerObj, type LineKind, type SurveyStatus } from '../doc/types';
+import { parseCode } from '../doc/dpcodes';
 import { LINE_COLOR, LINE_LABEL } from '../doc/base';
 import { newId } from '../doc/ids';
 import * as xs from '../doc/xsection';
@@ -18,13 +19,17 @@ export function LeftPanel() {
         <button class={tab === 'layers' ? 'on' : ''} onClick={() => (leftTab.value = 'layers')}><Icon.layers /> Layers</button>
         <button class={tab === 'roads' ? 'on' : ''} onClick={() => (leftTab.value = 'roads')}><Icon.road /> Roads</button>
         <button class={tab === 'issues' ? 'on' : ''} onClick={() => (leftTab.value = 'issues')}><Icon.warn /> Issues{n ? <span class="badge">{n > 999 ? '999+' : n}</span> : null}</button>
-        <button class={tab === 'review' ? 'on' : ''} onClick={() => (leftTab.value = 'review')}><Icon.review /> Review</button>
+        <button class={tab === 'review' || tab === 'survey' ? 'on' : ''} onClick={() => (leftTab.value = tab === 'survey' ? 'survey' : 'review')}><Icon.review /> Review</button>
       </nav>
       <div class="tab-body">
         {tab === 'layers' && <Layers />}
         {tab === 'roads' && <Roads />}
         {tab === 'issues' && <Issues />}
+        {(tab === 'review' || tab === 'survey') && (
+          <div class="review-mode"><Seg small value={tab} options={[{ value: 'review', label: 'Roads' }, { value: 'survey', label: 'DP regions' }]} onChange={(v) => { leftTab.value = v; }} /></div>
+        )}
         {tab === 'review' && <Review />}
+        {tab === 'survey' && <Survey />}
       </div>
     </aside>
   );
@@ -195,6 +200,53 @@ function Review() {
             <span class="clip">{r.name}</span><span class="muted small">{r.why}</span>
           </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------- survey: walk the DP regions ----------------
+
+const STATUS_ORDER: SurveyStatus[] = ['matches', 'differs', 'built', 'unclear', 'unsurveyed'];
+const COUNT_LABEL: Record<SurveyStatus, string> = { matches: 'Matches', differs: 'Differs', built: 'Built over', unclear: "Can't tell", unsurveyed: 'To do' };
+
+function Survey() {
+  void docVersion.value;
+  const D = ui.E.dpr;
+  useEffect(() => { D.load(); if (!dpRegionsOn.value) { dpRegionsOn.value = true; ui.E.overlayDirty = true; } }, []);
+  if (D.missing) return <div class="review"><p class="muted">No DP regions for this map yet — run <code>python tools/dp/regions.py</code>.</p></div>;
+  if (!D.ready) return <div class="review"><p class="muted">Loading DP regions…</p></div>;
+  const q = ui.app.surveyQueue();
+  const counts = Object.fromEntries(STATUS_ORDER.map((s) => [s, 0])) as Record<SurveyStatus, number>;
+  for (const x of q) counts[x.status]++;
+  const done = q.length - counts.unsurveyed;
+  const cur = selection.value.filter((s) => s.kind === 'region').map((s) => s.id);
+  const ro = readOnly.value;
+  return (
+    <div class="review survey">
+      <p>Check the Development Plan against the ground, one site at a time: is the garden still a garden, the school plot a school? Use imagery, a visit or photos, and record what you find. The DP sheet close-up in the inspector shows each site's code.</p>
+      <Seg small value={surveyFilter.value} options={[{ value: 'reserved', label: 'Reserved sites' }, { value: 'all', label: 'All regions' }]} onChange={(v) => { surveyFilter.value = v; }} />
+      <div class="progress"><div style={{ width: `${(done / Math.max(1, q.length)) * 100}%` }} /></div>
+      <p class="muted small">{done.toLocaleString()} of {q.length.toLocaleString()} surveyed</p>
+      <div class="counts">{STATUS_ORDER.map((s) => <span key={s} title={SURVEY_LABEL[s]}><i style={{ background: SURVEY_COLOR[s] }} />{COUNT_LABEL[s]} {counts[s]}</span>)}</div>
+      <div class="btns">
+        <button class="primary" onClick={() => ui.app.surveyNext()}>Next site <kbd>N</kbd></button>
+        <button disabled={ro || !cur.length} onClick={() => { ui.app.setSurvey(cur, 'matches'); ui.app.surveyNext(); }}>Matches <kbd>Y</kbd></button>
+        <button disabled={ro || !cur.length} onClick={() => ui.app.setSurvey(cur, 'differs')}>Differs</button>
+        <button disabled={ro || !cur.length} onClick={() => ui.app.setSurvey(cur, 'built')}>Built over</button>
+      </div>
+      <div class="list">
+        {q.slice(0, 120).map((x) => {
+          const c = parseCode(x.code);
+          return (
+            <button key={x.id} class={`list-item ${cur.includes(x.id) ? 'on' : ''}`} onClick={() => { select([{ kind: 'region', id: x.id }]); ui.E.zoomToSelection(); }}>
+              <i class="dot" style={{ background: SURVEY_COLOR[x.status] }} title={SURVEY_LABEL[x.status]} />
+              <span class="clip">{x.code ? `${x.code}${c?.purpose ? ` · ${c.purpose}` : ''}` : D.classLabel(x.cls)}</span>
+              <span class="muted small">{x.area >= 10000 ? `${(x.area / 10000).toFixed(1)} ha` : `${x.area.toLocaleString()} m²`}</span>
+            </button>
+          );
+        })}
+        {q.length > 120 && <p class="muted small">…and {q.length - 120} more — Next site walks through them all.</p>}
       </div>
     </div>
   );

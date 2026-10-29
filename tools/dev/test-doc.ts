@@ -224,5 +224,23 @@ check(!!doc.get(s0.id) && C.mesher.segs.has(`${s0.id}~0`), 'undo delete restores
   while (doc.canUndo) doc.undo();
   check(doc.patch.size === 0, 'undo all → clean base');
 }
+// ---------------- survey regions ----------------
+{
+  const O = OPS;
+  const R = JSON.parse(fs.readFileSync(dir + 'dp/regions.json', 'utf8'));
+  check(R.regions.length > 1000 && R.regions.some((r: { reserved: boolean }) => r.reserved), `DP regions file: ${R.regions.length} regions`);
+  const t = R.regions.find((r: { reserved: boolean; marker?: number[] }) => r.reserved && r.marker);
+  const snap = { src: t.id, cls: t.cls, reserved: t.reserved, ring: t.ring, area: t.area, sheet: t.sheet, marker: t.marker, conf: t.conf, status: 'unsurveyed' as const };
+  doc.transact('Survey', () => O.editRegion(doc, t.id, { status: 'built', code: 'PG 12', note: 'parking lot' }, snap));
+  const o = doc.get<'region'>(t.id)!;
+  check(!!o && o.status === 'built' && o.code === 'PG 12' && o.ring.length === t.ring.length, 'first survey edit creates the region object');
+  doc.transact('Survey 2', () => O.editRegion(doc, t.id, { status: 'differs' }));
+  check(doc.get<'region'>(t.id)!.status === 'differs' && doc.get<'region'>(t.id)!.code === 'PG 12', 'later edits update it');
+  const back = new CityDoc(buildBase(net, tile, util), newMeta('kp', '', ''));
+  openMap(back, parse(serialize(doc)));
+  check(back.get<'region'>(t.id)?.status === 'differs' && back.get<'region'>(t.id)?.note === 'parking lot', 'survey region survives save / load');
+  doc.undo(); doc.undo();
+  check(!doc.get(t.id), 'undo removes it');
+}
 console.log(ok ? '\nALL OK' : '\nFAILURES');
 process.exit(ok ? 0 : 1);

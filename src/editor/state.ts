@@ -24,7 +24,9 @@ export const xray = signal(false);
 export const accuracyView = signal(false);
 /** DP regions overlay (land-use plots / reservations from the DP sheets) */
 export const dpRegionsOn = signal(false);
-export const leftTab = signal<'layers' | 'roads' | 'issues' | 'review'>('layers');
+export const leftTab = signal<'layers' | 'roads' | 'issues' | 'review' | 'survey'>('layers');
+/** survey tab: which regions to walk */
+export const surveyFilter = signal<'reserved' | 'all'>('reserved');
 export const paletteOpen = signal(false);
 export const dialog = signal<null | 'open' | 'publish' | 'settings' | 'help' | 'about' | 'export'>(null);
 export const status = signal('');

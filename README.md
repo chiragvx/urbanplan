@@ -125,6 +125,12 @@ red circles) on it, marks a site reserved for a public purpose; pale blue is wat
 water. Each region has a confidence (colour fit, solidity, size). ≈30 s, 2,640 regions / 135 reserved for S2-06 + S2-07.
 In the editor, **DP regions** (<kbd>Shift D</kbd>) shows them; hover one to read it. Survey aid, not legal boundaries.
 
+**Surveying DP regions**: Review → **DP regions** walks the reserved sites (or every region) in a walking order. Click a
+region (or <kbd>N</kbd> next) and the inspector shows the DP sheet close-up at the site's code to read it (`PG 61` → play
+ground no. 61, from the legend), the land use, and the survey: *matches the plan* (<kbd>Y</kbd>), *differs*, *built over /
+encroached*, *can't tell*, with notes and photo links. The first edit makes a `region` object (a snapshot of the traced
+shape, same id) in the map, so surveys save, publish, fork and export (GeoJSON `dp_region` features) like roads.
+
 ### Underground utilities (free, optional)
 
 `npm run import:utilities -- kp` downloads PMC's public-domain sewer and stormwater datasets from OpenCity

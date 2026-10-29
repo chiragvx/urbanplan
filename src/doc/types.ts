@@ -112,7 +112,47 @@ export interface LayerObj {
   order: number;
 }
 
-export type Obj = SectionObj | JunctionObj | RoadObj | LineObj | BuildingObj | LayerObj;
+/** What a surveyor found at a DP region. */
+export type SurveyStatus = 'unsurveyed' | 'matches' | 'differs' | 'built' | 'unclear';
+export const SURVEY_LABEL: Record<SurveyStatus, string> = {
+  unsurveyed: 'Not surveyed', matches: 'Matches the plan', differs: 'Differs from the plan', built: 'Built over / encroached', unclear: "Can't tell",
+};
+export const SURVEY_COLOR: Record<SurveyStatus, string> = { unsurveyed: '#8a8f98', matches: '#16a34a', differs: '#f59e0b', built: '#dc2626', unclear: '#6b7280' };
+
+/**
+ * A survey region: a land-use plot or reserved site from the Development Plan (traced from the DP sheets, see
+ * tools/dp/regions.py — same id as the traced region), or one drawn by hand, with what was found on the ground.
+ * Created the first time a traced region is edited; the shape is a snapshot so re-tracing the sheets can't move it.
+ */
+export interface RegionObj {
+  kind: 'region';
+  id: Id;
+  /** the traced DP region it came from (tiles/<tile>/dp/regions.json), or undefined for a hand-drawn one */
+  src?: string;
+  /** DP land use (classes in regions.json) */
+  cls: string;
+  /** a site reserved for a public purpose (red verge on the sheet) */
+  reserved: boolean;
+  /** the reservation code printed on the sheet, e.g. "PG 61" */
+  code?: string;
+  /** outline x,z,… in tile metres, and holes */
+  ring: number[];
+  holes?: number[][];
+  area: number;
+  sheet?: string;
+  /** where the circled code sits on the sheet */
+  marker?: [number, number];
+  conf?: number;
+  status: SurveyStatus;
+  /** what's there today */
+  note?: string;
+  /** photo / document links */
+  links?: string[];
+  surveyedBy?: string;
+  surveyedAt?: string;
+}
+
+export type Obj = SectionObj | JunctionObj | RoadObj | LineObj | BuildingObj | LayerObj | RegionObj;
 export type Kind = Obj['kind'];
 export type ObjOf<K extends Kind> = Extract<Obj, { kind: K }>;
 

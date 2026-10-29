@@ -8,7 +8,7 @@ import {
   type RoadMode,
 } from './state';
 import { MODE_LABEL } from './roadtool';
-import type { Id, SectionObj } from '../doc/types';
+import { SURVEY_LABEL, type Id, type SectionObj } from '../doc/types';
 import type { Part } from '../net/model';
 
 export interface Command {
@@ -22,6 +22,7 @@ export interface Command {
 }
 
 const sel1 = () => selection.value.length === 1 ? selection.value[0] : null;
+const regionSel = () => selection.value.filter((s) => s.kind === 'region').map((s) => s.id);
 const hasRoads = (E: Editor) => E.selectedSections().length > 0;
 const editable = () => !readOnly.value;
 
@@ -213,8 +214,9 @@ export const COMMANDS: Command[] = [
   },
   { id: 'road.reverse', label: 'Reverse direction', group: 'Road', keys: 'Shift+R', enabled: hasRoads, run: (E) => eachSection(E, 'Reverse', (s) => ops.reverseSection(E.doc, s.id)) },
   {
-    id: 'road.verify', label: 'Mark as verified', group: 'Review', keys: 'Y', enabled: hasRoads,
-    run: (E) => { const secs = E.selectedSections(); const on = !secs.every((s) => s.verified); E.edit(on ? 'Verified' : 'Unverified', () => { for (const s of secs) E.doc.set(s.id, 'verified', on); }); toast(on ? `${secs.length} section(s) verified` : 'Verification removed', 'ok'); },
+    id: 'road.verify', label: 'Mark as verified (a region: matches the plan)', group: 'Review', keys: 'Y', enabled: (E) => hasRoads(E) || regionSel().length > 0,
+    run: (E) => {
+      if (regionSel().length) { E.app.setSurvey(regionSel(), 'matches'); E.app.surveyNext(); return; } const secs = E.selectedSections(); const on = !secs.every((s) => s.verified); E.edit(on ? 'Verified' : 'Unverified', () => { for (const s of secs) E.doc.set(s.id, 'verified', on); }); toast(on ? `${secs.length} section(s) verified` : 'Verification removed', 'ok'); },
   },
   {
     id: 'road.separate', label: 'Make selected sections a separate road', group: 'Road', enabled: (E) => selection.value.some((s) => s.kind === 'section'),
@@ -295,7 +297,12 @@ export const COMMANDS: Command[] = [
   { id: 'view.palette2', label: 'Command palette', group: 'View', keys: 'Ctrl+/', run: () => { paletteOpen.value = true; } },
 
   // ---- Review ----
-  { id: 'review.next', label: 'Next road to review', group: 'Review', keys: 'N', run: (E) => E.app.reviewNext() },
+  { id: 'review.next', label: 'Next road to review (next region in the Survey tab)', group: 'Review', keys: 'N', run: (E) => (leftTab.value === 'survey' || selection.value.some((s) => s.kind === 'region') ? E.app.surveyNext() : E.app.reviewNext()) },
+  { id: 'survey.open', label: 'Survey DP regions (reserved sites first)', group: 'Review', run: (E) => { leftTab.value = 'survey'; if (!dpRegionsOn.value) { dpRegionsOn.value = true; E.overlayDirty = true; } E.dpr.load(); } },
+  ...(['matches', 'differs', 'built', 'unclear', 'unsurveyed'] as const).map((st) => ({
+    id: `survey.${st}`, label: `Survey: ${SURVEY_LABEL[st]}`, group: 'Review' as const, enabled: () => editable() && regionSel().length > 0,
+    run: (E: Editor) => { E.app.setSurvey(regionSel(), st); },
+  })),
   { id: 'review.open', label: 'Open the review queue', group: 'Review', run: () => { leftTab.value = 'review'; } },
 
   // ---- Help ----

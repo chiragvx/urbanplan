@@ -37,6 +37,17 @@ export function toGeoJSON(doc: CityDoc, C: Compiler, P: Proj, opts: { buildings?
     for (let i = 0; i < l.pts.length; i += 2) coords.push(ll(l.pts[i], l.pts[i + 1]));
     features.push({ type: 'Feature', id: l.id, geometry: { type: 'LineString', coordinates: coords }, properties: { kind: L?.lineKind ?? 'other', layer: L?.name ?? l.layer, depth_m: l.depth, size_m: l.size, name: l.name, ...l.props } });
   }
+  // surveyed DP regions (what the plan says + what's there)
+  for (const r of doc.all('region')) {
+    const ring = (pts: number[]) => { const c: number[][] = []; for (let i = 0; i < pts.length; i += 2) c.push(ll(pts[i], pts[i + 1])); c.push(c[0]); return c; };
+    features.push({
+      type: 'Feature', id: r.id, geometry: { type: 'Polygon', coordinates: [ring(r.ring), ...(r.holes ?? []).map(ring)] },
+      properties: {
+        kind: 'dp_region', dp_land_use: r.cls, reserved: r.reserved, code: r.code ?? null, area_m2: r.area, dp_sheet: r.sheet ?? null,
+        survey: r.status, note: r.note ?? null, links: (r.links ?? []).join(' '), surveyed_by: r.surveyedBy ?? null, surveyed_at: r.surveyedAt ?? null,
+      },
+    });
+  }
   if (opts.buildings) for (const b of doc.all('building')) {
     const ring: number[][] = [];
     for (let i = 0; i < b.outer.length; i += 2) ring.push(ll(b.outer[i], b.outer[i + 1]));

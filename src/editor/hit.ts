@@ -27,7 +27,7 @@ export class HitIndex {
       for (const [x, z] of r) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
       return [x0, z0, x1, z1];
     }
-    const pts = o.kind === 'line' ? o.pts : o.kind === 'building' ? o.outer : null;
+    const pts = o.kind === 'line' ? o.pts : o.kind === 'building' ? o.outer : o.kind === 'region' ? o.ring : null;
     if (!pts || pts.length < 2) return null;
     let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
     for (let i = 0; i < pts.length; i += 2) { x0 = Math.min(x0, pts[i]); x1 = Math.max(x1, pts[i]); z0 = Math.min(z0, pts[i + 1]); z1 = Math.max(z1, pts[i + 1]); }
@@ -54,7 +54,7 @@ export class HitIndex {
 
   rebuild() {
     this.cells.clear(); this.idCells.clear();
-    for (const k of ['section', 'junction', 'line', 'building'] as Kind[]) for (const id of this.doc.ids(k)) this.add(id);
+    for (const k of ['section', 'junction', 'line', 'building', 'region'] as Kind[]) for (const id of this.doc.ids(k)) this.add(id);
   }
 
   update(ids: Iterable<Id>) {
@@ -112,6 +112,9 @@ export class HitIndex {
         if (d <= o.size / 2 + tol) offer({ kind: 'line', id, d: d - o.size / 2 + 0.5 });
       } else if (o.kind === 'building' && can('building')) {
         if (inRing(o.outer, x, z)) offer({ kind: 'building', id, d: 5 });
+      } else if (o.kind === 'region' && can('region')) {
+        // the land under everything else: anything on it wins
+        if (inRing(o.ring, x, z) && !o.holes?.some((h) => inRing(h, x, z))) offer({ kind: 'region', id, d: 50 + Math.sqrt(o.area) / 1000 });
       }
     }
     return best;

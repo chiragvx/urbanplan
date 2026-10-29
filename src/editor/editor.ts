@@ -41,6 +41,8 @@ export interface AppApi {
   fork(): void;
   toggleLayer(id: Id): void;
   reviewNext(): void;
+  surveyNext(): void;
+  setSurvey(ids: Id[], status: import('../doc/types').SurveyStatus): void;
 }
 
 export interface PenState { pts: ops.PenPoint[]; cursor: [number, number] | null; snap: Snap | null }
@@ -147,11 +149,21 @@ export class Editor {
   }
 
   canPick = (kind: Kind, layer?: Id) => {
+    if (kind === 'region') return dpRegionsOn.value;
     const L = this.doc.get<'layer'>(layer ?? (kind === 'section' || kind === 'junction' ? 'roads' : kind === 'building' ? 'buildings' : ''));
     return !L || (L.visible && !L.locked);
   };
 
-  pickAt(x: number, z: number): Pick | null { return this.hit.pick(x, z, this.tol, this.canPick); }
+  pickAt(x: number, z: number): Pick | null {
+    const p = this.hit.pick(x, z, this.tol, this.canPick);
+    if (p && p.kind !== 'region') return p;
+    // traced DP regions not surveyed yet (no region object): the smallest one under the point
+    if (dpRegionsOn.value && this.dpr.ready) {
+      const r = this.dpr.at(x, z);
+      if (r && (!p || r.area < (this.doc.get<'region'>(p.id)?.area ?? Infinity))) return { kind: 'region', id: r.id, d: 50 };
+    }
+    return p;
+  }
 
   /** What a click on a section selects: the road, or the section when already working inside that road. */
   private selFor(p: Pick, deep: boolean): Sel {
@@ -228,6 +240,11 @@ export class Editor {
     const grow = (x: number, z: number) => { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); };
     for (const s of sel) {
       const o = this.doc.get(s.id);
+      if (s.kind === 'region') {
+        const ring = o?.kind === 'region' ? o.ring : this.dpr.get(s.id)?.ring ?? [];
+        for (let i = 0; i < ring.length; i += 2) grow(ring[i], ring[i + 1]);
+        continue;
+      }
       if (!o) continue;
       if (o.kind === 'junction') grow(o.x, o.z);
       const secs = o.kind === 'road' ? this.doc.sectionsOf(o.id) : o.kind === 'section' ? [o] : [];
@@ -330,6 +347,7 @@ export class Editor {
       this.drag = { kind: 'move', ids: selection.value.map((x) => x.id), start: w, last: w, moved: false, n: ++dragSeq };
       return;
     }
+    if (p.kind === 'region') return;
     if (p.kind === 'junction') { const j = this.doc.get<'junction'>(p.id)!; this.drag = { kind: 'junction', id: p.id, start: w, orig: [j.x, j.z], moved: false, n: ++dragSeq }; }
     else if (p.kind === 'section' && tool.value === 'select') {
       const s0 = this.doc.get<'section'>(p.id)!;
@@ -478,7 +496,7 @@ export class Editor {
     const p = this.pickAt(w[0], w[1]);
     const next = p ? this.selFor(p, false) : null;
     if (next?.id !== hover.value?.id) hover.value = next;
-    this.dpHover = dpRegionsOn.value && this.dpr.ready && !p ? this.dpr.at(w[0], w[1]) : null;
+    this.dpHover = p?.kind === 'region' ? this.dpr.get(p.id) ?? null : null;
     if (p && !h) this.overlay.style.cursor = readOnly.value ? 'pointer' : p.kind === 'junction' ? 'move' : 'pointer';
   }
 

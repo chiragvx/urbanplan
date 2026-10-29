@@ -3,7 +3,7 @@
 import { fitCubics, type Part, type V2 } from '../net/model';
 import type { CityDoc } from './doc';
 import { newId } from './ids';
-import { INHERITED, type Anchor, type Id, type JunctionObj, type LineObj, type RoadObj, type SectionObj } from './types';
+import { INHERITED, type Anchor, type Id, type JunctionObj, type LineObj, type RegionObj, type RoadObj, type SectionObj } from './types';
 import { flip, template } from './xsection';
 
 const r2 = (v: number) => Math.round(v * 100) / 100;
@@ -730,4 +730,17 @@ export function deckOf(doc: CityDoc, ids: Id[]): number {
   let lv = 0;
   for (const id of ids) { const s = doc.get<'section'>(id); if (s) for (const a of anchorsOf(doc, s)) if (Math.abs(a.lift) > Math.abs(lv)) lv = a.lift; }
   return lv;
+}
+
+// ---------------- survey regions ----------------
+
+/**
+ * Change a survey region: the first edit of a traced DP region creates its region object (from `from`, the traced
+ * region's snapshot); later edits update it.
+ */
+export function editRegion(doc: CityDoc, id: Id, patch: Partial<RegionObj>, from?: Omit<RegionObj, 'kind' | 'id'>) {
+  const have = doc.get<'region'>(id);
+  if (have) { doc.update(id, patch); return; }
+  if (!from) return;
+  doc.create({ ...structuredClone(from), ...patch, kind: 'region', id } as RegionObj);
 }

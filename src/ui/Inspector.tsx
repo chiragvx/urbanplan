@@ -8,6 +8,7 @@ import * as xs from '../doc/xsection';
 import * as ops from '../doc/ops';
 import { CLASS_LABEL, ROAD_CLASSES, type Id, type SectionObj } from '../doc/types';
 import { COVER } from '../net/generate';
+import { RegionPanel } from './RegionPanel';
 import { LINE_LABEL } from '../doc/base';
 import { COMMANDS, setDeck } from '../editor/commands';
 import type { Part } from '../net/model';
@@ -24,6 +25,7 @@ export function Inspector() {
   if (!sel.length) return <Empty />;
   if (sel.length > 1) return <Multi />;
   const s = sel[0];
+  if (s.kind === 'region') return <RegionPanel id={s.id} />;
   const o = ui.doc.get(s.id);
   if (!o) return <Empty />;
   switch (o.kind) {

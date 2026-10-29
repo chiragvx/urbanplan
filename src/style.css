@@ -252,3 +252,20 @@ code { font: 12px ui-monospace, Menlo, Consolas, monospace; background: var(--pa
 .roadbar .select.small { font-size: 12px; padding: 3px 6px; }
 .roadbar .icon-btn { width: 24px; height: 24px; font-size: 10px; }
 @media (max-width: 1100px) { .roadbar .rb-modes button span { display: none; } }
+
+/* DP region inspector */
+.region-title { display: flex; align-items: center; gap: 8px; margin: 2px 0 2px; font-size: 16px; }
+.region-title .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.15); flex: none; }
+.sheet-crop { margin: 8px 0 4px; }
+.sheet-crop canvas { width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); display: block; background: #f4f3ef; }
+.sheet-crop figcaption { margin-top: 4px; }
+.survey-status { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.links .link-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 12.5px; }
+.links .link-row a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.links .row-inline { display: flex; gap: 6px; margin-top: 6px; }
+.links .row-inline .text { flex: 1; min-width: 0; }
+.survey .counts { display: grid; grid-template-columns: repeat(3, auto); justify-content: start; gap: 4px 14px; font-size: 12.5px; margin: 6px 0; }
+.survey .counts i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+.survey .list-item .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-right: 6px; }
+.review-mode { padding: 8px 10px 0; }
+.list-item.on { background: var(--accent-soft); }

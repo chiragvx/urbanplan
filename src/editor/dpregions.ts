@@ -2,6 +2,7 @@
 // (tools/dp/regions.py → tiles/<tile>/dp/regions.json). A reference layer for surveying: drawn in the plan, hover
 // to read a region. Polygons come from scanned paper maps registered to ~2–3 m — a survey aid, not legal boundaries.
 import { inRing } from './hit';
+import type { RegionObj } from '../doc/types';
 
 export interface DPRegion {
   id: string; cls: string; area: number;
@@ -25,6 +26,10 @@ export class DPRegions {
   data: DPRegionFile | null = null;
   private state: 'idle' | 'loading' | 'ready' | 'missing' = 'idle';
   private grid = new Map<number, DPRegion[]>();
+  private byId = new Map<string, DPRegion>();
+  /** DP sheet image blocks (tiles.py) for close-up crops */
+  sheetIndex: { res: number; tiles: { file: string; x0: number; z0: number; size: number }[] } | null = null;
+  private images = new Map<string, HTMLImageElement>();
   onLoad: () => void = () => {};
 
   constructor(public base = '') {}
@@ -42,6 +47,7 @@ export class DPRegions {
         let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
         for (let i = 0; i < r.ring.length; i += 2) { x0 = Math.min(x0, r.ring[i]); x1 = Math.max(x1, r.ring[i]); z0 = Math.min(z0, r.ring[i + 1]); z1 = Math.max(z1, r.ring[i + 1]); }
         r.box = [x0, z0, x1, z1];
+        this.byId.set(r.id, r);
         for (let i = Math.floor(x0 / CELL); i <= Math.floor(x1 / CELL); i++) for (let k = Math.floor(z0 / CELL); k <= Math.floor(z1 / CELL); k++) {
           const key = i * 100003 + k;
           (this.grid.get(key) ?? this.grid.set(key, []).get(key)!).push(r);
@@ -50,6 +56,7 @@ export class DPRegions {
       this.data = j;
       this.state = 'ready';
       this.onLoad();
+      fetch(`${this.base}dp/index.json`).then((r) => (r.ok ? r.json() : null)).then((ix) => { this.sheetIndex = ix; this.onLoad(); }).catch(() => {});
     }).catch(() => { this.state = 'missing'; this.onLoad(); });
   }
 
@@ -72,6 +79,31 @@ export class DPRegions {
     }
     return best;
   }
+
+  get(id: string): DPRegion | undefined { return this.byId.get(id); }
+
+  /** The traced region as the start of a survey region object. */
+  snapshot(r: DPRegion): Omit<RegionObj, 'kind' | 'id'> {
+    return {
+      src: r.id, cls: r.cls, reserved: r.reserved, ring: [...r.ring], ...(r.holes ? { holes: r.holes.map((h) => [...h]) } : {}),
+      area: r.area, sheet: r.sheet, ...(r.marker ? { marker: [...r.marker] as [number, number] } : {}), conf: r.conf, status: 'unsurveyed',
+    };
+  }
+
+  /** A loaded sheet image block (null until it has loaded; `onLoad` fires when it has). */
+  image(file: string): HTMLImageElement | null {
+    let im = this.images.get(file);
+    if (!im) {
+      im = new Image();
+      im.onload = () => this.onLoad();
+      im.src = `${this.base}dp/${file}`;
+      this.images.set(file, im);
+    }
+    return im.complete && im.naturalWidth ? im : null;
+  }
+
+  classLabel(cls: string) { return this.data?.classes[cls]?.label ?? cls; }
+  classColor(cls: string) { return this.data?.classes[cls]?.color ?? '#999999'; }
 
   label(r: DPRegion) { return this.data?.classes[r.cls]?.label ?? r.cls; }
   color(r: DPRegion) { return this.data?.classes[r.cls]?.color ?? '#999999'; }
