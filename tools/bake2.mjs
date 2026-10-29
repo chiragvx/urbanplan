@@ -335,7 +335,7 @@ for (const w of osm.ways.values()) {
 }
 const needNodes = new Set();
 for (const w of roadWays) for (const n of w.nds) needNodes.add(n);
-let xml = `<?xml version="1.0" encoding="UTF-8"?>\n<osm version="0.6" generator="PuneRemix bake2">\n<bounds minlat="${bS}" minlon="${bW}" maxlat="${bN}" maxlon="${bE}"/>\n`;
+let xml = `<?xml version="1.0" encoding="UTF-8"?>\n<osm version="0.6" generator="UrbanPlan bake2">\n<bounds minlat="${bS}" minlon="${bW}" maxlat="${bN}" maxlon="${bE}"/>\n`;
 for (const id of needNodes) { const n = osm.nodes.get(id); xml += `<node id="${id}" lat="${n.lat}" lon="${n.lon}">${Object.entries(n.tags).filter(([k]) => k === 'highway' || k === 'crossing').map(([k, v]) => `<tag k="${esc(k)}" v="${esc(v)}"/>`).join('')}</node>\n`; }
 for (const w of roadWays) xml += `<way id="${w.id}">${w.nds.map((n) => `<nd ref="${n}"/>`).join('')}${Object.entries(w.tags).map(([k, v]) => `<tag k="${esc(k)}" v="${esc(v)}"/>`).join('')}</way>\n`;
 xml += '</osm>\n';

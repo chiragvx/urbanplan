@@ -32,7 +32,7 @@ export function TopBar() {
   return (
     <header class="topbar">
       <div class="tb-left">
-        <Menu class="logo-menu" label={<span class="logo">Pune<span>Remix</span></span>} items={[
+        <Menu class="logo-menu" label={<span class="logo">Urban<span>Plan</span></span>} items={[
           item('file.new'), item('file.open'), 'sep', item('file.save'), item('file.saveas'), item('file.download'), 'sep', item('file.export'), item('file.publish'), 'sep', item('file.settings'), item('help.keys'), item('help.about'),
         ]} />
         <input class="map-name" value={name ?? d.meta.name} disabled={ro} title="Map name"

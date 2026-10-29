@@ -145,7 +145,7 @@ export interface MapMeta {
 }
 
 export interface MapFile {
-  format: 'pune-remix/map';
+  format: 'urbanplan/map' | 'pune-remix/map';
   version: 1;
   meta: MapMeta;
   objects: Record<Id, PatchEntry>;

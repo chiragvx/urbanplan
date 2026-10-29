@@ -22,7 +22,7 @@ for (const url of ['https://overpass-api.de/api/interpreter', 'https://overpass.
     console.log(`Fetching road XML for ${tile.id} from ${url} ...`);
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'User-Agent': 'PuneRemix-prototype/0.2', 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: { 'User-Agent': 'UrbanPlan/0.2', 'Content-Type': 'application/x-www-form-urlencoded' },
       body: 'data=' + encodeURIComponent(query),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);

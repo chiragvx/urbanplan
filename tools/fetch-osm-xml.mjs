@@ -46,7 +46,7 @@ async function run(q, label) {
       console.log(`  ${label}: ${url} (attempt ${attempt + 1})`);
       const res = await fetch(url, {
         method: 'POST',
-        headers: { 'User-Agent': 'PuneRemix-prototype/0.2', 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: { 'User-Agent': 'UrbanPlan/0.2', 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'data=' + encodeURIComponent(q),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -76,7 +76,7 @@ function merge(docs) {
       parts[m[1]].push(m[0]);
     }
   }
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<osm version="0.6" generator="PuneRemix merge">\n${parts.node.join('\n')}\n${parts.way.join('\n')}\n${parts.relation.join('\n')}\n</osm>\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<osm version="0.6" generator="UrbanPlan merge">\n${parts.node.join('\n')}\n${parts.way.join('\n')}\n${parts.relation.join('\n')}\n</osm>\n`;
 }
 
 const S = b.s - pad, W = b.w - pad, N = b.n + pad, E = b.e + pad;

@@ -4,14 +4,14 @@ import path from 'node:path';
 
 /**
  * Dev-server endpoints so the editor can keep maps as files in the project:
- *   GET  /__maps/list            maps/*.punemap.json (name, author, edits)
+ *   GET  /__maps/list            maps/*.urbanplan.json (name, author, edits)
  *   GET  /__maps/file?name=      one map file
  *   POST /__maps/save?name=      write maps/<name>
  *   POST /__maps/publish?name=   copy into public/maps/ and list it in public/maps/index.json (the site gallery)
  */
 function mapsPlugin(): Plugin {
   const dir = path.resolve('maps'), pub = path.resolve('public', 'maps');
-  const ok = (n: string | null): n is string => !!n && /^[a-z0-9][a-z0-9._-]*\.punemap\.json$/i.test(n);
+  const ok = (n: string | null): n is string => !!n && /^[a-z0-9][a-z0-9._-]*\.(urbanplan|punemap)\.json$/i.test(n);
   const body = (req: import('node:http').IncomingMessage) => new Promise<string>((res, rej) => {
     let s = '';
     req.on('data', (c) => { s += c; if (s.length > 50e6) rej(new Error('too large')); });
@@ -20,11 +20,11 @@ function mapsPlugin(): Plugin {
   });
   const summary = (text: string) => {
     const f = JSON.parse(text);
-    if (f.format !== 'pune-remix/map') throw new Error('not a map file');
+    if (f.format !== 'urbanplan/map' && f.format !== 'pune-remix/map') throw new Error('not a map file');
     return { name: f.meta?.name ?? '', author: f.meta?.author ?? '', description: f.meta?.description ?? '', updated: f.meta?.updated ?? '', edits: Object.keys(f.objects ?? {}).length };
   };
   return {
-    name: 'pune-remix-maps',
+    name: 'urbanplan-maps',
     configureServer(server) {
       server.middlewares.use('/__maps', async (req, res) => {
         const url = new URL(req.url ?? '/', 'http://x');
@@ -33,7 +33,7 @@ function mapsPlugin(): Plugin {
         try {
           if (url.pathname === '/list') {
             fs.mkdirSync(dir, { recursive: true });
-            const list = fs.readdirSync(dir).filter((f) => f.endsWith('.punemap.json')).map((file) => {
+            const list = fs.readdirSync(dir).filter((f) => f.endsWith('.urbanplan.json') || f.endsWith('.punemap.json')).map((file) => {
               try { return { file, ...summary(fs.readFileSync(path.join(dir, file), 'utf8')) }; } catch { return null; }
             }).filter(Boolean);
             return send(200, JSON.stringify(list), 'application/json');

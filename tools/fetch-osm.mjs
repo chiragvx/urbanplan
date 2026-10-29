@@ -35,7 +35,7 @@ for (const url of ENDPOINTS) {
     console.log(`Fetching ${tile.id} (${tile.sizeKm}x${tile.sizeKm} km) from ${url} ...`);
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'User-Agent': 'PuneRemix-prototype/0.1', 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: { 'User-Agent': 'UrbanPlan/0.1', 'Content-Type': 'application/x-www-form-urlencoded' },
       body: 'data=' + encodeURIComponent(query),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);

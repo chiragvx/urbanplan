@@ -1,12 +1,12 @@
 // Command line for maps — the same document, operations and checks as the editor, without a browser.
 //
-//   npm run map -- info    maps/my.punemap.json
-//   npm run map -- apply   maps/my.punemap.json scripts/widen.mjs     (script: export default (city) => { … })
-//   npm run map -- check   maps/my.punemap.json
-//   npm run map -- geojson maps/my.punemap.json out.geojson
-//   npm run map -- network maps/my.punemap.json out/network.json
-//   npm run map -- publish maps/my.punemap.json                       (copy into public/maps + gallery)
-//   npm run map -- new     maps/new.punemap.json "Name" "Author"
+//   npm run map -- info    maps/my.urbanplan.json
+//   npm run map -- apply   maps/my.urbanplan.json scripts/widen.mjs     (script: export default (city) => { … })
+//   npm run map -- check   maps/my.urbanplan.json
+//   npm run map -- geojson maps/my.urbanplan.json out.geojson
+//   npm run map -- network maps/my.urbanplan.json out/network.json
+//   npm run map -- publish maps/my.urbanplan.json                       (copy into public/maps + gallery)
+//   npm run map -- new     maps/new.urbanplan.json "Name" "Author"
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -124,7 +124,7 @@ async function main() {
       openFile(doc);
       const C = compiled(doc, hf);
       const [lat0, lon0] = tile.center;
-      const out = a3 ?? file.replace(/\.punemap\.json$/, '.geojson');
+      const out = a3 ?? file.replace(/\.(urbanplan|punemap)\.json$/, '.geojson');
       fs.writeFileSync(out, JSON.stringify(toGeoJSON(doc, C, { lat0, lon0, kx: tile.proj.kx, kz: tile.proj.kz }, { buildings: a4 === '--buildings' })));
       console.log(`wrote ${out}`);
       break;

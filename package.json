@@ -1,9 +1,9 @@
 {
-  "name": "pune-remix",
+  "name": "urbanplan",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Pune Remix — edit Pune in 2D like Figma, see it in 3D. Built on open data.",
+  "description": "UrbanPlan — edit a city in 2D like Figma, see it in 3D. Built on open data.",
   "scripts": {
     "fetch": "node tools/fetch-osm.mjs",
     "bake": "node tools/bake.mjs",

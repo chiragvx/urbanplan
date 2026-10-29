@@ -32,7 +32,7 @@ type Typed = Float32Array | Uint32Array | Uint8Array;
 
 export async function loadTile(id: string, progress: (f: number, msg: string) => void): Promise<TileData> {
   const base = `${import.meta.env.BASE_URL}tiles/${id}/`;
-  progress(0.02, 'Downloading Pune…');
+  progress(0.02, 'Downloading the city…');
   const [hdr, bin] = await Promise.all([
     fetch(base + 'tile.json').then((r) => r.json()),
     fetch(base + 'tile.bin').then((r) => r.arrayBuffer()),

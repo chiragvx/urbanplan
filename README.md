@@ -1,8 +1,8 @@
-# Pune Remix
+# UrbanPlan
 
-Edit real Pune like a Figma file, see it in 3D like Cities: Skylines. A personal map editor for making a more
-accurate map of the city — roads, junctions, utilities, metro — that you can publish and others can copy and edit.
-Illustrative concept, not engineering advice. Current tile: **Koregaon Park · Kalyani Nagar**, 5×5 km.
+Edit a real city like a Figma file, see it in 3D like Cities: Skylines. A personal map editor for making more
+accurate city maps — roads, junctions, utilities, metro — that you can publish and others can copy and edit.
+Illustrative concept, not engineering advice. Current data: Pune, **Koregaon Park · Kalyani Nagar** tile, 5×5 km.
 
 ## Run
 
@@ -47,11 +47,11 @@ npm test        # headless document + cross-section tests
 
 ### Maps: save, publish, copy
 
-A map is **only your edits** (`.punemap.json`): one line per edited object, so `git diff` reads like "this road's
+A map is **only your edits** (`.urbanplan.json`): one line per edited object, so `git diff` reads like "this road's
 cross-section changed". Edits sit on top of the baked base map and are re-attached by locator (OSM ways + position)
 when the base is re-imported; anything that no longer matches is kept and listed under Issues.
 
-- Autosaves in the browser. **Save** (<kbd>Ctrl S</kbd>) writes `maps/<name>.punemap.json` in this repo when running `npm run dev`
+- Autosaves in the browser. **Save** (<kbd>Ctrl S</kbd>) writes `maps/<name>.urbanplan.json` in this repo when running `npm run dev`
   (elsewhere: a file on disk / download).
 - **Publish** copies the map into `public/maps/` and its gallery; `npm run build` → upload `dist/` to any static host.
   `?map=<url>` opens any hosted map read-only with **Edit a copy** (a fork that remembers where it came from).
@@ -71,12 +71,12 @@ city.help()
 ```
 
 ```bash
-npm run map -- new maps/my.punemap.json "My map" "Me"
-npm run map -- apply maps/my.punemap.json scripts/widen.mjs    # export default (city) => { … }
-npm run map -- check maps/my.punemap.json                       # exit code 2 if there are errors
-npm run map -- geojson maps/my.punemap.json out.geojson
-npm run map -- network maps/my.punemap.json out/network.json
-npm run map -- publish maps/my.punemap.json
+npm run map -- new maps/my.urbanplan.json "My map" "Me"
+npm run map -- apply maps/my.urbanplan.json scripts/widen.mjs    # export default (city) => { … }
+npm run map -- check maps/my.urbanplan.json                       # exit code 2 if there are errors
+npm run map -- geojson maps/my.urbanplan.json out.geojson
+npm run map -- network maps/my.urbanplan.json out/network.json
+npm run map -- publish maps/my.urbanplan.json
 ```
 
 ## Data pipeline (offline)
@@ -157,5 +157,3 @@ legacy/v1/    first prototype (custom WebGPU engine, Baner)
 ```
 
 Data © OpenStreetMap contributors (ODbL) · Copernicus DEM GLO-30 © DLR/Airbus (EU/ESA).
-#   u r b a n p l a n  
- 

@@ -1,4 +1,4 @@
-// Pune Remix — map editor: 2D plan editing with an instant 3D view, on top of the baked city.
+// UrbanPlan — map editor: 2D plan editing with an instant 3D view, on top of the baked city.
 import { render, h } from 'preact';
 import { App } from './app/app';
 import { setUI } from './ui/ctx';

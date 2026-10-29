@@ -33,7 +33,7 @@ async function get(s, w, n, e, depth = 0) {
   if (fs.existsSync(cacheFile)) { ingest(fs.readFileSync(cacheFile, 'utf8')); return; }
   const url = `https://api.openstreetmap.org/api/0.6/map?bbox=${w},${s},${e},${n}`;
   for (let attempt = 0; attempt < 4; attempt++) {
-    const res = await fetch(url, { headers: { 'User-Agent': 'PuneRemix-prototype/0.2 (urban planning game prototype)' } });
+    const res = await fetch(url, { headers: { 'User-Agent': 'UrbanPlan/0.2 (urban planning game prototype)' } });
     if (res.status === 400 && depth < 3) {
       // too many nodes → split this cell into 4
       const ms = (s + n) / 2, mw = (w + e) / 2;
@@ -58,7 +58,7 @@ for (let i = 0; i < splits; i++) for (let j = 0; j < splits; j++) {
   console.log(`  cell ${++k}/${splits * splits}`);
   await get(s, w, n, e);
 }
-const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<osm version="0.6" generator="PuneRemix osm-api merge">\n` +
+const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<osm version="0.6" generator="UrbanPlan osm-api merge">\n` +
   [...elements.node.values(), ...elements.way.values(), ...elements.relation.values()].join('\n') + '\n</osm>\n';
 const out = path.join('data', 'raw', `${tile.id}.osm`);
 fs.writeFileSync(out, xml);

@@ -1,10 +1,12 @@
-// .punemap.json — a map is its edits: one line per edited object, stable order, so git diffs read like
+// .urbanplan.json — a map is its edits: one line per edited object, stable order, so git diffs read like
 // "section s1x… parts changed". Opening a map re-attaches edits to the current base (ids, then locators).
 import type { CityDoc } from './doc';
 import type { Id, Locator, MapFile, MapMeta, Obj, PatchEntry } from './types';
 import { newId } from './ids';
 
-export const FILE_EXT = '.punemap.json';
+export const FILE_EXT = '.urbanplan.json';
+/** map file format ids this version reads (the first is written; the second is the old Pune Remix name) */
+export const FORMATS = ['urbanplan/map', 'pune-remix/map'] as const;
 
 export function newMeta(tile: string, base: string, author = ''): MapMeta {
   const now = new Date().toISOString();
@@ -30,13 +32,13 @@ export function serialize(doc: CityDoc): string {
     if (e.add) out.add = round(e.add) as Obj;
     return `    ${JSON.stringify(id)}: ${JSON.stringify(out)}`;
   });
-  const head: Omit<MapFile, 'objects'> = { format: 'pune-remix/map', version: 1, meta: doc.meta };
+  const head: Omit<MapFile, 'objects'> = { format: FORMATS[0], version: 1, meta: doc.meta };
   return `{\n  "format": ${JSON.stringify(head.format)},\n  "version": 1,\n  "meta": ${JSON.stringify(doc.meta)},\n  "objects": {\n${lines.join(',\n')}\n  }\n}\n`;
 }
 
 export function parse(text: string): MapFile {
   const f = JSON.parse(text) as MapFile;
-  if (f.format !== 'pune-remix/map') throw new Error('Not a Pune Remix map file');
+  if (!(FORMATS as readonly string[]).includes(f.format)) throw new Error('Not an UrbanPlan map file');
   if (f.version !== 1) throw new Error(`Unsupported map version ${f.version}`);
   if (!f.objects || typeof f.objects !== 'object') throw new Error('Map file has no objects');
   return f;

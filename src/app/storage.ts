@@ -2,6 +2,7 @@
 // (File System Access / download), and published maps on any static host (maps/index.json gallery).
 import type { MapMeta } from '../doc/types';
 
+// storage keys keep the old name so autosaved maps survive the rename
 const DB = 'pune-remix', STORE = 'maps';
 
 function db(): Promise<IDBDatabase> {
@@ -86,7 +87,7 @@ export async function saveToDisk(name: string, text: string, again = false): Pro
   const w = window as unknown as { showSaveFilePicker?: (o: unknown) => Promise<FileHandle> };
   if (w.showSaveFilePicker) {
     try {
-      if (!handle || again) handle = await w.showSaveFilePicker({ suggestedName: name, types: [{ description: 'Pune Remix map', accept: { 'application/json': ['.json'] } }] });
+      if (!handle || again) handle = await w.showSaveFilePicker({ suggestedName: name, types: [{ description: 'UrbanPlan map', accept: { 'application/json': ['.json'] } }] });
       const s = await handle.createWritable();
       await s.write(text); await s.close();
       return handle.name;

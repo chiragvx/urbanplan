@@ -369,7 +369,7 @@ export function buildLayer(features, t, meta, ctx = {}) {
 
 // ---------------------------------------------------------------- download
 async function fetchJson(url) {
-  const r = await fetch(url, { headers: { 'user-agent': 'pune-remix-import-utilities' } });
+  const r = await fetch(url, { headers: { 'user-agent': 'urbanplan-import-utilities' } });
   if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
   return r.json();
 }

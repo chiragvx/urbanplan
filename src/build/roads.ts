@@ -158,7 +158,7 @@ export function buildRoadMeshes(net: StreetNet, elev: Elevation, hf: Heightfield
     else structureUnder(concrete, it.poly, zf, T, false, null);
   }
 
-  const tick = (label: string) => console.info(`[PuneRemix]   roads/${label} ${Math.round(performance.now() - t0)}ms`);
+  const tick = (label: string) => console.info(`[UrbanPlan]   roads/${label} ${Math.round(performance.now() - t0)}ms`);
   const t0 = performance.now();
   tick('junctions');
   // ---------------- Lanes ----------------

@@ -52,6 +52,7 @@ function loadSettings(): Settings {
     author: '', wheel: 'zoom', snap: true, showGrid: false, units: 'm',
     roadMode: 'straight', elevStep: 2.5, snapGeometry: true, snapAngles: true, snapGuides: true, snapLength: 1, grade: 0.05,
   };
+  // key keeps the old name so settings survive the rename
   try { return { ...def, ...JSON.parse(localStorage.getItem('pune-remix:settings') ?? '{}') }; } catch { return def; }
 }
 export function saveSettings(s: Partial<Settings>) {

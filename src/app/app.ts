@@ -88,7 +88,7 @@ export class App implements AppApi {
       select: (ids) => select(ids.map((id) => ({ kind: this.doc.get(id)!.kind, id }))),
       zoom: () => this.E.zoomToSelection(),
     });
-    console.info('%cPune Remix editor', 'font-weight:bold;color:#ff8a3d', '— script edits with `city`, e.g. city.help()');
+    console.info('%cUrbanPlan editor', 'font-weight:bold;color:#ff8a3d', '— script edits with `city`, e.g. city.help()');
     this.loop();
   }
 
@@ -117,7 +117,7 @@ export class App implements AppApi {
     if (r.unresolved.length) toast(`${r.unresolved.length} edit(s) no longer match the base map — see Issues`, 'warn');
     if (source) status.value = `Opened ${source}`;
     docVersion.value++;
-    document.title = `${this.doc.meta.name} — Pune Remix`;
+    document.title = `${this.doc.meta.name} — UrbanPlan`;
   }
 
   async openUrl(url: string, viewOnly: boolean) {
@@ -193,7 +193,7 @@ export class App implements AppApi {
   setMeta(m: Partial<MapMeta>) {
     Object.assign(this.doc.meta, m, { updated: new Date().toISOString() });
     this.doc.version++;
-    document.title = `${this.doc.meta.name} — Pune Remix`;
+    document.title = `${this.doc.meta.name} — UrbanPlan`;
     docVersion.value++;
     this.scheduleSave();
   }
@@ -253,7 +253,7 @@ export class App implements AppApi {
   }
 
   copyLink() {
-    const at = prompt('Where is the map file hosted? (a URL to the .punemap.json, e.g. a GitHub raw link or gist)');
+    const at = prompt('Where is the map file hosted? (a URL to the .urbanplan.json, e.g. a GitHub raw link or gist)');
     if (!at) return;
     const link = `${location.origin}${location.pathname}?map=${encodeURIComponent(at.trim())}`;
     navigator.clipboard?.writeText(link).then(() => toast('Link copied — anyone with it can view and copy your map', 'ok'), () => prompt('Copy this link', link));
@@ -359,7 +359,7 @@ export class App implements AppApi {
     if (this.E.markers.length) this.showMarkers(true);
     if (c.origin !== 'load') this.scheduleSave();
     for (const id of c.ids) if (this.doc.get(id)?.kind === 'layer' || this.doc.base.get(id)?.kind === 'layer') { this.world.applyLayers(); this.lastView = ''; break; }
-    document.title = `${this.doc.version !== this.doc.savedVersion ? '• ' : ''}${this.doc.meta.name} — Pune Remix`;
+    document.title = `${this.doc.version !== this.doc.savedVersion ? '• ' : ''}${this.doc.meta.name} — UrbanPlan`;
   }
 
   private loop() {

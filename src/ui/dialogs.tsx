@@ -68,8 +68,8 @@ function OpenDialog() {
             {!pub.length && <p class="muted small">None published on this site yet.</p>}
           </div>
           <h4>From a file or link</h4>
-          <div class="btns"><button onClick={() => ui.app.openFile()}>Choose a .punemap.json file…</button></div>
-          <div class="row-inline"><input class="text" placeholder="https://…/my-map.punemap.json" value={url} onInput={(e) => setUrl((e.currentTarget as HTMLInputElement).value)} /><button disabled={!url} onClick={() => ui.app.openUrl(url, true)}>Open</button></div>
+          <div class="btns"><button onClick={() => ui.app.openFile()}>Choose a .urbanplan.json file…</button></div>
+          <div class="row-inline"><input class="text" placeholder="https://…/my-map.urbanplan.json" value={url} onInput={(e) => setUrl((e.currentTarget as HTMLInputElement).value)} /><button disabled={!url} onClick={() => ui.app.openUrl(url, true)}>Open</button></div>
           <p class="muted small">You can also drop a map file anywhere on the window.</p>
           <div class="btns"><button onClick={() => ui.app.newMap()}>Start a new map from the base</button></div>
         </div>
@@ -112,7 +112,7 @@ function ExportDialog() {
       <div class="export-list">
         <div><b>GeoJSON</b><p class="muted small">Roads (with widths, lanes, cross-sections), junctions and visible line layers in WGS84 — opens in QGIS, geojson.io, JOSM.</p><Toggle label="Include buildings" checked={bld} onChange={setBld} /><button onClick={() => ui.app.exportGeoJSON(bld)}>Download .geojson</button></div>
         <div><b>Network (network.json)</b><p class="muted small">The edited road network in the bake format, for the offline tools (junction audit, DP measurement).</p><button onClick={() => ui.app.exportNetwork()}>Download network.json</button></div>
-        <div><b>Map file</b><p class="muted small">Just your edits (.punemap.json): small, diff-friendly, re-applies on top of newer base data.</p><button onClick={() => ui.app.download()}>Download .punemap.json</button></div>
+        <div><b>Map file</b><p class="muted small">Just your edits (.urbanplan.json): small, diff-friendly, re-applies on top of newer base data.</p><button onClick={() => ui.app.download()}>Download .urbanplan.json</button></div>
       </div>
     </Modal>
   );
@@ -150,7 +150,7 @@ function HelpDialog() {
             <li><b>Bridges</b>: <kbd>PgUp</kbd>/<kbd>PgDn</kbd> set the height while drawing — crossings at the same level become junctions, higher ones pass over. With a road selected, <kbd>Shift</kbd>+<kbd>PgUp</kbd> makes it a flyover with ramps; <kbd>Shift</kbd>+<kbd>PgDn</kbd> brings it down.</li>
             <li><b>Snapping</b>: junctions, roads at your level, 90° / 45° to the road you start from, guide lines from road ends, round lengths. <kbd>Shift</kbd> = 15° steps, hold <kbd>Ctrl</kbd> to skip, <kbd>S</kbd> toggles. <kbd>B</kbd> bulldozes; <kbd>K</kbd> splits a road so part of it can differ.</li>
             <li><kbd>Tab</kbd> flips between 2D and 3D. <kbd>X</kbd> x-ray shows pipes underground. <kbd>D</kbd> shows the DP sheets underneath.</li>
-            <li>Everything is undoable. Your work autosaves in this browser; <b>Save</b> writes a <code>.punemap.json</code> file.</li>
+            <li>Everything is undoable. Your work autosaves in this browser; <b>Save</b> writes a <code>.urbanplan.json</code> file.</li>
             <li>In the browser console, <code>city</code> scripts the same edits: <code>city.roads(&#123; name: /Nagar/ &#125;).width(30)</code> — try <code>city.help()</code>.</li>
           </ul>
         </div>
@@ -168,8 +168,8 @@ function HelpDialog() {
 
 function AboutDialog() {
   return (
-    <Modal title="About Pune Remix">
-      <p>A Cities: Skylines-style editor for a more accurate map of Pune. Illustrative — not engineering advice.</p>
+    <Modal title="About UrbanPlan">
+      <p>A Cities: Skylines-style editor for making more accurate city maps. Illustrative — not engineering advice.</p>
       <ul class="sources">
         <li>Roads, buildings, rail: © OpenStreetMap contributors, ODbL.</li>
         <li>Terrain: Copernicus DEM GLO-30 © DLR / Airbus (EU / ESA).</li>
