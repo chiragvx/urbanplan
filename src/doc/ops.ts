@@ -315,10 +315,20 @@ function endpointFor(doc: CityDoc, p: PenPoint): JunctionObj {
 }
 
 /** Level flags for a section from its heights (anything raised is a bridge / flyover). */
-function levelOf(path: Anchor[], ja: JunctionObj, jb: JunctionObj): Pick<SectionObj, 'bridge' | 'deck' | 'elevated'> {
-  const top = Math.max(ja.lift, jb.lift, ...path.map((p) => p.lift));
-  return top > 0.25 ? { bridge: 'overpass', deck: r2(top), elevated: true } : { bridge: 'none', deck: 0, elevated: false };
+function levelOf(path: Anchor[], ja: JunctionObj, jb: JunctionObj): Pick<SectionObj, 'bridge' | 'deck' | 'elevated' | 'tunnel'> {
+  return levelFlags([ja.lift, jb.lift, ...path.map((p) => p.lift)]);
 }
+
+/** Level flags from heights: anything raised is a bridge / flyover, anything sunk an underpass / tunnel. */
+export function levelFlags(lifts: number[]): Pick<SectionObj, 'bridge' | 'deck' | 'elevated' | 'tunnel'> {
+  const top = Math.max(...lifts), bottom = Math.min(...lifts);
+  if (top > 0.25) return { bridge: 'overpass', deck: r2(top), elevated: true, tunnel: bottom < -0.25 };
+  if (bottom < -0.25) return { bridge: 'none', deck: r2(bottom), elevated: false, tunnel: true };
+  return { bridge: 'none', deck: 0, elevated: false, tunnel: false };
+}
+
+/** Any section off the ground (bridge, flyover, underpass, tunnel). */
+export const offGrade = (s: SectionObj) => s.elevated || s.bridge !== 'none' || !!s.tunnel;
 
 /**
  * Create a road from pen points: a new road object and one section per stretch between junction / section snaps.
@@ -560,6 +570,8 @@ export function autoConnect(doc: CityDoc, ids: Id[]): { joined: number; bridged:
 
 /** Deck height of a flyover over a road: 5.5 m clearance plus the deck. */
 export const FLYOVER_DECK = 6.5;
+/** Road level of a covered tunnel / underpass: 5.5 m headroom, a 1 m roof and about 1.5 m of ground above. */
+export const TUNNEL_DEPTH = -8;
 
 interface ChainItem { s: SectionObj; fwd: boolean }
 /** Sections in runs through shared junctions (a road drawn in several sections). */
@@ -635,25 +647,29 @@ export function pruneSplits(P: Anchor[]): Anchor[] {
 export interface LevelResult { deck: number; grade: number; ramp: number; steep: boolean; lowered: boolean }
 
 /**
- * Raise sections to a deck height with graded ramps at the ends of each run (a flyover). Junctions in the
- * middle that connect other roads stay on the ground and the flyover passes over them.
+ * Raise sections to a deck height (or sink them, deck < 0) with graded ramps at the ends of each run: a flyover or
+ * an underpass / tunnel. Junctions in the middle that connect other roads stay on the ground and are passed over
+ * (or under).
  */
 export function elevate(doc: CityDoc, ids: Id[], deck: number, grade = 0.05, maxGrade = 0.1): LevelResult {
+  // a tunnel is a flyover upside down: work in mirrored heights
+  const sg = deck < 0 ? -1 : 1;
   let res: LevelResult = { deck, grade, ramp: 0, steep: false, lowered: false };
   for (const chain of chainsOf(doc, ids)) {
     const first = chain[0], last = chain[chain.length - 1];
-    const ja = doc.get<'junction'>(first.fwd ? first.s.a : first.s.b)!, jb = doc.get<'junction'>(last.fwd ? last.s.b : last.s.a)!;
+    const JA = doc.get<'junction'>(first.fwd ? first.s.a : first.s.b)!, JB = doc.get<'junction'>(last.fwd ? last.s.b : last.s.a)!;
+    const ja = { lift: JA.lift * sg }, jb = { lift: JB.lift * sg };
     const lens = chain.map((c) => samplePath(anchorsOf(doc, c.s), 24).len);
     const L = lens.reduce((a, b) => a + b, 0);
     if (L < 2) continue;
     // ramps at the run's ends; steeper when the run is short, then a lower deck
-    let D = deck, g = grade;
+    let D = deck * sg, g = grade;
     const need = Math.max(0, D - ja.lift) + Math.max(0, D - jb.lift);
     if (need / L > g) g = Math.min(maxGrade, need / L);
     if (need / L > maxGrade) D = Math.max(0, (L * maxGrade + ja.lift + jb.lift) / 2);
     const prof = (u: number) => Math.max(0, Math.min(D, ja.lift + g * u, jb.lift + g * (L - u)));
     const tops = [(D - ja.lift) / g, L - (D - jb.lift) / g].filter((u) => u > 0.5 && u < L - 0.5);
-    res = { deck: r2(D), grade: g, ramp: Math.round(Math.max(0, D - Math.min(ja.lift, jb.lift)) / g), steep: g > grade + 1e-6, lowered: D < deck - 0.01 };
+    res = { deck: r2(D * sg), grade: g, ramp: Math.round(Math.max(0, D - Math.min(ja.lift, jb.lift)) / g), steep: g > grade + 1e-6, lowered: D < deck * sg - 0.01 };
     let base = 0;
     chain.forEach((c, i) => {
       const len = lens[i];
@@ -667,17 +683,16 @@ export function elevate(doc: CityDoc, ids: Id[], deck: number, grade = 0.05, max
         P = insertAt(P, sl);
       }
       const at = anchorStations(P);
-      const path = P.map((a, k) => ({ ...a, lift: r2(prof(c.fwd ? base + at[k] : base + len - at[k])) }));
-      const top = Math.max(...path.map((a) => a.lift));
-      doc.update(sec.id, { path, ...(top > 0.25 ? { bridge: 'overpass', deck: r2(top), elevated: true } : { bridge: 'none', deck: 0, elevated: false }) });
+      const path = P.map((a, k) => ({ ...a, lift: r2(sg * prof(c.fwd ? base + at[k] : base + len - at[k])) }));
+      doc.update(sec.id, { path, ...levelFlags(path.map((a) => a.lift)) });
       // the junction at this section's far end, inside the run
       if (i < chain.length - 1) {
         const jid = c.fwd ? sec.b : sec.a;
-        const lift = r2(prof(base + len));
+        const lift = r2(sg * prof(base + len));
         const next = chain[i + 1].s.id;
         const others = doc.sectionsAt(jid).filter((q) => q.id !== sec.id && q.id !== next);
-        if (others.length && lift > 0.25) {
-          // pass over: the run gets its own junction above the one on the ground
+        if (others.length && Math.abs(lift) > 0.25) {
+          // pass over (or under): the run gets its own junction above / below the one on the ground
           const J = doc.get<'junction'>(jid)!;
           const nj = newJunction(doc, J.x, J.z, lift);
           for (const q of [sec.id, next]) { const o = doc.get<'section'>(q)!; doc.update(q, o.a === jid ? { a: nj.id } : { b: nj.id }); }
@@ -689,30 +704,30 @@ export function elevate(doc: CityDoc, ids: Id[], deck: number, grade = 0.05, max
   return res;
 }
 
-/** Bring sections back to the ground; flyover junctions that sit over a ground junction reconnect to it. */
+/** Bring sections back to the ground; flyover / tunnel junctions over / under a ground junction reconnect to it. */
 export function toGround(doc: CityDoc, ids: Id[]) {
   const set = new Set(ids);
   const touched = new Set<Id>();
   for (const id of ids) {
     const s = doc.get<'section'>(id);
     if (!s) continue;
-    doc.update(id, { path: pruneSplits(s.path).map((a) => ({ ...a, lift: 0 })), bridge: 'none', deck: 0, elevated: false });
+    doc.update(id, { path: pruneSplits(s.path).map((a) => ({ ...a, lift: 0 })), bridge: 'none', deck: 0, elevated: false, tunnel: false });
     touched.add(s.a); touched.add(s.b);
   }
   for (const j of touched) {
     const J = doc.get<'junction'>(j);
-    if (!J || J.lift <= 0) continue;
-    // only when nothing else still needs it raised
-    if (doc.sectionsAt(j).some((q) => !set.has(q.id) && (q.elevated || q.bridge !== 'none'))) continue;
+    if (!J || J.lift === 0) continue;
+    // only when nothing else still needs it raised / sunk
+    if (doc.sectionsAt(j).some((q) => !set.has(q.id) && offGrade(q))) continue;
     doc.set(j, 'lift', 0);
-    const under = doc.all('junction').find((o) => o.id !== j && o.lift <= 0.25 && Math.hypot(o.x - J.x, o.z - J.z) < 1);
+    const under = doc.all('junction').find((o) => o.id !== j && Math.abs(o.lift) <= 0.25 && Math.hypot(o.x - J.x, o.z - J.z) < 1);
     if (under) mergeJunctions(doc, j, under.id);
   }
 }
 
-/** Highest point of sections (their deck). */
+/** Level of sections: the height furthest from the ground (deck height > 0, tunnel depth < 0). */
 export function deckOf(doc: CityDoc, ids: Id[]): number {
-  let top = 0;
-  for (const id of ids) { const s = doc.get<'section'>(id); if (s) for (const a of anchorsOf(doc, s)) top = Math.max(top, a.lift); }
-  return top;
+  let lv = 0;
+  for (const id of ids) { const s = doc.get<'section'>(id); if (s) for (const a of anchorsOf(doc, s)) if (Math.abs(a.lift) > Math.abs(lv)) lv = a.lift; }
+  return lv;
 }

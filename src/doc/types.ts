@@ -24,6 +24,8 @@ export interface SectionObj {
   bridge: BridgeKind;
   deck: number;
   elevated: boolean;
+  /** below the ground somewhere (an underpass, trench or tunnel; heights are negative) */
+  tunnel?: boolean;
   viaduct: boolean;
   /** Development Plan road reserve (m), when measured */
   reserve?: number;

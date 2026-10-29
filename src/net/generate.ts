@@ -304,6 +304,7 @@ export interface MSeg {
   p: number[];
   t: RoadType; cls: string; bridge: BridgeKind;
   elevated?: boolean; viaduct?: boolean;
+  /** below the ground (a trench, underpass or tunnel) */ sunk?: boolean;
   /** raster / picking code (> 0) */
   code: number;
   /** the editor object this piece belongs to (section id) */
@@ -317,7 +318,16 @@ export const MESH_LAYERS: MeshLayer[] = ['asphalt', 'paving', 'markings', 'concr
 export interface Packed { pos: Float32Array; nor: Float32Array; col: Float32Array; uv: Float32Array; idx: Uint32Array }
 
 /** Terrain carving / footprint stamp of one item: a swept centre line or a closed polygon. */
-export interface Stamp { line?: Float32Array; hw?: number; ring?: Float32Array; carve: boolean; code: number }
+export interface Stamp {
+  line?: Float32Array; hw?: number; ring?: Float32Array; carve: boolean; code: number;
+  /** road surface height per line point (sunken roads: the trench floor), instead of the ground */ z?: Float32Array;
+  /** ring stamps: metres below the ground (sunken junctions) */ dz?: number;
+}
+
+/** Below this depth a sunken road is covered (a tunnel); above it, an open trench with retaining walls. */
+export const COVER = 6.5;
+/** Tunnel headroom: road surface to ceiling. */
+const CEIL = 5.5;
 
 export interface MeshItem {
   key: string; // 's:<seg id>' | 'n:<node id>'
@@ -449,8 +459,10 @@ export class RoadMesher {
   }
 
   private nodeLifted = (n: MNode) => n.lift > 0.25;
+  private nodeSunk = (n: MNode) => n.lift < -0.25;
+  private nodeOff = (n: MNode) => Math.abs(n.lift) > 0.25;
   private nodeZc = (n: MNode) => this.T(n.x, n.z) + n.lift;
-  private nodeZ = (n: MNode, x: number, z: number) => (this.nodeLifted(n) ? this.nodeZc(n) : this.T(x, z)) + LIFT;
+  private nodeZ = (n: MNode, x: number, z: number) => (this.nodeOff(n) ? this.nodeZc(n) : this.T(x, z)) + LIFT;
 
   private computeEnds(id: string) {
     const node = this.nodes.get(id);
@@ -532,11 +544,11 @@ export class RoadMesher {
   private segZ(g: SegGeo) {
     const T = this.T;
     const na = this.nodes.get(g.s.a)!, nb = this.nodes.get(g.s.b)!;
-    if (!g.s.elevated) return (_s: number, x: number, z: number) => T(x, z) + LIFT;
+    if (!g.s.elevated && !g.s.sunk) return (_s: number, x: number, z: number) => T(x, z) + LIFT;
     const span = Math.max(0.01, g.len - g.trimA - g.trimB);
     const valley = g.s.bridge === 'valley';
     const za = this.nodeZc(na), zb = this.nodeZc(nb);
-    const la = this.nodeLifted(na), lb = this.nodeLifted(nb);
+    const la = this.nodeOff(na), lb = this.nodeOff(nb);
     return (s: number, x: number, z: number) => {
       const t = Math.max(0, Math.min(1, (s - g.trimA) / span));
       if (valley) return Math.max(za + (zb - za) * t, T(x, z)) + LIFT;
@@ -582,6 +594,7 @@ export class RoadMesher {
     flush();
     segmentMarkings(markings, g, S, z, offs);
     if (g.s.elevated) structure(concrete, g, S, z, t, this.T);
+    else if (g.s.sunk) underground(concrete, S, z, t, this.T);
     const hw = Math.max(t.hwL, t.hwR);
     let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
     for (let i = 0; i < S.pts.length; i += 2) {
@@ -590,7 +603,7 @@ export class RoadMesher {
     this.items.set(key, {
       key, layers: { asphalt: pack(asphalt), paving: pack(paving), markings: pack(markings), concrete: pack(concrete) },
       x0: x0 - hw, z0: z0 - hw, x1: x1 + hw, z1: z1 + hw,
-      stamps: [{ line: new Float32Array(S.pts), hw, carve: !g.s.elevated, code: g.s.code }],
+      stamps: g.s.sunk && !g.s.elevated ? trenchStamps(S, z, hw, g.s.code, this.T) : [{ line: new Float32Array(S.pts), hw, carve: !g.s.elevated, code: g.s.code }],
     });
   }
 
@@ -641,6 +654,11 @@ export class RoadMesher {
       this.junctions.set(id, { ring: poly, hull: bad });
       ring = poly;
       drapePolygon(asphalt, new Float32Array(poly.flat()), [], zf, COL.junction, 4);
+      if (this.nodeSunk(node) && -node.lift >= COVER) {
+        // junction inside a tunnel: its ceiling
+        drapePolygon(concrete, new Float32Array(poly.flat()), [], (x, z) => zf(x, z) + CEIL, COL.concreteDark, 4);
+        drapePolygon(concrete, new Float32Array(poly.flat()), [], (x, z) => zf(x, z) + CEIL + 0.6, COL.concrete, 4);
+      }
       if (this.nodeLifted(node)) {
         // raised junction platform: slab underside + edge walls
         drapePolygon(concrete, new Float32Array(poly.flat()), [], (x, z) => zf(x, z) - SLAB, COL.concreteDark, 4);
@@ -653,8 +671,11 @@ export class RoadMesher {
     for (const [x, z] of ring) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
     const code = this.nodeCode(id);
     const carve = !this.nodeLifted(node);
-    const stamps: Stamp[] = [{ ring: new Float32Array(ring.flat()), carve, code }];
-    if (island) stamps.push({ ring: island, carve, code });
+    const covered = this.nodeSunk(node) && -node.lift >= COVER;
+    const dz = this.nodeSunk(node) ? node.lift : undefined;
+    // a junction in a covered tunnel leaves the ground (and what stands on it) alone
+    const stamps: Stamp[] = covered ? [] : [{ ring: new Float32Array(ring.flat()), carve, code, dz }];
+    if (island && !covered) stamps.push({ ring: island, carve, code, dz });
     this.items.set(key, { key, layers: { asphalt: pack(asphalt), paving: pack(paving), markings: pack(markings), concrete: pack(concrete) }, x0, z0, x1, z1, stamps });
   }
 
@@ -684,8 +705,8 @@ export class RoadMesher {
     const T = this.T;
     for (const it of items) for (const st of it.stamps) {
       if (!st.carve) continue;
-      if (st.line) stampLine(hf, targets, st.line, st.hw!, T, region);
-      else if (st.ring) stampPolygon(hf, targets, st.ring, (x, z) => T(x, z) - 0.3, region);
+      if (st.line) stampLine(hf, targets, st.line, st.hw!, T, region, st.z);
+      else if (st.ring) stampPolygon(hf, targets, st.ring, (x, z) => T(x, z) + (st.dz ?? 0) - 0.3, region);
     }
   }
 
@@ -958,11 +979,11 @@ function gridRange(cell: number, half: number, gn: number, x0: number, z0: numbe
 }
 
 /** Terrain target under a ground-level road: 0.3 m below the road surface along the centre line. */
-function stampLine(hf: Heightfield, targets: Float32Array, line: Float32Array, hw: number, T: (x: number, z: number) => number, region?: [number, number, number, number]) {
+function stampLine(hf: Heightfield, targets: Float32Array, line: Float32Array, hw: number, T: (x: number, z: number) => number, region?: [number, number, number, number], zs?: Float32Array) {
   const cell = hf.cell, half = hf.half, gn = hf.n;
   const rad = hw + cell * 0.75, rad2 = rad * rad;
   for (let i = 0; i < line.length / 2; i++) {
-    const x = line[i * 2], z = line[i * 2 + 1], tz = T(x, z) - 0.3;
+    const x = line[i * 2], z = line[i * 2 + 1], tz = (zs ? zs[i] : T(x, z)) - 0.3;
     const r = gridRange(cell, half, gn, x - rad, z - rad, x + rad, z + rad, region);
     for (let jj = r.j0; jj <= r.j1; jj++) for (let ii = r.i0; ii <= r.i1; ii++) {
       const dx = -half + ii * cell - x, dz = -half + jj * cell - z;
@@ -995,6 +1016,66 @@ function stampPolygon(hf: Heightfield, targets: Float32Array, ring: Float32Array
       const k = jj * gn + ii;
       if (Number.isNaN(targets[k]) || tz < targets[k]) targets[k] = tz;
     }
+}
+
+// ---------------- sunken roads: trenches and tunnels ----------------
+
+/** Samples i..j of a sub-range (inclusive). */
+function slice(S: Sub, i: number, j: number): Sub {
+  return { pts: S.pts.slice(i * 2, j * 2 + 2), nrm: S.nrm.slice(i * 2, j * 2 + 2), s: S.s.slice(i, j + 1) };
+}
+
+/** Runs of consecutive samples where `f` holds (each run shares its end sample with the next, so there are no gaps). */
+function runs(n: number, f: (i: number) => boolean): [number, number, boolean][] {
+  const out: [number, number, boolean][] = [];
+  let a = 0;
+  for (let i = 1; i <= n; i++) if (i === n || f(i) !== f(a)) { out.push([a, Math.min(i, n - 1), f(a)]); a = i; }
+  return out;
+}
+
+/**
+ * Below ground: retaining walls up to the ground (with a parapet) where it's an open trench; where it's deeper than
+ * COVER, a tunnel box (walls, ceiling) under untouched ground, and a portal wall where the trench goes under.
+ */
+function underground(gb: GeomBuilder, S: Sub, z: (i: number, x: number, zz: number) => number, t: RoadType, T: (x: number, z: number) => number) {
+  const n = S.s.length;
+  if (n < 2) return;
+  const L = t.hwL + 0.3, R = -(t.hwR + 0.3);
+  const zc = (i: number) => z(i, S.pts[i * 2], S.pts[i * 2 + 1]);
+  const covered = (i: number) => T(S.pts[i * 2], S.pts[i * 2 + 1]) - zc(i) >= COVER;
+  const bottom = (i: number, x: number, zz: number) => z(i, x, zz) - 0.4;
+  const top = (i: number, x: number, zz: number) => (covered(i) ? z(i, x, zz) + CEIL : Math.max(T(x, zz), z(i, x, zz)) + 0.9);
+  wallAlong(gb, S, L, bottom, top, false, COL.concrete);
+  wallAlong(gb, S, R, bottom, top, true, COL.concrete);
+  for (const [a, b, cov] of runs(n, covered)) {
+    if (!cov || b <= a) continue;
+    const sub = slice(S, a, b);
+    sweep(gb, sub, R, L, (k, x, zz) => z(k + a, x, zz) + CEIL, COL.concreteDark); // ceiling (faces down)
+    sweep(gb, sub, L, R, (k, x, zz) => z(k + a, x, zz) + CEIL + 0.6, COL.concrete); // roof slab
+    // portals: where the open trench meets the covered part, a face wall up to the ground
+    for (const i of [a, b]) {
+      if ((i === a && i === 0) || (i === b && i === n - 1)) continue;
+      const x = S.pts[i * 2], zz = S.pts[i * 2 + 1];
+      const yaw = Math.atan2(-S.nrm[i * 2], S.nrm[i * 2 + 1]);
+      gb.box(x, zz, zc(i) + CEIL - 0.2, T(x, zz) + 0.4, 0.8, L - R + 0.6, yaw, COL.concrete);
+    }
+  }
+}
+
+/** Terrain stamps of a sunken piece: the open stretches are cut down to the road; covered tunnel leaves the ground. */
+function trenchStamps(S: Sub, z: (i: number, x: number, zz: number) => number, hw: number, code: number, T: (x: number, z: number) => number): Stamp[] {
+  const n = S.s.length;
+  const zc = (i: number) => z(i, S.pts[i * 2], S.pts[i * 2 + 1]);
+  const open = (i: number) => T(S.pts[i * 2], S.pts[i * 2 + 1]) - zc(i) < COVER;
+  const out: Stamp[] = [];
+  for (const [a, b, op] of runs(n, open)) {
+    if (!op) continue;
+    const line = new Float32Array(S.pts.slice(a * 2, b * 2 + 2));
+    const zs = new Float32Array(b - a + 1);
+    for (let i = a; i <= b; i++) zs[i - a] = zc(i) - LIFT;
+    out.push({ line, hw: hw + 0.3, carve: true, code, z: zs });
+  }
+  return out;
 }
 
 // ---------------- elevated structure ----------------

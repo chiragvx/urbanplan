@@ -57,19 +57,31 @@ function junctionsSel(E: Editor): Id[] {
 
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const ELEV_STEPS = [10, 5, 2.5, 1.25, 0.5];
+/** heights the tools allow (m): deepest tunnel, highest deck */
+const MIN_LIFT = -40, MAX_LIFT = 60;
+const clampLift = (v: number) => Math.max(MIN_LIFT, Math.min(MAX_LIFT, r2(v)));
 
-function levelToast(r: ops.LevelResult) {
-  const bits = [`Flyover at ${r.deck} m`];
-  if (r.ramp) bits.push(`ramps ${r.ramp} m at ${(r.grade * 100).toFixed(1)} %`);
-  toast(bits.join(' · ') + (r.lowered ? ' — lowered to fit the road\'s length' : r.steep ? ' — steep: the road is short' : ''), r.lowered || r.steep ? 'warn' : 'ok');
+
+function penStatus(lift: number) {
+  if (lift >= ops.FLYOVER_DECK - 0.01) return `Drawing ${lift} m above the ground — clears roads below`;
+  if (lift > 0) return `Drawing ${lift} m above the ground`;
+  if (lift <= ops.TUNNEL_DEPTH + 0.01) return `Drawing ${-lift} m below ground — a covered tunnel under the roads above`;
+  if (lift < 0) return `Drawing ${-lift} m below ground — an open cut (deeper than ${-ops.TUNNEL_DEPTH - 1.5} m is covered)`;
+  return 'Drawing at ground level';
 }
 
-/** Set the selected roads' deck height (≤ 0.75 m = back on the ground). */
+function levelToast(r: ops.LevelResult) {
+  const bits = [r.deck < 0 ? `Tunnel ${-r.deck} m deep` : `Flyover at ${r.deck} m`];
+  if (r.ramp) bits.push(`ramps ${r.ramp} m at ${(r.grade * 100).toFixed(1)} %`);
+  toast(bits.join(' · ') + (r.lowered ? (r.deck < 0 ? ' — shallower to fit the road\'s length' : ' — lowered to fit the road\'s length') : r.steep ? ' — steep: the road is short' : ''), r.lowered || r.steep ? 'warn' : 'ok');
+}
+
+/** Set the selected roads' level: deck height > 0 (flyover), depth < 0 (underpass / tunnel), near 0 = ground. */
 export function setDeck(E: Editor, deck: number, merge?: string) {
   const ids = E.selectedSections().map((s) => s.id);
   if (!ids.length) return;
-  if (deck < 0.75) { E.edit('To ground', () => ops.toGround(E.doc, ids), merge); toast('Back on the ground', 'ok'); return; }
-  const r = E.edit('Flyover', () => ops.elevate(E.doc, ids, deck, settings.value.grade), merge);
+  if (Math.abs(deck) < 0.75) { E.edit('To ground', () => ops.toGround(E.doc, ids), merge); toast('Back on the ground', 'ok'); return; }
+  const r = E.edit(deck > 0 ? 'Flyover' : 'Tunnel', () => ops.elevate(E.doc, ids, clampLift(deck), settings.value.grade), merge);
   if (r) levelToast(r);
 }
 
@@ -77,8 +89,8 @@ export function setDeck(E: Editor, deck: number, merge?: string) {
 function levelBy(E: Editor, dir: 1 | -1) {
   const step = settings.value.elevStep;
   if (tool.value === 'pen') {
-    penLift.value = Math.max(0, Math.min(60, r2(penLift.value + dir * step)));
-    status.value = penLift.value ? `Drawing ${penLift.value} m above the ground${penLift.value >= ops.FLYOVER_DECK - 0.01 ? ' — clears roads below' : ''}` : 'Drawing at ground level';
+    penLift.value = clampLift(penLift.value + dir * step);
+    status.value = penStatus(penLift.value);
     E.road.refresh();
     E.overlayDirty = true;
     return;
@@ -89,14 +101,15 @@ function levelBy(E: Editor, dir: 1 | -1) {
     const o = E.doc.get(a.owner);
     if (o?.kind !== 'section') return;
     const last = o.path.length - 1;
-    if (a.k === 0 || a.k === last) { const j = a.k === 0 ? o.a : o.b; E.edit('Height', () => E.doc.set(j, 'lift', Math.max(0, r2(E.doc.get<'junction'>(j)!.lift + dir * step))), 'lift'); return; }
-    const path = o.path.map((p, i) => (i === a.k ? { ...p, lift: Math.max(0, r2(p.lift + dir * step)) } : p));
-    const top = Math.max(...path.map((p) => p.lift));
-    E.edit('Height', () => E.doc.update(o.id, { path, ...(top > 0.25 ? { elevated: true, bridge: o.bridge === 'none' ? 'overpass' : o.bridge, deck: top } : {}) }), 'lift');
+    if (a.k === 0 || a.k === last) { const j = a.k === 0 ? o.a : o.b; E.edit('Height', () => E.doc.set(j, 'lift', clampLift(E.doc.get<'junction'>(j)!.lift + dir * step)), 'lift'); return; }
+    const path = o.path.map((p, i) => (i === a.k ? { ...p, lift: clampLift(p.lift + dir * step) } : p));
+    const P = ops.anchorsOf(E.doc, { ...o, path });
+    const f = ops.levelFlags(P.map((p) => p.lift));
+    E.edit('Height', () => E.doc.update(o.id, { path, ...f, bridge: f.bridge === 'none' ? 'none' : o.bridge === 'none' ? 'overpass' : o.bridge }), 'lift');
     return;
   }
   const juncs = junctionsSel(E);
-  if (juncs.length) { E.edit('Height', () => { for (const id of juncs) E.doc.set(id, 'lift', Math.max(0, r2(E.doc.get<'junction'>(id)!.lift + dir * step))); }, 'lift'); return; }
+  if (juncs.length) { E.edit('Height', () => { for (const id of juncs) E.doc.set(id, 'lift', clampLift(E.doc.get<'junction'>(id)!.lift + dir * step)); }, 'lift'); return; }
   const ids = E.selectedSections().map((s) => s.id);
   if (!ids.length) { toast('Select a road (or pick the road tool) to change its height', 'info'); return; }
   setDeck(E, r2(ops.deckOf(E.doc, ids) + dir * step), 'lift');
@@ -220,7 +233,11 @@ export const COMMANDS: Command[] = [
     run: (E) => { if (tool.value === 'pen') { penLift.value = ops.FLYOVER_DECK; E.road.refresh(); status.value = `Drawing at flyover height (${ops.FLYOVER_DECK} m)`; return; } if (hasRoads(E) && editable()) setDeck(E, ops.FLYOVER_DECK); },
   },
   {
-    id: 'level.ground', label: 'Back to ground level', group: 'Road', keys: 'Shift+PageDown',
+    id: 'level.tunnel', label: `Make an underpass / tunnel (${-ops.TUNNEL_DEPTH} m deep, graded ramps)`, group: 'Road', keys: 'Shift+PageDown',
+    run: (E) => { if (tool.value === 'pen') { penLift.value = ops.TUNNEL_DEPTH; E.road.refresh(); status.value = penStatus(penLift.value); return; } if (hasRoads(E) && editable()) setDeck(E, ops.TUNNEL_DEPTH); },
+  },
+  {
+    id: 'level.ground', label: 'Back to ground level', group: 'Road', keys: 'Home',
     run: (E) => { if (tool.value === 'pen') { penLift.value = 0; E.road.refresh(); status.value = 'Drawing at ground level'; return; } if (hasRoads(E) && editable()) setDeck(E, 0); },
   },
   {

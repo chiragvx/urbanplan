@@ -80,7 +80,7 @@ export class Compiler {
       segs.push({
         id: `${s.id}~${k}`, a: k === 0 ? s.a : `${s.id}^${k}`, b: k === P.length - 2 ? s.b : `${s.id}^${k + 1}`,
         p: [a.x, a.z, a.x + a.ox, a.z + a.oz, b.x + b.ix, b.z + b.iz, b.x, b.z],
-        t, cls: s.cls, bridge: s.bridge, elevated, viaduct: s.viaduct, code, owner: s.id,
+        t, cls: s.cls, bridge: s.bridge, elevated, viaduct: s.viaduct, code, owner: s.id, sunk: Math.min(a.lift, b.lift) < -0.25,
       });
     }
     return { segs, shapes };

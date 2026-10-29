@@ -192,6 +192,25 @@ check(!!doc.get(s0.id) && C.mesher.segs.has(`${s0.id}~0`), 'undo delete restores
   x1 = doc.get<'section'>(X.id)!;
   check(!x1.elevated && x1.path.length === n0 && x1.path.every((a) => a.lift === 0), `back to ground: ${x1.path.length} points, flat`);
 
+  // underpass / tunnel: the same ramps, downwards; covered in the middle, open cut at the ends
+  const tr = doc.transact('Tunnel', () => O.elevate(doc, [X.id], O.TUNNEL_DEPTH, 0.05))!;
+  x1 = doc.get<'section'>(X.id)!;
+  const tl = O.anchorsOf(doc, x1).map((a) => a.lift);
+  check(tr.deck === O.TUNNEL_DEPTH && Math.min(...tl) === O.TUNNEL_DEPTH && tl[0] === 0 && !!x1.tunnel && !x1.elevated && x1.bridge === 'none', `tunnel: ${-tr.deck} m deep, ramps ${tr.ramp} m, lifts ${tl.join(',')}`);
+  const mids = [...C.mesher.items.values()].filter((it) => it.key.startsWith(`s:${X.id}~`));
+  const covered = mids.filter((it) => it.stamps.length === 0).length, open = mids.filter((it) => it.stamps.some((st) => st.z)).length;
+  check(mids.length > 0 && covered >= 1 && open >= 1, `tunnel compiles: ${covered} covered piece(s) leave the ground, ${open} open-cut piece(s) carve it`);
+  check(mids.every((it) => (it.layers.concrete?.idx.length ?? 0) > 0), 'tunnel pieces have walls');
+  const over = doc.transact('Draw over', () => { const r = O.drawStretch(doc, A, B, [O.line([A.x, A.z], [B.x, B.z])], 'residential'); return { ...r, ...O.autoConnect(doc, [r.section!]) }; })!;
+  check(over.joined === 0 && over.bridged >= 1, `a ground road across the tunnel passes over it (${over.joined} joined, ${over.bridged} crossed)`);
+  doc.undo();
+  const deep = doc.transact('Draw under', () => { const r = O.drawStretch(doc, { ...A, lift: -9 }, { ...B, lift: -9 }, [O.line([A.x, A.z], [B.x, B.z])], 'residential'); return { ...r, ...O.autoConnect(doc, [r.section!]) }; })!;
+  check(deep.joined >= 1 && doc.sectionsOf(deep.road).every((q) => q.tunnel), `a road 9 m down meets the tunnel 8 m down: underground junction (${deep.joined})`);
+  doc.undo();
+  doc.transact('Ground', () => O.toGround(doc, [X.id]));
+  x1 = doc.get<'section'>(X.id)!;
+  check(!x1.tunnel && x1.path.length === n0 && x1.path.every((a) => a.lift === 0), 'tunnel back to ground');
+
   // a whole road over its cross streets, and back down reconnecting them
   const RR = doc.all('road').map((r) => ({ r, s: doc.sectionsOf(r.id) })).filter((x) => x.s.length >= 3 && x.s.every((s) => !s.elevated))
     .sort((a, b) => b.s.length - a.s.length)[0];

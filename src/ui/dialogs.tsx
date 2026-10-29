@@ -147,7 +147,7 @@ function HelpDialog() {
             <li><b>Width</b>: drag the □ handles (Alt = one side), scrub the Width label, or press <kbd>[</kbd> <kbd>]</kbd>. Widths snap to the Development Plan sizes.</li>
             <li>Road-level edits apply to every section of the road; a section's own edit wins (blue dot). Purple dot = inherited from the road.</li>
             <li><kbd>P</kbd> is the road tool, as in Cities: Skylines: <kbd>1</kbd> straight · <kbd>2</kbd> simple curve · <kbd>3</kbd> complex curve · <kbd>4</kbd> continuous · <kbd>5</kbd> freeform pen · <kbd>6</kbd> replace. Each click builds a stretch and carries on; right-click steps back.</li>
-            <li><b>Bridges</b>: <kbd>PgUp</kbd>/<kbd>PgDn</kbd> set the height while drawing — crossings at the same level become junctions, higher ones pass over. With a road selected, <kbd>Shift</kbd>+<kbd>PgUp</kbd> makes it a flyover with ramps; <kbd>Shift</kbd>+<kbd>PgDn</kbd> brings it down.</li>
+            <li><b>Bridges and tunnels</b>: <kbd>PgUp</kbd>/<kbd>PgDn</kbd> set the height while drawing (below zero = underground) — crossings at the same level become junctions, others pass over or under. With a road selected, <kbd>Shift</kbd>+<kbd>PgUp</kbd> makes it a flyover, <kbd>Shift</kbd>+<kbd>PgDn</kbd> an underpass / tunnel (both with ramps), <kbd>Home</kbd> brings it back to the ground. <kbd>X</kbd> sees tunnels in 3D.</li>
             <li><b>Snapping</b>: junctions, roads at your level, 90° / 45° to the road you start from, guide lines from road ends, round lengths. <kbd>Shift</kbd> = 15° steps, hold <kbd>Ctrl</kbd> to skip, <kbd>S</kbd> toggles. <kbd>B</kbd> bulldozes; <kbd>K</kbd> splits a road so part of it can differ.</li>
             <li><kbd>Tab</kbd> flips between 2D and 3D — all tools work in both; in 3D drag empty ground to pan, right-drag to orbit. <kbd>X</kbd> x-ray shows pipes underground. <kbd>D</kbd> shows the DP sheets underneath.</li>
             <li>Everything is undoable. Your work autosaves in this browser; <b>Save</b> writes a <code>.urbanplan.json</code> file.</li>
@@ -204,7 +204,7 @@ function ProfileChart(p: { id: string }) {
   const hf = ui.E.hf;
   const ground = S.pts.map(([x, z]) => hf.sample(x, z) + hf.base);
   const road = S.pts.map(([x, z], i) => hf.sample(x, z) + hf.base + S.lift[i]);
-  const lo = Math.min(...ground) - 2, hi = Math.max(...road, ...ground) + 3;
+  const lo = Math.min(...ground, ...road) - 2, hi = Math.max(...road, ...ground) + 3;
   const W = 900, H = 150, L = S.len || 1;
   const X = (sv: number) => (sv / L) * (W - 40) + 30, Y = (v: number) => H - 20 - ((v - lo) / (hi - lo)) * (H - 35);
   const path = (vals: number[]) => vals.map((v, i) => `${i ? 'L' : 'M'}${X(S.s[i]).toFixed(1)},${Y(v).toFixed(1)}`).join('');
@@ -218,7 +218,7 @@ function ProfileChart(p: { id: string }) {
     const move = (m: PointerEvent) => {
       const v = lo + ((H - 20 - ((m.clientY - r.top) / r.height) * H) / (H - 35)) * (hi - lo);
       const g = hf.sample(P[k].x, P[k].z) + hf.base;
-      const lift = Math.max(0, Math.round((v - g) * 2) / 2);
+      const lift = Math.max(-40, Math.round((v - g) * 2) / 2);
       ui.E.edit('Height', () => ui.doc.set(s.id, 'path', s.path.map((a, i) => (i === k ? { ...a, lift } : a))), key);
     };
     const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };

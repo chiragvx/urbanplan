@@ -3,7 +3,7 @@
 import { penClass, penLift, saveSettings, settings, tool, type RoadMode } from '../editor/state';
 import { COMMANDS } from '../editor/commands';
 import { MODE_LABEL } from '../editor/roadtool';
-import { FLYOVER_DECK } from '../doc/ops';
+import { FLYOVER_DECK, TUNNEL_DEPTH } from '../doc/ops';
 import { CLASS_LABEL, ROAD_CLASSES } from '../doc/types';
 import { ui } from './ctx';
 
@@ -41,12 +41,13 @@ export function RoadToolbar() {
         {ROAD_CLASSES.map((c) => <option key={c} value={c}>{CLASS_LABEL[c]}</option>)}
       </select>
       {st.roadMode !== 'replace' && (
-        <div class="rb-group" title="Height to draw at — PageUp / PageDown; Shift+PageUp = flyover height, Shift+PageDown = ground">
+        <div class="rb-group" title="Height to draw at — PageUp / PageDown; Shift+PageUp = flyover, Shift+PageDown = tunnel, Home = ground">
           <span class="rb-label">Height</span>
           <button class="icon-btn" onClick={() => run('level.down')} title="Lower (PageDown)">▼</button>
-          <span class={`rb-value ${lift > 0.25 ? 'up' : ''}`}>{lift ? `${lift} m` : 'ground'}</span>
+          <span class={`rb-value ${lift > 0.25 ? 'up' : lift < -0.25 ? 'down' : ''}`}>{lift > 0 ? `${lift} m` : lift < 0 ? `${-lift} m deep` : 'ground'}</span>
           <button class="icon-btn" onClick={() => run('level.up')} title="Raise (PageUp)">▲</button>
           <button class={`chip ${Math.abs(lift - FLYOVER_DECK) < 0.01 ? 'on' : ''}`} title={`Flyover height: ${FLYOVER_DECK} m clears traffic below (Shift+PageUp)`} onClick={() => run('level.flyover')}>Flyover</button>
+          <button class={`chip ${Math.abs(lift - TUNNEL_DEPTH) < 0.01 ? 'on' : ''}`} title={`Tunnel: ${-TUNNEL_DEPTH} m down, covered, under the roads above (Shift+PageDown) — X shows it in 3D`} onClick={() => run('level.tunnel')}>Tunnel</button>
           <select class="select small" value={String(st.elevStep)} title="Elevation step (Alt+PageUp cycles)" onChange={(e) => saveSettings({ elevStep: Number((e.currentTarget as HTMLSelectElement).value) })}>
             {STEPS.map((s) => <option key={s} value={s}>step {s} m</option>)}
           </select>

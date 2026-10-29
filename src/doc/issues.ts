@@ -4,7 +4,7 @@ import type { CityDoc } from './doc';
 import type { Compiler } from './compile';
 import type { Id, SectionObj } from './types';
 import { totalWidth } from './xsection';
-import { anchorsOf, crossingsOf, samplePath, SAME_LEVEL } from './ops';
+import { anchorsOf, crossingsOf, offGrade, samplePath, SAME_LEVEL } from './ops';
 
 /** Headroom (m) under a bridge below which it is flagged (5.5 m is the usual clearance; imported decks are estimates). */
 const CLEARANCE = 5;
@@ -45,8 +45,8 @@ function sectionChecks(doc: CityDoc, C: Compiler, s: SectionObj, near: Near, out
       break;
     }
   }
-  if (s.elevated || s.bridge !== 'none') {
-    // bridges: level-aware — crossing at the same height needs a junction; too little headroom is a warning
+  if (offGrade(s)) {
+    // bridges and tunnels: level-aware — crossing at the same height needs a junction; too little headroom is a warning
     const S = samplePath(anchorsOf(doc, s), 12);
     const seen = new Set<Id>();
     for (const c of crossingsOf(doc, S.pts, S.lift, new Set([s.id]), near)) {
@@ -54,11 +54,11 @@ function sectionChecks(doc: CityDoc, C: Compiler, s: SectionObj, near: Near, out
       seen.add(c.other);
       const o = doc.get<'section'>(c.other)!;
       if (o.a === s.a || o.a === s.b || o.b === s.a || o.b === s.b) continue;
-      if ((o.elevated || o.bridge !== 'none') && o.id < s.id) continue; // the other one reports it
+      if (offGrade(o) && o.id < s.id) continue; // the other one reports it
       const gap = Math.abs(c.lift - c.otherLift);
       const other = o.name || 'an unnamed road';
       if (gap < SAME_LEVEL) out.push({ key: `cross:${s.id}:${o.id}`, sev: 'error', title: 'Roads cross without a junction', detail: `${name} × ${other} at the same height — connect them or raise one`, x: c.p[0], z: c.p[1], ids: [s.id, o.id] });
-      else if (gap < CLEARANCE) out.push({ key: `low:${s.id}:${o.id}`, sev: 'warn', title: 'Low clearance under a bridge', detail: `${name} passes ${gap.toFixed(1)} m ${c.lift > c.otherLift ? 'over' : 'under'} ${other} — about 5.5 m is usual`, x: c.p[0], z: c.p[1], ids: [s.id, o.id] });
+      else if (gap < CLEARANCE) out.push({ key: `low:${s.id}:${o.id}`, sev: 'warn', title: 'Low clearance', detail: `${name} passes ${gap.toFixed(1)} m ${c.lift > c.otherLift ? 'over' : 'under'} ${other} — about 5.5 m is usual`, x: c.p[0], z: c.p[1], ids: [s.id, o.id] });
     }
     return;
   }
@@ -72,7 +72,7 @@ function sectionChecks(doc: CityDoc, C: Compiler, s: SectionObj, near: Near, out
     for (const oid of near(x - 40, z - 40, x + 40, z + 40)) {
       if (oid === s.id || reported.has(oid)) continue;
       const o = doc.get(oid);
-      if (o?.kind !== 'section' || o.elevated || o.bridge !== 'none') continue;
+      if (o?.kind !== 'section' || offGrade(o)) continue;
       if (ends.has(o.a) || ends.has(o.b)) continue;
       const h = C.geo(oid);
       if (!h) continue;

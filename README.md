@@ -31,7 +31,12 @@ npm test        # headless document + cross-section tests
 - **Bridges / flyovers**: <kbd>PgUp</kbd> / <kbd>PgDn</kbd> set the height the road tool draws at (step 10 / 5 / 2.5 / 1.25 / 0.5 m,
   <kbd>Alt PgUp</kbd>). With roads selected, <kbd>Shift PgUp</kbd> makes them a flyover (6.5 m deck, ramps at the set grade,
   default 5 %; junctions underneath stay on the ground and are passed over), <kbd>PgUp</kbd> / <kbd>PgDn</kbd> step the deck and
-  <kbd>Shift PgDn</kbd> brings it back down, reconnecting the junctions below. The inspector's **Level** section does the same.
+  <kbd>Home</kbd> brings it back down, reconnecting the junctions below. The inspector's **Level** section does the same.
+- **Underground roads / tunnels**: below zero the road tool draws underground (<kbd>PgDn</kbd> past ground, or the Tunnel
+  chip). <kbd>Shift PgDn</kbd> turns selected roads into an underpass / tunnel (8 m down, ramps at the set grade). Shallower
+  than 6.5 m is an open cut (the ground is dug out, retaining walls); deeper is a covered tunnel box under untouched
+  ground — buildings and trees above stay — with portals where the cut goes under. Roads meet underground at the same
+  level (underground junctions); 2D shows tunnels dashed green, <kbd>X</kbd> x-ray shows them in 3D. Issues checks headroom.
 - **Snapping** (<kbd>S</kbd> toggles, hold <kbd>Ctrl</kbd> to skip once, <kbd>Shift</kbd> = 15° steps): junctions and roads at your
   level, 90° / 45° to the road you start from or the last stretch, guide lines from nearby road ends (and where two
   meet), lengths rounded to 1 / 5 / 8 / 10 m.

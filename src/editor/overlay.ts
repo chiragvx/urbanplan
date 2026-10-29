@@ -112,12 +112,13 @@ export function drawOverlay(E: Editor) {
 
 // ---------------- road tool ----------------
 
-const LEVEL = (lift: number) => (lift > 0.25 ? '#8b5cf6' : ACCENT);
+const UNDER = '#0e9f6e';
+const LEVEL = (lift: number) => (lift > 0.25 ? '#8b5cf6' : lift < -0.25 ? UNDER : ACCENT);
 
 function heightText(l0: number, l1: number, len: number): string {
-  if (l0 < 0.25 && l1 < 0.25) return '';
+  if (Math.abs(l0) < 0.25 && Math.abs(l1) < 0.25) return '';
   const g = len > 0.5 ? ((l1 - l0) / len) * 100 : 0;
-  return `height ${l1.toFixed(1)} m${Math.abs(g) > 0.05 ? ` · ${g > 0 ? '+' : ''}${g.toFixed(1)} %` : ''}${Math.abs(g) > 8 ? ' steep' : ''}`;
+  return `${l1 >= 0 ? `height ${l1.toFixed(1)} m` : `${(-l1).toFixed(1)} m deep${-l1 >= 6.5 ? ' (tunnel)' : ' (open cut)'}`}${Math.abs(g) > 0.05 ? ` · ${g > 0 ? '+' : ''}${g.toFixed(1)} %` : ''}${Math.abs(g) > 8 ? ' steep' : ''}`;
 }
 
 /** Ghost of the stretch at its real width, crossings (junction or bridge), guide lines and the readout. */
@@ -127,14 +128,14 @@ function roadTool(E: Editor) {
   const pv = T.preview, c = T.cursor;
   if (pv && T.start) {
     const w = Math.max(3, totalWidth(template(penClass.value)) * sc);
-    const lift = Math.max(pv.lift0, pv.lift1);
+    const lift = Math.abs(pv.lift0) > Math.abs(pv.lift1) ? pv.lift0 : pv.lift1;
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.strokeStyle = lift > 0.25 ? 'rgba(139,92,246,0.28)' : 'rgba(47,124,246,0.25)';
+    ctx.strokeStyle = lift > 0.25 ? 'rgba(139,92,246,0.28)' : lift < -0.25 ? 'rgba(14,159,110,0.25)' : 'rgba(47,124,246,0.25)';
     ctx.lineWidth = w; ctx.setLineDash([]);
     const liftAt = (i: number) => pv.lift0 + ((pv.lift1 - pv.lift0) * i) / Math.max(1, pv.pts.length - 1);
     ctx.beginPath(); pv.pts.forEach((p, i) => { const q = P(p[0], p[1], liftAt(i)); if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); }); ctx.stroke();
     ctx.strokeStyle = LEVEL(lift); ctx.lineWidth = 2;
-    if (lift > 0.25) ctx.setLineDash([8, 5]);
+    if (Math.abs(lift) > 0.25) ctx.setLineDash(lift > 0 ? [8, 5] : [3, 4]);
     ctx.stroke(); ctx.setLineDash([]); ctx.lineCap = 'butt';
     // control polygon for the curve modes
     if (T.ctrl.length) {
@@ -174,7 +175,7 @@ function roadTool(E: Editor) {
     if (joins || over) lines.push([joins ? `${joins} junction${joins > 1 ? 's' : ''}` : '', over ? `${over} bridge crossing${over > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · '));
     readout(E, c.p, lines);
   } else {
-    readout(E, c.p, [`${MODE_LABEL[T.mode]}${penLift.value ? ` · ${penLift.value} m up` : ''}`, c.over ? 'over a road at another level' : '']);
+    readout(E, c.p, [`${MODE_LABEL[T.mode]}${penLift.value > 0 ? ` · ${penLift.value} m up` : penLift.value < 0 ? ` · ${-penLift.value} m deep` : ''}`, c.over ? 'over a road at another level' : '']);
   }
 }
 
@@ -246,6 +247,7 @@ function bridgeEdges(E: Editor) {
   for (const id of E.hit.inRect(x0, z0, x1, z1, ['section'], E.canPick)) {
     const s = E.doc.get<'section'>(id);
     if (s && (s.elevated || s.bridge !== 'none')) sectionOutline(E, id, 'rgba(139,92,246,0.75)', 1.5, 0);
+    else if (s?.tunnel) { E.ctx.setLineDash([5, 4]); sectionOutline(E, id, 'rgba(14,159,110,0.9)', 1.5, 0.14); E.ctx.setLineDash([]); }
   }
 }
 

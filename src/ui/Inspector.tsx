@@ -7,6 +7,7 @@ import { CrossSection } from './CrossSection';
 import * as xs from '../doc/xsection';
 import * as ops from '../doc/ops';
 import { CLASS_LABEL, ROAD_CLASSES, type Id, type SectionObj } from '../doc/types';
+import { COVER } from '../net/generate';
 import { LINE_LABEL } from '../doc/base';
 import { COMMANDS, setDeck } from '../editor/commands';
 import type { Part } from '../net/model';
@@ -130,19 +131,27 @@ function LevelControls(p: { ids: Id[] }) {
   const ro = readOnly.value;
   const d = ui.doc;
   const deck = ops.deckOf(d, p.ids);
-  const up = deck > 0.25;
+  const up = deck > 0.25, down = deck < -0.25;
   const grade = settings.value.grade;
   return (
-    <Section title="Level" open={up}>
-      <Seg small value={up ? 'bridge' : 'ground'} options={[{ value: 'ground', label: 'At ground', title: 'Shift+PageDown' }, { value: 'bridge', label: 'Bridge / flyover', title: 'Shift+PageUp' }]}
-        onChange={(v) => { if (!ro) setDeck(ui.E, v === 'ground' ? 0 : Math.max(deck, ops.FLYOVER_DECK)); }} />
-      {up && (
+    <Section title="Level" open={up || down}>
+      <Seg small value={up ? 'bridge' : down ? 'tunnel' : 'ground'} options={[
+        { value: 'ground', label: 'At ground', title: 'Home' }, { value: 'bridge', label: 'Flyover', title: 'Shift+PageUp' }, { value: 'tunnel', label: 'Underpass / tunnel', title: 'Shift+PageDown' },
+      ]}
+        onChange={(v) => { if (!ro) setDeck(ui.E, v === 'ground' ? 0 : v === 'bridge' ? Math.max(deck, ops.FLYOVER_DECK) : Math.min(deck, ops.TUNNEL_DEPTH)); }} />
+      {(up || down) && (
         <div class="grid2">
-          <NumberField label="Deck height" unit="m" value={deck} step={0.5} min={0} max={40} disabled={ro} onChange={(v, m) => setDeck(ui.E, v, m)} title="Above the ground at the highest point — PageUp / PageDown" />
+          {up
+            ? <NumberField label="Deck height" unit="m" value={deck} step={0.5} min={0} max={60} disabled={ro} onChange={(v, m) => setDeck(ui.E, v, m)} title="Above the ground at the highest point — PageUp / PageDown" />
+            : <NumberField label="Depth" unit="m" value={-deck} step={0.5} min={0} max={40} disabled={ro} onChange={(v, m) => setDeck(ui.E, -v, m)} title={`Road surface below the ground at the lowest point — deeper than ${COVER} m is a covered tunnel, shallower an open cut`} />}
           <NumberField label="Ramp grade" unit="%" value={grade * 100} step={0.5} min={1} max={12} digits={1} disabled={ro} onChange={(v) => { saveSettings({ grade: v / 100 }); setDeck(ui.E, deck); }} title="How steeply the ramps climb (5 % ≈ 1 in 20)" />
         </div>
       )}
-      <p class="muted small">{up ? `Ramps of about ${Math.round(deck / grade)} m at each end. Junctions under the deck stay on the ground; roads below are crossed, not joined.` : <>Press <kbd>Shift</kbd>+<kbd>PgUp</kbd> to make this a flyover with ramps, <kbd>PgUp</kbd>/<kbd>PgDn</kbd> to step the height.</>}</p>
+      <p class="muted small">{up
+        ? `Ramps of about ${Math.round(deck / grade)} m at each end. Junctions under the deck stay on the ground; roads below are crossed, not joined.`
+        : down
+          ? `${-deck >= COVER ? 'Covered tunnel' : 'Open cut (a trench with retaining walls)'}, ramps of about ${Math.round(-deck / grade)} m at each end. Roads above are crossed, not joined; buildings above a covered tunnel stay. Press X in 3D to see it.`
+          : <><kbd>Shift</kbd>+<kbd>PgUp</kbd> makes this a flyover, <kbd>Shift</kbd>+<kbd>PgDn</kbd> an underpass / tunnel, both with ramps; <kbd>PgUp</kbd>/<kbd>PgDn</kbd> step the height.</>}</p>
     </Section>
   );
 }
@@ -240,7 +249,7 @@ function JunctionPanel(p: { id: Id }) {
         <div class="grid2">
           <NumberField label="X" unit="m" value={j.x} step={0.1} disabled={ro} onChange={(v, m) => ui.E.edit('Move junction', () => ops.moveJunction(d, p.id, v, j.z), m)} />
           <NumberField label="Z" unit="m" value={j.z} step={0.1} disabled={ro} onChange={(v, m) => ui.E.edit('Move junction', () => ops.moveJunction(d, p.id, j.x, v), m)} />
-          <NumberField label="Height" unit="m" value={j.lift} step={0.5} min={0} max={30} disabled={ro} onChange={(v, m) => set('lift', v, m)} title="Above the ground (for flyover junctions)" />
+          <NumberField label="Height" unit="m" value={j.lift} step={0.5} min={-40} max={60} disabled={ro} onChange={(v, m) => set('lift', v, m)} title="Above the ground (flyover junctions); negative = below ground (underground junctions)" />
         </div>
       </Section>
       <div class="list">{arms.map((s) => <button key={s.id} class="list-item" onClick={() => select([{ kind: 'section', id: s.id }])}><span>{s.name || 'Unnamed'}</span><span class="muted">{xs.totalWidth(s.parts).toFixed(1)} m</span></button>)}</div>
@@ -326,7 +335,7 @@ function AnchorPanel(p: { owner: Id; k: number }) {
       <div class="grid2">
         <NumberField label="X" unit="m" value={a.x} disabled={ro || end} onChange={(v, m) => setA({ x: v }, m)} />
         <NumberField label="Z" unit="m" value={a.z} disabled={ro || end} onChange={(v, m) => setA({ z: v }, m)} />
-        <NumberField label="Height" unit="m" value={a.lift} step={0.5} min={0} max={30} disabled={ro || end} onChange={(v, m) => setA({ lift: v }, m)} title="Deck height above ground at this point" />
+        <NumberField label="Height" unit="m" value={a.lift} step={0.5} min={-40} max={60} disabled={ro || end} onChange={(v, m) => setA({ lift: v }, m)} title="Height above the ground at this point (negative = below ground)" />
       </div>
       <p class="muted small">Drag handles to shape the curve; hold <kbd>Alt</kbd> for a sharp corner. <kbd>Delete</kbd> removes the point.</p>
       <div class="btns">{!end && <button disabled={ro} onClick={() => ui.E.deleteAnchor()}>Delete point</button>}<button onClick={() => { anchorSel.value = null; }}>Done</button></div>
