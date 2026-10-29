@@ -1,10 +1,11 @@
 // Floating options bar for the road tool and the bulldozer (Cities: Skylines' bottom panel): the drawing mode,
 // the road class, the height to draw at with its step, and what to snap to.
-import { penClass, penLift, saveSettings, settings, tool, type RoadMode } from '../editor/state';
+import { buildAsset, penClass, penLift, saveSettings, settings, tool, type RoadMode } from '../editor/state';
 import { COMMANDS } from '../editor/commands';
 import { MODE_LABEL } from '../editor/roadtool';
 import { FLYOVER_DECK, TUNNEL_DEPTH } from '../doc/ops';
 import { CLASS_LABEL, ROAD_CLASSES } from '../doc/types';
+import { getAsset } from '../assets';
 import { ui } from './ctx';
 
 const MODES: { m: RoadMode; icon: string }[] = [
@@ -23,37 +24,48 @@ const run = (id: string) => COMMANDS.find((c) => c.id === id)!.run(ui.E);
 export function RoadToolbar() {
   void penLift.value;
   if (tool.value === 'bulldoze') return <div class="roadbar"><span class="rb-hint">Bulldozer — click a section to remove it · <kbd>Shift</kbd> whole road · drag to sweep</span></div>;
-  if (tool.value !== 'pen') return null;
+  if (tool.value === 'place') {
+    const a = getAsset(buildAsset.value);
+    return <div class="roadbar"><span class="rb-hint"><b>{a?.name ?? 'Place'}</b> — click to place · <kbd>[</kbd> <kbd>]</kbd> rotate · snaps onto its line or road · <kbd>Esc</kbd> done</span></div>;
+  }
+  if (tool.value === 'area') {
+    const a = getAsset(buildAsset.value);
+    return <div class="roadbar"><span class="rb-hint"><b>{a?.name ?? 'Area'}</b> — click the corners · <kbd>Enter</kbd> or double-click to finish · right-click removes the last corner</span></div>;
+  }
+  const route = tool.value === 'route';
+  if (tool.value !== 'pen' && !route) return null;
   const st = settings.value;
   const lift = penLift.value;
+  const ra = route ? getAsset(buildAsset.value) : undefined;
   const chip = (on: boolean, label: string, title: string, f: () => void) => <button class={`chip ${on ? 'on' : ''}`} title={title} onClick={f}>{label}</button>;
   return (
     <div class="roadbar" onPointerDown={(e) => e.stopPropagation()}>
       <div class="seg rb-modes">
-        {MODES.map((x, i) => (
+        {route && <span class="rb-asset">{ra?.name}</span>}
+        {MODES.filter((x) => !route || (x.m !== 'freeform' && x.m !== 'replace')).map((x, i) => (
           <button key={x.m} class={st.roadMode === x.m ? 'on' : ''} title={`${MODE_LABEL[x.m]} (${i + 1})`} onClick={() => run(`road.mode.${x.m}`)}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d={x.icon} /></svg>
             <span>{MODE_LABEL[x.m]}</span>
           </button>
         ))}
       </div>
-      <select class="select" value={penClass.value} title="Class of the new road (Replace gives clicked roads this class)" onChange={(e) => { penClass.value = (e.currentTarget as HTMLSelectElement).value; ui.E.road.refresh(); }}>
+      {!route && <select class="select" value={penClass.value} title="Class of the new road (Replace gives clicked roads this class)" onChange={(e) => { penClass.value = (e.currentTarget as HTMLSelectElement).value; buildAsset.value = ''; ui.E.road.refresh(); }}>
         {ROAD_CLASSES.map((c) => <option key={c} value={c}>{CLASS_LABEL[c]}</option>)}
-      </select>
+      </select>}
       {st.roadMode !== 'replace' && (
         <div class="rb-group" title="Height to draw at — PageUp / PageDown; Shift+PageUp = flyover, Shift+PageDown = tunnel, Home = ground">
           <span class="rb-label">Height</span>
           <button class="icon-btn" onClick={() => run('level.down')} title="Lower (PageDown)">▼</button>
           <span class={`rb-value ${lift > 0.25 ? 'up' : lift < -0.25 ? 'down' : ''}`}>{lift > 0 ? `${lift} m` : lift < 0 ? `${-lift} m deep` : 'ground'}</span>
           <button class="icon-btn" onClick={() => run('level.up')} title="Raise (PageUp)">▲</button>
-          <button class={`chip ${Math.abs(lift - FLYOVER_DECK) < 0.01 ? 'on' : ''}`} title={`Flyover height: ${FLYOVER_DECK} m clears traffic below (Shift+PageUp)`} onClick={() => run('level.flyover')}>Flyover</button>
-          <button class={`chip ${Math.abs(lift - TUNNEL_DEPTH) < 0.01 ? 'on' : ''}`} title={`Tunnel: ${-TUNNEL_DEPTH} m down, covered, under the roads above (Shift+PageDown) — X shows it in 3D`} onClick={() => run('level.tunnel')}>Tunnel</button>
+          {!route && <><button class={`chip ${Math.abs(lift - FLYOVER_DECK) < 0.01 ? 'on' : ''}`} title={`Flyover height: ${FLYOVER_DECK} m clears traffic below (Shift+PageUp)`} onClick={() => run('level.flyover')}>Flyover</button>
+          <button class={`chip ${Math.abs(lift - TUNNEL_DEPTH) < 0.01 ? 'on' : ''}`} title={`Tunnel: ${-TUNNEL_DEPTH} m down, covered, under the roads above (Shift+PageDown) — X shows it in 3D`} onClick={() => run('level.tunnel')}>Tunnel</button></>}
           <select class="select small" value={String(st.elevStep)} title="Elevation step (Alt+PageUp cycles)" onChange={(e) => saveSettings({ elevStep: Number((e.currentTarget as HTMLSelectElement).value) })}>
             {STEPS.map((s) => <option key={s} value={s}>step {s} m</option>)}
           </select>
         </div>
       )}
-      {st.roadMode !== 'replace' && st.roadMode !== 'freeform' && (
+      {!route && st.roadMode !== 'replace' && st.roadMode !== 'freeform' && (
         <button class={`chip ${st.roadGraded ? 'on' : ''}`} title={`Graded roads: a fixed profile with stations every ≤ 96 m (12 cells of 8 m), the ground cut and filled to it — like Cities: Skylines. Off: roads follow the terrain.`} onClick={() => saveSettings({ roadGraded: !st.roadGraded })}>Graded</button>
       )}
       {st.roadMode !== 'replace' && (

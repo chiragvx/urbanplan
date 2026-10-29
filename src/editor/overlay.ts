@@ -8,6 +8,8 @@ import { template, totalWidth } from '../doc/xsection';
 import { bearing, MODE_LABEL, type SnapResult } from './roadtool';
 import { SURVEY_COLOR, SURVEY_LABEL, type Id, type LineKind, type SurveyStatus } from '../doc/types';
 import { parseCode } from '../doc/dpcodes';
+import { drawAssetLayers, drawAssetTool, isAssetLine } from './assetoverlay';
+import { lineShape } from '../assets';
 
 export interface Handle {
   kind: 'width' | 'anchor' | 'in' | 'out';
@@ -34,6 +36,7 @@ export function drawOverlay(E: Editor) {
     if (terrainView.value) E.tview.draw(terrainShow.value);
     if (dpRegionsOn.value) drawDPRegions(E);
     drawLines(E);
+    drawAssetLayers(E);
     if (accuracyView.value) drawAccuracy(E);
     bridgeEdges(E);
   }
@@ -50,6 +53,7 @@ export function drawOverlay(E: Editor) {
     if (tool.value === 'direct') anchors(E);
   }
   if (tool.value === 'pen' && settings.value.roadMode !== 'freeform' && settings.value.roadMode !== 'replace') roadTool(E);
+  drawAssetTool(E);
   // pen preview
   if (tool.value === 'pen' && settings.value.roadMode === 'freeform') {
     const pts = E.pen.pts.map((p) => P(p.x, p.z, p.lift ?? 0));
@@ -305,9 +309,14 @@ function outline(E: Editor, id: Id, color: string, width: number, fill: number) 
     return;
   }
   if (o.kind === 'line') {
-    const L = E.doc.get<'layer'>(o.layer);
+    const shape = lineShape(o);
+    if (shape === 'point') {
+      const p = E.project(o.pts[0], o.pts[1], 0);
+      if (p) { ctx.beginPath(); ctx.arc(p[0], p[1], Math.max(9, (o.size * E.view.scale) / 2 + 4), 0, Math.PI * 2); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); }
+      return;
+    }
+    if (shape === 'area') { poly(E, o.pts, true, color, width, fill); return; }
     poly(E, o.pts, false, color, Math.max(width + 2, o.size * E.view.scale + 3), 0, -o.depth * 0);
-    void L;
     return;
   }
   if (o.kind === 'building') poly(E, o.outer, true, color, width, fill);
@@ -373,7 +382,7 @@ function drawLines(E: Editor) {
   const byLayer = new Map<Id, number[][]>();
   for (const id of E.hit.query(x0, z0, x1, z1)) {
     const o = E.doc.get(id);
-    if (o?.kind !== 'line' || !vis.has(o.layer)) continue;
+    if (o?.kind !== 'line' || !vis.has(o.layer) || isAssetLine(o)) continue;
     (byLayer.get(o.layer) ?? byLayer.set(o.layer, []).get(o.layer)!).push(o.pts);
   }
   for (const [layer, lines] of byLayer) {

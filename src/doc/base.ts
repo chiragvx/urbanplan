@@ -15,13 +15,15 @@ const r1 = (v: number) => Math.round(v);
 const r2 = (v: number) => Math.round(v * 100) / 100;
 
 /** Depth (m below ground) by utility type when the data doesn't say. Typical Indian urban practice. */
-export const DEFAULT_DEPTH: Record<LineKind, number> = { sewer: 2.5, storm: 1.5, water: 1.2, power: 1.0, gas: 1.0, telecom: 0.8, metro: -9, rail: 0, path: 0, other: 1 };
-export const DEFAULT_SIZE: Record<LineKind, number> = { sewer: 0.45, storm: 0.9, water: 0.3, power: 0.15, gas: 0.15, telecom: 0.1, metro: 9, rail: 3, path: 1.8, other: 0.3 };
+export const DEFAULT_DEPTH: Record<LineKind, number> = { sewer: 2.5, storm: 1.5, water: 1.2, power: 1.0, gas: 1.0, telecom: 0.8, metro: -9, rail: 0, path: 0, other: 1, canal: 0, nalla: 0, hv: 0, transit: 0, site: 0, zone: 0 };
+export const DEFAULT_SIZE: Record<LineKind, number> = { sewer: 0.45, storm: 0.9, water: 0.3, power: 0.15, gas: 0.15, telecom: 0.1, metro: 9, rail: 3, path: 1.8, other: 0.3, canal: 8, nalla: 12, hv: 27, transit: 4, site: 10, zone: 0 };
 export const LINE_COLOR: Record<LineKind, string> = {
   sewer: '#3fa34d', storm: '#7a5cd6', water: '#2f80ed', power: '#e5484d', gas: '#f5c518', telecom: '#f2994a', metro: '#d2479b', rail: '#9aa0a6', path: '#c9b98f', other: '#9e9e9e',
+  canal: '#2b8fc7', nalla: '#4aa3a0', hv: '#d9822b', transit: '#c2410c', site: '#6b7280', zone: '#3b82f6',
 };
 export const LINE_LABEL: Record<LineKind, string> = {
   sewer: 'Sewer', storm: 'Stormwater', water: 'Water supply', power: 'Power', gas: 'Gas', telecom: 'Telecom', metro: 'Metro', rail: 'Railway', path: 'Footpaths & trails', other: 'Other utility',
+  canal: 'Canals', nalla: 'Nallas & streams', hv: 'Power lines (overhead)', transit: 'Bus & BRT', site: 'Sites & structures', zone: 'Zones',
 };
 
 export function buildBase(net: Network, tile: TileData, utilities?: UtilitiesFile | null): Map<Id, Obj> {

@@ -119,7 +119,8 @@ function smoothShift(shift: (number[] | null)[], win: number): number[][] {
  * and move the kept line onto their midline → one double-track viaduct.
  */
 function mergeMetroPairs(tile: TileData, R: RS[], paired: boolean[], dropped: boolean[]) {
-  const metro = tile.rails.map((r, i) => (r.metro ? i : -1)).filter((i) => i >= 0);
+  // OSM metro lines come one track per way; lines drawn from an asset already carry both tracks
+  const metro = tile.rails.map((r, i) => (r.metro && r.tracks === undefined ? i : -1)).filter((i) => i >= 0);
   const CELL = 12;
   const grid = new Map<string, [number, number][]>();
   for (const i of metro) for (let k = 0; k < R[i].pts.length / 2; k++) {
@@ -175,7 +176,7 @@ function snapToRoads(tile: TileData, R: RS[], roads: { pts: Float32Array; oneway
   });
   let snapped = 0;
   tile.rails.forEach((r, i) => {
-    if (!r.metro || dropped[i]) return;
+    if (!r.metro || dropped[i] || r.tracks !== undefined) return;
     const P = R[i], m = P.pts.length / 2;
     const shift: (number[] | null)[] = [];
     for (let k = 0; k < m; k++) {
@@ -216,7 +217,7 @@ function snapToRoads(tile: TileData, R: RS[], roads: { pts: Float32Array; oneway
 function dropCrossovers(tile: TileData, R: RS[], paired: boolean[], dropped: boolean[]) {
   const keep = tile.rails.map((r, i) => (r.metro && !dropped[i] && R[i].len > 250 ? i : -1)).filter((i) => i >= 0);
   tile.rails.forEach((r, i) => {
-    if (!r.metro || dropped[i] || R[i].len > 250) return; // short pieces only: crossovers, sidings, station tracks
+    if (!r.metro || dropped[i] || R[i].len > 250 || r.tracks !== undefined) return; // short pieces only: crossovers, sidings, station tracks
     const P = R[i], m = P.pts.length / 2;
     let inside = 0;
     for (let k = 0; k < m; k++) {
@@ -285,7 +286,7 @@ export function buildRail(tile: TileData, hf: Heightfield, roadCenters: { pts: F
   const off = new Map<string, number>();
   tile.rails.forEach((r, i) => {
     if (r.tunnel) return;
-    const d = r.bridge || r.layer > 0 ? DECK * Math.max(1, r.layer) : 0;
+    const d = r.bridge || r.layer > 0 ? r.deck ?? DECK * Math.max(1, r.layer) : 0;
     for (const k of ends[i]) off.set(k, Math.max(off.get(k) ?? 0, d));
   });
   for (let iter = 0; iter < 40; iter++) {
@@ -313,11 +314,12 @@ export function buildRail(tile: TileData, hf: Heightfield, roadCenters: { pts: F
     for (let k = 0; k < m; k++) {
       const x = RS.pts[k * 2], z = RS.pts[k * 2 + 1], t = RS.len ? RS.s[k] / RS.len : 0;
       gs[k] = T(x, z);
-      ys[k] = lifted ? Math.max(za + (zb - za) * t, gs[k] + DECK * 0.8) : gs[k] + oa + (ob - oa) * t + 0.3;
+      ys[k] = lifted ? Math.max(za + (zb - za) * t, gs[k] + (r.deck ?? DECK) * 0.8) : gs[k] + oa + (ob - oa) * t + 0.3;
     }
     const elevated = (k: number) => ys[k] - gs[k] > 2.5;
     const anyElevated = Array.from(ys).some((y, k) => y - gs[k] > 2.5);
-    const w = paired[i] ? 4.7 : r.metro ? 2.6 : 1.9; // double-track viaduct when the twin was merged in
+    // half width: from the asset's formation, else a double-track viaduct when the twin was merged in
+    const w = r.formation ? r.formation / 2 : paired[i] ? 4.7 : r.metro ? 2.6 : 1.9;
     const bedCol = rgbHex(anyElevated || r.metro ? 0x9a958c : 0x7a6a58);
     const wallCol = rgbHex(anyElevated ? 0xa8a49b : 0x6f6253);
     strip(ballast, RS, -w, w, (k) => ys[k], bedCol);
@@ -329,7 +331,11 @@ export function buildRail(tile: TileData, hf: Heightfield, roadCenters: { pts: F
       sideWall(structure, RS, w, (k) => ys[k], (k) => ys[k] + (elevated(k) ? 1.1 : 0), rgbHex(0xb0aca3));
       sideWall(structure, RS, -w, (k) => ys[k], (k) => ys[k] + (elevated(k) ? 1.1 : 0), rgbHex(0xb0aca3));
     }
-    for (const c of paired[i] ? [-2.2, 2.2] : [0]) for (const g of [-0.84, 0.84]) strip(steel, RS, c + g - 0.05, c + g + 0.05, (k) => ys[k] + 0.18, [1, 1, 1]);
+    const nt = r.tracks ?? (paired[i] ? 2 : 1), tc = r.tc ?? 4.4, hg = (r.gauge ?? 1.676) / 2;
+    for (let t = 0; t < nt; t++) {
+      const c = (t - (nt - 1) / 2) * tc;
+      for (const g of [-hg, hg]) strip(steel, RS, c + g - 0.05, c + g + 0.05, (k) => ys[k] + 0.18, [1, 1, 1]);
+    }
 
     // pillars every 30 m under elevated stretches
     if (anyElevated) {
@@ -340,7 +346,7 @@ export function buildRail(tile: TileData, hf: Heightfield, roadCenters: { pts: F
         const x = RS.pts[k * 2], z = RS.pts[k * 2 + 1];
         const yaw = Math.atan2(-RS.nor[k * 2], RS.nor[k * 2 + 1]);
         const top = ys[k] - 1.6;
-        structure.box(x, z, gs[k] - 1, top - 0.7, 1.8, paired[i] ? 2.2 : r.metro ? 2.0 : 1.6, yaw, rgbHex(0xa8a49b));
+        structure.box(x, z, gs[k] - 1, top - 0.7, 1.8, paired[i] || (r.tracks ?? 1) > 1 ? 2.2 : r.metro ? 2.0 : 1.6, yaw, rgbHex(0xa8a49b));
         structure.box(x, z, top - 0.7, top, 2.2, w * 2 * 0.9, yaw, rgbHex(0x9a968d));
       }
     }

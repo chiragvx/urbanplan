@@ -7,6 +7,9 @@ import { COMMANDS, type Command } from '../editor/commands';
 import { ui } from './ctx';
 import { Icon, Menu, prettyKeys } from './components';
 import { CLASS_LABEL } from '../doc/types';
+import { allAssets, sizeLabel } from '../assets';
+import { buildOpen } from '../editor/state';
+import { revealAsset } from './BuildPalette';
 import type { Tool } from '../editor/state';
 
 const TOOLS: { t: Tool; icon: (p: { size?: number }) => preact.JSX.Element; label: string; key: string }[] = [
@@ -51,6 +54,9 @@ export function TopBar() {
             <x.icon />
           </button>
         ))}
+        <button class={`tool build-btn ${buildOpen.value ? 'on' : ''}`} title="Build: roads, transit, rail, canals, drains, utilities, power (O)" disabled={ro} onClick={() => { buildOpen.value = !buildOpen.value; }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></svg>
+        </button>
         {tool.value === 'line' && (
           <select class="select tool-opt" value={lineLayer.value} title="Layer to draw into" onChange={(e) => { lineLayer.value = (e.currentTarget as HTMLSelectElement).value; }}>
             <option value="">Choose layer…</option>
@@ -132,9 +138,12 @@ export function Palette() {
     .filter((c: Command) => !seen.has(c.label) && seen.add(c.label) && (!c.enabled || c.enabled(ui.E)) && (!ql || `${c.group} ${c.label}`.toLowerCase().includes(ql)))
     .map((c) => ({ label: `${c.group}: ${c.label}`, hint: c.keys && prettyKeys(c.keys), run: () => c.run(ui.E) }));
   const roadHits = ql.length >= 2 ? roads.filter((r) => r.name.toLowerCase().includes(ql)).slice(0, 8).map((r) => ({ label: `Go to ${r.name}`, hint: CLASS_LABEL[r.cls], run: () => { select([{ kind: 'road', id: r.id }]); ui.E.zoomToSelection(); } })) : [];
+  // catalogue assets: "18 m", "BRT", "220 kV", "canal"
+  const assetHits = ql.length >= 2 && !readOnly.value ? allAssets().filter((a) => `${a.name} ${a.tab} ${sizeLabel(a)} ${a.use ?? ''}`.toLowerCase().includes(ql)).slice(0, 10)
+    .map((a) => ({ label: `Build: ${a.name}`, hint: sizeLabel(a), run: () => { revealAsset(a.id); ui.E.useAsset(a.id); } })) : [];
   const coord = /^(-?\d+(\.\d+)?)\s*[, ]\s*(-?\d+(\.\d+)?)$/.exec(q.trim());
   const extra = coord ? [{ label: `Go to ${coord[1]}, ${coord[3]}`, hint: Math.abs(Number(coord[1])) < 90 ? 'lat, lon' : 'x, z metres', run: () => ui.app.goTo(Number(coord[1]), Number(coord[3])) }] : [];
-  const all = [...extra, ...roadHits, ...cmds].slice(0, 40);
+  const all = [...extra, ...roadHits, ...assetHits, ...cmds].slice(0, 40);
   const close = () => { paletteOpen.value = false; };
   const go = (k: number) => { const it = all[k]; close(); it?.run(); };
   return (

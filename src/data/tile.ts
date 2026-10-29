@@ -4,7 +4,11 @@ export interface Line { pts: Float32Array }
 
 export interface Building extends Poly { h: number; minH: number; kind: number; roof: number; name: string; id: number }
 export interface Area extends Poly { kind: number }
-export interface Rail extends Line { bridge: boolean; tunnel: boolean; layer: number; service: boolean; metro: boolean }
+export interface Rail extends Line {
+  bridge: boolean; tunnel: boolean; layer: number; service: boolean; metro: boolean;
+  /** drawn from a catalogue asset: tracks, track centres, gauge (m), formation width, deck height above ground */
+  tracks?: number; tc?: number; gauge?: number; formation?: number; deck?: number;
+}
 
 export interface TileData {
   id: string;

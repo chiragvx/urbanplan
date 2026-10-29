@@ -286,5 +286,31 @@ check(!!doc.get(s0.id) && C.mesher.segs.has(`${s0.id}~0`), 'undo delete restores
   doc.undo(); doc.undo();
   check(!doc.get(t.id), 'undo removes it');
 }
+// ---- catalogue assets ----
+{
+  const A = await import('../../src/assets/index');
+  const { ruleIssues } = await import('../../src/doc/rules');
+  const all = A.allAssets();
+  check(all.length > 150 && new Set(all.map((a) => a.id)).size === all.length, `${all.length} assets, unique ids`);
+  const streets = all.filter((a) => a.profile.type === 'street');
+  check(streets.every((a) => a.profile.type === 'street' && a.profile.parts.every((p) => p.width > 0) && (a.id === 'road.subway' || a.profile.parts.some((p) => p.kind === 'lane' || p.kind === 'bus'))), 'every street asset has lanes (but the subway) and positive widths');
+  const pune = all.filter((a) => a.pack === 'pune');
+  const off = pune.filter((a) => Math.abs(A.assetWidth(a) - Number(/^([\d.]+)/.exec(a.name)![1])) > 0.01);
+  check(pune.length >= 40 && !off.length, `Pune USDG templates add up to their right of way${off.length ? ': ' + off.map((a) => a.id).join(', ') : ''}`);
+  const docA = new CityDoc(buildBase(net, tile, util), newMeta('kp', '', ''));
+  const b = docA.all('building')[0];
+  let cx = 0, cz = 0; for (let i = 0; i < b.outer.length; i += 2) { cx += b.outer[i]; cz += b.outer[i + 1]; } cx /= b.outer.length / 2; cz /= b.outer.length / 2;
+  const nalla = A.getAsset('water.nalla')!;
+  const lid = docA.transact('Nalla', () => A.createAssetLine(docA, nalla, [cx - 60, cz, cx + 60, cz], 0));
+  const l = docA.get<'line'>(lid as string)!;
+  check(!!l && l.props.asset === 'water.nalla' && !!docA.get(l.layer), 'asset line and its layer are created');
+  const near = (x0: number, z0: number, x1: number, z1: number) => docA.all('building').filter((o) => { const xs = o.outer.filter((_, i) => i % 2 === 0), zs = o.outer.filter((_, i) => i % 2 === 1); return Math.max(...xs) >= x0 && Math.min(...xs) <= x1 && Math.max(...zs) >= z0 && Math.min(...zs) <= z1; }).map((o) => o.id);
+  check(ruleIssues(docA, near).some((i) => i.key.startsWith(`rule:${lid}`) && i.ids.includes(b.id)), 'a building on a nalla breaks its 6 m buffer');
+  const st = A.getAsset('pune.18A')!;
+  const r = docA.transact('Road', () => OPS.drawStretch(docA, { x: cx, z: cz + 300 }, { x: cx + 200, z: cz + 300 }, [OPS.line([cx, cz + 300], [cx + 200, cz + 300])], 'tertiary', { parts: st.profile.type === 'street' ? st.profile.parts : undefined, asset: st.id }));
+  const back = new CityDoc(buildBase(net, tile, util), newMeta('kp', '', ''));
+  openMap(back, parse(serialize(docA)));
+  check(back.get<'line'>(lid as string)?.props.asset === 'water.nalla' && back.get<'section'>(r!.section!)?.asset === 'pune.18A' && totalWidth(back.get<'section'>(r!.section!)!.parts) === 18, 'asset lines and street assets survive save / load');
+}
 console.log(ok ? '\nALL OK' : '\nFAILURES');
 process.exit(ok ? 0 : 1);

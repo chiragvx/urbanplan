@@ -4,10 +4,12 @@ import { isTyping } from './editor';
 import * as ops from '../doc/ops';
 import * as xs from '../doc/xsection';
 import {
-  accuracyView, anchorSel, dialog, dpRegionsOn, terrainView, leftTab, mode, paletteOpen, penLift, profileOpen, readOnly, saveSettings, select, selection, settings, status, toast, tool, xray,
+  accuracyView, anchorSel, buildAsset, buildOpen, dialog, dpRegionsOn, terrainView, leftTab, mode, paletteOpen, penLift, placeRot, profileOpen, readOnly, saveSettings, select, selection, settings, status, toast, tool, xray,
   type RoadMode,
 } from './state';
 import { MODE_LABEL } from './roadtool';
+import { stepTile, revealAsset } from '../ui/BuildPalette';
+import { getAsset } from '../assets';
 import { TERRAIN_OPS } from './terraintool';
 import { SURVEY_LABEL, type Id, type SectionObj } from '../doc/types';
 import type { Part } from '../net/model';
@@ -90,6 +92,12 @@ export function setDeck(E: Editor, deck: number, merge?: string) {
 /** PageUp / PageDown: the road tool's drawing height, a point or junction's height, or the selection's deck. */
 function levelBy(E: Editor, dir: 1 | -1) {
   const step = settings.value.elevStep;
+  if (tool.value === 'route') {
+    penLift.value = clampLift(penLift.value + dir * step);
+    status.value = penLift.value > 0 ? `${penLift.value} m up` : penLift.value < 0 ? `${-penLift.value} m below ground` : 'At ground level';
+    E.at.refresh();
+    return;
+  }
   if (tool.value === 'pen') {
     penLift.value = clampLift(penLift.value + dir * step);
     status.value = penStatus(penLift.value);
@@ -119,6 +127,7 @@ function levelBy(E: Editor, dir: 1 | -1) {
 
 function setRoadMode(E: Editor, m: RoadMode) {
   saveSettings({ roadMode: m });
+  if (tool.value === 'route') { E.at.cancel(); status.value = E.at.hint(); E.overlayDirty = true; return; }
   E.cancelPen();
   E.road.cancel();
   if (tool.value !== 'pen') E.setTool('pen');
@@ -127,6 +136,12 @@ function setRoadMode(E: Editor, m: RoadMode) {
 }
 
 const ROAD_MODES: RoadMode[] = ['straight', 'curve', 'complex', 'continuous', 'freeform', 'replace'];
+
+function rotatePlace(E: Editor, deg: number) {
+  placeRot.value = (((placeRot.value + deg) % 360) + 360) % 360;
+  status.value = `Rotation ${placeRot.value}° (snapping onto a line overrides it)`;
+  E.overlayDirty = true;
+}
 const BRUSH_SIZES = [10, 20, 40, 80, 160, 320];
 /** [ ] in the terrain tool: brush size (Shift: strength) */
 function brushBy(E: Editor, dir: 1 | -1, strength: boolean) {
@@ -183,6 +198,8 @@ export const COMMANDS: Command[] = [
     run: (E) => {
       if (E.pen.pts.length || E.linePts.length) { if (tool.value === 'pen' && E.pen.pts.length >= 2) E.finishPen(); else E.cancelPen(); return; }
       if (E.road.active) { E.road.cancel(); status.value = E.road.hint(); return; }
+      if (E.at.active) { E.at.cancel(); status.value = E.at.hint(); return; }
+      if (buildOpen.value && tool.value === 'select') { buildOpen.value = false; return; }
       if (tool.value === 'terrain' && E.terra.pts.length) { E.terra.cancel(); status.value = E.terra.hint(); E.overlayDirty = true; return; }
       if (tool.value !== 'select') { E.setTool('select'); return; }
       const s = sel1();
@@ -196,6 +213,7 @@ export const COMMANDS: Command[] = [
       if (tool.value === 'pen') { if (E.road.active) { E.road.cancel(); status.value = E.road.hint(); } else E.finishPen(); return; }
       if (tool.value === 'terrain') { E.terra.finish(); return; }
       if (tool.value === 'line') { E.finishLine(); return; }
+      if (tool.value === 'route' || tool.value === 'area') { E.at.finish(); return; }
       const s = sel1();
       if (s?.kind === 'road') select(E.doc.sectionsOf(s.id).map((x) => ({ kind: 'section' as const, id: x.id })));
     },
@@ -206,8 +224,8 @@ export const COMMANDS: Command[] = [
   ]),
 
   // ---- Road ----
-  { id: 'road.widen', label: 'Widen by 0.5 m', group: 'Road', keys: ']', enabled: (E) => terrainTool() || hasRoads(E), run: (E) => { if (terrainTool()) { brushBy(E, 1, false); return; } editParts(E, 'Widen', (p) => xs.setTotalWidth(p, xs.totalWidth(p) + 0.5)); } },
-  { id: 'road.narrow', label: 'Narrow by 0.5 m', group: 'Road', keys: '[', enabled: (E) => terrainTool() || hasRoads(E), run: (E) => { if (terrainTool()) { brushBy(E, -1, false); return; } editParts(E, 'Narrow', (p) => xs.setTotalWidth(p, Math.max(3, xs.totalWidth(p) - 0.5))); } },
+  { id: 'road.widen', label: 'Widen by 0.5 m', group: 'Road', keys: ']', enabled: (E) => tool.value === 'place' || terrainTool() || hasRoads(E), run: (E) => { if (tool.value === 'place') { rotatePlace(E, 15); return; } if (terrainTool()) { brushBy(E, 1, false); return; } editParts(E, 'Widen', (p) => xs.setTotalWidth(p, xs.totalWidth(p) + 0.5)); } },
+  { id: 'road.narrow', label: 'Narrow by 0.5 m', group: 'Road', keys: '[', enabled: (E) => tool.value === 'place' || terrainTool() || hasRoads(E), run: (E) => { if (tool.value === 'place') { rotatePlace(E, -15); return; } if (terrainTool()) { brushBy(E, -1, false); return; } editParts(E, 'Narrow', (p) => xs.setTotalWidth(p, Math.max(3, xs.totalWidth(p) - 0.5))); } },
   { id: 'road.widen.big', label: 'Widen by 3 m', group: 'Road', keys: 'Shift+]', enabled: (E) => terrainTool() || hasRoads(E), run: (E) => { if (terrainTool()) { brushBy(E, 1, true); return; } editParts(E, 'Widen', (p) => xs.setTotalWidth(p, xs.totalWidth(p) + 3)); } },
   { id: 'road.narrow.big', label: 'Narrow by 3 m', group: 'Road', keys: 'Shift+[', enabled: (E) => terrainTool() || hasRoads(E), run: (E) => { if (terrainTool()) { brushBy(E, -1, true); return; } editParts(E, 'Narrow', (p) => xs.setTotalWidth(p, Math.max(3, xs.totalWidth(p) - 3))); } },
   { id: 'road.lane.add', label: 'Add a lane each way', group: 'Road', keys: 'Alt+]', enabled: hasRoads, run: (E) => editParts(E, 'Add lane', (p) => { const n = xs.laneCount(p); return xs.isOneway(p) ? xs.setLanes(p, n.f + 1, 0) : xs.setLanes(p, n.f + 1, n.b + 1); }) },
@@ -344,6 +362,14 @@ export const COMMANDS: Command[] = [
   })),
   { id: 'review.open', label: 'Open the review queue', group: 'Review', run: () => { leftTab.value = 'review'; } },
 
+  // ---- Build (asset palette) ----
+  { id: 'build.open', label: 'Build palette: roads, transit, rail, water, drainage, utilities, power', group: 'Tools', keys: 'O', enabled: editable, run: (E) => { buildOpen.value = !buildOpen.value; if (buildAsset.value) revealAsset(buildAsset.value); E.overlayDirty = true; } },
+  { id: 'build.next', label: 'Build: next item in the tab', group: 'Tools', keys: '.', enabled: editable, run: () => stepTile(1) },
+  { id: 'build.prev', label: 'Build: previous item in the tab', group: 'Tools', keys: ',', enabled: editable, run: () => stepTile(-1) },
+  { id: 'build.nextTab', label: 'Build: next tab', group: 'Tools', keys: 'Shift+.', enabled: editable, run: () => stepTile(1, true) },
+  { id: 'build.prevTab', label: 'Build: previous tab', group: 'Tools', keys: 'Shift+,', enabled: editable, run: () => stepTile(-1, true) },
+  { id: 'build.again', label: 'Build the last asset again', group: 'Tools', enabled: () => editable() && !!getAsset(buildAsset.value), run: (E) => E.useAsset(buildAsset.value) },
+
   // ---- Help ----
   { id: 'help.keys', label: 'Keyboard shortcuts & help', group: 'Help', keys: '?', run: () => { dialog.value = 'help'; } },
   { id: 'help.about', label: 'About & data sources', group: 'Help', run: () => { dialog.value = 'about'; } },
@@ -365,6 +391,8 @@ export function keyName(e: KeyboardEvent): string {
     else if (e.code === 'Equal') k = '=';
     else if (e.code === 'Minus') k = '-';
     else if (e.code === 'Slash') k = e.shiftKey ? '?' : '/';
+    else if (e.code === 'Comma') k = ',';
+    else if (e.code === 'Period') k = '.';
   }
   if (e.shiftKey && k !== '?') mods.push('Shift');
   return [...mods.sort((a, b) => ['Ctrl', 'Alt', 'Shift'].indexOf(a) - ['Ctrl', 'Alt', 'Shift'].indexOf(b)), k].join('+');

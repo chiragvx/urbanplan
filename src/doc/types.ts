@@ -41,6 +41,8 @@ export interface SectionObj {
   note?: string;
   /** where the width came from */
   widthSrc?: Source;
+  /** the catalogue asset it was built from (src/assets) */
+  asset?: string;
   /** (created sections) inheritable keys set on the section itself */
   own?: string[];
 }
@@ -71,7 +73,8 @@ export interface RoadObj {
   own?: string[];
 }
 
-export type LineKind = 'sewer' | 'storm' | 'water' | 'power' | 'gas' | 'telecom' | 'metro' | 'rail' | 'path' | 'other';
+export type LineKind = 'sewer' | 'storm' | 'water' | 'power' | 'gas' | 'telecom' | 'metro' | 'rail' | 'path' | 'other'
+  | 'canal' | 'nalla' | 'hv' | 'transit' | 'site' | 'zone';
 
 export interface LineObj {
   kind: 'line';

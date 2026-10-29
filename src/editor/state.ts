@@ -2,7 +2,7 @@
 import { signal, computed } from '@preact/signals';
 import type { Id, Kind } from '../doc/types';
 
-export type Tool = 'select' | 'direct' | 'pen' | 'knife' | 'line' | 'measure' | 'hand' | 'bulldoze' | 'wand' | 'terrain';
+export type Tool = 'select' | 'direct' | 'pen' | 'knife' | 'line' | 'measure' | 'hand' | 'bulldoze' | 'wand' | 'terrain' | 'route' | 'place' | 'area';
 /** Road tool modes, as in Cities: Skylines (freeform = the Bézier pen; replace = CS's upgrade tool). */
 export type RoadMode = 'straight' | 'curve' | 'complex' | 'continuous' | 'freeform' | 'replace';
 export type ViewMode = '2d' | '3d';
@@ -38,6 +38,14 @@ export const penClass = signal('residential');
 /** height above the ground the road tool draws at (PageUp / PageDown) */
 export const penLift = signal(0);
 export const lineLayer = signal<Id>('');
+/** the asset being built (palette): its id; the road tool also takes its cross-section from it */
+export const buildAsset = signal<string>('');
+/** the build palette: open, and the category / tab shown */
+export const buildOpen = signal(false);
+export const buildCat = signal<import('../assets/model').Category>('roads');
+export const buildTab = signal<Record<string, string>>({});
+/** rotation (degrees) for placed structures, '[' / ']' turn it */
+export const placeRot = signal(0);
 /** cursor in world metres (status bar) */
 export const cursor = signal<[number, number] | null>(null);
 export const zoomScale = signal(1);
@@ -59,13 +67,14 @@ export interface Settings {
   levelHeight: number | null; levelBalanced: boolean; embankOffset: number; embankWidth: number; pondDepth: number;
   /** 3D vertical exaggeration in the terrain view */ exaggeration: number;
   /** 3D look: simple (light, the default) or high (sky, ambient occlusion, sharper shadows) */ graphics: 'simple' | 'high';
+  /** assets saved from cross-sections ("Save as asset") */ customAssets: import('../assets/model').AssetDef[];
 }
 function loadSettings(): Settings {
   const def: Settings = {
     author: '', wheel: 'zoom', snap: true, showGrid: false, units: 'm',
-    roadMode: 'straight', elevStep: 2.5, snapGeometry: true, snapAngles: true, snapGuides: true, snapLength: 1, grade: 0.05, roadGraded: false,
+    roadMode: 'straight', elevStep: 2.5, snapGeometry: true, snapAngles: true, snapGuides: true, snapLength: 1, grade: 0.035, roadGraded: false,
     terrainOp: 'shift', brushRadius: 40, brushStrength: 0.5, levelHeight: null, levelBalanced: true, embankOffset: 2, embankWidth: 10, pondDepth: 2, exaggeration: 1,
-    graphics: 'simple',
+    graphics: 'simple', customAssets: [],
   };
   // key keeps the old name so settings survive the rename
   try { return { ...def, ...JSON.parse(localStorage.getItem('pune-remix:settings') ?? '{}') }; } catch { return def; }

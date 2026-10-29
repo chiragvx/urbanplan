@@ -13,6 +13,10 @@ import { EarthworkPanel } from './EarthworkPanel';
 import { LINE_LABEL } from '../doc/base';
 import { COMMANDS, setDeck } from '../editor/commands';
 import type { Part } from '../net/model';
+import { allAssets, assetOf, getAsset, lineShape, retypeLine, saveCustom, sizeLabel, type AssetDef } from '../assets';
+import { thumb } from '../assets/thumb';
+import { revealAsset } from './BuildPalette';
+import { buildOpen } from '../editor/state';
 
 const classOptions = ROAD_CLASSES.map((c) => ({ value: c as string, label: CLASS_LABEL[c] }));
 const run = (id: string) => { const c = COMMANDS.find((x) => x.id === id)!; if (!c.enabled || c.enabled(ui.E)) c.run(ui.E); };
@@ -111,6 +115,7 @@ function RoadPanel(p: { id: Id }) {
         <WaysControls target={p.id} parts={lead.parts} reserve={reserves.length === 1 ? reserves[0] : undefined} state={d.editState(lead.id, 'parts')} mixed={mixed} />
         {reserves.length > 1 && <p class="muted">DP reserve along this road: {reserves.sort((a, b) => a - b).join(' / ')} m</p>}
       </Section>
+      <StreetAsset ids={secs.map((x) => x.id)} target={p.id} parts={lead.parts} cls={lead.cls} name={r.name} />
       <LevelControls ids={secs.map((x) => x.id)} />
       <Section title="Sections" open={secs.length <= 12} right={<span class="muted">{verified}/{secs.length} verified</span>}>
         <div class="list">
@@ -205,6 +210,7 @@ function SectionPanel(p: { id: Id }) {
         <Actions items={['road.straighten', 'road.smooth', 'road.arc', 'road.reverse']} />
         <p class="muted small">Drag the road to bend it. Double-click it (or press <kbd>A</kbd>) to edit points and curve handles.</p>
       </Section>
+      <StreetAsset ids={[p.id]} target={p.id} parts={s.parts} cls={s.cls} name={s.name || r?.name || ''} />
       <LevelControls ids={[p.id]} />
       <Section title="Source & accuracy">
         <Row label="Width from"><span>{({ dp: 'Development Plan sheet', osm: 'OpenStreetMap tags / defaults', user: 'Edited by hand', default: 'Default', survey: 'Survey', import: 'Import' } as Record<string, string>)[s.widthSrc ?? 'default']}</span></Row>
@@ -299,13 +305,14 @@ function LinePanel(p: { id: Id }) {
     <div class="insp">
       <div class="insp-kind"><span class="swatch" style={{ background: L?.color }} /> {LINE_LABEL[L?.lineKind ?? 'other']}</div>
       <input class="title-input" value={l.name} placeholder="Unnamed line" disabled={ro} onChange={(e) => set('name', (e.currentTarget as HTMLInputElement).value.trim())} />
-      <p class="muted">{fmtLen(length)} · {l.pts.length / 2} points</p>
+      <p class="muted">{lineShape(l) === 'point' ? 'Placed structure' : lineShape(l) === 'area' ? `Area · ${l.pts.length / 2} corners` : `${fmtLen(length)} · ${l.pts.length / 2} points`}</p>
+      {assetOf(l) && <LineAsset id={p.id} />}
       <Row label="Layer"><Select value={l.layer} options={layers.map((x) => ({ value: x.id, label: x.name }))} disabled={ro} onChange={(v) => set('layer', v)} /></Row>
-      <div class="grid2">
+      {lineShape(l) === 'route' && <><div class="grid2">
         <NumberField label={l.depth < 0 ? 'Height' : 'Depth'} unit="m" value={Math.abs(l.depth)} step={0.1} min={0} max={60} disabled={ro} onChange={(v, m) => set('depth', l.depth < 0 ? -v : v, m)} title="Below ground (pipes) / above ground (viaducts)" />
         <NumberField label={L?.group === 'underground' ? 'Diameter' : 'Width'} unit="m" value={l.size} step={0.05} digits={2} min={0.02} max={20} disabled={ro} onChange={(v, m) => set('size', v, m)} />
       </div>
-      <Row label="Position"><Seg small value={l.depth < -0.5 ? 'above' : l.depth > 0.3 ? 'below' : 'ground'} options={[{ value: 'below', label: 'Underground' }, { value: 'ground', label: 'Ground' }, { value: 'above', label: 'Elevated' }]} onChange={(v) => set('depth', v === 'below' ? Math.max(1, Math.abs(l.depth)) : v === 'ground' ? 0 : -Math.max(6, Math.abs(l.depth)))} /></Row>
+      <Row label="Position"><Seg small value={l.depth < -0.5 ? 'above' : l.depth > 0.3 ? 'below' : 'ground'} options={[{ value: 'below', label: 'Underground' }, { value: 'ground', label: 'Ground' }, { value: 'above', label: 'Elevated' }]} onChange={(v) => set('depth', v === 'below' ? Math.max(1, Math.abs(l.depth)) : v === 'ground' ? 0 : -Math.max(6, Math.abs(l.depth)))} /></Row></>}
       {Object.keys(l.props).length > 0 && (
         <Section title="Attributes" open={false}>
           {Object.entries(l.props).map(([k, v]) => <Row key={k} label={k}><span>{String(v)}</span></Row>)}
@@ -374,6 +381,69 @@ function Actions(p: { items: string[] }) {
   const cmds = p.items.map((id) => COMMANDS.find((c) => c.id === id)!).filter((c) => c && (!c.enabled || c.enabled(ui.E)));
   if (!cmds.length) return null;
   return <div class="actions">{cmds.map((c) => <button key={c.id} disabled={readOnly.value && c.group !== 'View'} onClick={() => c.run(ui.E)} title={c.keys}>{c.label}</button>)}</div>;
+}
+
+// ---------------- catalogue assets ----------------
+
+function AssetHead(p: { a: AssetDef }) {
+  const a = p.a;
+  return (
+    <div class="asset-head">
+      <img src={thumb(a)} width={56} height={36} alt="" />
+      <div>
+        <b>{a.name}</b> <span class="muted">{sizeLabel(a)}</span>
+        <p class="muted small">{a.source}{a.approx ? ' · some values typical' : ''}</p>
+      </div>
+      <button class="link small" title="Show it in the build palette" onClick={() => { revealAsset(a.id); buildOpen.value = true; }}>Palette</button>
+    </div>
+  );
+}
+
+/** Streets: which catalogue cross-section this is, switch to another, or save this one as your own. */
+function StreetAsset(p: { ids: Id[]; target: Id; parts: Part[]; cls: string; name: string }) {
+  const d = ui.doc, ro = readOnly.value;
+  const first = d.get<'section'>(p.ids[0]);
+  const cur = getAsset(first?.asset);
+  const same = cur && p.ids.every((id) => d.get<'section'>(id)?.asset === cur.id) ? cur : undefined;
+  const options = same ? allAssets().filter((a) => a.drawer === 'network' && a.category === same.category && a.tab === same.tab) : [];
+  const apply = (a: AssetDef) => {
+    if (a.profile.type !== 'street') return;
+    const prof = a.profile;
+    ui.E.edit(`Make it ${a.name}`, () => {
+      d.set(p.target, 'parts', prof.parts.map((q) => ({ ...q })));
+      d.set(p.target, 'cls', prof.cls);
+      for (const id of p.ids) d.set(id, 'asset', a.id);
+    });
+  };
+  const save = () => {
+    const name = prompt('Name for this cross-section', `${p.name || CLASS_LABEL[p.cls] || 'Street'} ${xs.totalWidth(p.parts)} m`);
+    if (!name) return;
+    const a = saveCustom({ category: 'roads', tab: 'My assets', name, use: xs.describe(p.parts), drawer: 'network', profile: { type: 'street', cls: p.cls, parts: p.parts.map((q) => ({ ...q })) }, source: 'Saved from this map' });
+    ui.E.edit('Asset', () => { for (const id of p.ids) d.set(id, 'asset', a.id); });
+    revealAsset(a.id);
+  };
+  return (
+    <Section title="Catalogue" open={!!same}>
+      {same ? <AssetHead a={same} /> : <p class="muted small">Not from the catalogue{cur ? ' (sections differ)' : ''}. Pick one in the build palette's Replace mode, or save this cross-section.</p>}
+      {same && options.length > 1 && <Row label="Type"><Select value={same.id} options={options.map((a) => ({ value: a.id, label: a.name }))} disabled={ro} onChange={(v) => { const a = getAsset(v); if (a) apply(a); }} /></Row>}
+      <div class="btns"><button class="small" disabled={ro} onClick={save}>Save as asset…</button></div>
+    </Section>
+  );
+}
+
+/** Lines from the catalogue: the asset, and switching to another of its kind (e.g. a bigger canal, another voltage). */
+function LineAsset(p: { id: Id }) {
+  const d = ui.doc, ro = readOnly.value;
+  const l = d.get<'line'>(p.id)!;
+  const a = assetOf(l)!;
+  const options = allAssets().filter((x) => x.drawer === a.drawer && x.profile.type === a.profile.type && x.category === a.category);
+  return (
+    <Section title="Catalogue">
+      <AssetHead a={a} />
+      {options.length > 1 && <Row label="Type"><Select value={a.id} options={options.map((x) => ({ value: x.id, label: `${x.name} · ${sizeLabel(x)}` }))} disabled={ro} onChange={(v) => { const x = getAsset(v); if (x) ui.E.edit(`Make it ${x.name}`, () => retypeLine(d, p.id, x)); }} /></Row>}
+      {(a.rules ?? []).length > 0 && <ul class="asset-rules">{a.rules!.map((r, i) => <li key={i}>{r.note}</li>)}</ul>}
+    </Section>
+  );
 }
 
 export function fmtLen(m: number) { return m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${Math.round(m)} m`; }

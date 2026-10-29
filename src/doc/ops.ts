@@ -433,7 +433,7 @@ export function quadPiece(a: V2, m: V2, b: V2): number[] {
  * Add one stretch of road from `a` to `b` along the given cubic pieces (absolute control points). Heights run
  * evenly from a's to b's. Joins an existing road (`road`) or starts a new one. Returns the ids it made / used.
  */
-export function drawStretch(doc: CityDoc, a: PenPoint, b: PenPoint, pieces: number[][], cls: string, opt: { road?: Id; name?: string; parts?: Part[] } = {}): { road: Id; section: Id | null; a: Id; b: Id } {
+export function drawStretch(doc: CityDoc, a: PenPoint, b: PenPoint, pieces: number[][], cls: string, opt: { road?: Id; name?: string; parts?: Part[]; asset?: string } = {}): { road: Id; section: Id | null; a: Id; b: Id } {
   let road = opt.road && doc.get(opt.road) ? opt.road : '';
   if (!road) { const r: RoadObj = { kind: 'road', id: newId('r'), name: opt.name ?? '', cls }; doc.create(r); road = r.id; }
   const jA = endpointFor(doc, a);
@@ -460,6 +460,7 @@ export function drawStretch(doc: CityDoc, a: PenPoint, b: PenPoint, pieces: numb
   const s: SectionObj = {
     kind: 'section', id: newId('s'), a: jA.id, b: jB.id, path, parts: P.map((p) => ({ ...p })), cls, name: opt.name ?? '', road,
     surface: cls === 'track' ? 'dirt' : 'asphalt', ...levelOf(path, jA, jB), viaduct: false, wayIds: [], widthSrc: 'user',
+    ...(opt.asset ? { asset: opt.asset } : {}),
   };
   doc.create(s);
   return { road, section: s.id, a: jA.id, b: jB.id };

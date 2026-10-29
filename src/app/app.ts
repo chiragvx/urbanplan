@@ -16,6 +16,7 @@ import { editRegion } from '../doc/ops';
 import { FILE_EXT, newMeta, openMap, parse, serialize } from '../doc/format';
 import { IssueIndex, type RegionLike } from '../doc/issues';
 import { earthworkBox } from '../doc/terrain';
+import { riverIssues } from '../doc/rules';
 import { toGeoJSON, toNetwork } from '../doc/export';
 import { CityApi } from '../doc/api';
 import type { Id, LayerObj, MapMeta } from '../doc/types';
@@ -102,6 +103,8 @@ export class App implements AppApi {
         ids: this.doc.all('earthwork').filter((o) => { const b = earthworkBox(o); return p.x >= b[0] && p.x <= b[2] && p.z >= b[1] && p.z <= b[3]; }).map((o) => o.id),
       }));
     };
+    // buildings within 15 m of the river (UDCPR §3.1.1 ii)
+    this.issues.riverIssues = () => riverIssues(this.doc, (x0, z0, x1, z1) => this.E.hit.query(x0, z0, x1, z1), this.tile.waters.map((w) => w.outer));
     // DP regions for the checks: survey region objects, and traced regions not surveyed yet
     this.issues.regions = () => {
       const D = this.E.dpr;

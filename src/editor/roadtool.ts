@@ -7,7 +7,9 @@ import type { Editor } from './editor';
 import * as ops from '../doc/ops';
 import type { Id } from '../doc/types';
 import type { V2 } from '../net/model';
-import { penClass, penLift, readOnly, settings, status, toast, type RoadMode } from './state';
+import { buildAsset, penClass, penLift, readOnly, settings, status, toast, type RoadMode } from './state';
+import { getAsset } from '../assets';
+import type { Part } from '../net/model';
 import { template } from '../doc/xsection';
 
 export interface Guide { o: V2; d: V2; label: string; ray?: boolean }
@@ -38,6 +40,13 @@ const MODE_HINT: Record<RoadMode, string> = {
   freeform: 'Click points, drag for curves · Enter to finish',
   replace: 'Click a road to give it the chosen class · Alt = one section',
 };
+
+/** The street asset picked in the palette, if it matches the road class being drawn. */
+export function penStreet(): { id: string; parts: Part[] } | null {
+  const a = getAsset(buildAsset.value);
+  if (!a || a.profile.type !== 'street' || a.profile.cls !== penClass.value) return null;
+  return { id: a.id, parts: a.profile.parts };
+}
 
 export class RoadTool {
   start: Start | null = null;
@@ -251,7 +260,8 @@ export class RoadTool {
     const end: ops.PenPoint = { x: sp.p[0], z: sp.p[1], junction: sp.junction, section: sp.section, lift: sp.lift };
     if (Math.hypot(end.x - S.pt.x, end.z - S.pt.z) < 1) return;
     const res = E.edit('Draw road', () => {
-      const r = ops.drawStretch(E.doc, S.pt, end, pieces, penClass.value, { road: this.road ?? undefined });
+      const st = penStreet();
+      const r = ops.drawStretch(E.doc, S.pt, end, pieces, penClass.value, { road: this.road ?? undefined, parts: st?.parts, asset: st?.id });
       const c = r.section ? ops.autoConnect(E.doc, [r.section]) : { joined: 0, bridged: 0 };
       // Cities: Skylines style: a graded road (fixed profile, the ground cut / filled to it) on ground level
       if (settings.value.roadGraded && Math.abs(S.lift) < 0.25 && Math.abs(end.lift ?? 0) < 0.25)
@@ -292,11 +302,12 @@ export class RoadTool {
   private replaceAt(w: V2, alt: boolean) {
     const E = this.E, p = E.pickAt(w[0], w[1]);
     if (p?.kind !== 'section') return;
-    const sec = E.doc.get<'section'>(p.id)!, cls = penClass.value;
+    const sec = E.doc.get<'section'>(p.id)!, cls = penClass.value, st = penStreet();
     E.edit('Replace road', () => {
       const target = alt ? sec.id : sec.road;
       E.doc.set(target, 'cls', cls);
-      E.doc.set(target, 'parts', template(cls));
+      E.doc.set(target, 'parts', st ? st.parts.map((q) => ({ ...q })) : template(cls));
+      for (const s of alt ? [sec] : E.doc.sectionsOf(sec.road)) E.doc.set(s.id, 'asset', st?.id);
       if (!alt) for (const s of E.doc.sectionsOf(sec.road)) { if (E.doc.editState(s.id, 'parts') === 'own') E.doc.reset(s.id, 'parts'); if (E.doc.editState(s.id, 'cls') === 'own') E.doc.reset(s.id, 'cls'); }
     });
     toast(`${alt ? 'Section' : 'Road'} is now ${cls}`, 'ok');

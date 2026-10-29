@@ -97,6 +97,36 @@ npm run map -- network maps/my.urbanplan.json out/network.json
 npm run map -- publish maps/my.urbanplan.json
 ```
 
+### Build palette (standard infrastructure)
+
+Like Cities: Skylines' asset panel: **O** (or the grid button) opens it; each tile is an asset drawn from its own
+cross-section, with a hover card giving its dimensions, limits and the standard it comes from. Click a tile to build.
+
+| Category | What's in it | From |
+|---|---|---|
+| Roads | access / layout roads (6–15 m), collectors, sub-arterials, arterials, highways (SH 45 m, NH 60 m, expressway), flyovers, ROB, underpass; **Pune USDG** templates 6A–45; **Mumbai SDG** hierarchy; every DP width | IRC:86-2018, UDCPR 2020 §3.2–3.3, PMC USDG 2016, MCGM SDG 2014, IRC:SP:90 |
+| Public transport | BRT streets and median stations, bus stops, depots; elevated / at-grade / underground metro, stations (500 m TOD ring), depots; Pune BRT templates | IRC:124-2017, MoR metro MSS 2014 |
+| Rail | BG single / double / quadruple lines, viaduct, yards, platforms, stations, goods yards | Indian Railways Schedule of Dimensions |
+| Water | canals by discharge class (field channel → main canal), nallas (natural / trained), blue and red flood-line zones, ponds | IS 10430:2000, UDCPR §3.1.1 / §3.1.3 |
+| Drainage | open drains, storm pipes Ø 600–1200, box drains, sewers Ø 150–1500 (manholes placed by diameter), STPs | CPHEEO manuals |
+| Utilities | water mains Ø 100–1200 (hydrants every 150 m), service reservoirs, gas, telecom and common utility ducts | CPHEEO, PNGRB, MoRTH |
+| Power | LT, 11 / 33 kV poles, 66–765 kV towers in their right-of-way corridors, underground cables, transformers, substations | MoP RoW 2015, UDCPR §3.1.2 / §3.6 |
+| Paths & places | footpaths, cycle tracks, trails, parks, playgrounds, parking lots, plazas | IRC:86, UDCPR Table 8A |
+
+- **Streets** go to the road tool (all its modes, heights, snapping); the section remembers its asset, and the
+  inspector can switch it to another of the same family or **Save as asset** (your own tab, kept in this browser).
+- **Routes** (rail, metro, canals, pipes, power lines, paths) use the same modes, carry on from the last stretch, snap
+  to their layer's lines; pipes and cables slip into a road's footpath (Alt: the centre line). Hard limits refuse a
+  stretch (a metro curve under 120 m, a kink); `,` / `.` step through the tiles, `Shift+,` / `Shift+.` the tabs.
+- **Structures** snap onto their line (stations, platforms) or road (BRT stations, bus stops); `[` `]` rotate.
+  **Areas**: click the corners, Enter to finish.
+- **Checks** (Issues): curves under the limit, buildings inside buffers (6 m canals / nallas, power corridors, 30 m
+  railway NOC), buildings in flood zones, roads over rail without 6.25 m clearance and level crossings, BRT stations
+  on streets under 30 m, ramps you drew steeper than 3.5 %, and buildings within 15 m of the river.
+- In 3D: canals wider than a terrain cell cut into the ground with lining, banks and water; towers and conductors;
+  stations, platforms, tanks and substations as simple blocks. Values that are typical or read off drawings rather
+  than a clause are marked on the hover card.
+
 ### Graphics and performance
 
 - **3D looks** (Settings → 3D graphics): *Simple* (default: flat sky, shadows re-rendered once the camera settles, FXAA

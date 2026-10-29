@@ -5,6 +5,7 @@ import type { Compiler } from './compile';
 import type { Id, SectionObj, SurveyStatus } from './types';
 import { totalWidth } from './xsection';
 import { anchorsOf, crossingsOf, offGrade, samplePath, SAME_LEVEL } from './ops';
+import { ruleIssues } from './rules';
 
 /** Headroom (m) under a bridge below which it is flagged (5.5 m is the usual clearance; imported decks are estimates). */
 const CLEARANCE = 5;
@@ -229,6 +230,26 @@ export class IssueIndex {
   regions: () => RegionLike[] = () => [];
   /** terrain checks (water pooling where the ground was terraformed), set by the app */
   terrainIssues: () => Issue[] = () => [];
+  /** buildings near rivers (the tile's water), set by the app */
+  riverIssues: () => Issue[] = () => [];
+
+  private clearPrefix(p: string) {
+    for (const k of [...this.byKey.keys()]) if (k.startsWith(p)) { const i = this.byKey.get(k)!; this.byKey.delete(k); for (const o of i.ids) this.byObj.get(o)?.delete(k); }
+  }
+
+  /** Re-run the standards checks of catalogue assets (src/doc/rules.ts). */
+  rulePass() {
+    this.clearPrefix('rule:');
+    for (const i of ruleIssues(this.doc, this.near)) this.add(i);
+    this.version++;
+  }
+
+  /** Buildings near rivers. */
+  riverPass() {
+    this.clearPrefix('river:');
+    for (const i of this.riverIssues()) this.add(i);
+    this.version++;
+  }
 
   /** Re-run the terrain checks. */
   terrainPass() {
@@ -269,6 +290,8 @@ export class IssueIndex {
     this.version++;
     this.regionPass();
     this.terrainPass();
+    this.rulePass();
+    this.riverPass();
   }
 
   /** Re-check changed objects and their neighbourhood. */
@@ -292,6 +315,9 @@ export class IssueIndex {
     this.version++;
     if ([...todo].some((id) => this.doc.get(id)?.kind === 'region' || this.doc.get(id)?.kind === 'building')) this.regionPass();
     if ([...todo].some((id) => this.doc.get(id)?.kind === 'earthwork' || id.startsWith('ew'))) this.terrainPass();
+    const kinds = new Set([...todo].map((id) => this.doc.get(id)?.kind ?? 'gone'));
+    if (kinds.has('line') || kinds.has('building') || kinds.has('section') || kinds.has('gone')) this.rulePass();
+    if (kinds.has('building')) this.riverPass();
   }
 
   list(): Issue[] {

@@ -7,6 +7,7 @@ import { LeftPanel } from './ui/panels';
 import { Inspector } from './ui/Inspector';
 import { Dialogs, Profile } from './ui/dialogs';
 import { RoadToolbar } from './ui/RoadToolbar';
+import { BuildPalette } from './ui/BuildPalette';
 import { TerrainToolbar } from './ui/TerrainToolbar';
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -27,7 +28,7 @@ async function boot() {
   render(h(LeftPanel, {}), $('left'));
   render(h(Inspector, {}), $('right'));
   render(h(StatusBar, {}), $('status'));
-  render(h('div', {}, h(ReadOnlyBanner, {}), h(RoadToolbar, {}), h(TerrainToolbar, {}), h(Toasts, {}), h(Profile, {})), $('stage-ui'));
+  render(h('div', {}, h(ReadOnlyBanner, {}), h(RoadToolbar, {}), h(TerrainToolbar, {}), h(BuildPalette, {}), h(Toasts, {}), h(Profile, {})), $('stage-ui'));
   render(h('div', {}, h(Palette, {}), h(Dialogs, {})), $('modals'));
   // the stage changes size with the panels: keep the renderer + overlay in step
   new ResizeObserver(() => { app.engine.resize(); app.E.resize(); }).observe($('stage'));

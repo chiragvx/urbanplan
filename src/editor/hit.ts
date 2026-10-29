@@ -33,7 +33,7 @@ export class HitIndex {
     if (!pts || pts.length < 2) return null;
     let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
     for (let i = 0; i < pts.length; i += 2) { x0 = Math.min(x0, pts[i]); x1 = Math.max(x1, pts[i]); z0 = Math.min(z0, pts[i + 1]); z1 = Math.max(z1, pts[i + 1]); }
-    const pad = o.kind === 'line' ? o.size / 2 + 1 : 0;
+    const pad = o.kind === 'line' ? Math.max(o.size, Number(o.props.len ?? 0)) / 2 + 1 : 0;
     return [x0 - pad, z0 - pad, x1 + pad, z1 + pad];
   }
 
@@ -110,8 +110,19 @@ export class HitIndex {
         const sd = this.sectionDist(id, x, z);
         if (sd && sd.d <= sd.hw + tol) offer({ kind: 'section', id, d: sd.d - sd.hw, p: sd.p });
       } else if (o.kind === 'line' && can('line', o.layer)) {
-        const d = polyDist(o.pts, x, z);
-        if (d <= o.size / 2 + tol) offer({ kind: 'line', id, d: d - o.size / 2 + 0.5 });
+        if (o.props.shape === 'point') {
+          // a placed structure: inside its (rotated) footprint
+          const r = (Number(o.props.rot ?? 0) * Math.PI) / 180, dx = x - o.pts[0], dz = z - o.pts[1];
+          const al = Math.abs(dx * Math.cos(r) + dz * Math.sin(r)), ac = Math.abs(-dx * Math.sin(r) + dz * Math.cos(r));
+          const hl = Math.max(Number(o.props.len ?? o.size), 6) / 2, hw = Math.max(o.size, 6) / 2;
+          if (al <= hl + tol && ac <= hw + tol) offer({ kind: 'line', id, d: -2 });
+        } else if (o.props.shape === 'area') {
+          if (inRing(o.pts, x, z)) offer({ kind: 'line', id, d: 6 });
+          else { const d = polyDist([...o.pts, o.pts[0], o.pts[1]], x, z); if (d <= tol) offer({ kind: 'line', id, d: d + 0.5 }); }
+        } else {
+          const d = polyDist(o.pts, x, z);
+          if (d <= o.size / 2 + tol) offer({ kind: 'line', id, d: d - o.size / 2 + 0.5 });
+        }
       } else if (o.kind === 'building' && can('building')) {
         if (inRing(o.outer, x, z)) offer({ kind: 'building', id, d: 5 });
       } else if (o.kind === 'earthwork' && can('earthwork')) {

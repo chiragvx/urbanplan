@@ -19,6 +19,8 @@ import type { BuildingObj, Id, LineObj } from '../doc/types';
 import { LINE_COLOR } from '../doc/base';
 import { ChunkSet, type ChunkItem } from './chunks';
 import { releaseAfterUpload } from '../render/release';
+import { buildAssets3d, carves, stampChannel, type AssetItem } from '../build/assets3d';
+import { assetOf, lineShape } from '../assets';
 import type { Graphics } from '../render/engine';
 import earcut from 'earcut';
 
@@ -65,6 +67,13 @@ export class World {
   /** pond water surfaces (terraforming) */
   ponds = new THREE.Group();
   private utilityLayers = new Map<Id, THREE.Mesh>();
+  /** catalogue assets that aren't streets / tracks / pipes (canals, power lines, structures, areas), per layer */
+  readonly assets = new THREE.Group();
+  private assetLayers = new Map<Id, THREE.Group>();
+  private assetsDirty = false;
+  private assetMat: THREE.MeshLambertNodeMaterial;
+  /** last extent of lines that cut the terrain (so an edit refreshes where they were) */
+  private lineExtent = new Map<Id, Region>();
   private treeChunks: { list: TreeInstance[]; hi: THREE.InstancedMesh; lo: THREE.InstancedMesh; cx: number; cz: number; x0: number; z0: number }[] = [];
   readonly raster: RoadRaster;
   readonly targets: Float32Array;
@@ -91,8 +100,10 @@ export class World {
     this.raster = new RoadRaster(tile.half);
     this.targets = new Float32Array(hf.n * hf.n).fill(NaN);
     this.planM = planMaterials(landuse);
+    this.assetMat = new THREE.MeshLambertNodeMaterial();
+    this.assetMat.colorNode = vertexColor().rgb;
     scene.add(this.root);
-    this.root.add(this.rail, this.metro, this.trees, this.utilities, this.ponds);
+    this.root.add(this.rail, this.metro, this.trees, this.utilities, this.ponds, this.assets);
   }
 
   /** Initial build of everything (after compiler.full()). */
@@ -112,6 +123,7 @@ export class World {
 
     progress(0.6, 'Fitting the ground to the roads…');
     C.mesher.stampTargets(this.targets);
+    this.stampChannels();
     hf.conform(this.targets);
     C.mesher.stampRaster(this.raster);
     this.terrain = buildTerrainChunks(hf, 80).map((c) => {
@@ -134,6 +146,7 @@ export class World {
 
     progress(0.85, 'Laying railway and metro…');
     this.buildRail();
+    this.buildAssets();
     progress(0.9, 'Planting trees…');
     this.buildTrees();
   }
@@ -172,11 +185,15 @@ export class World {
   // ---------------- rail / metro ----------------
 
   private railsFromDoc(layer: 'rail' | 'metro'): TileData['rails'] {
-    return this.doc.linesOf(layer).map((l: LineObj) => ({
-      pts: new Float32Array(l.pts),
-      bridge: l.props.bridge === 1 || l.depth < -0.5, tunnel: l.depth > 3, layer: l.depth < -0.5 ? Math.max(1, Math.round(-l.depth / 7.5)) : 0,
-      service: l.props.service === 1, metro: layer === 'metro',
-    }));
+    return this.doc.linesOf(layer).filter((l) => lineShape(l) === 'route' && l.pts.length >= 4).map((l: LineObj) => {
+      const a = assetOf(l), p = a?.profile.type === 'track' ? a.profile : undefined;
+      return {
+        pts: new Float32Array(l.pts),
+        bridge: l.props.bridge === 1 || l.depth < -0.5, tunnel: l.depth > 3 || p?.structure === 'tunnel', layer: l.depth < -0.5 ? Math.max(1, Math.round(-l.depth / 7.5)) : 0,
+        service: l.props.service === 1, metro: layer === 'metro',
+        ...(p ? { tracks: p.tracks, tc: p.tc, gauge: p.gauge, formation: p.formation, deck: l.depth < -0.5 ? -l.depth : undefined } : {}),
+      };
+    });
   }
 
   private buildRail() {
@@ -247,6 +264,8 @@ export class World {
     const rgb = rgbHex(new THREE.Color(L.color ?? LINE_COLOR[L.lineKind ?? 'other']).getHex());
     const T = (x: number, z: number) => this.hf.sampleSurface(x, z);
     for (const l of this.doc.linesOf(layer)) {
+      const a = assetOf(l);
+      if (lineShape(l) !== 'route' || (a && a.profile.type !== 'conduit')) continue;
       const r = Math.max(0.12, l.size / 2), p = l.pts;
       for (let i = 0; i + 3 < p.length; i += 2) {
         const ax = p[i], az = p[i + 1], bx = p[i + 2], bz = p[i + 3];
@@ -295,6 +314,11 @@ export class World {
       if (kind === 'building') { grow(this.bItems.get(id)); this.buildBuilding(o as BuildingObj | undefined, id); grow(this.bItems.get(id)); bTouched.push(id); }
       else if (o?.kind === 'line' || (!o && c.structural)) {
         const layer = o?.kind === 'line' ? o.layer : undefined;
+        if (o?.kind === 'line' ? !!assetOf(o) : true) this.assetsDirty = true;
+        // canals wide enough to cut the terrain: refresh where the line was and where it is
+        const was = this.lineExtent.get(id);
+        if (was) { grow({ x0: was[0], z0: was[1], x1: was[2], z1: was[3] }); this.lineExtent.delete(id); }
+        if (o?.kind === 'line') { const a = assetOf(o); if (a && carves(a)) { const e = lineBox(o.pts, o.size / 2 + 12); this.lineExtent.set(id, e); grow({ x0: e[0], z0: e[1], x1: e[2], z1: e[3] }); } }
         if (layer === 'rail' || layer === 'metro') this.railDirty = true;
         else if (layer && layer !== 'paths') this.utilDirty.add(layer);
         else if (!o) { this.railDirty = true; for (const l of this.utilityLayers.keys()) this.utilDirty.add(l); }
@@ -319,7 +343,9 @@ export class World {
     // road targets are read up to `radius` cells around a vertex: stamp a little wider than we conform
     const s0 = Math.max(0, g.i0 - pad * 2), t0 = Math.max(0, g.j0 - pad * 2), s1 = Math.min(hf.n - 1, g.i1 + pad * 2), t1 = Math.min(hf.n - 1, g.j1 + pad * 2);
     for (let j = t0; j <= t1; j++) this.targets.fill(NaN, j * hf.n + s0, j * hf.n + s1 + 1);
-    C.mesher.stampTargets(this.targets, [-hf.half + s0 * hf.cell - 0.01, -hf.half + t0 * hf.cell - 0.01, -hf.half + s1 * hf.cell + 0.01, -hf.half + t1 * hf.cell + 0.01]);
+    const box: Region = [-hf.half + s0 * hf.cell - 0.01, -hf.half + t0 * hf.cell - 0.01, -hf.half + s1 * hf.cell + 0.01, -hf.half + t1 * hf.cell + 0.01];
+    C.mesher.stampTargets(this.targets, box);
+    this.stampChannels(box);
     hf.conformRegion(this.targets, Math.max(0, g.i0 - pad), Math.max(0, g.j0 - pad), Math.min(hf.n - 1, g.i1 + pad), Math.min(hf.n - 1, g.j1 + pad));
     for (const t of this.terrain) {
       if (t.i1 < g.i0 - pad || t.i0 > g.i1 + pad || t.j1 < g.j0 - pad || t.j0 > g.j1 + pad) continue;
@@ -368,7 +394,49 @@ export class World {
   /** vertical exaggeration (buildings and trees are hidden while it's on: stretched they'd hide the ground) */
   private exag = 1;
 
-  get stale() { return this.dirty.length > 0 || this.railDirty || this.utilDirty.size > 0; }
+  get stale() { return this.dirty.length > 0 || this.railDirty || this.utilDirty.size > 0 || this.assetsDirty; }
+
+  // ---------------- catalogue assets ----------------
+
+  /** Lower the terrain targets under canals / nallas wide enough to cut in. */
+  private stampChannels(region?: Region) {
+    for (const l of this.doc.all('line')) {
+      const a = assetOf(l);
+      if (!a || !carves(a) || a.profile.type !== 'channel' || lineShape(l) !== 'route') continue;
+      if (!this.lineExtent.has(l.id)) this.lineExtent.set(l.id, lineBox(l.pts, l.size / 2 + 12));
+      if (region) { const e = this.lineExtent.get(l.id)!; if (e[2] < region[0] || e[0] > region[2] || e[3] < region[1] || e[1] > region[3]) continue; }
+      stampChannel(this.hf, this.targets, l.pts, a.profile, region);
+    }
+  }
+
+  /** Canals, power lines, structures and areas, one group per layer. */
+  private buildAssets() {
+    this.assetsDirty = false;
+    for (const g of this.assetLayers.values()) {
+      for (const c of [...g.children]) { g.remove(c); (c as THREE.Mesh).geometry.dispose(); }
+      this.assets.remove(g);
+    }
+    this.assetLayers.clear();
+    const byLayer = new Map<Id, AssetItem[]>();
+    for (const l of this.doc.all('line')) {
+      const a = assetOf(l);
+      if (!a) continue;
+      const shape = lineShape(l), t = a.profile.type;
+      // tracks are the rail builder's, pipes the utility builder's, paths the road mesher's
+      if (shape === 'route' && (t === 'track' || t === 'conduit' || t === 'path' || t === 'street')) continue;
+      const color = this.doc.get<'layer'>(l.layer)?.color ?? '#888';
+      (byLayer.get(l.layer) ?? byLayer.set(l.layer, []).get(l.layer)!).push({ id: l.id, pts: l.pts, a, lift: -l.depth, rot: Number(l.props.rot ?? 0), shape, color });
+    }
+    for (const [layer, items] of byLayer) {
+      const { solid, water } = buildAssets3d(items, this.hf);
+      const g = new THREE.Group();
+      if (solid.vertexCount) { const m = new THREE.Mesh(solid.build(), this.assetMat); m.castShadow = true; m.receiveShadow = true; m.matrixAutoUpdate = false; g.add(m); }
+      if (water.vertexCount) { const m = new THREE.Mesh(water.build(), this.M.water); m.receiveShadow = true; m.matrixAutoUpdate = false; g.add(m); }
+      this.assetLayers.set(layer, g);
+      this.assets.add(g);
+    }
+    this.applyLayers();
+  }
 
   /** Bring terrain, buildings, trees, rail and pipes up to date with the roads. */
   sync() {
@@ -394,6 +462,7 @@ export class World {
     }
     this.buildings.flush();
     if (this.railDirty) { this.railDirty = false; this.buildRail(); }
+    if (this.assetsDirty) this.buildAssets();
     for (const l of this.utilDirty) if (this.utilityLayers.has(l) || this.doc.get<'layer'>(l)?.visible) this.buildUtilityLayer(l);
     this.utilDirty.clear();
     this.needsRender = true;
@@ -437,6 +506,7 @@ export class World {
     this.trees.visible = vis('trees') && !this.plan && this.exag === 1;
     this.rail.visible = vis('rail') && !this.plan;
     this.metro.visible = vis('metro') && !this.plan;
+    for (const [layer, g] of this.assetLayers) g.visible = vis(layer) && !this.plan;
     // underground pipes: 3D only (2D draws them as vector lines)
     for (const L of this.doc.all('layer')) {
       if (L.group !== 'underground' || L.type !== 'lines') continue;
@@ -500,6 +570,12 @@ function inRing(x: number, z: number, r: number[]) {
     if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) c = !c;
   }
   return c;
+}
+
+function lineBox(p: number[], pad: number): Region {
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  for (let i = 0; i < p.length; i += 2) { x0 = Math.min(x0, p[i]); x1 = Math.max(x1, p[i]); z0 = Math.min(z0, p[i + 1]); z1 = Math.max(z1, p[i + 1]); }
+  return [x0 - pad, z0 - pad, x1 + pad, z1 + pad];
 }
 
 function hashId(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h; }
