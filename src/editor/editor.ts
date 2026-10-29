@@ -107,12 +107,39 @@ export class Editor {
     docVersion.value++;
     stale3d.value = this.world.stale;
     this.overlayDirty = true;
+    if (mode.value === '3d' && !this.drag) this.syncSoon();
     this.onAfterChange(c);
+  }
+
+  private syncTimer = 0;
+  /** In 3D, bring terrain / buildings / trees up to date with the roads shortly after an edit. */
+  syncSoon(ms = 150) {
+    clearTimeout(this.syncTimer);
+    this.syncTimer = window.setTimeout(() => { if (mode.value === '3d' && !this.drag && this.world.stale) { this.world.sync(); stale3d.value = false; } }, ms);
   }
 
   // ---------------- helpers ----------------
 
-  get tol() { return 6 / this.view.scale; }
+  get tol() { return 6 / this.ppm; }
+
+  /** Screen pixels per metre where the pointer is: the plan scale in 2D, from the camera distance in 3D. */
+  get ppm() { return mode.value === '2d' ? this.view.scale : this.ppm3; }
+  private ppm3 = 1;
+
+  /** Where the map is centred (the plan centre, or the 3D camera's target). */
+  get centre(): [number, number] { if (mode.value === '2d') return [this.view.cx, this.view.cz]; const f = this.controls.focus; return [f.x, f.z]; }
+
+  /** Overlay pixel → world metres: the plan transform in 2D, a ray onto the terrain in 3D. */
+  toWorld(sx: number, sy: number): [number, number] {
+    if (mode.value === '2d') return this.view.toWorld(sx, sy);
+    const r = this.overlay.getBoundingClientRect();
+    const cx = sx + r.left, cy = sy + r.top;
+    const p = this.controls.pick(cx, cy) ?? this.controls.pickAtHeight(cx, cy, this.controls.focus.y);
+    if (!p) return this.centre;
+    const d = this.engine.camera.position.distanceTo(p);
+    this.ppm3 = this.view.h / (2 * Math.max(1, d) * Math.tan((this.engine.camera.fov * Math.PI) / 360));
+    return [p.x, p.z];
+  }
 
   canPick = (kind: Kind, layer?: Id) => {
     const L = this.doc.get<'layer'>(layer ?? (kind === 'section' || kind === 'junction' ? 'roads' : kind === 'building' ? 'buildings' : ''));
@@ -162,7 +189,6 @@ export class Editor {
       c.yaw = 0; c.pitch = 1.5; c.dist = dist; c.snap();
       c.pitch = 0.75; c.yaw = 0.35; c.dist = dist * 0.7;
       this.engine.setPlan(false); this.world.setPlan(false);
-      this.overlay.style.pointerEvents = 'none';
     } else {
       const c = this.controls, f = c.focus;
       const viewH = 2 * c.currentDist * Math.tan((this.engine.camera.fov * Math.PI) / 360);
@@ -170,7 +196,6 @@ export class Editor {
       this.view.scale = Math.min(this.view.maxScale, Math.max(this.view.minScale, this.view.h / viewH));
       this.view.apply();
       this.engine.setPlan(true); this.world.setPlan(true);
-      this.overlay.style.pointerEvents = 'auto';
     }
     mode.value = m;
     this.engine.plan = m === '2d';
@@ -220,7 +245,7 @@ export class Editor {
     el.addEventListener('pointerup', (e) => this.up(e));
     el.addEventListener('pointerleave', () => { cursor.value = null; if (!this.drag) hover.value = null; this.overlayDirty = true; });
     el.addEventListener('wheel', (e) => this.wheel(e), { passive: false });
-    window.addEventListener('keydown', (e) => { if (e.code === 'Space' && !isTyping(e)) { this.spaceDown = true; if (mode.value === '2d') el.style.cursor = 'grab'; } });
+    window.addEventListener('keydown', (e) => { if (e.code === 'Space' && !isTyping(e)) { this.spaceDown = true; el.style.cursor = 'grab'; } });
     window.addEventListener('keyup', (e) => { if (e.code === 'Space') { this.spaceDown = false; this.updateCursor(); } });
   }
 
@@ -231,6 +256,7 @@ export class Editor {
 
   private wheel(e: WheelEvent) {
     e.preventDefault();
+    if (mode.value === '3d') { this.controls.wheel(e); return; }
     const [sx, sy] = this.local(e);
     const px = e.deltaMode === 1 ? 33 : 1;
     // trackpads: two-finger scroll pans, pinch (ctrl) zooms; mouse wheels zoom (or pan, per settings)
@@ -246,11 +272,14 @@ export class Editor {
 
   private down(e: PointerEvent) {
     const s = this.local(e);
-    const w = this.view.toWorld(...s);
+    const w = this.toWorld(...s);
     this.overlay.setPointerCapture(e.pointerId);
     this.mouse = s;
-    if (e.button === 1 || e.button === 2 || this.spaceDown || tool.value === 'hand') {
+    const is3d = mode.value === '3d';
+    if (e.button === 1 || e.button === 2 || this.spaceDown || tool.value === 'hand' || (is3d && e.button === 0 && e.altKey && tool.value !== 'pen')) {
       this.drag = { kind: 'pan', last: s, start: s, right: e.button === 2 };
+      // 3D: right / Alt drag orbits, middle / Space / hand pans
+      if (is3d) { this.controls.beginDrag(e, e.button === 2 || e.altKey ? 'rotate' : 'pan'); return; }
       this.overlay.style.cursor = 'grabbing';
       return;
     }
@@ -281,6 +310,8 @@ export class Editor {
     }
     const p = this.pickAt(w[0], w[1]);
     if (!p) {
+      // 3D: dragging empty ground moves the camera (a click there clears the selection)
+      if (is3d) { this.controls.beginDrag(e, 'pan'); return; }
       this.drag = { kind: 'marquee', a: w, b: w, add: e.shiftKey, deep: e.altKey || e.ctrlKey || e.metaKey };
       return;
     }
@@ -303,15 +334,15 @@ export class Editor {
 
   private move(e: PointerEvent) {
     const s = this.local(e);
-    const w = this.view.toWorld(...s);
+    const w = this.toWorld(...s);
     this.mouse = s;
     cursor.value = w;
     this.overlayDirty = true;
     const d = this.drag;
     if (!d) { this.hoverAt(s, w, e); return; }
-    const moved = (a: [number, number]) => Math.hypot(w[0] - a[0], w[1] - a[1]) * this.view.scale > 3;
+    const moved = (a: [number, number]) => Math.hypot(w[0] - a[0], w[1] - a[1]) * this.ppm > 3;
     switch (d.kind) {
-      case 'pan': this.view.pan(s[0] - d.last[0], s[1] - d.last[1]); d.last = s; this.world.needsRender = true; break;
+      case 'pan': if (mode.value === '2d') this.view.pan(s[0] - d.last[0], s[1] - d.last[1]); d.last = s; this.world.needsRender = true; break;
       case 'marquee': d.b = w; break;
       case 'bulldoze': this.bulldozeAt(w, e.shiftKey, d.n); break;
       case 'measure': d.b = this.snapPoint(w, e.shiftKey ? d.a : null).p; this.measure = { a: d.a, b: d.b }; break;
@@ -341,7 +372,7 @@ export class Editor {
       case 'anchor': this.dragAnchor(d, w, e.altKey || d.alt); break;
       case 'pen': {
         const p = this.pen.pts[d.idx];
-        if (Math.hypot(w[0] - d.start[0], w[1] - d.start[1]) * this.view.scale > 4) { p.hx = (w[0] - d.start[0]) / 2; p.hz = (w[1] - d.start[1]) / 2; }
+        if (Math.hypot(w[0] - d.start[0], w[1] - d.start[1]) * this.ppm > 4) { p.hx = (w[0] - d.start[0]) / 2; p.hz = (w[1] - d.start[1]) / 2; }
         break;
       }
     }
@@ -356,12 +387,13 @@ export class Editor {
     this.overlayDirty = true;
     this.updateCursor();
     if (!d) return;
-    const w = this.view.toWorld(...this.local(e));
+    if (mode.value === '3d' && d.kind !== 'pan') this.syncSoon(0);
+    const w = this.toWorld(...this.local(e));
     // right-click without dragging: step back, as in Cities: Skylines
     if (d.kind === 'pan' && d.right && Math.hypot(d.last[0] - d.start[0], d.last[1] - d.start[1]) < 4) { this.stepBack(); return; }
     if (d.kind === 'marquee') {
       const [ax, az] = d.a, [bx, bz] = d.b;
-      if (Math.hypot(bx - ax, bz - az) * this.view.scale < 4) { if (!d.add) select([]); return; }
+      if (Math.hypot(bx - ax, bz - az) * this.ppm < 4) { if (!d.add) select([]); return; }
       const r: [number, number, number, number] = [Math.min(ax, bx), Math.min(az, bz), Math.max(ax, bx), Math.max(az, bz)];
       const kinds: Kind[] = tool.value === 'direct' || d.deep ? ['section', 'junction', 'line'] : ['section', 'junction', 'line'];
       const ids = this.hit.inRect(...r, kinds, this.canPick);
@@ -381,11 +413,11 @@ export class Editor {
       // dropped on another junction / a road → connect
       const j = this.doc.get<'junction'>(d.id);
       if (j) {
-        const other = this.hit.nearestJunction(j.x, j.z, 8 / this.view.scale + 0.5, new Set([d.id]));
+        const other = this.hit.nearestJunction(j.x, j.z, 8 / this.ppm + 0.5, new Set([d.id]));
         const atSecs = new Set(this.doc.sectionsAt(d.id).map((s) => s.id));
         if (other) { this.edit('Connect junctions', () => ops.mergeJunctions(this.doc, d.id, other.id), 'drag' + d.n); toast('Junctions merged', 'ok'); }
         else if (this.doc.sectionsAt(d.id).length <= 2) {
-          const sec = this.hit.nearestSection(j.x, j.z, 6 / this.view.scale + 0.5, atSecs);
+          const sec = this.hit.nearestSection(j.x, j.z, 6 / this.ppm + 0.5, atSecs);
           if (sec) { this.edit('Connect to road', () => ops.connectToSection(this.doc, d.id, sec.id, sec.p), 'drag' + d.n); toast('Connected to the road', 'ok'); }
         }
       }
@@ -447,7 +479,7 @@ export class Editor {
   private baseCursor() {
     return { select: 'default', direct: 'default', pen: 'crosshair', knife: 'crosshair', line: 'crosshair', measure: 'crosshair', hand: 'grab', bulldoze: 'crosshair' }[tool.value];
   }
-  updateCursor() { if (mode.value === '2d') this.overlay.style.cursor = this.spaceDown ? 'grab' : this.baseCursor(); }
+  updateCursor() { this.overlay.style.cursor = this.spaceDown ? 'grab' : this.baseCursor(); }
 
   private handleAt(s: [number, number]): Handle | null {
     let best: Handle | null = null, bd = 9;
@@ -460,7 +492,7 @@ export class Editor {
   /** Snap a point to junctions, then road centre lines; with `from`, Shift-style 15° angle steps. */
   snapPoint(w: [number, number], from: [number, number] | null, exclude?: Set<Id>): { p: [number, number]; snap: Snap | null; junction?: Id; section?: Id } {
     if (!settings.value.snap) return { p: w, snap: null };
-    const r = 10 / this.view.scale;
+    const r = 10 / this.ppm;
     const j = this.hit.nearestJunction(w[0], w[1], r, exclude);
     if (j) { const o = this.doc.get<'junction'>(j.id)!; return { p: [o.x, o.z], snap: { kind: 'junction', p: [o.x, o.z], id: j.id }, junction: j.id }; }
     const exS = exclude ? new Set([...exclude].flatMap((id) => this.doc.sectionsAt(id).map((s) => s.id))) : undefined;
@@ -515,7 +547,7 @@ export class Editor {
     const o = this.doc.get(d.owner);
     if (!o) return;
     const dx = w[0] - d.start[0], dz = w[1] - d.start[1];
-    if (!d.moved && Math.hypot(dx, dz) * this.view.scale < 3) return;
+    if (!d.moved && Math.hypot(dx, dz) * this.ppm < 3) return;
     d.moved = true;
     if (o.kind === 'line') {
       const pts = [...(d.base as number[])];
@@ -723,11 +755,10 @@ export class Editor {
   // ---------------- 3D picking ----------------
 
   private click3d(cx: number, cy: number) {
+    if (tool.value !== 'select' && tool.value !== 'direct') return;
     const p = this.controls.pick(cx, cy);
-    if (!p) { select([]); return; }
-    const k = this.pickAt(p.x, p.z);
-    if (!k) { select([]); return; }
-    select([this.selFor(k, false)]);
+    const k = p ? this.pickAt(p.x, p.z) : null;
+    select(k ? [this.selFor(k, false)] : []);
   }
 
   private hover3d(cx: number, cy: number) {

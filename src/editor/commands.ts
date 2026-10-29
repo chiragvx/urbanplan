@@ -250,7 +250,7 @@ export const COMMANDS: Command[] = [
   { id: 'tool.bulldoze', label: 'Bulldozer', group: 'Tools', keys: 'B', enabled: editable, run: (E) => E.setTool('bulldoze') },
   ...ROAD_MODES.map((m, i) => ({
     id: `road.mode.${m}`, label: `Road tool: ${MODE_LABEL[m]}`, group: 'Tools' as const, keys: String(i + 1),
-    enabled: () => editable() && mode.value === '2d', run: (E: Editor) => setRoadMode(E, m),
+    enabled: editable, run: (E: Editor) => setRoadMode(E, m),
   })),
   {
     id: 'snap.toggle', label: 'Snapping on / off (hold Ctrl to skip it once)', group: 'Tools', keys: 'S',

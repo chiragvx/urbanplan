@@ -149,7 +149,7 @@ function HelpDialog() {
             <li><kbd>P</kbd> is the road tool, as in Cities: Skylines: <kbd>1</kbd> straight · <kbd>2</kbd> simple curve · <kbd>3</kbd> complex curve · <kbd>4</kbd> continuous · <kbd>5</kbd> freeform pen · <kbd>6</kbd> replace. Each click builds a stretch and carries on; right-click steps back.</li>
             <li><b>Bridges</b>: <kbd>PgUp</kbd>/<kbd>PgDn</kbd> set the height while drawing — crossings at the same level become junctions, higher ones pass over. With a road selected, <kbd>Shift</kbd>+<kbd>PgUp</kbd> makes it a flyover with ramps; <kbd>Shift</kbd>+<kbd>PgDn</kbd> brings it down.</li>
             <li><b>Snapping</b>: junctions, roads at your level, 90° / 45° to the road you start from, guide lines from road ends, round lengths. <kbd>Shift</kbd> = 15° steps, hold <kbd>Ctrl</kbd> to skip, <kbd>S</kbd> toggles. <kbd>B</kbd> bulldozes; <kbd>K</kbd> splits a road so part of it can differ.</li>
-            <li><kbd>Tab</kbd> flips between 2D and 3D. <kbd>X</kbd> x-ray shows pipes underground. <kbd>D</kbd> shows the DP sheets underneath.</li>
+            <li><kbd>Tab</kbd> flips between 2D and 3D — all tools work in both; in 3D drag empty ground to pan, right-drag to orbit. <kbd>X</kbd> x-ray shows pipes underground. <kbd>D</kbd> shows the DP sheets underneath.</li>
             <li>Everything is undoable. Your work autosaves in this browser; <b>Save</b> writes a <code>.urbanplan.json</code> file.</li>
             <li>In the browser console, <code>city</code> scripts the same edits: <code>city.roads(&#123; name: /Nagar/ &#125;).width(30)</code> — try <code>city.help()</code>.</li>
           </ul>

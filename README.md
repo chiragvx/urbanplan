@@ -14,7 +14,9 @@ npm test        # headless document + cross-section tests
 
 ## The editor
 
-- **2D plan** (default) for editing, **3D** with <kbd>Tab</kbd> — the same generated city, a camera flight apart.
+- **2D plan** (default) and **3D** with <kbd>Tab</kbd> — the same generated city, a camera flight apart. Every tool works in
+  both: in 3D, click / drag roads, junctions, handles and points as in 2D; drag empty ground to pan, right-drag (or
+  Alt-drag) to orbit, the wheel to zoom, <kbd>W A S D Q E R F</kbd> to fly.
 - **Select** (<kbd>V</kbd>): click a road → the whole road; double-click → one section (junction to junction); <kbd>Esc</kbd> steps out.
   Drag a road to bend it, a junction to move it (drop it on another junction / road to connect), the □ handles to
   change width (<kbd>Alt</kbd> = one side; snaps to DP standard widths). Shift-drag moves the selection.

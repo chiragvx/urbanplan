@@ -17,13 +17,17 @@ export interface Handle {
 }
 
 const ACCENT = '#2f7cf6', HOVER = '#5aa0ff', WARN = '#e5484d';
+const OFF: [number, number] = [NaN, NaN]; // canvas ignores NaN points: things behind the 3D camera aren't drawn
+
+/** World → overlay pixels in either view (lift = metres above the ground). */
+const at = (E: Editor, x: number, z: number, lift = 0): [number, number] => E.project(x, z, lift) ?? OFF;
 
 export function drawOverlay(E: Editor) {
   const ctx = E.ctx, w = E.view.w, h = E.view.h;
   ctx.clearRect(0, 0, w, h);
   E.handles = [];
   const is2d = mode.value === '2d';
-  const P = (x: number, z: number) => E.project(x, z);
+  const P = (x: number, z: number, lift = 0) => at(E, x, z, lift);
 
   if (is2d) {
     drawLines(E);
@@ -38,14 +42,14 @@ export function drawOverlay(E: Editor) {
   // selection
   for (const s of selection.value) outline(E, s.id, ACCENT, 2, 0.12);
 
-  if (is2d && !readOnly.value) {
+  if (!readOnly.value) {
     if (tool.value === 'select') widthHandles(E);
     if (tool.value === 'direct') anchors(E);
   }
-  if (tool.value === 'pen' && is2d && settings.value.roadMode !== 'freeform' && settings.value.roadMode !== 'replace') roadTool(E);
+  if (tool.value === 'pen' && settings.value.roadMode !== 'freeform' && settings.value.roadMode !== 'replace') roadTool(E);
   // pen preview
-  if (tool.value === 'pen' && is2d && settings.value.roadMode === 'freeform') {
-    const pts = E.pen.pts.map((p) => P(p.x, p.z)!);
+  if (tool.value === 'pen' && settings.value.roadMode === 'freeform') {
+    const pts = E.pen.pts.map((p) => P(p.x, p.z, p.lift ?? 0));
     ctx.strokeStyle = ACCENT; ctx.lineWidth = 2; ctx.setLineDash([]);
     ctx.beginPath();
     pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
@@ -61,7 +65,7 @@ export function drawOverlay(E: Editor) {
       readout(E, c, [`${L.toFixed(1)} m · ${bearing([(c[0] - a.x) / (L || 1), (c[1] - a.z) / (L || 1)])}°`, heightText(a.lift ?? 0, lift, L)]);
     }
   }
-  if (tool.value === 'line' && is2d) {
+  if (tool.value === 'line') {
     const L = E.linePts;
     ctx.strokeStyle = '#7a5cd6'; ctx.lineWidth = 2;
     ctx.beginPath();
@@ -72,7 +76,7 @@ export function drawOverlay(E: Editor) {
   }
   // snap indicator
   const sn = E.snap ?? (tool.value === 'pen' ? E.pen.snap : null);
-  if (sn && is2d) {
+  if (sn) {
     const p = P(...sn.p)!;
     ctx.strokeStyle = '#ff8a3d'; ctx.lineWidth = 2;
     if (sn.kind === 'junction') { ctx.beginPath(); ctx.arc(p[0], p[1], 8, 0, Math.PI * 2); ctx.stroke(); }
@@ -88,7 +92,7 @@ export function drawOverlay(E: Editor) {
     ctx.strokeRect(Math.min(a[0], b[0]) + 0.5, Math.min(a[1], b[1]) + 0.5, Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1]));
   }
   // measure
-  if (E.measure && is2d) {
+  if (E.measure) {
     const a = P(...E.measure.a)!, b = P(...E.measure.b)!;
     ctx.strokeStyle = '#ff8a3d'; ctx.lineWidth = 2; ctx.setLineDash([]);
     ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
@@ -96,7 +100,7 @@ export function drawOverlay(E: Editor) {
     const L = Math.hypot(E.measure.b[0] - E.measure.a[0], E.measure.b[1] - E.measure.a[1]);
     label(ctx, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], `${L.toFixed(1)} m`, 12, -12);
   }
-  if (tool.value === 'measure' && !E.drag && is2d) roadWidthReadout(E);
+  if (tool.value === 'measure' && !E.drag) roadWidthReadout(E);
   // issue markers
   for (const m of E.markers) {
     const p = P(m.x, m.z);
@@ -118,8 +122,8 @@ function heightText(l0: number, l1: number, len: number): string {
 
 /** Ghost of the stretch at its real width, crossings (junction or bridge), guide lines and the readout. */
 function roadTool(E: Editor) {
-  const ctx = E.ctx, T = E.road, sc = E.view.scale;
-  const P = (x: number, z: number) => E.view.toScreen(x, z);
+  const ctx = E.ctx, T = E.road, sc = E.ppm;
+  const P = (x: number, z: number, lift = 0) => at(E, x, z, lift);
   const pv = T.preview, c = T.cursor;
   if (pv && T.start) {
     const w = Math.max(3, totalWidth(template(penClass.value)) * sc);
@@ -127,7 +131,8 @@ function roadTool(E: Editor) {
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.strokeStyle = lift > 0.25 ? 'rgba(139,92,246,0.28)' : 'rgba(47,124,246,0.25)';
     ctx.lineWidth = w; ctx.setLineDash([]);
-    ctx.beginPath(); pv.pts.forEach((p, i) => { const q = P(p[0], p[1]); if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); }); ctx.stroke();
+    const liftAt = (i: number) => pv.lift0 + ((pv.lift1 - pv.lift0) * i) / Math.max(1, pv.pts.length - 1);
+    ctx.beginPath(); pv.pts.forEach((p, i) => { const q = P(p[0], p[1], liftAt(i)); if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); }); ctx.stroke();
     ctx.strokeStyle = LEVEL(lift); ctx.lineWidth = 2;
     if (lift > 0.25) ctx.setLineDash([8, 5]);
     ctx.stroke(); ctx.setLineDash([]); ctx.lineCap = 'butt';
@@ -142,7 +147,7 @@ function roadTool(E: Editor) {
     }
     // crossings: a junction will be made (same level) or it passes over / under
     for (const x of pv.crossings) {
-      const q = P(x.p[0], x.p[1]);
+      const q = P(x.p[0], x.p[1], x.lift);
       if (x.join) dot(ctx, q, 6, '#fff', '#16a34a');
       else {
         const clear = Math.abs(x.lift - x.otherLift);
@@ -152,11 +157,11 @@ function roadTool(E: Editor) {
         label(ctx, q, `${x.lift > x.otherLift ? 'over' : 'under'} · ${clear.toFixed(1)} m${low ? ' low' : ''}`, 11, -14);
       }
     }
-    dot(ctx, P(T.start.pt.x, T.start.pt.z), 5, '#fff', LEVEL(pv.lift0));
+    dot(ctx, P(T.start.pt.x, T.start.pt.z, pv.lift0), 5, '#fff', LEVEL(pv.lift0));
   }
   if (!c) return;
   guidesAndSnap(E, c);
-  dot(ctx, P(c.p[0], c.p[1]), 4, LEVEL(c.lift), '#fff');
+  dot(ctx, P(c.p[0], c.p[1], c.lift), 4, LEVEL(c.lift), '#fff');
   if (pv && T.start) {
     const ch = [c.p[0] - T.start.pt.x, c.p[1] - T.start.pt.z], L = Math.hypot(ch[0], ch[1]) || 1;
     const lines = [`${pv.len.toFixed(1)} m · ${bearing([ch[0] / L, ch[1] / L])}°${pv.R < 1e5 ? ` · R ${pv.R.toFixed(0)} m` : ''}`];
@@ -175,9 +180,9 @@ function roadTool(E: Editor) {
 
 function guidesAndSnap(E: Editor, c: SnapResult) {
   const ctx = E.ctx;
-  const P = (x: number, z: number) => E.view.toScreen(x, z);
+  const P = (x: number, z: number) => at(E, x, z, c.lift);
   for (const g of c.guides ?? []) {
-    const a = P(g.o[0], g.o[1]), far = 4000;
+    const a = P(g.o[0], g.o[1]), far = mode.value === '2d' ? 4000 : 250;
     const b = P(g.o[0] + g.d[0] * far, g.o[1] + g.d[1] * far), b0 = g.ray ? a : P(g.o[0] - g.d[0] * far, g.o[1] - g.d[1] * far);
     ctx.strokeStyle = 'rgba(255,138,61,0.85)'; ctx.lineWidth = 1; ctx.setLineDash([5, 4]);
     ctx.beginPath(); ctx.moveTo(b0[0], b0[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); ctx.setLineDash([]);
@@ -195,7 +200,8 @@ function guidesAndSnap(E: Editor, c: SnapResult) {
 function readout(E: Editor, at: [number, number], lines: string[]) {
   const L = lines.filter(Boolean);
   if (!L.length) return;
-  const ctx = E.ctx, p = E.view.toScreen(at[0], at[1]);
+  const ctx = E.ctx, p = E.project(at[0], at[1]) ?? OFF;
+  if (Number.isNaN(p[0])) return;
   ctx.font = '600 12px Inter, system-ui, sans-serif';
   const w = Math.max(...L.map((t) => ctx.measureText(t).width)) + 14, h = L.length * 16 + 8;
   let x = p[0] + 16, y = p[1] - h - 12;
@@ -352,9 +358,12 @@ function widthHandles(E: Editor) {
   if (!g || !sid) return;
   // station: the part of the section closest to the view centre (so the handles are on screen)
   let mi = Math.floor(g.pts.length / 4), bd = Infinity;
-  for (let i = 0; i < g.pts.length / 2; i++) { const d = Math.hypot(g.pts[i * 2] - E.view.cx, g.pts[i * 2 + 1] - E.view.cz); if (d < bd) { bd = d; mi = i; } }
+  const [vx, vz] = E.centre;
+  for (let i = 0; i < g.pts.length / 2; i++) { const d = Math.hypot(g.pts[i * 2] - vx, g.pts[i * 2 + 1] - vz); if (d < bd) { bd = d; mi = i; } }
   const cx = g.pts[mi * 2], cz = g.pts[mi * 2 + 1], nx = g.nrm[mi * 2], nz = g.nrm[mi * 2 + 1];
-  const Lp = E.view.toScreen(cx + nx * g.t.hwL, cz + nz * g.t.hwL), Rp = E.view.toScreen(cx - nx * g.t.hwR, cz - nz * g.t.hwR);
+  const lift = E.doc.get<'section'>(sid)?.elevated ? 6 : 0;
+  const Lp = E.project(cx + nx * g.t.hwL, cz + nz * g.t.hwL, lift), Rp = E.project(cx - nx * g.t.hwR, cz - nz * g.t.hwR, lift);
+  if (!Lp || !Rp) return;
   const ctx = E.ctx;
   // dimension line
   ctx.strokeStyle = ACCENT; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
@@ -384,7 +393,7 @@ function anchors(E: Editor) {
     if (o?.kind === 'line') {
       ctx.strokeStyle = ACCENT; ctx.lineWidth = 1.5;
       for (let k = 0; k < o.pts.length / 2; k++) {
-        const p = E.view.toScreen(o.pts[k * 2], o.pts[k * 2 + 1]);
+        const p = at(E, o.pts[k * 2], o.pts[k * 2 + 1]);
         const on = as?.owner === id && as.k === k;
         square(ctx, p, on ? ACCENT : '#fff', ACCENT);
         E.handles.push({ kind: 'anchor', sx: p[0], sy: p[1], owner: id, k });
@@ -394,10 +403,10 @@ function anchors(E: Editor) {
     if (o?.kind !== 'section') continue;
     const P = anchorsOf(E.doc, o);
     P.forEach((a, k) => {
-      const p = E.view.toScreen(a.x, a.z);
+      const p = at(E, a.x, a.z, a.lift);
       for (const [hk, hx, hz] of [['in', a.ix, a.iz], ['out', a.ox, a.oz]] as const) {
         if ((hk === 'in' && k === 0) || (hk === 'out' && k === P.length - 1) || (!hx && !hz)) continue;
-        const q = E.view.toScreen(a.x + hx, a.z + hz);
+        const q = at(E, a.x + hx, a.z + hz, a.lift);
         ctx.strokeStyle = 'rgba(47,124,246,0.7)'; ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke();
         dot(ctx, q, 3.5, as?.owner === id && as.k === k && as.handle === hk ? ACCENT : '#fff', ACCENT);
@@ -413,8 +422,8 @@ function anchors(E: Editor) {
 }
 
 function roadWidthReadout(E: Editor) {
-  const c = E.view.toWorld(...E.mouse);
-  const p = E.hit.pick(c[0], c[1], 2 / E.view.scale, E.canPick);
+  const c = E.toWorld(...E.mouse);
+  const p = E.hit.pick(c[0], c[1], 2 / E.ppm, E.canPick);
   if (p?.kind !== 'section') return;
   const s = E.doc.get<'section'>(p.id)!;
   const sd = E.hit.sectionDist(p.id, c[0], c[1]);

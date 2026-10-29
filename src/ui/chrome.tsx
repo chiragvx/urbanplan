@@ -45,7 +45,7 @@ export function TopBar() {
       </div>
       <div class="tb-tools">
         {TOOLS.map((x) => (
-          <button key={x.t} class={`tool ${tool.value === x.t ? 'on' : ''}`} title={`${x.label} (${x.key})`} disabled={mode.value === '3d' && x.t !== 'select' || (ro && ['pen', 'knife', 'line', 'direct', 'bulldoze'].includes(x.t))} onClick={() => ui.E.setTool(x.t)}>
+          <button key={x.t} class={`tool ${tool.value === x.t ? 'on' : ''}`} title={`${x.label} (${x.key})`} disabled={(ro && ['pen', 'knife', 'line', 'direct', 'bulldoze'].includes(x.t))} onClick={() => ui.E.setTool(x.t)}>
             <x.icon />
           </button>
         ))}

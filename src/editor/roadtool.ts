@@ -62,7 +62,7 @@ export class RoadTool {
   snap(w: V2, ctrlKey: boolean, shift: boolean, from: V2 | null = this.lastPoint(), dir: V2 | null = this.lastDir()): SnapResult {
     const E = this.E, st = settings.value, lift = penLift.value;
     if (!st.snap || ctrlKey) return { p: w, lift };
-    const px = 1 / E.view.scale;
+    const px = 1 / E.ppm;
     let over = false;
     if (st.snapGeometry) {
       const j = E.hit.nearestJunction(w[0], w[1], 12 * px);

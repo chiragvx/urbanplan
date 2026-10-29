@@ -25,9 +25,7 @@ export class CityControls {
     el.addEventListener('contextmenu', (e) => e.preventDefault());
     el.addEventListener('pointerdown', (e) => {
       el.setPointerCapture(e.pointerId);
-      this.last = this.down = { x: e.clientX, y: e.clientY };
-      if (e.button === 2 || (e.button === 0 && e.altKey)) this.drag = 'rotate';
-      else { this.drag = 'pan'; this.anchor = this.pick(e.clientX, e.clientY); }
+      this.beginDrag(e, e.button === 2 || (e.button === 0 && e.altKey) ? 'rotate' : 'pan');
     });
     window.addEventListener('pointermove', (e) => {
       const dx = e.clientX - this.last.x, dy = e.clientY - this.last.y;
@@ -48,7 +46,21 @@ export class CityControls {
       this.drag = null;
       this.anchor = null;
     });
-    el.addEventListener('wheel', (e) => {
+    el.addEventListener('wheel', (e) => this.wheel(e), { passive: false });
+    window.addEventListener('keydown', (e) => { if ((e.target as HTMLElement)?.tagName !== 'INPUT') this.keys.add(e.key.toLowerCase()); });
+    window.addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
+    window.addEventListener('blur', () => this.keys.clear());
+  }
+
+  /** Start a camera drag (also used by the 3D editor when a press doesn't hit anything editable). */
+  beginDrag(e: PointerEvent, kind: 'pan' | 'rotate') {
+    this.last = this.down = { x: e.clientX, y: e.clientY };
+    this.drag = kind;
+    this.anchor = kind === 'pan' ? this.pick(e.clientX, e.clientY) : null;
+  }
+
+  /** Zoom towards the cursor. */
+  wheel(e: WheelEvent) {
       e.preventDefault();
       const amount = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
       const f = Math.exp(amount * (e.ctrlKey ? 0.01 : 0.0012));
@@ -60,10 +72,6 @@ export class CityControls {
         this.target.x = g.x + (this.target.x - g.x) * k;
         this.target.z = g.z + (this.target.z - g.z) * k;
       }
-    }, { passive: false });
-    window.addEventListener('keydown', (e) => { if ((e.target as HTMLElement)?.tagName !== 'INPUT') this.keys.add(e.key.toLowerCase()); });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
-    window.addEventListener('blur', () => this.keys.clear());
   }
 
   snap() { this.cur = { x: this.target.x, y: this.target.y, z: this.target.z, dist: this.dist, yaw: this.yaw, pitch: this.pitch }; }
@@ -94,7 +102,7 @@ export class CityControls {
     return null;
   }
 
-  private pickAtHeight(cx: number, cy: number, y: number): THREE.Vector3 | null {
+  pickAtHeight(cx: number, cy: number, y: number): THREE.Vector3 | null {
     const ray = this.ray(cx, cy);
     if (Math.abs(ray.direction.y) < 1e-4) return null;
     const t = (y - ray.origin.y) / ray.direction.y;

@@ -1,6 +1,6 @@
 // Floating options bar for the road tool and the bulldozer (Cities: Skylines' bottom panel): the drawing mode,
 // the road class, the height to draw at with its step, and what to snap to.
-import { mode, penClass, penLift, saveSettings, settings, tool, type RoadMode } from '../editor/state';
+import { penClass, penLift, saveSettings, settings, tool, type RoadMode } from '../editor/state';
 import { COMMANDS } from '../editor/commands';
 import { MODE_LABEL } from '../editor/roadtool';
 import { FLYOVER_DECK } from '../doc/ops';
@@ -22,7 +22,6 @@ const run = (id: string) => COMMANDS.find((c) => c.id === id)!.run(ui.E);
 
 export function RoadToolbar() {
   void penLift.value;
-  if (mode.value !== '2d') return null;
   if (tool.value === 'bulldoze') return <div class="roadbar"><span class="rb-hint">Bulldozer — click a section to remove it · <kbd>Shift</kbd> whole road · drag to sweep</span></div>;
   if (tool.value !== 'pen') return null;
   const st = settings.value;
