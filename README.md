@@ -117,6 +117,14 @@ Sheets live in `data/raw/dp/` (downloaded from PMC's public file store). Sector 
 `public/tiles/kp/dp/` (`index.json` lists each block's `x0`/`z0` in tile metres; legend and uncovered areas are
 transparent; overlaps take the sheet farther from its frame edge). ≈45 s, ≈13 MB for S2-06 + S2-07.
 
+**DP regions** (no vector DP is public, so they're traced from the sheets): `python tools/dp/regions.py [sheet ...]`
+mosaics the registered sheets at 1 m, calibrates the legend's land-use colours on the sheets, classifies pixels
+(CIELAB), bridges thin plot / building lines within a land use (never across a red verge), and traces each patch into
+a polygon in tile metres → `public/tiles/kp/dp/regions.json`. A red verge around a patch, or a circled code (found as
+red circles) on it, marks a site reserved for a public purpose; pale blue is water or C-1 commercial, decided by OSM
+water. Each region has a confidence (colour fit, solidity, size). ≈30 s, 2,640 regions / 135 reserved for S2-06 + S2-07.
+In the editor, **DP regions** (<kbd>Shift D</kbd>) shows them; hover one to read it. Survey aid, not legal boundaries.
+
 ### Underground utilities (free, optional)
 
 `npm run import:utilities -- kp` downloads PMC's public-domain sewer and stormwater datasets from OpenCity

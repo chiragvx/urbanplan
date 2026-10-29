@@ -74,6 +74,7 @@ export class App implements AppApi {
     const [lat, lon] = this.tile.center;
     this.ref = new Reference(this.doc, base, { lat, lon, kx: this.tile.proj.kx, kz: this.tile.proj.kz });
     this.ref.onLoad = () => { this.world.needsRender = true; this.lastView = ''; };
+    this.E.dpr.base = base;
     this.engine.scene.add(this.ref.group);
     this.issues = new IssueIndex(this.doc, this.C, (x0, z0, x1, z1) => this.E.hit.query(x0, z0, x1, z1));
     this.E.onAfterChange = (c) => this.afterChange(c);

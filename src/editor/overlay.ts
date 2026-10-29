@@ -1,7 +1,7 @@
 // Canvas overlay: everything interactive drawn crisply on top of the rendered city — hover / selection outlines,
 // width handles, Bézier anchors, pen and line previews, vector utility lines (2D), measure, snaps, issue markers.
 import type { Editor } from './editor';
-import { accuracyView, anchorSel, hover, mode, penClass, penLift, readOnly, selection, settings, tool } from './state';
+import { accuracyView, anchorSel, dpRegionsOn, hover, mode, penClass, penLift, readOnly, selection, settings, tool } from './state';
 import { anchorsOf, FLYOVER_DECK } from '../doc/ops';
 import { LINE_COLOR } from '../doc/base';
 import { template, totalWidth } from '../doc/xsection';
@@ -30,6 +30,7 @@ export function drawOverlay(E: Editor) {
   const P = (x: number, z: number, lift = 0) => at(E, x, z, lift);
 
   if (is2d) {
+    if (dpRegionsOn.value) drawDPRegions(E);
     drawLines(E);
     if (accuracyView.value) drawAccuracy(E);
     bridgeEdges(E);
@@ -322,6 +323,40 @@ function drawLines(E: Editor) {
     if (v.kind === 'metro') { ctx.globalAlpha = v.opacity * 0.9; ctx.strokeStyle = v.color; ctx.lineWidth = 1.5; ctx.setLineDash([10, 6]); ctx.stroke(); }
   }
   ctx.globalAlpha = 1; ctx.setLineDash([]);
+}
+
+/** DP regions: land-use fill, reservations in a red verge, the hovered one outlined with its details. */
+function drawDPRegions(E: Editor) {
+  const D = E.dpr;
+  D.load();
+  if (!D.ready) return;
+  const ctx = E.ctx, s = E.view.scale;
+  const [x0, z0, x1, z1] = E.view.rect;
+  const path = (r: number[]) => { for (let i = 0; i < r.length; i += 2) { const p = E.view.toScreen(r[i], r[i + 1]); if (i) ctx.lineTo(p[0], p[1]); else ctx.moveTo(p[0], p[1]); } ctx.closePath(); };
+  const list = D.inRect(x0, z0, x1, z1);
+  for (const r of list) {
+    const b = r.box!;
+    if ((b[2] - b[0]) * s < 1.5 && (b[3] - b[1]) * s < 1.5) continue;
+    ctx.beginPath(); path(r.ring); for (const h of r.holes ?? []) path(h);
+    ctx.globalAlpha = 0.42; ctx.fillStyle = D.color(r); ctx.fill('evenodd');
+    ctx.globalAlpha = 1;
+    if (r.reserved) { ctx.strokeStyle = 'rgba(214,40,40,0.9)'; ctx.lineWidth = s > 1 ? 2 : 1.25; ctx.stroke(); }
+    else if (s > 0.8) { ctx.strokeStyle = 'rgba(60,60,60,0.25)'; ctx.lineWidth = 1; ctx.stroke(); }
+  }
+  // circled reservation codes (read in a later step): a small ring where the code sits on the sheet
+  if (s > 0.35) for (const r of list) if (r.marker) {
+    const p = E.view.toScreen(r.marker[0], r.marker[1]);
+    ctx.strokeStyle = 'rgba(214,40,40,0.95)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(p[0], p[1], Math.max(4, 12 * s), 0, Math.PI * 2); ctx.stroke();
+  }
+  const h = E.dpHover;
+  if (h) {
+    ctx.beginPath(); path(h.ring); for (const q of h.holes ?? []) path(q);
+    ctx.strokeStyle = '#111'; ctx.lineWidth = 2; ctx.setLineDash([]); ctx.stroke();
+    readout(E, E.toWorld(...E.mouse), [
+      `${D.label(h)}${h.reserved ? ` · reserved site${h.marker ? ' (code on the sheet)' : ''}` : ''}`,
+      `${h.area >= 10000 ? `${(h.area / 10000).toFixed(2)} ha` : `${h.area.toLocaleString()} m²`} · DP sheet ${h.sheet} · confidence ${Math.round(h.conf * 100)} %`,
+    ]);
+  }
 }
 
 function drawAccuracy(E: Editor) {

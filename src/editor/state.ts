@@ -22,6 +22,8 @@ export const docVersion = signal(0);
 export const readOnly = signal(false);
 export const xray = signal(false);
 export const accuracyView = signal(false);
+/** DP regions overlay (land-use plots / reservations from the DP sheets) */
+export const dpRegionsOn = signal(false);
 export const leftTab = signal<'layers' | 'roads' | 'issues' | 'review'>('layers');
 export const paletteOpen = signal(false);
 export const dialog = signal<null | 'open' | 'publish' | 'settings' | 'help' | 'about' | 'export'>(null);

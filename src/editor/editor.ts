@@ -13,10 +13,11 @@ import { DP_WIDTHS, setSideWidth, setTotalWidth, totalWidth } from '../doc/xsect
 import { HitIndex, type Pick } from './hit';
 import { PlanView } from './view2d';
 import {
-  anchorSel, cursor, docVersion, hover, lineLayer, mode, penClass, readOnly, select, selection, settings, stale3d, status, toast, tool, xray, zoomScale,
+  anchorSel, cursor, docVersion, dpRegionsOn, hover, lineLayer, mode, penClass, readOnly, select, selection, settings, stale3d, status, toast, tool, xray, zoomScale,
   type Sel, type Tool,
 } from './state';
 import { RoadTool, type SnapResult } from './roadtool';
+import { DPRegions, type DPRegion } from './dpregions';
 import { drawOverlay, type Handle } from './overlay';
 import { DEFAULT_DEPTH, DEFAULT_SIZE } from '../doc/base';
 
@@ -51,6 +52,9 @@ export class Editor {
   readonly hit: HitIndex;
   readonly view: PlanView;
   readonly road: RoadTool;
+  readonly dpr = new DPRegions();
+  /** DP region under the cursor (when the overlay is on) */
+  dpHover: DPRegion | null = null;
   readonly ctx: CanvasRenderingContext2D;
   drag: Drag | null = null;
   pen: PenState = { pts: [], cursor: null, snap: null };
@@ -74,6 +78,7 @@ export class Editor {
     this.hit = new HitIndex(doc, C);
     this.hit.rebuild();
     this.road = new RoadTool(this);
+    this.dpr.onLoad = () => { this.overlayDirty = true; };
     this.view = new PlanView(engine.planCamera, world.tile.half);
     this.ctx = overlay.getContext('2d')!;
     this.resize();
@@ -473,6 +478,7 @@ export class Editor {
     const p = this.pickAt(w[0], w[1]);
     const next = p ? this.selFor(p, false) : null;
     if (next?.id !== hover.value?.id) hover.value = next;
+    this.dpHover = dpRegionsOn.value && this.dpr.ready && !p ? this.dpr.at(w[0], w[1]) : null;
     if (p && !h) this.overlay.style.cursor = readOnly.value ? 'pointer' : p.kind === 'junction' ? 'move' : 'pointer';
   }
 

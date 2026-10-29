@@ -4,7 +4,7 @@ import { isTyping } from './editor';
 import * as ops from '../doc/ops';
 import * as xs from '../doc/xsection';
 import {
-  accuracyView, anchorSel, dialog, leftTab, mode, paletteOpen, penLift, profileOpen, readOnly, saveSettings, select, selection, settings, status, toast, tool, xray,
+  accuracyView, anchorSel, dialog, dpRegionsOn, leftTab, mode, paletteOpen, penLift, profileOpen, readOnly, saveSettings, select, selection, settings, status, toast, tool, xray,
   type RoadMode,
 } from './state';
 import { MODE_LABEL } from './roadtool';
@@ -278,6 +278,10 @@ export const COMMANDS: Command[] = [
   { id: 'view.toggle3d', label: 'Switch 2D / 3D', group: 'View', keys: 'Tab', run: (E) => E.setMode(mode.value === '2d' ? '3d' : '2d') },
   { id: 'view.xray', label: 'X-ray (see underground)', group: 'View', keys: 'X', run: (E) => { E.setXray(!xray.value); if (xray.value && mode.value === '2d') E.setMode('3d'); } },
   { id: 'view.dp', label: 'Development Plan sheets', group: 'View', keys: 'D', run: (E) => E.app.toggleLayer('dp') },
+  {
+    id: 'view.dpregions', label: 'DP regions (land use and reserved sites from the DP sheets)', group: 'View', keys: 'Shift+D',
+    run: (E) => { dpRegionsOn.value = !dpRegionsOn.value; if (dpRegionsOn.value) { E.dpr.load(); if (E.dpr.missing) toast('No DP regions for this map yet (tools/dp/regions.py)', 'warn'); } E.dpHover = null; E.overlayDirty = true; },
+  },
   { id: 'view.accuracy', label: 'Accuracy view (where widths come from)', group: 'View', keys: 'Shift+A', run: (E) => { accuracyView.value = !accuracyView.value; E.overlayDirty = true; } },
   { id: 'view.fit', label: 'Zoom to the whole map', group: 'View', keys: 'Shift+1', run: (E) => { const h = E.world.tile.half; E.zoomTo([-h, -h, h, h]); } },
   { id: 'view.sel', label: 'Zoom to selection', group: 'View', keys: 'Shift+2', enabled: () => selection.value.length > 0, run: (E) => E.zoomToSelection() },

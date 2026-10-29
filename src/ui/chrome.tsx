@@ -1,7 +1,7 @@
 // Top bar (file menu, tools, view switches), status bar, command palette, toasts, read-only banner.
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
-  cursor, dialog, docVersion, lineLayer, mode, paletteOpen, readOnly, selection, stale3d, status, toasts, tool, xray, zoomScale, accuracyView, select,
+  cursor, dialog, docVersion, dpRegionsOn, lineLayer, mode, paletteOpen, readOnly, selection, stale3d, status, toasts, tool, xray, zoomScale, accuracyView, select,
 } from '../editor/state';
 import { COMMANDS, type Command } from '../editor/commands';
 import { ui } from './ctx';
@@ -59,6 +59,7 @@ export function TopBar() {
       <div class="tb-right">
         <button class={`chip ${accuracyView.value ? 'on' : ''}`} title="Accuracy view: colour roads by where their width comes from (Shift+A)" onClick={() => cmd('view.accuracy').run(ui.E)}>Accuracy</button>
         <button class={`chip ${ui.doc.get<'layer'>('dp')?.visible ? 'on' : ''}`} title="Development Plan sheets (D)" onClick={() => ui.app.toggleLayer('dp')}>DP</button>
+        <button class={`chip ${dpRegionsOn.value ? 'on' : ''}`} title="DP regions: land use and reserved sites traced from the DP sheets — hover a region to read it (Shift+D)" onClick={() => cmd('view.dpregions').run(ui.E)}>DP regions</button>
         <div class="seg">
           <button class={mode.value === '2d' ? 'on' : ''} onClick={() => ui.E.setMode('2d')} title="2D plan (Tab)"><Icon.map /> 2D</button>
           <button class={mode.value === '3d' ? 'on' : ''} onClick={() => ui.E.setMode('3d')} title="3D view (Tab)"><Icon.cube /> 3D{stale3d.value && mode.value === '2d' ? <i class="dot own" title="3D refreshes when opened" /> : null}</button>
