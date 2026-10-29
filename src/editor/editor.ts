@@ -18,6 +18,8 @@ import {
 } from './state';
 import { RoadTool, type SnapResult } from './roadtool';
 import { DPRegions, type DPRegion } from './dpregions';
+import { traceAt } from './wand';
+import { newId } from '../doc/ids';
 import { drawOverlay, type Handle } from './overlay';
 import { DEFAULT_DEPTH, DEFAULT_SIZE } from '../doc/base';
 
@@ -312,6 +314,7 @@ export class Editor {
     if (dbl) { this.doubleClick(w, e); return; }
     const t = tool.value;
     if (t === 'pen') { if (settings.value.roadMode === 'freeform') return this.penDown(w, e); this.road.click(w, e.ctrlKey || e.metaKey, e.shiftKey, e.altKey); return; }
+    if (t === 'wand') { void this.fillAt(w); return; }
     if (t === 'bulldoze') { const n = ++dragSeq; this.drag = { kind: 'bulldoze', n }; this.bulldozeAt(w, e.shiftKey, n); return; }
     if (t === 'line') return this.lineDown(w);
     if (t === 'measure') { this.drag = { kind: 'measure', a: w, b: w }; this.measure = { a: w, b: w }; return; }
@@ -501,7 +504,7 @@ export class Editor {
   }
 
   private baseCursor() {
-    return { select: 'default', direct: 'default', pen: 'crosshair', knife: 'crosshair', line: 'crosshair', measure: 'crosshair', hand: 'grab', bulldoze: 'crosshair' }[tool.value];
+    return { select: 'default', direct: 'default', pen: 'crosshair', knife: 'crosshair', line: 'crosshair', measure: 'crosshair', hand: 'grab', bulldoze: 'crosshair', wand: 'cell' }[tool.value];
   }
   updateCursor() { this.overlay.style.cursor = this.spaceDown ? 'grab' : this.baseCursor(); }
 
@@ -721,6 +724,32 @@ export class Editor {
 
   cancelPen() { this.pen = { pts: [], cursor: null, snap: null }; this.linePts = []; this.road.cancel(); status.value = ''; this.overlayDirty = true; }
 
+  // ---------------- fill tool (DP sheet → survey region) ----------------
+
+  /** Trace the DP sheet fill under a point into a new survey region. */
+  async fillAt(w: [number, number]) {
+    if (readOnly.value) { toast('This map is read-only', 'warn'); return; }
+    const D = this.dpr;
+    D.load();
+    if (!D.sheetIndex) { toast('Loading the DP sheets — try again in a moment', 'info', undefined, 1500); return; }
+    status.value = 'Tracing the DP sheet…';
+    let r = await traceAt(this, w[0], w[1]);
+    if (r?.touchesEdge) r = (await traceAt(this, w[0], w[1], 1000)) ?? r;
+    if (!r) { status.value = ''; toast('Nothing to fill there — click inside a coloured plot on the DP sheet (roads and unzoned land are white)', 'warn'); return; }
+    // land use: the legend colour nearest the fill
+    const hex = (c: string) => [1, 3, 5].map((k) => parseInt(c.slice(k, k + 2), 16));
+    let cls = 'residential', bd = Infinity;
+    for (const [k, v] of Object.entries(D.data?.classes ?? {})) { const c = hex(v.color); const d = Math.hypot(c[0] - r.rgb[0], c[1] - r.rgb[1], c[2] - r.rgb[2]); if (d < bd) { bd = d; cls = k; } }
+    const id = newId('rg');
+    const ok = this.edit('Trace region', () => this.doc.create({ kind: 'region', id, cls, reserved: r!.reserved, ring: r!.ring, area: r!.area, status: 'unsurveyed' }));
+    if (ok === undefined && !this.doc.get(id)) return;
+    if (!dpRegionsOn.value) dpRegionsOn.value = true;
+    select([{ kind: 'region', id }]);
+    this.overlayDirty = true;
+    status.value = '';
+    toast(`Traced ${r.area.toLocaleString()} m² of ${D.classLabel(cls).toLowerCase()}${r.reserved ? ' (reserved site)' : ''}${r.touchesEdge ? ' — it runs past 1 km, only part was traced' : ''}`, r.touchesEdge ? 'warn' : 'ok');
+  }
+
   // ---------------- bulldozer ----------------
 
   /** Delete what's under the cursor (a section; Shift = the whole road). One undo step per sweep. */
@@ -811,6 +840,7 @@ export class Editor {
   setTool(t: Tool) {
     if (t !== 'pen' && t !== 'line') this.cancelPen();
     hover.value = null;
+    if (t === 'wand') { this.dpr.load(); if (!this.doc.get<'layer'>('dp')?.visible) this.app.toggleLayer('dp'); }
     if (t !== 'measure') this.measure = null;
     tool.value = t;
     this.updateCursor();
@@ -820,6 +850,7 @@ export class Editor {
       direct: 'Drag points and curve handles · double-click a road to add a point · Alt breaks the curve',
       pen: this.road.hint(),
       bulldoze: 'Click a road section to remove it · Shift = the whole road · drag to sweep',
+      wand: 'Click a coloured plot on the DP sheet to trace it as a survey region',
       knife: 'Click a road to split it · click a junction between two sections to join them',
       line: 'Click points to draw a line in the chosen layer · Enter to finish',
       measure: 'Drag to measure · hover a road to read its width',

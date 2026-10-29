@@ -130,6 +130,10 @@ region (or <kbd>N</kbd> next) and the inspector shows the DP sheet close-up at t
 ground no. 61, from the legend), the land use, and the survey: *matches the plan* (<kbd>Y</kbd>), *differs*, *built over /
 encroached*, *can't tell*, with notes and photo links. The first edit makes a `region` object (a snapshot of the traced
 shape, same id) in the map, so surveys save, publish, fork and export (GeoJSON `dp_region` features) like roads.
+The **fill tool** (<kbd>W</kbd>) traces any plot on the DP sheet underlay into a survey region with one click (flood fill by
+colour in the browser, stopping at plot lines and red verges) — for plots the automatic tracing merged or missed.
+**Checks** against the plan (Issues): *buildings in the DP road reserve* (where the DP widens a road past today's width)
+and *buildings on a reserved open space* (gardens, playgrounds, parks — skipped once surveyed as matching the plan).
 
 ### Underground utilities (free, optional)
 

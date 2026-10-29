@@ -18,6 +18,7 @@ const TOOLS: { t: Tool; icon: (p: { size?: number }) => preact.JSX.Element; labe
   { t: 'measure', icon: Icon.measure, label: 'Measure', key: 'M' },
   { t: 'hand', icon: Icon.hand, label: 'Pan', key: 'H' },
   { t: 'bulldoze', icon: Icon.bulldoze, label: 'Bulldozer', key: 'B' },
+  { t: 'wand', icon: Icon.wand, label: 'Fill: trace a DP plot as a survey region', key: 'W' },
 ];
 
 const cmd = (id: string) => COMMANDS.find((c) => c.id === id)!;
@@ -45,7 +46,7 @@ export function TopBar() {
       </div>
       <div class="tb-tools">
         {TOOLS.map((x) => (
-          <button key={x.t} class={`tool ${tool.value === x.t ? 'on' : ''}`} title={`${x.label} (${x.key})`} disabled={(ro && ['pen', 'knife', 'line', 'direct', 'bulldoze'].includes(x.t))} onClick={() => ui.E.setTool(x.t)}>
+          <button key={x.t} class={`tool ${tool.value === x.t ? 'on' : ''}`} title={`${x.label} (${x.key})`} disabled={(ro && ['pen', 'knife', 'line', 'direct', 'bulldoze', 'wand'].includes(x.t))} onClick={() => ui.E.setTool(x.t)}>
             <x.icon />
           </button>
         ))}

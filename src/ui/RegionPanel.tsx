@@ -83,9 +83,10 @@ export function RegionPanel(p: { id: string }) {
       </Section>
       <div class="btns">
         <button onClick={() => { select([{ kind: 'region', id: p.id }]); ui.E.zoomToSelection(); }}>Zoom to it</button>
-        {own && <button disabled={ro} title="Forget the survey and edits; back to the traced region" onClick={() => ui.E.edit('Reset region', () => ui.doc.remove(p.id))}>Reset to the tracing</button>}
+        {own && r.src && <button disabled={ro} title="Forget the survey and edits; back to the traced region" onClick={() => ui.E.edit('Reset region', () => ui.doc.remove(p.id))}>Reset to the tracing</button>}
+        {own && !r.src && <button class="danger" disabled={ro} onClick={() => { ui.E.edit('Delete region', () => ui.doc.remove(p.id)); select([]); }}><Icon.trash size={14} /> Delete region</button>}
       </div>
-      <p class="muted small">Traced automatically from the scanned DP sheet (registered to about 2–3 m): a survey aid, not a legal plot boundary.</p>
+      <p class="muted small">{r.src ? 'Traced automatically from the scanned DP sheet' : 'Traced from the DP sheet with the fill tool'} (registered to about 2–3 m): a survey aid, not a legal plot boundary.</p>
     </div>
   );
 }

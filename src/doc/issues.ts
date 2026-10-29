@@ -2,7 +2,7 @@
 // to drive, curves tighter than the road is wide, widths far from the Development Plan reserve.
 import type { CityDoc } from './doc';
 import type { Compiler } from './compile';
-import type { Id, SectionObj } from './types';
+import type { Id, SectionObj, SurveyStatus } from './types';
 import { totalWidth } from './xsection';
 import { anchorsOf, crossingsOf, offGrade, samplePath, SAME_LEVEL } from './ops';
 
@@ -62,6 +62,20 @@ function sectionChecks(doc: CityDoc, C: Compiler, s: SectionObj, near: Near, out
     }
     return;
   }
+  // buildings standing where the Development Plan widens the road
+  if (s.reserve && s.reserve > w + 1.5) {
+    const half = s.reserve / 2;
+    const hits: Id[] = [];
+    let hx = 0, hz = 0;
+    for (const oid of near(g.x0 - half, g.z0 - half, g.x1 + half, g.z1 + half)) {
+      const b = doc.get(oid);
+      if (b?.kind !== 'building') continue;
+      let inside = false;
+      for (let k = 0; k < b.outer.length && !inside; k += 2) inside = lineDist(g.pts, b.outer[k], b.outer[k + 1]) < half - 0.5;
+      if (inside) { if (!hits.length) { hx = b.outer[0]; hz = b.outer[1]; } hits.push(oid); }
+    }
+    if (hits.length) out.push({ key: `widen:${s.id}`, sev: 'info', title: 'Buildings in the DP road reserve', detail: `${name}: DP ${s.reserve} m, ${w.toFixed(1)} m today — ${hits.length} building${hits.length > 1 ? 's stand' : ' stands'} where the road would widen`, x: hx, z: hz, ids: [s.id, ...hits.slice(0, 30)] });
+  }
   // overlaps / crossings with roads that don't share a junction
   const ends = new Set([s.a, s.b]);
   const reported = new Set<Id>();
@@ -92,6 +106,58 @@ function sectionChecks(doc: CityDoc, C: Compiler, s: SectionObj, near: Near, out
       }
     }
   }
+}
+
+function lineDist(pts: ArrayLike<number>, x: number, z: number) {
+  let best = Infinity;
+  for (let k = 0; k + 3 < pts.length; k += 2) {
+    const px = pts[k], pz = pts[k + 1], dx = pts[k + 2] - px, dz = pts[k + 3] - pz;
+    const t = Math.max(0, Math.min(1, ((x - px) * dx + (z - pz) * dz) / (dx * dx + dz * dz || 1e-9)));
+    best = Math.min(best, Math.hypot(x - px - dx * t, z - pz - dz * t));
+  }
+  return best;
+}
+
+/** A DP region as the checks see it (a survey region object, or a traced region not surveyed yet). */
+export interface RegionLike { id: Id; cls: string; reserved: boolean; code?: string; ring: number[]; holes?: number[][]; area: number; status?: SurveyStatus }
+
+/** Open space the plan reserves (gardens, playgrounds, parks…): buildings on it are worth a survey. */
+const OPEN_CODES = /^(G|PG|CPG|PK|MPG|NG|G&PG|RP|STDM|RFD)/;
+export const isOpenSpace = (r: RegionLike) => r.cls === 'recreational' || (r.reserved && !!r.code && OPEN_CODES.test(r.code.toUpperCase()));
+
+function inRing(r: number[], x: number, z: number) {
+  let c = false;
+  for (let i = 0, j = r.length / 2 - 1; i < r.length / 2; j = i++) {
+    const xi = r[i * 2], zi = r[i * 2 + 1], xj = r[j * 2], zj = r[j * 2 + 1];
+    if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) c = !c;
+  }
+  return c;
+}
+
+function regionChecks(doc: CityDoc, r: RegionLike, near: Near, out: Issue[]) {
+  if (!isOpenSpace(r) || r.status === 'matches') return;
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  for (let i = 0; i < r.ring.length; i += 2) { x0 = Math.min(x0, r.ring[i]); x1 = Math.max(x1, r.ring[i]); z0 = Math.min(z0, r.ring[i + 1]); z1 = Math.max(z1, r.ring[i + 1]); }
+  const hits: Id[] = [];
+  let area = 0;
+  for (const oid of near(x0, z0, x1, z1)) {
+    const b = doc.get(oid);
+    if (b?.kind !== 'building') continue;
+    let cx = 0, cz = 0, a = 0;
+    const n = b.outer.length / 2;
+    for (let i = 0, j = n - 1; i < n; j = i++) { const f = b.outer[j * 2] * b.outer[i * 2 + 1] - b.outer[i * 2] * b.outer[j * 2 + 1]; a += f; cx += (b.outer[j * 2] + b.outer[i * 2]) * f; cz += (b.outer[j * 2 + 1] + b.outer[i * 2 + 1]) * f; }
+    if (Math.abs(a) < 1e-6) continue;
+    cx /= 3 * a; cz /= 3 * a;
+    if (!inRing(r.ring, cx, cz) || r.holes?.some((h) => inRing(h, cx, cz))) continue;
+    hits.push(oid); area += Math.abs(a) / 2;
+  }
+  if (!hits.length || area < 25) return;
+  const share = Math.min(100, Math.round((area / Math.max(1, r.area)) * 100));
+  out.push({
+    key: `open:${r.id}`, sev: share >= 10 ? 'warn' : 'info', title: 'Buildings on a reserved open space',
+    detail: `${r.code ? `${r.code}: ` : ''}${hits.length} building${hits.length > 1 ? 's' : ''} (≈${Math.round(area).toLocaleString()} m², ${share} % of the site) on land the plan keeps open — survey it`,
+    x: (x0 + x1) / 2, z: (z0 + z1) / 2, ids: [r.id, ...hits.slice(0, 30)],
+  });
 }
 
 function junctionChecks(doc: CityDoc, C: Compiler, id: Id, near: Near, out: Issue[]) {
@@ -126,7 +192,17 @@ export class IssueIndex {
   orphans: { id: Id; title: string }[] = [];
   version = 0;
 
+  /** DP regions to check (set by the app once they're loaded) */
+  regions: () => RegionLike[] = () => [];
+
   constructor(readonly doc: CityDoc, readonly C: Compiler, readonly near: Near) {}
+
+  /** Re-check the DP regions (after they load, or a survey edit). */
+  regionPass() {
+    for (const k of [...this.byKey.keys()]) if (k.startsWith('open:')) { const i = this.byKey.get(k)!; this.byKey.delete(k); for (const o of i.ids) this.byObj.get(o)?.delete(k); }
+    for (const r of this.regions()) { const out: Issue[] = []; regionChecks(this.doc, r, this.near, out); out.forEach((i) => this.add(i)); }
+    this.version++;
+  }
 
   private add(i: Issue) {
     this.byKey.set(i.key, i);
@@ -149,6 +225,7 @@ export class IssueIndex {
     for (const s of this.doc.all('section')) { const out: Issue[] = []; sectionChecks(this.doc, this.C, s, this.near, out); out.forEach((i) => this.add(i)); }
     for (const id of this.doc.ids('junction')) { const out: Issue[] = []; junctionChecks(this.doc, this.C, id, this.near, out); out.forEach((i) => this.add(i)); }
     this.version++;
+    this.regionPass();
   }
 
   /** Re-check changed objects and their neighbourhood. */
@@ -170,6 +247,7 @@ export class IssueIndex {
       for (const i of out) if (!this.byKey.has(i.key)) this.add(i);
     }
     this.version++;
+    if ([...todo].some((id) => this.doc.get(id)?.kind === 'region' || this.doc.get(id)?.kind === 'building')) this.regionPass();
   }
 
   list(): Issue[] {

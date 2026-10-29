@@ -170,7 +170,12 @@ function Issues() {
       )}
       <div class="list">
         {list.slice(0, 400).map((i) => (
-          <button key={i.key} class={`list-item issue ${i.sev}`} onClick={() => { select(i.ids.filter((id) => ui.doc.get(id)).map((id) => ({ kind: ui.doc.get(id)!.kind, id }))); ui.E.zoomTo([i.x - 60, i.z - 60, i.x + 60, i.z + 60]); }}>
+          <button key={i.key} class={`list-item issue ${i.sev}`} onClick={() => {
+            const sel = i.ids.flatMap((id) => { const k = ui.doc.get(id)?.kind ?? (ui.E.dpr.get(id) ? 'region' as const : null); return k ? [{ kind: k, id }] : []; });
+            // a DP region issue: the region itself (its inspector has the survey), with the overlay on
+            if (sel[0]?.kind === 'region') { if (!dpRegionsOn.value) dpRegionsOn.value = true; select([sel[0]]); ui.E.zoomToSelection(); return; }
+            select(sel); ui.E.zoomTo([i.x - 60, i.z - 60, i.x + 60, i.z + 60]);
+          }}>
             <span class={`sev ${i.sev}`} />
             <span class="clip"><b>{i.title}</b><br /><span class="muted small">{i.detail}</span></span>
           </button>

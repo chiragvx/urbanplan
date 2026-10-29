@@ -13,7 +13,7 @@ import { Compiler } from '../doc/compile';
 import type { SurveyStatus } from '../doc/types';
 import { editRegion } from '../doc/ops';
 import { FILE_EXT, newMeta, openMap, parse, serialize } from '../doc/format';
-import { IssueIndex } from '../doc/issues';
+import { IssueIndex, type RegionLike } from '../doc/issues';
 import { toGeoJSON, toNetwork } from '../doc/export';
 import { CityApi } from '../doc/api';
 import type { Id, LayerObj, MapMeta } from '../doc/types';
@@ -80,9 +80,21 @@ export class App implements AppApi {
     this.ref = new Reference(this.doc, base, { lat, lon, kx: this.tile.proj.kx, kz: this.tile.proj.kz });
     this.ref.onLoad = () => { this.world.needsRender = true; this.lastView = ''; };
     this.E.dpr.base = base;
-    this.E.dpr.onLoad = () => { this.E.overlayDirty = true; docVersion.value++; };
+    let regionsChecked = false;
+    this.E.dpr.onLoad = () => {
+      this.E.overlayDirty = true; docVersion.value++;
+      // first time the DP regions arrive: check them (buildings on reserved open space)
+      if (this.E.dpr.ready && !regionsChecked && this.issues.version) { regionsChecked = true; this.issues.regionPass(); this.showMarkers(!!this.E.markers.length); }
+    };
     this.engine.scene.add(this.ref.group);
     this.issues = new IssueIndex(this.doc, this.C, (x0, z0, x1, z1) => this.E.hit.query(x0, z0, x1, z1));
+    // DP regions for the checks: survey region objects, and traced regions not surveyed yet
+    this.issues.regions = () => {
+      const D = this.E.dpr;
+      const out: RegionLike[] = this.doc.all('region');
+      if (D.ready && D.data) for (const r of D.data.regions) if (!this.doc.get(r.id)) out.push(r);
+      return out;
+    };
     this.E.onAfterChange = (c) => this.afterChange(c);
     bindShortcuts(this.E);
     this.bindDrop();
@@ -295,6 +307,7 @@ export class App implements AppApi {
   // ---------------- checks & review ----------------
 
   checkAll() {
+    this.E.dpr.load(); // the DP regions join the checks when they arrive
     const t = performance.now();
     this.issues.full();
     docVersion.value++;

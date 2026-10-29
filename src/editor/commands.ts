@@ -267,6 +267,7 @@ export const COMMANDS: Command[] = [
   { id: 'tool.measure', label: 'Measure tool', group: 'Tools', keys: 'M', run: (E) => E.setTool('measure') },
   { id: 'tool.hand', label: 'Hand (pan) tool', group: 'Tools', keys: 'H', run: (E) => E.setTool('hand') },
   { id: 'tool.bulldoze', label: 'Bulldozer', group: 'Tools', keys: 'B', enabled: editable, run: (E) => E.setTool('bulldoze') },
+  { id: 'tool.wand', label: 'Fill tool: trace a plot on the DP sheet as a survey region', group: 'Tools', keys: 'W', enabled: editable, run: (E) => E.setTool('wand') },
   ...ROAD_MODES.map((m, i) => ({
     id: `road.mode.${m}`, label: `Road tool: ${MODE_LABEL[m]}`, group: 'Tools' as const, keys: String(i + 1),
     enabled: editable, run: (E: Editor) => setRoadMode(E, m),

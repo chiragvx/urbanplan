@@ -178,6 +178,7 @@ export const Icon = {
   trash: I('M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4'),
   arrowUp: I('M8 13V3M4 7l4-4 4 4'),
   arrowDown: I('M8 3v10M4 9l4 4 4-4'),
+  wand: I('M2 14L10 6M9 3v2M13 7h-2M12 4l-1.4 1.4M6.5 3.5l.7.7M12.5 9.5l-.7-.7'),
   bulldoze: I('M1.5 12.5h8M2.5 12.5V9h5l1.5 3.5M4 9V6.5h3L7.5 9M9.5 10l3-4.5 2 1M12.5 5.5L14 3'),
   both: I('M5 13V3M2.5 5.5L5 3l2.5 2.5M11 3v10M8.5 10.5L11 13l2.5-2.5'),
 };
