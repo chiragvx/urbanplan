@@ -2,7 +2,9 @@
 import { signal, computed } from '@preact/signals';
 import type { Id, Kind } from '../doc/types';
 
-export type Tool = 'select' | 'direct' | 'pen' | 'knife' | 'line' | 'measure' | 'hand';
+export type Tool = 'select' | 'direct' | 'pen' | 'knife' | 'line' | 'measure' | 'hand' | 'bulldoze';
+/** Road tool modes, as in Cities: Skylines (freeform = the Bézier pen; replace = CS's upgrade tool). */
+export type RoadMode = 'straight' | 'curve' | 'complex' | 'continuous' | 'freeform' | 'replace';
 export type ViewMode = '2d' | '3d';
 
 export interface Sel { kind: Kind; id: Id }
@@ -26,6 +28,8 @@ export const dialog = signal<null | 'open' | 'publish' | 'settings' | 'help' | '
 export const status = signal('');
 /** pen / line tool options */
 export const penClass = signal('residential');
+/** height above the ground the road tool draws at (PageUp / PageDown) */
+export const penLift = signal(0);
 export const lineLayer = signal<Id>('');
 /** cursor in world metres (status bar) */
 export const cursor = signal<[number, number] | null>(null);
@@ -35,9 +39,19 @@ export const settings = signal(loadSettings());
 export const profileOpen = signal(false);
 export const stale3d = signal(false);
 
-export interface Settings { author: string; wheel: 'zoom' | 'pan'; snap: boolean; showGrid: boolean; units: 'm' }
+export interface Settings {
+  author: string; wheel: 'zoom' | 'pan'; snap: boolean; showGrid: boolean; units: 'm';
+  roadMode: RoadMode;
+  /** PageUp / PageDown step (m) */ elevStep: number;
+  /** what the road tool snaps to */ snapGeometry: boolean; snapAngles: boolean; snapGuides: boolean;
+  /** round lengths to this many metres (0 = off) */ snapLength: number;
+  /** ramp gradient for flyovers (0.05 = 5 %) */ grade: number;
+}
 function loadSettings(): Settings {
-  const def: Settings = { author: '', wheel: 'zoom', snap: true, showGrid: false, units: 'm' };
+  const def: Settings = {
+    author: '', wheel: 'zoom', snap: true, showGrid: false, units: 'm',
+    roadMode: 'straight', elevStep: 2.5, snapGeometry: true, snapAngles: true, snapGuides: true, snapLength: 1, grade: 0.05,
+  };
   try { return { ...def, ...JSON.parse(localStorage.getItem('pune-remix:settings') ?? '{}') }; } catch { return def; }
 }
 export function saveSettings(s: Partial<Settings>) {

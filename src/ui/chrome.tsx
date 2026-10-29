@@ -1,12 +1,12 @@
 // Top bar (file menu, tools, view switches), status bar, command palette, toasts, read-only banner.
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
-  cursor, dialog, docVersion, lineLayer, mode, paletteOpen, penClass, readOnly, selection, stale3d, status, toasts, tool, xray, zoomScale, accuracyView, select,
+  cursor, dialog, docVersion, lineLayer, mode, paletteOpen, readOnly, selection, stale3d, status, toasts, tool, xray, zoomScale, accuracyView, select,
 } from '../editor/state';
 import { COMMANDS, type Command } from '../editor/commands';
 import { ui } from './ctx';
 import { Icon, Menu, prettyKeys } from './components';
-import { CLASS_LABEL, ROAD_CLASSES } from '../doc/types';
+import { CLASS_LABEL } from '../doc/types';
 import type { Tool } from '../editor/state';
 
 const TOOLS: { t: Tool; icon: (p: { size?: number }) => preact.JSX.Element; label: string; key: string }[] = [
@@ -17,6 +17,7 @@ const TOOLS: { t: Tool; icon: (p: { size?: number }) => preact.JSX.Element; labe
   { t: 'line', icon: Icon.line, label: 'Draw line (utilities, rail)', key: 'L' },
   { t: 'measure', icon: Icon.measure, label: 'Measure', key: 'M' },
   { t: 'hand', icon: Icon.hand, label: 'Pan', key: 'H' },
+  { t: 'bulldoze', icon: Icon.bulldoze, label: 'Bulldozer', key: 'B' },
 ];
 
 const cmd = (id: string) => COMMANDS.find((c) => c.id === id)!;
@@ -44,15 +45,10 @@ export function TopBar() {
       </div>
       <div class="tb-tools">
         {TOOLS.map((x) => (
-          <button key={x.t} class={`tool ${tool.value === x.t ? 'on' : ''}`} title={`${x.label} (${x.key})`} disabled={mode.value === '3d' && x.t !== 'select' || (ro && ['pen', 'knife', 'line', 'direct'].includes(x.t))} onClick={() => ui.E.setTool(x.t)}>
+          <button key={x.t} class={`tool ${tool.value === x.t ? 'on' : ''}`} title={`${x.label} (${x.key})`} disabled={mode.value === '3d' && x.t !== 'select' || (ro && ['pen', 'knife', 'line', 'direct', 'bulldoze'].includes(x.t))} onClick={() => ui.E.setTool(x.t)}>
             <x.icon />
           </button>
         ))}
-        {tool.value === 'pen' && (
-          <select class="select tool-opt" value={penClass.value} title="Class of the new road" onChange={(e) => { penClass.value = (e.currentTarget as HTMLSelectElement).value; }}>
-            {ROAD_CLASSES.map((c) => <option key={c} value={c}>{CLASS_LABEL[c]}</option>)}
-          </select>
-        )}
         {tool.value === 'line' && (
           <select class="select tool-opt" value={lineLayer.value} title="Layer to draw into" onChange={(e) => { lineLayer.value = (e.currentTarget as HTMLSelectElement).value; }}>
             <option value="">Choose layer…</option>

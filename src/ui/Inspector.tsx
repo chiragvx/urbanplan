@@ -1,6 +1,6 @@
 // Right panel: properties of whatever is selected. Road-level edits pass down to the road's sections unless a section
 // sets its own value (shown with a dot: blue = edited here, purple = from the road edit, green = new object).
-import { anchorSel, docVersion, readOnly, select, selection, tool } from '../editor/state';
+import { anchorSel, docVersion, readOnly, saveSettings, select, selection, settings, tool } from '../editor/state';
 import { ui } from './ctx';
 import { NumberField, Row, Section, Select, Toggle, Icon, Seg } from './components';
 import { CrossSection } from './CrossSection';
@@ -8,7 +8,7 @@ import * as xs from '../doc/xsection';
 import * as ops from '../doc/ops';
 import { CLASS_LABEL, ROAD_CLASSES, type Id, type SectionObj } from '../doc/types';
 import { LINE_LABEL } from '../doc/base';
-import { COMMANDS } from '../editor/commands';
+import { COMMANDS, setDeck } from '../editor/commands';
 import type { Part } from '../net/model';
 
 const classOptions = ROAD_CLASSES.map((c) => ({ value: c as string, label: CLASS_LABEL[c] }));
@@ -106,6 +106,7 @@ function RoadPanel(p: { id: Id }) {
         <WaysControls target={p.id} parts={lead.parts} reserve={reserves.length === 1 ? reserves[0] : undefined} state={d.editState(lead.id, 'parts')} mixed={mixed} />
         {reserves.length > 1 && <p class="muted">DP reserve along this road: {reserves.sort((a, b) => a - b).join(' / ')} m</p>}
       </Section>
+      <LevelControls ids={secs.map((x) => x.id)} />
       <Section title="Sections" open={secs.length <= 12} right={<span class="muted">{verified}/{secs.length} verified</span>}>
         <div class="list">
           {secs.sort((a, b) => len(b.id) - len(a.id)).map((s) => (
@@ -123,6 +124,29 @@ function RoadPanel(p: { id: Id }) {
   );
 }
 
+/** Ground / flyover with a deck height: ramps are built at the run's ends at the set gradient. */
+function LevelControls(p: { ids: Id[] }) {
+  void docVersion.value; // signals make components pure: re-render on every document change
+  const ro = readOnly.value;
+  const d = ui.doc;
+  const deck = ops.deckOf(d, p.ids);
+  const up = deck > 0.25;
+  const grade = settings.value.grade;
+  return (
+    <Section title="Level" open={up}>
+      <Seg small value={up ? 'bridge' : 'ground'} options={[{ value: 'ground', label: 'At ground', title: 'Shift+PageDown' }, { value: 'bridge', label: 'Bridge / flyover', title: 'Shift+PageUp' }]}
+        onChange={(v) => { if (!ro) setDeck(ui.E, v === 'ground' ? 0 : Math.max(deck, ops.FLYOVER_DECK)); }} />
+      {up && (
+        <div class="grid2">
+          <NumberField label="Deck height" unit="m" value={deck} step={0.5} min={0} max={40} disabled={ro} onChange={(v, m) => setDeck(ui.E, v, m)} title="Above the ground at the highest point — PageUp / PageDown" />
+          <NumberField label="Ramp grade" unit="%" value={grade * 100} step={0.5} min={1} max={12} digits={1} disabled={ro} onChange={(v) => { saveSettings({ grade: v / 100 }); setDeck(ui.E, deck); }} title="How steeply the ramps climb (5 % ≈ 1 in 20)" />
+        </div>
+      )}
+      <p class="muted small">{up ? `Ramps of about ${Math.round(deck / grade)} m at each end. Junctions under the deck stay on the ground; roads below are crossed, not joined.` : <>Press <kbd>Shift</kbd>+<kbd>PgUp</kbd> to make this a flyover with ramps, <kbd>PgUp</kbd>/<kbd>PgDn</kbd> to step the height.</>}</p>
+    </Section>
+  );
+}
+
 function SectionPanel(p: { id: Id }) {
   void docVersion.value; // signals make components pure: re-render on every document change
   const d = ui.doc;
@@ -131,8 +155,6 @@ function SectionPanel(p: { id: Id }) {
   const ro = readOnly.value;
   const g = ui.C.geo(p.id);
   const minR = g ? minRadius(g.pts) : Infinity;
-  const lifts = s.path.slice(1, -1).map((a) => a.lift);
-  const deck = lifts.length ? Math.max(...lifts) : 0;
   return (
     <div class="insp">
       <div class="crumbs">
@@ -150,18 +172,7 @@ function SectionPanel(p: { id: Id }) {
         <Actions items={['road.straighten', 'road.smooth', 'road.arc', 'road.reverse']} />
         <p class="muted small">Drag the road to bend it. Double-click it (or press <kbd>A</kbd>) to edit points and curve handles.</p>
       </Section>
-      <Section title="Level" open={s.elevated || s.bridge !== 'none'}>
-        <Seg small value={s.bridge === 'none' && !s.elevated ? 'ground' : 'bridge'} options={[{ value: 'ground', label: 'At ground' }, { value: 'bridge', label: 'Bridge / flyover' }]}
-          onChange={(v) => ui.E.edit('Level', () => {
-            if (v === 'ground') d.update(p.id, { bridge: 'none', elevated: false, path: s.path.map((a) => ({ ...a, lift: 0 })) });
-            else d.update(p.id, { bridge: 'overpass', elevated: true, deck: 6.5, path: s.path.map((a, i) => (i === 0 || i === s.path.length - 1 ? a : { ...a, lift: 6.5 })) });
-          })} />
-        {(s.elevated || s.bridge !== 'none') && lifts.length > 0 && (
-          <NumberField label="Deck height" unit="m" value={deck} step={0.5} min={0} max={30} disabled={ro}
-            onChange={(v, m) => ui.E.edit('Deck height', () => d.set(p.id, 'path', s.path.map((a, i) => (i === 0 || i === s.path.length - 1 ? a : { ...a, lift: v }))), m)} />
-        )}
-        {(s.elevated || s.bridge !== 'none') && lifts.length === 0 && <p class="muted small">Add a point in the middle (double-click with <kbd>A</kbd>) to raise the deck between its junctions.</p>}
-      </Section>
+      <LevelControls ids={[p.id]} />
       <Section title="Source & accuracy">
         <Row label="Width from"><span>{({ dp: 'Development Plan sheet', osm: 'OpenStreetMap tags / defaults', user: 'Edited by hand', default: 'Default', survey: 'Survey', import: 'Import' } as Record<string, string>)[s.widthSrc ?? 'default']}</span></Row>
         {s.reserve ? <Row label="DP reserve"><span>{s.reserve} m</span></Row> : null}

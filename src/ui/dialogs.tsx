@@ -124,7 +124,11 @@ function SettingsDialog() {
     <Modal title="Settings">
       <label class="field">Your name (for published maps)<input class="text" value={s.author} onInput={(e) => saveSettings({ author: (e.currentTarget as HTMLInputElement).value })} /></label>
       <div class="field">Mouse wheel<Seg value={s.wheel} options={[{ value: 'zoom', label: 'Zooms' }, { value: 'pan', label: 'Pans (Ctrl zooms)' }]} onChange={(v) => saveSettings({ wheel: v })} /></div>
-      <Toggle label="Snap to junctions and roads" checked={s.snap} onChange={(v) => saveSettings({ snap: v })} />
+      <Toggle label="Snapping (S)" checked={s.snap} onChange={(v) => saveSettings({ snap: v })} />
+      <Toggle label="Snap to junctions and roads at the same level" checked={s.snapGeometry} onChange={(v) => saveSettings({ snapGeometry: v })} />
+      <Toggle label="Snap to 90° / 45° from the road you start on" checked={s.snapAngles} onChange={(v) => saveSettings({ snapAngles: v })} />
+      <Toggle label="Snap to guide lines from road ends" checked={s.snapGuides} onChange={(v) => saveSettings({ snapGuides: v })} />
+      <label class="field">Flyover ramp gradient (%)<input class="text" type="number" min={1} max={12} step={0.5} value={s.grade * 100} onChange={(e) => saveSettings({ grade: Math.max(0.01, Math.min(0.12, Number((e.currentTarget as HTMLInputElement).value) / 100)) })} /></label>
     </Modal>
   );
 }
@@ -142,7 +146,9 @@ function HelpDialog() {
             <li><b>Drag a road</b> to bend it. <b>Drag a junction</b> to move it — drop it on another junction or road to connect.</li>
             <li><b>Width</b>: drag the □ handles (Alt = one side), scrub the Width label, or press <kbd>[</kbd> <kbd>]</kbd>. Widths snap to the Development Plan sizes.</li>
             <li>Road-level edits apply to every section of the road; a section's own edit wins (blue dot). Purple dot = inherited from the road.</li>
-            <li><kbd>P</kbd> draws a new road: click points, drag for curves, end on a road. <kbd>K</kbd> splits a road so part of it can differ.</li>
+            <li><kbd>P</kbd> is the road tool, as in Cities: Skylines: <kbd>1</kbd> straight · <kbd>2</kbd> simple curve · <kbd>3</kbd> complex curve · <kbd>4</kbd> continuous · <kbd>5</kbd> freeform pen · <kbd>6</kbd> replace. Each click builds a stretch and carries on; right-click steps back.</li>
+            <li><b>Bridges</b>: <kbd>PgUp</kbd>/<kbd>PgDn</kbd> set the height while drawing — crossings at the same level become junctions, higher ones pass over. With a road selected, <kbd>Shift</kbd>+<kbd>PgUp</kbd> makes it a flyover with ramps; <kbd>Shift</kbd>+<kbd>PgDn</kbd> brings it down.</li>
+            <li><b>Snapping</b>: junctions, roads at your level, 90° / 45° to the road you start from, guide lines from road ends, round lengths. <kbd>Shift</kbd> = 15° steps, hold <kbd>Ctrl</kbd> to skip, <kbd>S</kbd> toggles. <kbd>B</kbd> bulldozes; <kbd>K</kbd> splits a road so part of it can differ.</li>
             <li><kbd>Tab</kbd> flips between 2D and 3D. <kbd>X</kbd> x-ray shows pipes underground. <kbd>D</kbd> shows the DP sheets underneath.</li>
             <li>Everything is undoable. Your work autosaves in this browser; <b>Save</b> writes a <code>.punemap.json</code> file.</li>
             <li>In the browser console, <code>city</code> scripts the same edits: <code>city.roads(&#123; name: /Nagar/ &#125;).width(30)</code> — try <code>city.help()</code>.</li>

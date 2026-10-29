@@ -147,5 +147,63 @@ check(!!doc.get(s0.id) && C.mesher.segs.has(`${s0.id}~0`), 'undo delete restores
   check(doc.patch.size === 0, 'undo all → clean base');
   check(C.mesher.segs.size === net.segments.length, `mesher back to base (${C.mesher.segs.size})`);
 }
+
+// ---------------- road tool: stretches, crossings, flyovers ----------------
+{
+  const O = OPS;
+  const arc = O.arcPieces([0, 0], [1, 0], [50, 50]);
+  check(Math.abs(arc.R - 50) < 0.01 && Math.abs(arc.end[0]) < 1e-6 && Math.abs(arc.end[1] - 1) < 1e-6, `continuous arc: R ${arc.R.toFixed(2)}, ends heading ${arc.end.map((v) => v.toFixed(2))}`);
+  const mid = O.bezAt(arc.pieces[0], 0.5);
+  check(Math.abs(Math.hypot(mid[0], mid[1] - 50) - 50) < 0.05, 'arc cubic stays on the circle');
+
+  // a long ground section, crossed square-on through its middle
+  const X = doc.all('section').filter((s) => !s.elevated && s.bridge === 'none' && (C.geo(s.id)?.len ?? 0) > 320 && s.path.length <= 3)
+    .sort((a, b) => C.geo(b.id)!.len - C.geo(a.id)!.len)[0];
+  const g = C.geo(X.id)!;
+  const i = Math.floor(g.pts.length / 4);
+  const M: [number, number] = [g.pts[i * 2], g.pts[i * 2 + 1]], nx = g.nrm[i * 2], nz = g.nrm[i * 2 + 1];
+  const A = { x: M[0] + nx * 40, z: M[1] + nz * 40 }, B = { x: M[0] - nx * 40, z: M[1] - nz * 40 };
+  const nJ = doc.ids('junction').size;
+  let res = doc.transact('Draw', () => { const r = O.drawStretch(doc, A, B, [O.line([A.x, A.z], [B.x, B.z])], 'residential'); return { ...r, ...O.autoConnect(doc, [r.section!]) }; })!;
+  check(res.joined >= 1 && !doc.get(X.id), `same level: crossing becomes a junction (${res.joined} joined, original split)`);
+  const hub = doc.all('junction').find((j) => Math.hypot(j.x - M[0], j.z - M[1]) < 1.5);
+  check(!!hub && doc.sectionsAt(hub.id).length === 4, `four-way junction at the crossing (${hub && doc.sectionsAt(hub.id).length})`);
+  doc.undo();
+  check(!!doc.get(X.id) && doc.ids('junction').size === nJ, 'undo draw');
+  res = doc.transact('Draw high', () => { const r = O.drawStretch(doc, { ...A, lift: 7 }, { ...B, lift: 7 }, [O.line([A.x, A.z], [B.x, B.z])], 'residential'); return { ...r, ...O.autoConnect(doc, [r.section!]) }; })!;
+  check(res.joined === 0 && res.bridged >= 1 && !!doc.get(X.id) && doc.get<'section'>(res.section!)!.elevated, `7 m up: passes over (${res.bridged} bridged), no junction`);
+  doc.undo();
+
+  // flyover with ramps, re-raised without piling up points, then back down
+  const n0 = X.path.length;
+  const r1 = doc.transact('Flyover', () => O.elevate(doc, [X.id], 6.5, 0.05))!;
+  let x1 = doc.get<'section'>(X.id)!;
+  const lifts = O.anchorsOf(doc, x1).map((a) => a.lift);
+  check(r1.deck === 6.5 && Math.max(...lifts) === 6.5 && lifts[0] === 0 && lifts[lifts.length - 1] === 0 && x1.elevated, `flyover: deck ${r1.deck} m, ramps ${r1.ramp} m, lifts ${lifts.join(',')}`);
+  check(x1.path.length === n0 + 2, `ramp tops became points (${n0} → ${x1.path.length})`);
+  check(C.mesher.segs.has(`${X.id}~0`), 'flyover compiles');
+  doc.transact('Higher', () => O.elevate(doc, [X.id], 8, 0.05));
+  doc.transact('Higher', () => O.elevate(doc, [X.id], 9.5, 0.05));
+  x1 = doc.get<'section'>(X.id)!;
+  check(x1.path.length === n0 + 2 && Math.abs(O.deckOf(doc, [X.id]) - 9.5) < 0.01, `raising again keeps ${x1.path.length} points`);
+  const short = doc.transact('Too high', () => O.elevate(doc, [X.id], 40, 0.05))!;
+  check(short.lowered && short.deck < 40 && short.grade <= 0.1 + 1e-9, `too high for its length → lowered to ${short.deck} m at ${(short.grade * 100).toFixed(1)} %`);
+  doc.transact('Ground', () => O.toGround(doc, [X.id]));
+  x1 = doc.get<'section'>(X.id)!;
+  check(!x1.elevated && x1.path.length === n0 && x1.path.every((a) => a.lift === 0), `back to ground: ${x1.path.length} points, flat`);
+
+  // a whole road over its cross streets, and back down reconnecting them
+  const RR = doc.all('road').map((r) => ({ r, s: doc.sectionsOf(r.id) })).filter((x) => x.s.length >= 3 && x.s.every((s) => !s.elevated))
+    .sort((a, b) => b.s.length - a.s.length)[0];
+  const longest = O.chainsOf(doc, RR.s.map((s) => s.id)).sort((a, b) => b.length - a.length)[0].map((c) => c.s.id);
+  const nj = doc.ids('junction').size;
+  const fr = doc.transact('Flyover road', () => O.elevate(doc, longest, 6.5, 0.05))!;
+  const nj2 = doc.ids('junction').size;
+  check(nj2 > nj, `"${RR.r.name}" flyover over ${longest.length} sections: deck ${fr.deck} m, passes over ${nj2 - nj} junction(s)`);
+  doc.transact('Road to ground', () => O.toGround(doc, longest));
+  check(doc.ids('junction').size === nj, `back down: rejoined the junctions below (${doc.ids('junction').size} vs ${nj})`);
+  while (doc.canUndo) doc.undo();
+  check(doc.patch.size === 0, 'undo all → clean base');
+}
 console.log(ok ? '\nALL OK' : '\nFAILURES');
 process.exit(ok ? 0 : 1);

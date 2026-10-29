@@ -1,10 +1,11 @@
 // Canvas overlay: everything interactive drawn crisply on top of the rendered city — hover / selection outlines,
 // width handles, Bézier anchors, pen and line previews, vector utility lines (2D), measure, snaps, issue markers.
 import type { Editor } from './editor';
-import { accuracyView, anchorSel, hover, mode, readOnly, selection, tool } from './state';
-import { anchorsOf } from '../doc/ops';
+import { accuracyView, anchorSel, hover, mode, penClass, penLift, readOnly, selection, settings, tool } from './state';
+import { anchorsOf, FLYOVER_DECK } from '../doc/ops';
 import { LINE_COLOR } from '../doc/base';
-import { totalWidth } from '../doc/xsection';
+import { template, totalWidth } from '../doc/xsection';
+import { bearing, MODE_LABEL, type SnapResult } from './roadtool';
 import type { Id, LineKind } from '../doc/types';
 
 export interface Handle {
@@ -27,11 +28,13 @@ export function drawOverlay(E: Editor) {
   if (is2d) {
     drawLines(E);
     if (accuracyView.value) drawAccuracy(E);
+    bridgeEdges(E);
   }
 
   // hover
   const hv = hover.value;
-  if (hv && !selection.value.some((s) => s.id === hv.id)) outline(E, hv.id, HOVER, 1.5, 0);
+  if (hv && tool.value === 'bulldoze') outline(E, hv.id, WARN, 2.5, 0.25);
+  else if (hv && !selection.value.some((s) => s.id === hv.id)) outline(E, hv.id, HOVER, 1.5, 0);
   // selection
   for (const s of selection.value) outline(E, s.id, ACCENT, 2, 0.12);
 
@@ -39,8 +42,9 @@ export function drawOverlay(E: Editor) {
     if (tool.value === 'select') widthHandles(E);
     if (tool.value === 'direct') anchors(E);
   }
+  if (tool.value === 'pen' && is2d && settings.value.roadMode !== 'freeform' && settings.value.roadMode !== 'replace') roadTool(E);
   // pen preview
-  if (tool.value === 'pen' && is2d) {
+  if (tool.value === 'pen' && is2d && settings.value.roadMode === 'freeform') {
     const pts = E.pen.pts.map((p) => P(p.x, p.z)!);
     ctx.strokeStyle = ACCENT; ctx.lineWidth = 2; ctx.setLineDash([]);
     ctx.beginPath();
@@ -49,9 +53,12 @@ export function drawOverlay(E: Editor) {
     ctx.stroke(); ctx.setLineDash([]);
     for (const p of pts) dot(ctx, p, 4, '#fff', ACCENT);
     if (E.pen.cursor) dot(ctx, P(...E.pen.cursor)!, 3, ACCENT, ACCENT);
+    if (E.road.cursor) guidesAndSnap(E, E.road.cursor);
     if (E.pen.cursor && pts.length) {
       const a = E.pen.pts[E.pen.pts.length - 1], c = E.pen.cursor;
-      label(ctx, P(c[0], c[1])!, `${Math.hypot(c[0] - a.x, c[1] - a.z).toFixed(1)} m`, 12, -14);
+      const L = Math.hypot(c[0] - a.x, c[1] - a.z);
+      const lift = E.road.cursor?.lift ?? 0;
+      readout(E, c, [`${L.toFixed(1)} m · ${bearing([(c[0] - a.x) / (L || 1), (c[1] - a.z) / (L || 1)])}°`, heightText(a.lift ?? 0, lift, L)]);
     }
   }
   if (tool.value === 'line' && is2d) {
@@ -99,6 +106,108 @@ export function drawOverlay(E: Editor) {
   if (is2d) scaleBar(E);
 }
 
+// ---------------- road tool ----------------
+
+const LEVEL = (lift: number) => (lift > 0.25 ? '#8b5cf6' : ACCENT);
+
+function heightText(l0: number, l1: number, len: number): string {
+  if (l0 < 0.25 && l1 < 0.25) return '';
+  const g = len > 0.5 ? ((l1 - l0) / len) * 100 : 0;
+  return `height ${l1.toFixed(1)} m${Math.abs(g) > 0.05 ? ` · ${g > 0 ? '+' : ''}${g.toFixed(1)} %` : ''}${Math.abs(g) > 8 ? ' steep' : ''}`;
+}
+
+/** Ghost of the stretch at its real width, crossings (junction or bridge), guide lines and the readout. */
+function roadTool(E: Editor) {
+  const ctx = E.ctx, T = E.road, sc = E.view.scale;
+  const P = (x: number, z: number) => E.view.toScreen(x, z);
+  const pv = T.preview, c = T.cursor;
+  if (pv && T.start) {
+    const w = Math.max(3, totalWidth(template(penClass.value)) * sc);
+    const lift = Math.max(pv.lift0, pv.lift1);
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = lift > 0.25 ? 'rgba(139,92,246,0.28)' : 'rgba(47,124,246,0.25)';
+    ctx.lineWidth = w; ctx.setLineDash([]);
+    ctx.beginPath(); pv.pts.forEach((p, i) => { const q = P(p[0], p[1]); if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); }); ctx.stroke();
+    ctx.strokeStyle = LEVEL(lift); ctx.lineWidth = 2;
+    if (lift > 0.25) ctx.setLineDash([8, 5]);
+    ctx.stroke(); ctx.setLineDash([]); ctx.lineCap = 'butt';
+    // control polygon for the curve modes
+    if (T.ctrl.length) {
+      ctx.strokeStyle = 'rgba(47,124,246,0.6)'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      const pts = [[T.start.pt.x, T.start.pt.z], ...T.ctrl, c ? c.p : null].filter(Boolean) as [number, number][];
+      pts.forEach((p, i) => { const q = P(p[0], p[1]); if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); });
+      ctx.stroke(); ctx.setLineDash([]);
+      for (const p of T.ctrl) square(ctx, P(p[0], p[1]), '#fff', ACCENT);
+    }
+    // crossings: a junction will be made (same level) or it passes over / under
+    for (const x of pv.crossings) {
+      const q = P(x.p[0], x.p[1]);
+      if (x.join) dot(ctx, q, 6, '#fff', '#16a34a');
+      else {
+        const clear = Math.abs(x.lift - x.otherLift);
+        const low = clear < FLYOVER_DECK - 1;
+        ctx.fillStyle = low ? WARN : '#8b5cf6';
+        ctx.fillRect(q[0] - 5, q[1] - 5, 10, 10);
+        label(ctx, q, `${x.lift > x.otherLift ? 'over' : 'under'} · ${clear.toFixed(1)} m${low ? ' low' : ''}`, 11, -14);
+      }
+    }
+    dot(ctx, P(T.start.pt.x, T.start.pt.z), 5, '#fff', LEVEL(pv.lift0));
+  }
+  if (!c) return;
+  guidesAndSnap(E, c);
+  dot(ctx, P(c.p[0], c.p[1]), 4, LEVEL(c.lift), '#fff');
+  if (pv && T.start) {
+    const ch = [c.p[0] - T.start.pt.x, c.p[1] - T.start.pt.z], L = Math.hypot(ch[0], ch[1]) || 1;
+    const lines = [`${pv.len.toFixed(1)} m · ${bearing([ch[0] / L, ch[1] / L])}°${pv.R < 1e5 ? ` · R ${pv.R.toFixed(0)} m` : ''}`];
+    if (T.start.dir && !T.ctrl.length) {
+      const a = Math.round((Math.acos(Math.max(-1, Math.min(1, (T.start.dir[0] * ch[0] + T.start.dir[1] * ch[1]) / L))) * 180) / Math.PI);
+      if (T.mode === 'straight' && a > 0) lines[0] += ` · turn ${a}°`;
+    }
+    lines.push(heightText(pv.lift0, pv.lift1, pv.len));
+    const joins = pv.crossings.filter((x) => x.join).length, over = pv.crossings.length - joins;
+    if (joins || over) lines.push([joins ? `${joins} junction${joins > 1 ? 's' : ''}` : '', over ? `${over} bridge crossing${over > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · '));
+    readout(E, c.p, lines);
+  } else {
+    readout(E, c.p, [`${MODE_LABEL[T.mode]}${penLift.value ? ` · ${penLift.value} m up` : ''}`, c.over ? 'over a road at another level' : '']);
+  }
+}
+
+function guidesAndSnap(E: Editor, c: SnapResult) {
+  const ctx = E.ctx;
+  const P = (x: number, z: number) => E.view.toScreen(x, z);
+  for (const g of c.guides ?? []) {
+    const a = P(g.o[0], g.o[1]), far = 4000;
+    const b = P(g.o[0] + g.d[0] * far, g.o[1] + g.d[1] * far), b0 = g.ray ? a : P(g.o[0] - g.d[0] * far, g.o[1] - g.d[1] * far);
+    ctx.strokeStyle = 'rgba(255,138,61,0.85)'; ctx.lineWidth = 1; ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.moveTo(b0[0], b0[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); ctx.setLineDash([]);
+  }
+  if (!c.kind) return;
+  const p = P(c.p[0], c.p[1]);
+  ctx.strokeStyle = '#ff8a3d'; ctx.lineWidth = 2;
+  if (c.kind === 'junction') { ctx.beginPath(); ctx.arc(p[0], p[1], 8, 0, Math.PI * 2); ctx.stroke(); }
+  else if (c.kind === 'section') { ctx.beginPath(); ctx.moveTo(p[0] - 6, p[1] - 6); ctx.lineTo(p[0] + 6, p[1] + 6); ctx.moveTo(p[0] + 6, p[1] - 6); ctx.lineTo(p[0] - 6, p[1] + 6); ctx.stroke(); }
+  else { ctx.beginPath(); ctx.moveTo(p[0] - 7, p[1]); ctx.lineTo(p[0] + 7, p[1]); ctx.moveTo(p[0], p[1] - 7); ctx.lineTo(p[0], p[1] + 7); ctx.stroke(); }
+  if (c.label) label(ctx, p, c.label, 11, 20);
+}
+
+/** Multi-line measurement box next to the cursor (Precision Engineering style). */
+function readout(E: Editor, at: [number, number], lines: string[]) {
+  const L = lines.filter(Boolean);
+  if (!L.length) return;
+  const ctx = E.ctx, p = E.view.toScreen(at[0], at[1]);
+  ctx.font = '600 12px Inter, system-ui, sans-serif';
+  const w = Math.max(...L.map((t) => ctx.measureText(t).width)) + 14, h = L.length * 16 + 8;
+  let x = p[0] + 16, y = p[1] - h - 12;
+  if (x + w > E.view.w - 4) x = p[0] - w - 16;
+  if (y < 4) y = p[1] + 16;
+  ctx.fillStyle = 'rgba(20,24,30,0.86)';
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, 6); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+  L.forEach((t, i) => ctx.fillText(t, x + 7, y + 5 + i * 16));
+  ctx.textBaseline = 'alphabetic';
+}
+
 // ---------------- outlines ----------------
 
 function outline(E: Editor, id: Id, color: string, width: number, fill: number) {
@@ -122,6 +231,16 @@ function outline(E: Editor, id: Id, color: string, width: number, fill: number) 
     return;
   }
   if (o.kind === 'building') poly(E, o.outer, true, color, width, fill);
+}
+
+/** In the plan, bridges and flyovers get a purple edge so they read as above the roads they cross. */
+function bridgeEdges(E: Editor) {
+  if (E.view.scale < 0.6) return;
+  const [x0, z0, x1, z1] = E.view.rect;
+  for (const id of E.hit.inRect(x0, z0, x1, z1, ['section'], E.canPick)) {
+    const s = E.doc.get<'section'>(id);
+    if (s && (s.elevated || s.bridge !== 'none')) sectionOutline(E, id, 'rgba(139,92,246,0.75)', 1.5, 0);
+  }
 }
 
 function sectionOutline(E: Editor, id: Id, color: string, width: number, fill: number) {

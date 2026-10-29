@@ -16,11 +16,13 @@ import {
   anchorSel, cursor, docVersion, hover, lineLayer, mode, penClass, readOnly, select, selection, settings, stale3d, status, toast, tool, xray, zoomScale,
   type Sel, type Tool,
 } from './state';
+import { RoadTool, type SnapResult } from './roadtool';
 import { drawOverlay, type Handle } from './overlay';
 import { DEFAULT_DEPTH, DEFAULT_SIZE } from '../doc/base';
 
 type Drag =
-  | { kind: 'pan'; last: [number, number] }
+  | { kind: 'pan'; last: [number, number]; start: [number, number]; right: boolean }
+  | { kind: 'bulldoze'; n: number }
   | { kind: 'marquee'; a: [number, number]; b: [number, number]; add: boolean; deep: boolean }
   | { kind: 'junction'; id: Id; start: [number, number]; orig: [number, number]; moved: boolean; n: number }
   | { kind: 'bend'; id: Id; base: Anchor[]; grab: [number, number]; start: [number, number]; moved: boolean; n: number }
@@ -41,13 +43,14 @@ export interface AppApi {
 }
 
 export interface PenState { pts: ops.PenPoint[]; cursor: [number, number] | null; snap: Snap | null }
-export interface Snap { kind: 'junction' | 'section' | 'anchor' | 'angle' | 'width'; p: [number, number]; id?: Id; label?: string }
+export interface Snap { kind: 'junction' | 'section' | 'anchor' | 'angle' | 'width' | 'guide' | 'cross'; p: [number, number]; id?: Id; label?: string }
 
 let dragSeq = 0;
 
 export class Editor {
   readonly hit: HitIndex;
   readonly view: PlanView;
+  readonly road: RoadTool;
   readonly ctx: CanvasRenderingContext2D;
   drag: Drag | null = null;
   pen: PenState = { pts: [], cursor: null, snap: null };
@@ -70,6 +73,7 @@ export class Editor {
   ) {
     this.hit = new HitIndex(doc, C);
     this.hit.rebuild();
+    this.road = new RoadTool(this);
     this.view = new PlanView(engine.planCamera, world.tile.half);
     this.ctx = overlay.getContext('2d')!;
     this.resize();
@@ -246,7 +250,7 @@ export class Editor {
     this.overlay.setPointerCapture(e.pointerId);
     this.mouse = s;
     if (e.button === 1 || e.button === 2 || this.spaceDown || tool.value === 'hand') {
-      this.drag = { kind: 'pan', last: s };
+      this.drag = { kind: 'pan', last: s, start: s, right: e.button === 2 };
       this.overlay.style.cursor = 'grabbing';
       return;
     }
@@ -256,7 +260,8 @@ export class Editor {
     this.lastClick = { t: now, x: s[0], y: s[1] };
     if (dbl) { this.doubleClick(w, e); return; }
     const t = tool.value;
-    if (t === 'pen') return this.penDown(w, e);
+    if (t === 'pen') { if (settings.value.roadMode === 'freeform') return this.penDown(w, e); this.road.click(w, e.ctrlKey || e.metaKey, e.shiftKey, e.altKey); return; }
+    if (t === 'bulldoze') { const n = ++dragSeq; this.drag = { kind: 'bulldoze', n }; this.bulldozeAt(w, e.shiftKey, n); return; }
     if (t === 'line') return this.lineDown(w);
     if (t === 'measure') { this.drag = { kind: 'measure', a: w, b: w }; this.measure = { a: w, b: w }; return; }
     if (t === 'knife') return this.knife(w, e.shiftKey);
@@ -303,11 +308,12 @@ export class Editor {
     cursor.value = w;
     this.overlayDirty = true;
     const d = this.drag;
-    if (!d) { this.hoverAt(s, w); return; }
+    if (!d) { this.hoverAt(s, w, e); return; }
     const moved = (a: [number, number]) => Math.hypot(w[0] - a[0], w[1] - a[1]) * this.view.scale > 3;
     switch (d.kind) {
       case 'pan': this.view.pan(s[0] - d.last[0], s[1] - d.last[1]); d.last = s; this.world.needsRender = true; break;
       case 'marquee': d.b = w; break;
+      case 'bulldoze': this.bulldozeAt(w, e.shiftKey, d.n); break;
       case 'measure': d.b = this.snapPoint(w, e.shiftKey ? d.a : null).p; this.measure = { a: d.a, b: d.b }; break;
       case 'junction': {
         if (!d.moved && !moved(d.start)) break;
@@ -339,7 +345,8 @@ export class Editor {
         break;
       }
     }
-    if (d.kind === 'pen' || tool.value === 'pen') this.penHover(w, e.shiftKey);
+    if (d.kind === 'pen' || (tool.value === 'pen' && settings.value.roadMode === 'freeform')) this.penHover(w, e.shiftKey, e.ctrlKey || e.metaKey);
+    else if (tool.value === 'pen') this.road.hover(w, e.ctrlKey || e.metaKey, e.shiftKey);
   }
 
   private up(e: PointerEvent) {
@@ -350,6 +357,8 @@ export class Editor {
     this.updateCursor();
     if (!d) return;
     const w = this.view.toWorld(...this.local(e));
+    // right-click without dragging: step back, as in Cities: Skylines
+    if (d.kind === 'pan' && d.right && Math.hypot(d.last[0] - d.start[0], d.last[1] - d.start[1]) < 4) { this.stepBack(); return; }
     if (d.kind === 'marquee') {
       const [ax, az] = d.a, [bx, bz] = d.b;
       if (Math.hypot(bx - ax, bz - az) * this.view.scale < 4) { if (!d.add) select([]); return; }
@@ -402,8 +411,29 @@ export class Editor {
     if (!p && e) select([]);
   }
 
-  private hoverAt(s: [number, number], w: [number, number]) {
-    if (tool.value === 'pen') { this.penHover(w, false); return; }
+  /** Right-click in the road tool: drop the last point, or stop the road being drawn. */
+  stepBack() {
+    if (tool.value !== 'pen') return;
+    if (settings.value.roadMode === 'freeform') {
+      if (this.pen.pts.length) { this.pen.pts.pop(); this.overlayDirty = true; }
+      return;
+    }
+    this.road.back();
+  }
+
+  private hoverAt(s: [number, number], w: [number, number], e?: PointerEvent) {
+    const ctrl = !!(e?.ctrlKey || e?.metaKey), shift = !!e?.shiftKey;
+    if (tool.value === 'pen') {
+      if (settings.value.roadMode === 'freeform') this.penHover(w, shift, ctrl);
+      else this.road.hover(w, ctrl, shift);
+      return;
+    }
+    if (tool.value === 'bulldoze') {
+      const p = this.pickAt(w[0], w[1]);
+      const next: Sel | null = !p ? null : p.kind === 'section' ? (shift ? { kind: 'road', id: this.doc.get<'section'>(p.id)!.road } : { kind: 'section', id: p.id }) : { kind: p.kind, id: p.id };
+      if (next?.id !== hover.value?.id) hover.value = next;
+      return;
+    }
     if (tool.value === 'line') { this.pen.cursor = w; return; }
     const h = this.handleAt(s);
     this.overlay.style.cursor = h ? (h.kind === 'width' ? 'ew-resize' : 'move') : this.baseCursor();
@@ -415,7 +445,7 @@ export class Editor {
   }
 
   private baseCursor() {
-    return { select: 'default', direct: 'default', pen: 'crosshair', knife: 'crosshair', line: 'crosshair', measure: 'crosshair', hand: 'grab' }[tool.value];
+    return { select: 'default', direct: 'default', pen: 'crosshair', knife: 'crosshair', line: 'crosshair', measure: 'crosshair', hand: 'grab', bulldoze: 'crosshair' }[tool.value];
   }
   updateCursor() { if (mode.value === '2d') this.overlay.style.cursor = this.spaceDown ? 'grab' : this.baseCursor(); }
 
@@ -586,18 +616,26 @@ export class Editor {
 
   // ---------------- pen ----------------
 
-  private penHover(w: [number, number], shift: boolean) {
-    const from = this.pen.pts.length ? [this.pen.pts[this.pen.pts.length - 1].x, this.pen.pts[this.pen.pts.length - 1].z] as [number, number] : null;
-    const sp = this.snapPoint(w, shift ? from : null);
+  /** The freeform pen snaps like the road tool, from its last point along the last leg. */
+  private penSnap(w: [number, number], shift: boolean, ctrl: boolean): SnapResult {
+    const P = this.pen.pts, n = P.length;
+    const from: [number, number] | null = n ? [P[n - 1].x, P[n - 1].z] : null;
+    let dir: [number, number] | null = null;
+    if (n >= 2) { const dx = P[n - 1].x - P[n - 2].x, dz = P[n - 1].z - P[n - 2].z, l = Math.hypot(dx, dz); if (l > 0.1) dir = [dx / l, dz / l]; }
+    return this.road.snap(w, ctrl, shift, from, dir);
+  }
+
+  private penHover(w: [number, number], shift: boolean, ctrl = false) {
+    const sp = this.penSnap(w, shift, ctrl);
     this.pen.cursor = sp.p;
-    this.pen.snap = sp.snap;
+    this.pen.snap = null;
+    this.road.cursor = sp;
   }
 
   private penDown(w: [number, number], e: PointerEvent) {
     if (readOnly.value) { toast('Read-only map', 'warn'); return; }
-    const from = this.pen.pts.length ? [this.pen.pts[this.pen.pts.length - 1].x, this.pen.pts[this.pen.pts.length - 1].z] as [number, number] : null;
-    const sp = this.snapPoint(w, e.shiftKey ? from : null);
-    const pt: ops.PenPoint = { x: sp.p[0], z: sp.p[1], junction: sp.junction, section: sp.section };
+    const sp = this.penSnap(w, e.shiftKey, e.ctrlKey || e.metaKey);
+    const pt: ops.PenPoint = { x: sp.p[0], z: sp.p[1], junction: sp.junction, section: sp.section, lift: sp.lift };
     this.pen.pts.push(pt);
     this.drag = { kind: 'pen', idx: this.pen.pts.length - 1, start: sp.p };
     if (this.pen.pts.length >= 2 && (sp.junction || sp.section)) {
@@ -614,12 +652,33 @@ export class Editor {
     // drop accidental duplicate points
     const clean = pts.filter((p, i) => i === 0 || Math.hypot(p.x - pts[i - 1].x, p.z - pts[i - 1].z) > 0.5);
     if (clean.length < 2) return;
-    const rid = this.edit('Draw road', () => ops.createRoad(this.doc, clean, penClass.value));
-    if (rid) { select([{ kind: 'road', id: rid }]); toast('Road added', 'ok'); }
+    const res = this.edit('Draw road', () => {
+      const rid = ops.createRoad(this.doc, clean, penClass.value);
+      return rid ? { rid, ...ops.autoConnect(this.doc, this.doc.sectionsOf(rid).map((s) => s.id)) } : null;
+    });
+    if (res) {
+      select([{ kind: 'road', id: res.rid }]);
+      toast(`Road added${res.joined ? ` · ${res.joined} new junction${res.joined > 1 ? 's' : ''}` : ''}${res.bridged ? ` · passes over ${res.bridged} road${res.bridged > 1 ? 's' : ''}` : ''}`, 'ok');
+    }
     status.value = '';
   }
 
-  cancelPen() { this.pen = { pts: [], cursor: null, snap: null }; this.linePts = []; status.value = ''; this.overlayDirty = true; }
+  cancelPen() { this.pen = { pts: [], cursor: null, snap: null }; this.linePts = []; this.road.cancel(); status.value = ''; this.overlayDirty = true; }
+
+  // ---------------- bulldozer ----------------
+
+  /** Delete what's under the cursor (a section; Shift = the whole road). One undo step per sweep. */
+  private bulldozeAt(w: [number, number], whole: boolean, n: number) {
+    if (readOnly.value) return;
+    const p = this.pickAt(w[0], w[1]);
+    if (!p) return;
+    this.edit('Bulldoze', () => {
+      if (p.kind === 'section') { if (whole) ops.deleteRoad(this.doc, this.doc.get<'section'>(p.id)!.road); else ops.deleteSections(this.doc, [p.id]); }
+      else if (p.kind === 'junction') ops.deleteJunction(this.doc, p.id);
+      else this.doc.remove(p.id);
+    }, 'drag' + n);
+    hover.value = null;
+  }
 
   // ---------------- line tool ----------------
 
@@ -696,6 +755,7 @@ export class Editor {
 
   setTool(t: Tool) {
     if (t !== 'pen' && t !== 'line') this.cancelPen();
+    hover.value = null;
     if (t !== 'measure') this.measure = null;
     tool.value = t;
     this.updateCursor();
@@ -703,7 +763,8 @@ export class Editor {
     status.value = {
       select: 'Click a road to select it · double-click for one section · drag to bend · Shift-drag to move',
       direct: 'Drag points and curve handles · double-click a road to add a point · Alt breaks the curve',
-      pen: `Draw a new ${penClass.value} road: click points, drag for curves, end on a road or press Enter`,
+      pen: this.road.hint(),
+      bulldoze: 'Click a road section to remove it · Shift = the whole road · drag to sweep',
       knife: 'Click a road to split it · click a junction between two sections to join them',
       line: 'Click points to draw a line in the chosen layer · Enter to finish',
       measure: 'Drag to measure · hover a road to read its width',

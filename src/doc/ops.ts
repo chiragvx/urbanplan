@@ -297,7 +297,12 @@ export function deleteRoad(doc: CityDoc, id: Id) {
 
 // ---------------- new roads ----------------
 
-export interface PenPoint { x: number; z: number; /** outgoing handle (relative) — the pen's drag */ hx?: number; hz?: number; /** snapped to */ junction?: Id; section?: Id }
+export interface PenPoint {
+  x: number; z: number;
+  /** outgoing handle (relative) — the pen's drag */ hx?: number; hz?: number;
+  /** snapped to */ junction?: Id; section?: Id;
+  /** height above the ground (bridges, flyovers) */ lift?: number;
+}
 
 /** Resolve a pen end: an existing junction, a point on a section (split it), or a new dead-end junction. */
 function endpointFor(doc: CityDoc, p: PenPoint): JunctionObj {
@@ -306,7 +311,13 @@ function endpointFor(doc: CityDoc, p: PenPoint): JunctionObj {
     const r = splitSection(doc, p.section, [p.x, p.z]);
     if (r) return doc.get<'junction'>(r.junction)!;
   }
-  return newJunction(doc, p.x, p.z);
+  return newJunction(doc, p.x, p.z, p.lift ?? 0);
+}
+
+/** Level flags for a section from its heights (anything raised is a bridge / flyover). */
+function levelOf(path: Anchor[], ja: JunctionObj, jb: JunctionObj): Pick<SectionObj, 'bridge' | 'deck' | 'elevated'> {
+  const top = Math.max(ja.lift, jb.lift, ...path.map((p) => p.lift));
+  return top > 0.25 ? { bridge: 'overpass', deck: r2(top), elevated: true } : { bridge: 'none', deck: 0, elevated: false };
 }
 
 /**
@@ -336,13 +347,15 @@ export function createRoad(doc: CityDoc, pts: PenPoint[], cls: string, name = ''
       let ix = -(p.hx ?? 0), iz = -(p.hz ?? 0);
       if (p.hx === undefined && prev && next) { ix = -ox; iz = -oz; }
       else if (p.hx === undefined && prev) { ix = (prev.x - p.x) / 3; iz = (prev.z - p.z) / 3; }
-      return { x: r2(p.x), z: r2(p.z), ix: k ? r2(ix) : 0, iz: k ? r2(iz) : 0, ox: k < seg.length - 1 ? r2(ox) : 0, oz: k < seg.length - 1 ? r2(oz) : 0, lift: 0 };
+      return { x: r2(p.x), z: r2(p.z), ix: k ? r2(ix) : 0, iz: k ? r2(iz) : 0, ox: k < seg.length - 1 ? r2(ox) : 0, oz: k < seg.length - 1 ? r2(oz) : 0, lift: r2(p.lift ?? 0) };
     });
-    path[0].x = jA.x; path[0].z = jA.z; path[path.length - 1].x = jB.x; path[path.length - 1].z = jB.z;
+    path[0].x = jA.x; path[0].z = jA.z; path[0].lift = jA.lift;
+    const pl = path[path.length - 1];
+    pl.x = jB.x; pl.z = jB.z; pl.lift = jB.lift;
     if (jA.id !== jB.id) {
       const s: SectionObj = {
         kind: 'section', id: newId('s'), a: jA.id, b: jB.id, path, parts: P.map((p) => ({ ...p })), cls, name, road: road.id,
-        surface: cls === 'track' ? 'dirt' : 'asphalt', bridge: 'none', deck: 0, elevated: false, viaduct: false, wayIds: [], widthSrc: 'user',
+        surface: cls === 'track' ? 'dirt' : 'asphalt', ...levelOf(path, jA, jB), viaduct: false, wayIds: [], widthSrc: 'user',
       };
       doc.create(s);
     }
@@ -370,4 +383,336 @@ export function createLine(doc: CityDoc, layer: Id, pts: number[], depth: number
   const l: LineObj = { kind: 'line', id: newId('l'), layer, pts: pts.map(r2), depth, size, name, props: {} };
   doc.create(l);
   return l.id;
+}
+
+// ---------------- drawing a stretch (the road tool's modes) ----------------
+
+/** Cubic pieces of a circular arc leaving `s` along unit tangent `t` and ending at `e` (straight when it can't turn). */
+export function arcPieces(s: V2, t: V2, e: V2): { pieces: number[][]; R: number; end: V2 } {
+  const cx = e[0] - s[0], cz = e[1] - s[1];
+  const cr = t[0] * cz - t[1] * cx, dt = t[0] * cx + t[1] * cz;
+  const th = Math.atan2(cr, dt), L = Math.hypot(cx, cz);
+  if (Math.abs(th) < 0.003 || Math.abs(th) > 2.7 || L < 0.5) return { pieces: [line(s, e)], R: Infinity, end: L > 0.5 ? [cx / L, cz / L] : t };
+  const R = L / (2 * Math.sin(Math.abs(th)));
+  const sg = Math.sign(th);
+  const ox = s[0] - t[1] * R * sg, oz = s[1] + t[0] * R * sg; // centre, on the side the road turns to
+  const a0 = Math.atan2(s[1] - oz, s[0] - ox), sweep = 2 * th;
+  const n = Math.max(1, Math.ceil(Math.abs(sweep) / (Math.PI / 2)));
+  const d = sweep / n, k = (4 / 3) * Math.tan(d / 4) * R;
+  const pieces: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    const a = a0 + d * i, b = a + d;
+    const p0: V2 = [ox + Math.cos(a) * R, oz + Math.sin(a) * R], p3: V2 = [ox + Math.cos(b) * R, oz + Math.sin(b) * R];
+    pieces.push([p0[0], p0[1], p0[0] - Math.sin(a) * k, p0[1] + Math.cos(a) * k, p3[0] + Math.sin(b) * k, p3[1] - Math.cos(b) * k, p3[0], p3[1]]);
+  }
+  pieces[n - 1][6] = e[0]; pieces[n - 1][7] = e[1];
+  const b = a0 + sweep;
+  return { pieces, R, end: [-Math.sin(b) * sg, Math.cos(b) * sg] };
+}
+
+export function line(a: V2, b: V2): number[] {
+  return [a[0], a[1], a[0] + (b[0] - a[0]) / 3, a[1] + (b[1] - a[1]) / 3, a[0] + (2 * (b[0] - a[0])) / 3, a[1] + (2 * (b[1] - a[1])) / 3, b[0], b[1]];
+}
+
+/** Cubic through a quadratic control point (the "simple curve" mode). */
+export function quadPiece(a: V2, m: V2, b: V2): number[] {
+  return [a[0], a[1], a[0] + ((m[0] - a[0]) * 2) / 3, a[1] + ((m[1] - a[1]) * 2) / 3, b[0] + ((m[0] - b[0]) * 2) / 3, b[1] + ((m[1] - b[1]) * 2) / 3, b[0], b[1]];
+}
+
+/**
+ * Add one stretch of road from `a` to `b` along the given cubic pieces (absolute control points). Heights run
+ * evenly from a's to b's. Joins an existing road (`road`) or starts a new one. Returns the ids it made / used.
+ */
+export function drawStretch(doc: CityDoc, a: PenPoint, b: PenPoint, pieces: number[][], cls: string, opt: { road?: Id; name?: string; parts?: Part[] } = {}): { road: Id; section: Id | null; a: Id; b: Id } {
+  let road = opt.road && doc.get(opt.road) ? opt.road : '';
+  if (!road) { const r: RoadObj = { kind: 'road', id: newId('r'), name: opt.name ?? '', cls }; doc.create(r); road = r.id; }
+  const jA = endpointFor(doc, a);
+  const jB = endpointFor(doc, b);
+  if (jA.id === jB.id || !pieces.length) return { road, section: null, a: jA.id, b: jB.id };
+  const C = pieces.map((c) => [...c]);
+  // ends exactly on the junctions (shift the neighbouring handle with them)
+  const f = C[0], l = C[C.length - 1];
+  f[2] += jA.x - f[0]; f[3] += jA.z - f[1]; f[0] = jA.x; f[1] = jA.z;
+  l[4] += jB.x - l[6]; l[5] += jB.z - l[7]; l[6] = jB.x; l[7] = jB.z;
+  const chord = [0];
+  for (const c of C) chord.push(chord[chord.length - 1] + Math.hypot(c[6] - c[0], c[7] - c[1]));
+  const tot = chord[chord.length - 1] || 1;
+  const path: Anchor[] = [];
+  for (let k = 0; k <= C.length; k++) {
+    const prev = C[k - 1], next = C[k];
+    const x = next ? next[0] : prev[6], z = next ? next[1] : prev[7];
+    path.push({
+      x: r2(x), z: r2(z), ix: prev ? r2(prev[4] - prev[6]) : 0, iz: prev ? r2(prev[5] - prev[7]) : 0,
+      ox: next ? r2(next[2] - next[0]) : 0, oz: next ? r2(next[3] - next[1]) : 0, lift: r2(jA.lift + ((jB.lift - jA.lift) * chord[k]) / tot),
+    });
+  }
+  const P = opt.parts ?? template(cls);
+  const s: SectionObj = {
+    kind: 'section', id: newId('s'), a: jA.id, b: jB.id, path, parts: P.map((p) => ({ ...p })), cls, name: opt.name ?? '', road,
+    surface: cls === 'track' ? 'dirt' : 'asphalt', ...levelOf(path, jA, jB), viaduct: false, wayIds: [], widthSrc: 'user',
+  };
+  doc.create(s);
+  return { road, section: s.id, a: jA.id, b: jB.id };
+}
+
+// ---------------- crossings: junction at the same level, bridge otherwise ----------------
+
+/** Vertical separation (m) below which two crossing roads meet in a junction. */
+export const SAME_LEVEL = 2.5;
+
+function sampled(doc: CityDoc, s: SectionObj) {
+  const S = samplePath(anchorsOf(doc, s), 12);
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  for (const p of S.pts) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); z0 = Math.min(z0, p[1]); z1 = Math.max(z1, p[1]); }
+  return { S, box: [x0, z0, x1, z1] };
+}
+
+function segHit(a: V2, b: V2, c: V2, d: V2): [number, number] | null {
+  const rx = b[0] - a[0], rz = b[1] - a[1], sx = d[0] - c[0], sz = d[1] - c[1];
+  const den = rx * sz - rz * sx;
+  if (Math.abs(den) < 1e-9) return null;
+  const qx = c[0] - a[0], qz = c[1] - a[1];
+  const t = (qx * sz - qz * sx) / den, u = (qx * rz - qz * rx) / den;
+  return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? [t, u] : null;
+}
+
+export interface Crossing { p: V2; other: Id; s: number; lift: number; otherLift: number; join: boolean }
+
+/** Where a polyline (with heights) crosses existing sections. `skip` = sections to ignore (itself). */
+export function crossingsOf(doc: CityDoc, pts: V2[], lifts: number[], skip: Set<Id>, near?: (x0: number, z0: number, x1: number, z1: number) => Iterable<Id>): Crossing[] {
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  for (const p of pts) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); z0 = Math.min(z0, p[1]); z1 = Math.max(z1, p[1]); }
+  const cand = near ? [...near(x0, z0, x1, z1)].map((id) => doc.get(id)).filter((o): o is SectionObj => o?.kind === 'section') : doc.all('section');
+  const acc = [0];
+  for (let i = 1; i < pts.length; i++) acc.push(acc[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  const out: Crossing[] = [];
+  for (const o of cand) {
+    if (skip.has(o.id)) continue;
+    // cheap reject on the control points (the curve lies inside their box)
+    let bx0 = Infinity, bz0 = Infinity, bx1 = -Infinity, bz1 = -Infinity;
+    for (const a of o.path) for (const [x, z] of [[a.x, a.z], [a.x + a.ix, a.z + a.iz], [a.x + a.ox, a.z + a.oz]]) { bx0 = Math.min(bx0, x); bx1 = Math.max(bx1, x); bz0 = Math.min(bz0, z); bz1 = Math.max(bz1, z); }
+    if (bx0 > x1 + 50 || bx1 < x0 - 50 || bz0 > z1 + 50 || bz1 < z0 - 50) continue;
+    const { S, box } = sampled(doc, o);
+    if (box[0] > x1 || box[2] < x0 || box[1] > z1 || box[3] < z0) continue;
+    for (let i = 0; i + 1 < pts.length; i++) {
+      for (let j = 0; j + 1 < S.pts.length; j++) {
+        const h = segHit(pts[i], pts[i + 1], S.pts[j], S.pts[j + 1]);
+        if (!h) continue;
+        const p: V2 = [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * h[0], pts[i][1] + (pts[i + 1][1] - pts[i][1]) * h[0]];
+        const lift = lifts[i] + (lifts[i + 1] - lifts[i]) * h[0];
+        const otherLift = S.lift[j] + (S.lift[j + 1] - S.lift[j]) * h[1];
+        out.push({ p, other: o.id, s: acc[i] + (acc[i + 1] - acc[i]) * h[0], lift, otherLift, join: Math.abs(lift - otherLift) < SAME_LEVEL });
+      }
+    }
+  }
+  return out.sort((a, b) => a.s - b.s);
+}
+
+/** Junction of a section at a point: its end junction when the point is within `r` of it, else split there. */
+function junctionOn(doc: CityDoc, id: Id, p: V2, r = 3): Id | null {
+  const s = doc.get<'section'>(id);
+  if (!s) return null;
+  for (const j of [s.a, s.b]) { const J = doc.get<'junction'>(j); if (J && Math.hypot(J.x - p[0], J.z - p[1]) < r) return j; }
+  return splitSection(doc, id, p)?.junction ?? null;
+}
+
+/**
+ * Connect new sections to the roads they cross at the same level (a junction at each crossing, as Cities:
+ * Skylines does); crossings at different levels stay as bridges. Returns how many of each.
+ */
+export function autoConnect(doc: CityDoc, ids: Id[]): { joined: number; bridged: number } {
+  const work = [...ids];
+  let joined = 0;
+  const bridges = new Set<string>();
+  for (let guard = 0; guard < 400 && work.length; guard++) {
+    const id = work[work.length - 1];
+    const s = doc.get<'section'>(id);
+    if (!s) { work.pop(); continue; }
+    const { S } = sampled(doc, s);
+    const hit = crossingsOf(doc, S.pts, S.lift, new Set([id])).find((c) => {
+      const o = doc.get<'section'>(c.other)!;
+      // the two already meet at a junction right there
+      for (const j of [o.a, o.b]) {
+        if (j !== s.a && j !== s.b) continue;
+        const J = doc.get<'junction'>(j);
+        if (J && Math.hypot(J.x - c.p[0], J.z - c.p[1]) < 4) return false;
+      }
+      if (!c.join) { bridges.add(c.other); return false; }
+      return true;
+    });
+    if (!hit) { work.pop(); continue; }
+    const jo = junctionOn(doc, hit.other, hit.p);
+    if (!jo) { work.pop(); continue; }
+    const jn = junctionOn(doc, id, hit.p);
+    if (!jn) { work.pop(); continue; }
+    if (jn !== jo) mergeJunctions(doc, jn, jo);
+    joined++;
+    if (!doc.get(id)) {
+      // split: carry on with the two halves
+      work.pop();
+      for (const q of doc.sectionsAt(jo)) if (q.road === s.road && !ids.includes(q.id)) work.push(q.id);
+    }
+  }
+  return { joined, bridged: bridges.size };
+}
+
+// ---------------- levels: bridges and flyovers ----------------
+
+/** Deck height of a flyover over a road: 5.5 m clearance plus the deck. */
+export const FLYOVER_DECK = 6.5;
+
+interface ChainItem { s: SectionObj; fwd: boolean }
+/** Sections in runs through shared junctions (a road drawn in several sections). */
+export function chainsOf(doc: CityDoc, ids: Id[]): ChainItem[][] {
+  const secs = ids.map((id) => doc.get<'section'>(id)).filter((s): s is SectionObj => !!s);
+  const at = new Map<Id, SectionObj[]>();
+  for (const s of secs) for (const j of [s.a, s.b]) (at.get(j) ?? at.set(j, []).get(j)!).push(s);
+  const deg = (j: Id) => at.get(j)?.length ?? 0;
+  const startOf = (s: SectionObj) => (deg(s.a) !== 2 ? s.a : deg(s.b) !== 2 ? s.b : s.a);
+  const used = new Set<Id>();
+  const out: ChainItem[][] = [];
+  const order = [...secs].sort((p, q) => (deg(startOf(p)) !== 2 ? 0 : 1) - (deg(startOf(q)) !== 2 ? 0 : 1));
+  for (const s0 of order) {
+    if (used.has(s0.id)) continue;
+    const chain: ChainItem[] = [];
+    let s: SectionObj | undefined = s0, from = startOf(s0);
+    while (s && !used.has(s.id)) {
+      used.add(s.id);
+      const fwd: boolean = s.a === from;
+      chain.push({ s, fwd });
+      const to: Id = fwd ? s.b : s.a;
+      s = deg(to) === 2 ? at.get(to)!.find((q) => !used.has(q.id)) : undefined;
+      from = to;
+    }
+    out.push(chain);
+  }
+  return out;
+}
+
+/** Arc length of each anchor along a path. */
+function anchorStations(P: Anchor[]) {
+  const S = samplePath(P, 24);
+  return P.map((_, k) => S.s[Math.min(S.s.length - 1, k * 24)]);
+}
+
+/** Insert an anchor at arc length `s` (keeps the curve exactly). */
+function insertAt(P: Anchor[], s: number): Anchor[] {
+  const S = samplePath(P, 24);
+  let i = 1;
+  while (i < S.s.length - 1 && S.s[i] < s) i++;
+  const f = Math.max(0, Math.min(1, (s - S.s[i - 1]) / Math.max(1e-6, S.s[i] - S.s[i - 1])));
+  const k = S.k[i], t = S.k[i - 1] === k ? S.t[i - 1] + (S.t[i] - S.t[i - 1]) * f : S.t[i] * f;
+  const C = cubicsOf(P);
+  const [l, r] = splitCubic(C[k], t);
+  const out = P.map((a) => ({ ...a }));
+  out[k] = { ...out[k], ox: r2(l[2] - l[0]), oz: r2(l[3] - l[1]) };
+  out[k + 1] = { ...out[k + 1], ix: r2(r[4] - r[6]), iz: r2(r[5] - r[7]) };
+  out.splice(k + 1, 0, { x: r2(l[6]), z: r2(l[7]), ix: r2(l[4] - l[6]), iz: r2(l[5] - l[7]), ox: r2(r[2] - r[0]), oz: r2(r[3] - r[1]), lift: 0 });
+  return out;
+}
+
+/**
+ * Drop interior anchors that only split a curve (removing them leaves the same shape) — e.g. ramp points left by
+ * an earlier height change, so changing the height again doesn't pile them up.
+ */
+export function pruneSplits(P: Anchor[]): Anchor[] {
+  const out = P.map((a) => ({ ...a }));
+  for (let k = out.length - 2; k >= 1; k--) {
+    const A = out[k - 1], M = out[k], B = out[k + 1];
+    const li = Math.hypot(M.ix, M.iz), lo = Math.hypot(M.ox, M.oz);
+    if (li < 1e-3 || lo < 1e-3 || (M.ix * M.ox + M.iz * M.oz) / (li * lo) > -0.999) continue;
+    const t = li / (li + lo);
+    const C = [A.x, A.z, A.x + A.ox / t, A.z + A.oz / t, B.x + B.ix / (1 - t), B.z + B.iz / (1 - t), B.x, B.z];
+    const [l, r] = splitCubic(C, t);
+    if (Math.hypot(l[6] - M.x, l[7] - M.z) > 0.1 || Math.hypot(l[4] - (M.x + M.ix), l[5] - (M.z + M.iz)) > 0.1 || Math.hypot(r[2] - (M.x + M.ox), r[3] - (M.z + M.oz)) > 0.1) continue;
+    out[k - 1] = { ...A, ox: r2(C[2] - A.x), oz: r2(C[3] - A.z) };
+    out[k + 1] = { ...B, ix: r2(C[4] - B.x), iz: r2(C[5] - B.z) };
+    out.splice(k, 1);
+  }
+  return out;
+}
+
+export interface LevelResult { deck: number; grade: number; ramp: number; steep: boolean; lowered: boolean }
+
+/**
+ * Raise sections to a deck height with graded ramps at the ends of each run (a flyover). Junctions in the
+ * middle that connect other roads stay on the ground and the flyover passes over them.
+ */
+export function elevate(doc: CityDoc, ids: Id[], deck: number, grade = 0.05, maxGrade = 0.1): LevelResult {
+  let res: LevelResult = { deck, grade, ramp: 0, steep: false, lowered: false };
+  for (const chain of chainsOf(doc, ids)) {
+    const first = chain[0], last = chain[chain.length - 1];
+    const ja = doc.get<'junction'>(first.fwd ? first.s.a : first.s.b)!, jb = doc.get<'junction'>(last.fwd ? last.s.b : last.s.a)!;
+    const lens = chain.map((c) => samplePath(anchorsOf(doc, c.s), 24).len);
+    const L = lens.reduce((a, b) => a + b, 0);
+    if (L < 2) continue;
+    // ramps at the run's ends; steeper when the run is short, then a lower deck
+    let D = deck, g = grade;
+    const need = Math.max(0, D - ja.lift) + Math.max(0, D - jb.lift);
+    if (need / L > g) g = Math.min(maxGrade, need / L);
+    if (need / L > maxGrade) D = Math.max(0, (L * maxGrade + ja.lift + jb.lift) / 2);
+    const prof = (u: number) => Math.max(0, Math.min(D, ja.lift + g * u, jb.lift + g * (L - u)));
+    const tops = [(D - ja.lift) / g, L - (D - jb.lift) / g].filter((u) => u > 0.5 && u < L - 0.5);
+    res = { deck: r2(D), grade: g, ramp: Math.round(Math.max(0, D - Math.min(ja.lift, jb.lift)) / g), steep: g > grade + 1e-6, lowered: D < deck - 0.01 };
+    let base = 0;
+    chain.forEach((c, i) => {
+      const len = lens[i];
+      const toLocal = (u: number) => (c.fwd ? u - base : base + len - u);
+      const sec = doc.get<'section'>(c.s.id)!;
+      let P = pruneSplits(anchorsOf(doc, sec));
+      for (const u of tops) {
+        const sl = toLocal(u);
+        if (sl < 3 || sl > len - 3) continue;
+        if (anchorStations(P).some((x) => Math.abs(x - sl) < 4)) continue;
+        P = insertAt(P, sl);
+      }
+      const at = anchorStations(P);
+      const path = P.map((a, k) => ({ ...a, lift: r2(prof(c.fwd ? base + at[k] : base + len - at[k])) }));
+      const top = Math.max(...path.map((a) => a.lift));
+      doc.update(sec.id, { path, ...(top > 0.25 ? { bridge: 'overpass', deck: r2(top), elevated: true } : { bridge: 'none', deck: 0, elevated: false }) });
+      // the junction at this section's far end, inside the run
+      if (i < chain.length - 1) {
+        const jid = c.fwd ? sec.b : sec.a;
+        const lift = r2(prof(base + len));
+        const next = chain[i + 1].s.id;
+        const others = doc.sectionsAt(jid).filter((q) => q.id !== sec.id && q.id !== next);
+        if (others.length && lift > 0.25) {
+          // pass over: the run gets its own junction above the one on the ground
+          const J = doc.get<'junction'>(jid)!;
+          const nj = newJunction(doc, J.x, J.z, lift);
+          for (const q of [sec.id, next]) { const o = doc.get<'section'>(q)!; doc.update(q, o.a === jid ? { a: nj.id } : { b: nj.id }); }
+        } else doc.set(jid, 'lift', lift);
+      }
+      base += len;
+    });
+  }
+  return res;
+}
+
+/** Bring sections back to the ground; flyover junctions that sit over a ground junction reconnect to it. */
+export function toGround(doc: CityDoc, ids: Id[]) {
+  const set = new Set(ids);
+  const touched = new Set<Id>();
+  for (const id of ids) {
+    const s = doc.get<'section'>(id);
+    if (!s) continue;
+    doc.update(id, { path: pruneSplits(s.path).map((a) => ({ ...a, lift: 0 })), bridge: 'none', deck: 0, elevated: false });
+    touched.add(s.a); touched.add(s.b);
+  }
+  for (const j of touched) {
+    const J = doc.get<'junction'>(j);
+    if (!J || J.lift <= 0) continue;
+    // only when nothing else still needs it raised
+    if (doc.sectionsAt(j).some((q) => !set.has(q.id) && (q.elevated || q.bridge !== 'none'))) continue;
+    doc.set(j, 'lift', 0);
+    const under = doc.all('junction').find((o) => o.id !== j && o.lift <= 0.25 && Math.hypot(o.x - J.x, o.z - J.z) < 1);
+    if (under) mergeJunctions(doc, j, under.id);
+  }
+}
+
+/** Highest point of sections (their deck). */
+export function deckOf(doc: CityDoc, ids: Id[]): number {
+  let top = 0;
+  for (const id of ids) { const s = doc.get<'section'>(id); if (s) for (const a of anchorsOf(doc, s)) top = Math.max(top, a.lift); }
+  return top;
 }

@@ -4,8 +4,10 @@ import { isTyping } from './editor';
 import * as ops from '../doc/ops';
 import * as xs from '../doc/xsection';
 import {
-  accuracyView, anchorSel, dialog, leftTab, mode, paletteOpen, profileOpen, readOnly, select, selection, toast, tool, xray,
+  accuracyView, anchorSel, dialog, leftTab, mode, paletteOpen, penLift, profileOpen, readOnly, saveSettings, select, selection, settings, status, toast, tool, xray,
+  type RoadMode,
 } from './state';
+import { MODE_LABEL } from './roadtool';
 import type { Id, SectionObj } from '../doc/types';
 import type { Part } from '../net/model';
 
@@ -51,6 +53,66 @@ function junctionsSel(E: Editor): Id[] {
   return selection.value.filter((s) => s.kind === 'junction').map((s) => s.id).filter((id) => E.doc.get(id));
 }
 
+// ---------------- levels (PageUp / PageDown, as in Cities: Skylines) ----------------
+
+const r2 = (v: number) => Math.round(v * 100) / 100;
+const ELEV_STEPS = [10, 5, 2.5, 1.25, 0.5];
+
+function levelToast(r: ops.LevelResult) {
+  const bits = [`Flyover at ${r.deck} m`];
+  if (r.ramp) bits.push(`ramps ${r.ramp} m at ${(r.grade * 100).toFixed(1)} %`);
+  toast(bits.join(' · ') + (r.lowered ? ' — lowered to fit the road\'s length' : r.steep ? ' — steep: the road is short' : ''), r.lowered || r.steep ? 'warn' : 'ok');
+}
+
+/** Set the selected roads' deck height (≤ 0.75 m = back on the ground). */
+export function setDeck(E: Editor, deck: number, merge?: string) {
+  const ids = E.selectedSections().map((s) => s.id);
+  if (!ids.length) return;
+  if (deck < 0.75) { E.edit('To ground', () => ops.toGround(E.doc, ids), merge); toast('Back on the ground', 'ok'); return; }
+  const r = E.edit('Flyover', () => ops.elevate(E.doc, ids, deck, settings.value.grade), merge);
+  if (r) levelToast(r);
+}
+
+/** PageUp / PageDown: the road tool's drawing height, a point or junction's height, or the selection's deck. */
+function levelBy(E: Editor, dir: 1 | -1) {
+  const step = settings.value.elevStep;
+  if (tool.value === 'pen') {
+    penLift.value = Math.max(0, Math.min(60, r2(penLift.value + dir * step)));
+    status.value = penLift.value ? `Drawing ${penLift.value} m above the ground${penLift.value >= ops.FLYOVER_DECK - 0.01 ? ' — clears roads below' : ''}` : 'Drawing at ground level';
+    E.road.refresh();
+    E.overlayDirty = true;
+    return;
+  }
+  if (readOnly.value) return;
+  const a = anchorSel.value;
+  if (a && tool.value === 'direct') {
+    const o = E.doc.get(a.owner);
+    if (o?.kind !== 'section') return;
+    const last = o.path.length - 1;
+    if (a.k === 0 || a.k === last) { const j = a.k === 0 ? o.a : o.b; E.edit('Height', () => E.doc.set(j, 'lift', Math.max(0, r2(E.doc.get<'junction'>(j)!.lift + dir * step))), 'lift'); return; }
+    const path = o.path.map((p, i) => (i === a.k ? { ...p, lift: Math.max(0, r2(p.lift + dir * step)) } : p));
+    const top = Math.max(...path.map((p) => p.lift));
+    E.edit('Height', () => E.doc.update(o.id, { path, ...(top > 0.25 ? { elevated: true, bridge: o.bridge === 'none' ? 'overpass' : o.bridge, deck: top } : {}) }), 'lift');
+    return;
+  }
+  const juncs = junctionsSel(E);
+  if (juncs.length) { E.edit('Height', () => { for (const id of juncs) E.doc.set(id, 'lift', Math.max(0, r2(E.doc.get<'junction'>(id)!.lift + dir * step))); }, 'lift'); return; }
+  const ids = E.selectedSections().map((s) => s.id);
+  if (!ids.length) { toast('Select a road (or pick the road tool) to change its height', 'info'); return; }
+  setDeck(E, r2(ops.deckOf(E.doc, ids) + dir * step), 'lift');
+}
+
+function setRoadMode(E: Editor, m: RoadMode) {
+  saveSettings({ roadMode: m });
+  E.cancelPen();
+  E.road.cancel();
+  if (tool.value !== 'pen') E.setTool('pen');
+  status.value = E.road.hint();
+  E.overlayDirty = true;
+}
+
+const ROAD_MODES: RoadMode[] = ['straight', 'curve', 'complex', 'continuous', 'freeform', 'replace'];
+
 export const COMMANDS: Command[] = [
   // ---- File ----
   { id: 'file.new', label: 'New map (start from the base map)', group: 'File', run: (E) => E.app.newMap() },
@@ -95,6 +157,7 @@ export const COMMANDS: Command[] = [
     id: 'edit.escape', label: 'Deselect / step out', group: 'Edit', keys: 'Escape',
     run: (E) => {
       if (E.pen.pts.length || E.linePts.length) { if (tool.value === 'pen' && E.pen.pts.length >= 2) E.finishPen(); else E.cancelPen(); return; }
+      if (E.road.active) { E.road.cancel(); status.value = E.road.hint(); return; }
       if (tool.value !== 'select') { E.setTool('select'); return; }
       const s = sel1();
       if (s?.kind === 'section') { const o = E.doc.get<'section'>(s.id); if (o) { select([{ kind: 'road', id: o.road }]); return; } }
@@ -104,7 +167,7 @@ export const COMMANDS: Command[] = [
   {
     id: 'edit.enter', label: 'Finish drawing / step into road', group: 'Edit', keys: 'Enter',
     run: (E) => {
-      if (tool.value === 'pen') { E.finishPen(); return; }
+      if (tool.value === 'pen') { if (E.road.active) { E.road.cancel(); status.value = E.road.hint(); } else E.finishPen(); return; }
       if (tool.value === 'line') { E.finishLine(); return; }
       const s = sel1();
       if (s?.kind === 'road') select(E.doc.sectionsOf(s.id).map((x) => ({ kind: 'section' as const, id: x.id })));
@@ -149,6 +212,22 @@ export const COMMANDS: Command[] = [
     run: (E) => E.edit('Reset', () => { for (const s of selection.value) E.doc.reset(s.id); for (const s of E.selectedSections()) if (E.doc.base.has(s.id)) E.doc.reset(s.id); }),
   },
 
+  // ---- Level ----
+  { id: 'level.up', label: 'Raise (road tool height / selection) by the step', group: 'Road', keys: 'PageUp', run: (E) => levelBy(E, 1) },
+  { id: 'level.down', label: 'Lower (road tool height / selection) by the step', group: 'Road', keys: 'PageDown', run: (E) => levelBy(E, -1) },
+  {
+    id: 'level.flyover', label: `Make a flyover (${ops.FLYOVER_DECK} m deck, graded ramps)`, group: 'Road', keys: 'Shift+PageUp',
+    run: (E) => { if (tool.value === 'pen') { penLift.value = ops.FLYOVER_DECK; E.road.refresh(); status.value = `Drawing at flyover height (${ops.FLYOVER_DECK} m)`; return; } if (hasRoads(E) && editable()) setDeck(E, ops.FLYOVER_DECK); },
+  },
+  {
+    id: 'level.ground', label: 'Back to ground level', group: 'Road', keys: 'Shift+PageDown',
+    run: (E) => { if (tool.value === 'pen') { penLift.value = 0; E.road.refresh(); status.value = 'Drawing at ground level'; return; } if (hasRoads(E) && editable()) setDeck(E, 0); },
+  },
+  {
+    id: 'level.step', label: 'Elevation step (cycle 10 / 5 / 2.5 / 1.25 / 0.5 m)', group: 'Tools', keys: 'Alt+PageUp',
+    run: () => { const i = ELEV_STEPS.indexOf(settings.value.elevStep); saveSettings({ elevStep: ELEV_STEPS[(i + 1) % ELEV_STEPS.length] }); toast(`Elevation step ${settings.value.elevStep} m`, 'info', undefined, 1500); },
+  },
+
   // ---- Junction ----
   { id: 'junction.signals', label: 'Toggle traffic signals', group: 'Junction', enabled: (E) => junctionsSel(E).length > 0, run: (E) => E.edit('Signals', () => { for (const id of junctionsSel(E)) E.doc.set(id, 'signals', !E.doc.get<'junction'>(id)!.signals); }) },
   {
@@ -168,6 +247,15 @@ export const COMMANDS: Command[] = [
   { id: 'tool.line', label: 'Draw utility / rail line tool', group: 'Tools', keys: 'L', enabled: editable, run: (E) => E.setTool('line') },
   { id: 'tool.measure', label: 'Measure tool', group: 'Tools', keys: 'M', run: (E) => E.setTool('measure') },
   { id: 'tool.hand', label: 'Hand (pan) tool', group: 'Tools', keys: 'H', run: (E) => E.setTool('hand') },
+  { id: 'tool.bulldoze', label: 'Bulldozer', group: 'Tools', keys: 'B', enabled: editable, run: (E) => E.setTool('bulldoze') },
+  ...ROAD_MODES.map((m, i) => ({
+    id: `road.mode.${m}`, label: `Road tool: ${MODE_LABEL[m]}`, group: 'Tools' as const, keys: String(i + 1),
+    enabled: () => editable() && mode.value === '2d', run: (E: Editor) => setRoadMode(E, m),
+  })),
+  {
+    id: 'snap.toggle', label: 'Snapping on / off (hold Ctrl to skip it once)', group: 'Tools', keys: 'S',
+    run: (E) => { saveSettings({ snap: !settings.value.snap }); toast(settings.value.snap ? 'Snapping on' : 'Snapping off', 'info', undefined, 1500); E.overlayDirty = true; },
+  },
 
   // ---- View ----
   { id: 'view.toggle3d', label: 'Switch 2D / 3D', group: 'View', keys: 'Tab', run: (E) => E.setMode(mode.value === '2d' ? '3d' : '2d') },
@@ -176,6 +264,7 @@ export const COMMANDS: Command[] = [
   { id: 'view.accuracy', label: 'Accuracy view (where widths come from)', group: 'View', keys: 'Shift+A', run: (E) => { accuracyView.value = !accuracyView.value; E.overlayDirty = true; } },
   { id: 'view.fit', label: 'Zoom to the whole map', group: 'View', keys: 'Shift+1', run: (E) => { const h = E.world.tile.half; E.zoomTo([-h, -h, h, h]); } },
   { id: 'view.sel', label: 'Zoom to selection', group: 'View', keys: 'Shift+2', enabled: () => selection.value.length > 0, run: (E) => E.zoomToSelection() },
+  { id: 'view.focus', label: 'Focus the selection', group: 'View', keys: 'U', enabled: () => selection.value.length > 0, run: (E) => E.zoomToSelection() },
   { id: 'view.zoomin', label: 'Zoom in', group: 'View', keys: '=', run: (E) => { E.view.zoomAt(E.view.w / 2, E.view.h / 2, 1.5); E.world.needsRender = true; } },
   { id: 'view.zoomout', label: 'Zoom out', group: 'View', keys: '-', run: (E) => { E.view.zoomAt(E.view.w / 2, E.view.h / 2, 1 / 1.5); E.world.needsRender = true; } },
   { id: 'view.profile', label: 'Height profile panel', group: 'View', keys: 'Shift+P', run: () => { profileOpen.value = !profileOpen.value; } },
