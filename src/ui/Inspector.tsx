@@ -398,28 +398,125 @@ function JunctionPanel(p: { id: Id }) {
     <div class="insp">
       <div class="insp-kind"><Icon.target /> {j.R ? 'Roundabout' : arms.length >= 3 ? 'Junction' : arms.length === 2 ? 'Join' : 'Dead end'}</div>
       <p class="muted">{arms.length} arm{arms.length === 1 ? '' : 's'}: {[...new Set(arms.map((s) => s.name || 'unnamed'))].slice(0, 4).join(', ')}</p>
-      <Toggle label="Traffic signals" checked={j.signals} disabled={ro} onChange={(v) => set('signals', v)} />
-      <Row label="Crossings"><Seg small value={j.crossings === undefined ? 'auto' : j.crossings ? 'on' : 'off'} options={[{ value: 'auto', label: 'Auto' }, { value: 'on', label: 'Zebras' }, { value: 'off', label: 'None' }]} onChange={(v) => set('crossings', v === 'auto' ? undefined : v === 'on')} /></Row>
-      <Row label="Kerb corners"><Seg small value={j.rc === undefined ? 'auto' : 'set'} options={[{ value: 'auto', label: 'Auto' }, { value: 'set', label: 'Custom' }]} onChange={(v) => set('rc', v === 'auto' ? undefined : 8)} /></Row>
-      {j.rc !== undefined && <NumberField label="Corner radius" unit="m" value={j.rc} step={0.5} min={1} max={30} disabled={ro} onChange={(v, m) => set('rc', v, m)} />}
-      <Section title="Roundabout" open={!!j.R}>
-        <Toggle label="Roundabout" checked={!!j.R} disabled={ro} onChange={(v) => ui.E.edit('Roundabout', () => d.update(p.id, v ? { R: 14, ringLanes: 1 } : { R: undefined, ringLanes: undefined }))} />
-        {j.R ? <div class="grid2">
-          <NumberField label="Radius" unit="m" value={j.R} step={0.5} min={4} max={60} disabled={ro} onChange={(v, m) => set('R', v, m)} />
-          <NumberField label="Ring lanes" value={j.ringLanes ?? 1} step={1} digits={0} min={1} max={4} disabled={ro} onChange={(v) => set('ringLanes', Math.round(v))} />
-        </div> : null}
-      </Section>
-      <Section title="Position" open={false}>
-        <div class="grid2">
-          <NumberField label="X" unit="m" value={j.x} step={0.1} disabled={ro} onChange={(v, m) => ui.E.edit('Move junction', () => ops.moveJunction(d, p.id, v, j.z), m)} />
-          <NumberField label="Z" unit="m" value={j.z} step={0.1} disabled={ro} onChange={(v, m) => ui.E.edit('Move junction', () => ops.moveJunction(d, p.id, j.x, v), m)} />
-          <NumberField label="Height" unit="m" value={j.lift} step={0.5} min={-40} max={60} disabled={ro} onChange={(v, m) => set('lift', v, m)} title="Above the ground (flyover junctions); negative = below ground (underground junctions)" />
-        </div>
-      </Section>
-      <div class="list">{arms.map((s) => <button key={s.id} class="list-item" onClick={() => select([{ kind: 'section', id: s.id }])}><span>{s.name || 'Unnamed'}</span><span class="muted">{xs.totalWidth(s.parts).toFixed(1)} m</span></button>)}</div>
-      <Actions items={['junction.dissolve']} />
-      <div class="btns"><button class="danger" disabled={ro} onClick={() => run('edit.delete')}><Icon.trash size={14} /> Delete junction</button></div>
+      <Tabs id="junction" tabs={[
+        { id: 'general', label: 'Junction', body: () => (
+          <>
+            <Toggle label="Traffic signals" checked={j.signals} disabled={ro} onChange={(v) => set('signals', v)} />
+            <Row label="Crossings"><Seg small value={j.crossings === undefined ? 'auto' : j.crossings ? 'on' : 'off'} options={[{ value: 'auto', label: 'Auto' }, { value: 'on', label: 'Zebras' }, { value: 'off', label: 'None' }]} onChange={(v) => set('crossings', v === 'auto' ? undefined : v === 'on')} /></Row>
+            <Row label="Kerb corners"><Seg small value={j.rc === undefined ? 'auto' : 'set'} options={[{ value: 'auto', label: 'Auto' }, { value: 'set', label: 'Custom' }]} onChange={(v) => set('rc', v === 'auto' ? undefined : 8)} /></Row>
+            {j.rc !== undefined && <NumberField label="Corner radius" unit="m" value={j.rc} step={0.5} min={1} max={30} disabled={ro} onChange={(v, m) => set('rc', v, m)} />}
+            <div class="list">{arms.map((s) => <button key={s.id} class="list-item" onClick={() => select([{ kind: 'section', id: s.id }])}><span>{s.name || 'Unnamed'}</span><span class="muted">{xs.totalWidth(s.parts).toFixed(1)} m</span></button>)}</div>
+            <Actions items={['junction.dissolve']} />
+          </>
+        ) },
+        ...(arms.length >= 3 && !j.R ? [{ id: 'signals', label: 'Signals', body: () => <SignalsTab id={p.id} /> }] : []),
+        ...(arms.length >= 3 && !j.R ? [{ id: 'slips', label: 'Slip lanes', hint: j.slips?.length || undefined, body: () => <SlipsTab id={p.id} /> }] : []),
+        { id: 'round', label: 'Roundabout', body: () => (
+          <>
+            <Toggle label="Roundabout" checked={!!j.R} disabled={ro} onChange={(v) => ui.E.edit('Roundabout', () => d.update(p.id, v ? { R: 14, ringLanes: 1 } : { R: undefined, ringLanes: undefined }))} />
+            {j.R ? <div class="grid2">
+              <NumberField label="Radius" unit="m" value={j.R} step={0.5} min={4} max={60} disabled={ro} onChange={(v, m) => set('R', v, m)} />
+              <NumberField label="Ring lanes" value={j.ringLanes ?? 1} step={1} digits={0} min={1} max={4} disabled={ro} onChange={(v) => set('ringLanes', Math.round(v))} />
+            </div> : null}
+          </>
+        ) },
+        { id: 'pos', label: 'Position', body: () => (
+          <div class="grid2">
+            <NumberField label="X" unit="m" value={j.x} step={0.1} disabled={ro} onChange={(v, m) => ui.E.edit('Move junction', () => ops.moveJunction(d, p.id, v, j.z), m)} />
+            <NumberField label="Z" unit="m" value={j.z} step={0.1} disabled={ro} onChange={(v, m) => ui.E.edit('Move junction', () => ops.moveJunction(d, p.id, j.x, v), m)} />
+            <NumberField label="Height" unit="m" value={j.lift} step={0.5} min={-40} max={60} disabled={ro} onChange={(v, m) => set('lift', v, m)} title="Above the ground (flyover junctions); negative = below ground (underground junctions)" />
+          </div>
+        ) },
+      ]} />
+      <div class="insp-foot">
+        <span />
+        <button class="icon-btn danger" title="Delete junction (Del)" disabled={ro} onClick={() => run('edit.delete')}><Icon.trash size={15} /></button>
+      </div>
     </div>
+  );
+}
+
+/** Signals: on / off, the phase plan (which arms go together) drawn as a diagram, the phase shown in 3D. */
+function SignalsTab(p: { id: Id }) {
+  void docVersion.value;
+  const d = ui.doc, ro = readOnly.value;
+  const j = d.get<'junction'>(p.id)!;
+  const set = (k: string, v: unknown) => ui.E.edit('Signals', () => d.set(p.id, k, v));
+  const plan = ui.C.mesher.signalPlan(p.id);
+  if (!plan) return <p class="muted small">Signals need three or more arms.</p>;
+  const n = plan.arms.length, G = plan.groups.length;
+  const shown = ((j.phase ?? 0) % G + G) % G;
+  const green = new Set(plan.groups[shown]);
+  const name = (owner?: string) => (owner && d.get<'section'>(owner)?.name) || 'arm';
+  return (
+    <>
+      <Toggle label="Traffic signals" checked={j.signals} disabled={ro} onChange={(v) => set('signals', v)} />
+      {j.signals ? (
+        <>
+          <Row label="Phases"><Seg small value={j.phases === undefined ? 'auto' : String(j.phases)} options={[{ value: 'auto', label: 'Auto' }, ...[2, 3, 4].filter((k) => k <= n).map((k) => ({ value: String(k), label: String(k) }))]} onChange={(v) => set('phases', v === 'auto' ? undefined : Number(v))} /></Row>
+          <div class="phase-plan">
+            <svg viewBox="-60 -60 120 120" class="phase-svg" role="img" aria-label="Signal phase diagram">
+              <circle r="14" class="phase-hub" />
+              {plan.arms.map((a, i) => {
+                const on = green.has(i);
+                const x = a.ux * 46, y = a.uz * 46;
+                return (
+                  <g key={i} class={on ? 'go' : 'stop'}>
+                    <line x1={a.ux * 16} y1={a.uz * 16} x2={x} y2={y} />
+                    {on && <path d={`M${a.ux * 30 - a.uz * 6},${a.uz * 30 + a.ux * 6} L${a.ux * 20},${a.uz * 20} L${a.ux * 30 + a.uz * 6},${a.uz * 30 - a.ux * 6}`} />}
+                    <circle cx={x} cy={y} r="5" />
+                  </g>
+                );
+              })}
+            </svg>
+            <div class="phase-list">
+              {plan.groups.map((g, k) => (
+                <button key={k} class={`list-item ${k === shown ? 'on' : ''}`} disabled={ro} onClick={() => set('phase', k)} title="Show this phase green in 2D / 3D">
+                  <b>Phase {k + 1}</b><span class="muted small">{[...new Set(g.map((i) => name(plan.arms[i].owner)))].join(' + ')}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <p class="muted small">Arms in a phase get green together; the others are held (pedestrians cross them). The phase you pick is shown on the lights.</p>
+          <Toggle label="Keep-clear box (yellow hatching)" checked={!!j.box} disabled={ro} onChange={(v) => set('box', v || undefined)} />
+        </>
+      ) : <p class="muted small">Turn signals on to place lights at every approach, stop lines, lane arrows and right-turn guides.</p>}
+    </>
+  );
+}
+
+/** Free-left slip lanes: one per corner, from an arm to the next arm round, with width and radius. */
+function SlipsTab(p: { id: Id }) {
+  void docVersion.value;
+  const d = ui.doc, ro = readOnly.value;
+  const j = d.get<'junction'>(p.id)!;
+  const cands = ui.C.mesher.slipCandidates(p.id);
+  const slips = j.slips ?? [];
+  const name = (id: string) => d.get<'section'>(id)?.name || 'unnamed';
+  const put = (next: typeof slips, label: string, merge?: string) => ui.E.edit(label, () => d.set(p.id, 'slips', next.length ? next : undefined), merge);
+  const find = (c: { from: string; to: string }) => slips.findIndex((s) => s.from === c.from && s.to === c.to);
+  const built = ui.C.mesher.slipsBuilt(p.id);
+  if (!cands.length) return <p class="muted small">No corner here suits a slip lane (each needs two arms 35°–150° apart, at ground level).</p>;
+  return (
+    <>
+      <p class="muted small">A free-left lane round a corner, with a raised island, a footpath along it and a give-way line where it rejoins traffic (IRC:SP:41: 4.5–5.5 m wide, 15–25 m radius).</p>
+      {cands.map((c) => {
+        const k = find(c), s = k >= 0 ? slips[k] : null;
+        const upd = (patch: Partial<NonNullable<typeof s>>, m?: string) => put(slips.map((x, i) => (i === k ? { ...x, ...patch } : x)), 'Slip lane', m);
+        return (
+          <div key={c.from + c.to} class="slip-row">
+            <Toggle label={`${name(c.from)} → ${name(c.to)}`} checked={!!s} disabled={ro} onChange={(v) => put(v ? [...slips, { from: c.from, to: c.to }] : slips.filter((_, i) => i !== k), v ? 'Add slip lane' : 'Remove slip lane')} />
+            {s && !built.has(`${c.from}|${c.to}`) && <p class="note">Doesn't fit here: the arms are too short before the next junction, or the corner is too tight. Try a smaller radius or width.</p>}
+            {s && (
+              <div class="grid2">
+                <NumberField label="Width" unit="m" value={s.w ?? 5} step={0.25} min={3.5} max={8} disabled={ro} onChange={(v, m) => upd({ w: v }, m)} />
+                <NumberField label="Radius" unit="m" value={s.r ?? 20} step={1} min={10} max={40} disabled={ro} onChange={(v, m) => upd({ r: v }, m)} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </>
   );
 }
 

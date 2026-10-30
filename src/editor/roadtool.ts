@@ -85,7 +85,18 @@ export class RoadTool {
         const P = ops.anchorsOf(E.doc, sec);
         const n = ops.nearestOnPath(P, s.p);
         const sl = P[n.k].lift + (P[n.k + 1].lift - P[n.k].lift) * n.t;
-        if (Math.abs(sl - lift) < ops.SAME_LEVEL) return { p: n.p, kind: 'section', section: s.id, lift: sl };
+        if (Math.abs(sl - lift) < ops.SAME_LEVEL) {
+          // a point on the road inside (or just outside) its junction's surface: connect to the junction instead of
+          // splitting the arm right next to it (a second junction there tangles with the first)
+          for (const jid of [sec.a, sec.b]) {
+            const J = E.doc.get<'junction'>(jid), ring = E.C.mesher.junctions.get(jid)?.ring;
+            if (!J || E.doc.sectionsAt(jid).length < 2) continue;
+            if (Math.hypot(n.p[0] - J.x, n.p[1] - J.z) < 8 || (ring && nearRing(ring, n.p, 4))) {
+              return { p: [J.x, J.z], kind: 'junction', junction: jid, lift: J.lift, label: 'junction' };
+            }
+          }
+          return { p: n.p, kind: 'section', section: s.id, lift: sl };
+        }
         over = true;
       }
     }
@@ -316,3 +327,15 @@ export class RoadTool {
 
 /** Compass bearing in degrees (0 = north, x east, z south). */
 export function bearing(d: V2): number { return Math.round(((Math.atan2(d[0], -d[1]) * 180) / Math.PI + 360) % 360); }
+
+/** Inside a closed ring, or within `d` of its edge. */
+function nearRing(P: [number, number][], q: V2, d: number): boolean {
+  let inside = false, best = Infinity;
+  for (let i = 0, j = P.length - 1; i < P.length; j = i++) {
+    const a = P[i], b = P[j];
+    if ((a[1] > q[1]) !== (b[1] > q[1]) && q[0] < ((b[0] - a[0]) * (q[1] - a[1])) / (b[1] - a[1]) + a[0]) inside = !inside;
+    const dx = b[0] - a[0], dz = b[1] - a[1], t = Math.max(0, Math.min(1, ((q[0] - a[0]) * dx + (q[1] - a[1]) * dz) / (dx * dx + dz * dz || 1)));
+    best = Math.min(best, Math.hypot(a[0] + dx * t - q[0], a[1] + dz * t - q[1]));
+  }
+  return inside || best < d;
+}

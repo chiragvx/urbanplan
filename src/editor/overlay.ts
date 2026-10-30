@@ -40,6 +40,7 @@ export function drawOverlay(E: Editor) {
     drawAssetLayers(E);
     if (accuracyView.value) drawAccuracy(E);
     bridgeEdges(E);
+    signalSymbols(E);
   }
 
   // hover
@@ -369,6 +370,22 @@ function poly(E: Editor, pts: number[], closed: boolean, color: string, width: n
 }
 
 // ---------------- vector layers (2D) ----------------
+
+/** Traffic signals in 2D: a small lamp housing at each signal head, lit red / green for the phase shown. */
+function signalSymbols(E: Editor) {
+  if (E.ppm < 1.2) return;
+  const ctx = E.ctx, w = E.view.w, h = E.view.h;
+  const s = Math.min(1.6, E.ppm / 4);
+  for (const heads of E.C.mesher.signals.values()) for (const g of heads) {
+    const p = E.view.toScreen(g.x, g.z);
+    if (p[0] < -20 || p[1] < -20 || p[0] > w + 20 || p[1] > h + 20) continue;
+    const r = (g.ped ? 2.4 : 3.6) * Math.max(1, s);
+    ctx.fillStyle = '#23262a';
+    ctx.beginPath(); ctx.arc(p[0], p[1], r + 1.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = g.green ? '#34e07a' : '#ff3b30';
+    ctx.beginPath(); ctx.arc(p[0], p[1], r, 0, Math.PI * 2); ctx.fill();
+  }
+}
 
 function drawLines(E: Editor) {
   const ctx = E.ctx;

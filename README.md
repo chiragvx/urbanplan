@@ -255,6 +255,22 @@ OSM is treated as a survey, not as geometry. `src/net/importer.ts` compiles it i
 curved kerb corners fit, raised footpath corners, roundabout rings with filleted entries, markings, stop lines and
 zebras, decks and pillars. Terrain is carved under ground-level roads; buildings are shrunk away from roads.
 
+- **Transitions**: where two roads meet within 25° of straight there's no junction surface — the joint is mitred, and
+  if the cross-sections differ each part (lanes, median, footpaths, matched by kind) tapers to the joint at 1 : 10;
+  an extra lane or a new median grows from nothing.
+- **Heights**: ground roads are level across their width and follow the terrain along it (smoothed ±12 m); a junction
+  is one plane (tilted at most 5 %) and its arms meet it exactly. The terrain is cut / filled to the roads with 1 : 2
+  side slopes.
+- **Junction markings** (IRC:35): solid stop lines at signals, give-way lines and triangles on minor arms, lane
+  arrows from the arms' directions, solid lane lines over the last 30 m, zebras broken at medians, rounded median
+  noses, right-turn guide lines through big signalised junctions, optional yellow keep-clear box.
+- **Traffic signals**: poles on the kerb at each approach (mast arms over multi-lane ones), pedestrian signals at the
+  zebras, lit for the phase picked in the junction's **Signals** tab (phases group the most opposite arms); symbols
+  in 2D.
+- **Slip lanes**: the junction's **Slip lanes** tab adds a free-left lane round any corner between neighbouring arms —
+  tapers off and onto the arms, a raised island, a footpath outside, a give-way line where it rejoins. It follows the
+  arms across their pieces; corners too tight or arms too short say so.
+
 ## Layout
 
 ```

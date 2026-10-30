@@ -58,6 +58,12 @@ export interface JunctionObj {
   rc?: number;
   /** zebra crossings forced on / off */
   crossings?: boolean;
+  /** signal phases (default by the number of arms) and the phase shown green */
+  phases?: number; phase?: number;
+  /** yellow keep-clear box */
+  box?: boolean;
+  /** free-left slip lanes: from one arm section to the next arm round (width / radius in metres) */
+  slips?: { from: Id; to: Id; w?: number; r?: number }[];
   name?: string;
 }
 

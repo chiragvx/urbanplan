@@ -118,7 +118,7 @@ export class Compiler {
   }
 
   private junctionNode(j: JunctionObj): MNode {
-    return { id: j.id, x: j.x, z: j.z, lift: j.lift, R: j.R, ringLanes: j.ringLanes, signals: j.signals, rc: j.rc, crossings: j.crossings };
+    return { id: j.id, x: j.x, z: j.z, lift: j.lift, R: j.R, ringLanes: j.ringLanes, signals: j.signals, rc: j.rc, crossings: j.crossings, phases: j.phases, phase: j.phase, box: j.box, slips: j.slips };
   }
 
   /** Everything (initial load). */

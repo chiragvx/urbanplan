@@ -267,6 +267,16 @@ a { color: var(--accent); }
 .wprof rect:hover { opacity: 0.75; }
 .wprof-dp { stroke: var(--ok); stroke-width: 1; stroke-dasharray: 4 3; }
 .uniform { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.phase-plan { display: flex; gap: 10px; align-items: center; }
+.slip-row { display: flex; flex-direction: column; gap: 6px; padding: 6px 0; border-top: 1px solid var(--line); }
+.phase-svg { width: 112px; height: 112px; flex: none; background: var(--panel-2); border-radius: 10px; }
+.phase-svg line { stroke-width: 7; stroke-linecap: round; }
+.phase-svg .go line, .phase-svg .go circle { stroke: var(--ok); fill: var(--ok); }
+.phase-svg .stop line, .phase-svg .stop circle { stroke: var(--danger); fill: var(--danger); opacity: 0.55; }
+.phase-svg path { fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.phase-hub { fill: var(--neutral-bar); }
+.phase-list { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.phase-list .list-item { flex-direction: column; align-items: flex-start; gap: 0; padding: 4px 8px; }
 .row { display: flex; align-items: center; gap: 8px; min-height: 28px; }
 .row-label { width: 84px; flex-shrink: 0; color: var(--muted); font-size: 12px; }
 .row-body { flex: 1; min-width: 0; display: flex; gap: 6px; align-items: center; }

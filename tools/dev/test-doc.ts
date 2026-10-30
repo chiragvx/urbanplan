@@ -312,6 +312,46 @@ check(!!doc.get(s0.id) && C.mesher.segs.has(`${s0.id}~0`), 'undo delete restores
   openMap(back, parse(serialize(docA)));
   check(back.get<'line'>(lid as string)?.props.asset === 'water.nalla' && back.get<'section'>(r!.section!)?.asset === 'pune.18A' && totalWidth(back.get<'section'>(r!.section!)!.parts) === 18, 'asset lines and street assets survive save / load');
 }
+// ---- junctions: transitions, level roads on slopes, signals, slip lanes ----
+{
+  const docJ = new CityDoc(buildBase(net, tile, util), newMeta('kp', '', ''));
+  const CJ = new Compiler(docJ, hf);
+  CJ.full();
+  const M = CJ.mesher as unknown as { kinds: Map<string, string>; signals: Map<string, unknown[]>; items: Map<string, { layers: Record<string, { idx: Uint32Array } | undefined> }>; slipCandidates(id: string): { from: string; to: string }[]; slipsBuilt(id: string): Set<string> };
+  const kinds = [...M.kinds.values()];
+  check(kinds.includes('transition'), `roads that change cross-section carry on through a tapered joint (${kinds.filter((k) => k === 'transition').length} transitions)`);
+  check(M.signals.size > 0, `signalised junctions get signal heads (${M.signals.size} junctions)`);
+  // ground roads are level across: terrain under them conformed, nothing poking through the asphalt
+  const { generateNetwork } = await import('../../src/net/generate');
+  const hf2 = new Heightfield(tile.terrain.n, tile.terrain.cell, tile.terrain.heights);
+  const NM = generateNetwork(net, hf2);
+  hf2.conform(NM.targets);
+  const pos = NM.asphalt.pos, nor = NM.asphalt.nor;
+  let n = 0, clip = 0;
+  for (let i = 0; i < pos.length; i += 3) { if (nor[i + 1] < 0.9) continue; n++; if (hf2.sampleSurface(pos[i], pos[i + 2]) - pos[i + 1] > 0.02) clip++; }
+  check(clip / n < 0.001, `terrain stays under road surfaces on slopes (${clip} of ${n} vertices poke through)`);
+  // slip lanes: add at the first junction where one fits, undo / redo, save / load
+  let jid = '', key = '';
+  for (const j of docJ.all('junction')) {
+    const c = M.slipCandidates(j.id);
+    if (!c.length || docJ.sectionsAt(j.id).length < 3) continue;
+    docJ.transact('Slip', () => docJ.set(j.id, 'slips', c.map((x) => ({ from: x.from, to: x.to }))));
+    CJ.update([j.id]);
+    const b = M.slipsBuilt(j.id);
+    if (b.size) { jid = j.id; key = [...b][0]; break; }
+    docJ.undo(); CJ.update([j.id]);
+  }
+  const paving = (id: string) => M.items.get('n:' + id)?.layers.paving?.idx.length ?? 0;
+  check(!!jid, `a slip lane fits at a real junction (${key})`);
+  const withSlip = paving(jid);
+  docJ.undo(); CJ.update([jid]);
+  const without = paving(jid);
+  docJ.redo(); CJ.update([jid]);
+  check(withSlip > without && paving(jid) === withSlip, 'slip lane island and footpath come and go with undo / redo');
+  const back = new CityDoc(buildBase(net, tile, util), newMeta('kp', '', ''));
+  openMap(back, parse(serialize(docJ)));
+  check((back.get<'junction'>(jid)?.slips?.length ?? 0) > 0, 'slip lanes survive save / load');
+}
 // ---- imported DP roads: standard lanes, no slivers, one lane layout along a road ----
 {
   type Seg = { type: string; name?: string; reserve?: number };
