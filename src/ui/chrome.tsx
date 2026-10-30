@@ -114,7 +114,7 @@ export function Dock() {
       <div class="bar">
         <div class="mapcard">
           <Menu class="logo-menu" title="Map: new, open, save, export, publish" label={<span class="logo-badge" aria-label="Map menu">UP</span>} items={[
-            item('file.new'), item('file.open'), 'sep', item('file.save'), item('file.saveas'), item('file.download'), 'sep', item('file.export'), item('file.publish'), 'sep', item('file.settings'), item('help.keys'), item('help.about'),
+            item('file.home'), 'sep', item('file.new'), item('file.open'), 'sep', item('file.save'), item('file.saveas'), item('file.download'), 'sep', item('file.export'), item('file.publish'), 'sep', item('file.settings'), item('help.keys'), item('help.about'),
           ]} />
           <div class="mapcard-text">
             <input class="map-name" value={name ?? d.meta.name} disabled={ro} aria-label="Map name"

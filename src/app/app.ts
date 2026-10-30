@@ -294,18 +294,25 @@ export class App implements AppApi {
   /** in a region: where the first view looks, relative to the window centre */
   private startOffset: [number, number] = [0, 0];
 
-  /** Region: open where the last map's edits are, else Koregaon Park. */
+  /** The newest map saved in this browser for this city (or a tile it took over). */
+  private async lastHere(id: string, legacy: Record<string, unknown> = {}) {
+    const last = await local.last();
+    if (last && (last.meta.tile === id || legacy[last.meta.tile])) return last;
+    return (await local.list()).find((m) => m.meta.tile === id || legacy[m.meta.tile]);
+  }
+
+  /** Region: open where the last map's edits are, else the city's start (Koregaon Park in Pune). */
   private async startPoint(R: RegionManifest): Promise<[number, number]> {
     let p: [number, number] | null = null;
     try {
-      const last = await local.last();
+      const last = await this.lastHere(R.id, R.legacy);
       if (last) {
         const f = this.toRegion(parse(last.text), R);
         if (f) p = mapHome(f);
       }
     } catch { /* no saved map */ }
     const kp = R.legacy.kp;
-    p ??= kp ? movePoint(frameMove(kp, R.frame), -350, 150) : [0, 0];
+    p ??= R.start ?? (kp ? movePoint(frameMove(kp, R.frame), -350, 150) : [0, 0]);
     const P = R.piece;
     this.startOffset = [p[0] - (Math.floor(p[0] / P) + 0.5) * P, p[1] - (Math.floor(p[1] / P) + 0.5) * P];
     return p;
@@ -323,8 +330,19 @@ export class App implements AppApi {
     const url = q.get('map');
     await repo.probe();
     if (url) { await this.openUrl(url, true); return; }
-    const last = await local.last();
-    if (last && (last.meta.tile === this.tile.id || (this.region && this.region.legacy[last.meta.tile]))) {
+    // from the start menu: one of this browser's maps, a new map, or a file picked there
+    const lid = q.get('local'), fresh = q.has('new'), picked = q.get('open') === 'file';
+    for (const k of ['local', 'new', 'open']) q.delete(k);
+    if (lid || fresh || picked) history.replaceState(null, '', `${location.pathname}?${q}`);
+    if (lid && (await local.get(lid))) { await this.openLocal(lid); return; }
+    if (fresh) { this.newMap(false); return; }
+    if (picked) {
+      let text: string | null = null;
+      try { text = sessionStorage.getItem('urbanplan:open'); sessionStorage.removeItem('urbanplan:open'); } catch { /* storage off */ }
+      if (text) { try { await this.load(text, false, 'the file'); return; } catch (e) { toast(`Couldn't open the file: ${(e as Error).message}`, 'error'); } }
+    }
+    const last = await this.lastHere(this.region?.id ?? this.tile.id, this.region?.legacy);
+    if (last) {
       await this.load(last.text, false);
       status.value = `Restored “${last.meta.name}” from this browser`;
     }
@@ -411,8 +429,14 @@ export class App implements AppApi {
     });
   }
 
-  newMap() {
-    if (this.doc.editCount && !confirm('Start a new map? Your current map stays saved in this browser.')) return;
+  /** Back to the start menu (the map stays saved in this browser). */
+  async home() {
+    try { await this.persist(); } catch (e) { console.error(e); }
+    location.href = import.meta.env.BASE_URL;
+  }
+
+  newMap(ask = true) {
+    if (ask && this.doc.editCount && !confirm('Start a new map? Your current map stays saved in this browser.')) return;
     void this.persist();
     this.doc.load(new Map(), newMeta(this.tile.id, this.doc.meta.base ?? '', settings.value.author));
     readOnly.value = false; this.repoFile = null; this.issues.orphans = [];

@@ -1,0 +1,36 @@
+{
+ "regions": [
+  {
+   "id": "pune",
+   "name": "Pune · Pimpri-Chinchwad",
+   "city": "Pune",
+   "state": "Maharashtra",
+   "about": "PMC with the merged villages, and PCMC. DP sheets and road reserves for old PMC.",
+   "legacy": [
+    "kp"
+   ],
+   "counts": {
+    "sections": 159481,
+    "roads": 67378,
+    "buildings": 292838
+   },
+   "km2": 1283,
+   "baked": "2026-10-30T18:09:22.529Z"
+  },
+  {
+   "id": "mumbai",
+   "name": "Mumbai",
+   "city": "Mumbai",
+   "state": "Maharashtra",
+   "about": "MCGM: the island city and the western and eastern suburbs, Colaba to Dahisar and Mulund.",
+   "legacy": [],
+   "counts": {
+    "sections": 108927,
+    "roads": 44688,
+    "buildings": 117868
+   },
+   "km2": 1107,
+   "baked": "2026-10-30T21:27:22.337Z"
+  }
+ ]
+}

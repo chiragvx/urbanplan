@@ -49,6 +49,8 @@ export interface AppApi {
   /** a region (whole city streamed in pieces): its extent */
   region: { bounds: [number, number, number, number] } | null;
   newMap(): void;
+  /** back to the start menu */
+  home(): Promise<void>;
   save(copy?: boolean): Promise<void>;
   download(): void;
   fork(): void;

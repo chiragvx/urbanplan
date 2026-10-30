@@ -12,6 +12,8 @@ export interface RegionManifest {
   bounds: [number, number, number, number];
   base: number; fingerprint: string;
   legacy: Record<string, { lat: number; lon: number }>;
+  /** where the editor first opens (frame metres), when the city names a place */
+  start?: [number, number];
   pieces: [number, number, number][];
   counts: Record<string, number>;
   attribution: string;

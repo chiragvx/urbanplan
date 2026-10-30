@@ -268,7 +268,8 @@ const H = new Float32Array(GN * GM);
       raw[my * W + mx] = win[(y - py0) * ww + (x - px0)];
     }
   }
-  for (let k = 0; k < raw.length; k++) if (Number.isNaN(raw[k])) raw[k] = k > 0 ? raw[k - 1] : 560;
+  for (let k = 0; k < raw.length; k++) if (Number.isNaN(raw[k])) raw[k] = R.coastal ? 0 : k > 0 ? raw[k - 1] : 560;
+  if (R.coastal) markSea(raw, W, Hh, sw, ne, res);
   // DSM → ground: min filter (radius 2 px ≈ 60 m strips buildings / trees) then Gaussian blur (σ ≈ 2 px)
   const minF = new Float32Array(W * Hh);
   for (let y = 0; y < Hh; y++) for (let x = 0; x < W; x++) {
@@ -284,6 +285,88 @@ const H = new Float32Array(GN * GM);
     const g = (xx: number, yy: number) => ground[Math.min(Hh - 1, Math.max(0, yy)) * W + Math.min(W - 1, Math.max(0, xx))];
     H[j * GN + i] = (g(x0, y0) * (1 - tx) + g(x0 + 1, y0) * tx) * (1 - ty) + (g(x0, y0 + 1) * (1 - tx) + g(x0 + 1, y0 + 1) * tx) * ty;
   }
+}
+/**
+ * The sea (coastal regions): Copernicus sets open water to exactly 0 m, so the grid cells whose DEM pixel is 0, in
+ * patches of at least ~1 ha, are sea — except under buildings and within a few metres of a road on the ground (the
+ * 30 m DEM blurs the shore; the sea wall roads must stay dry). They join the water mask (the ground is carved under
+ * them) and become water polygons, one set of row-merged rectangles per piece.
+ */
+function markSea(raw: Float32Array, W: number, Hh: number, sw: { lat: number; lon: number }, ne: { lat: number; lon: number }, res: number) {
+  // the 0 m pixels as a 0/1 field, softened (σ ≈ 1 px) and read bilinearly: the shore follows the pixels' diagonals
+  // in 8 m steps instead of 30 m squares
+  const I = new Float32Array(W * Hh);
+  for (let k = 0; k < W * Hh; k++) I[k] = raw[k] === 0 ? 1 : 0;
+  const Is = blur2(I, W, Hh, 1);
+  const sea = new Uint8Array(GN * GM);
+  for (let j = 0; j < GM; j++) for (let i = 0; i < GN; i++) {
+    const { lat, lon } = F.unproj(F.x0 + i * CELL, F.z0 + j * CELL);
+    const fx = (lon - sw.lon) / res, fy = (ne.lat - lat) / res, x0 = Math.floor(fx), y0 = Math.floor(fy), tx = fx - x0, ty = fy - y0;
+    if (x0 < 0 || y0 < 0 || x0 + 1 >= W || y0 + 1 >= Hh) continue;
+    const v = (Is[y0 * W + x0] * (1 - tx) + Is[y0 * W + x0 + 1] * tx) * (1 - ty) + (Is[(y0 + 1) * W + x0] * (1 - tx) + Is[(y0 + 1) * W + x0 + 1] * tx) * ty;
+    if (v >= 0.5) sea[j * GN + i] = 1;
+  }
+  // dry land: buildings, and ground-level roads with a margin
+  for (let j = 0; j < GM; j++) for (let i = 0; i < GN; i++) if (sea[j * GN + i] && buildingAt(F.x0 + i * CELL, F.z0 + j * CELL)) sea[j * GN + i] = 0;
+  const dry = (x: number, z: number, r: number) => {
+    for (let j = Math.max(0, Math.floor((z - r - F.z0) / CELL)); j <= Math.min(GM - 1, Math.ceil((z + r - F.z0) / CELL)); j++)
+      for (let i = Math.max(0, Math.floor((x - r - F.x0) / CELL)); i <= Math.min(GN - 1, Math.ceil((x + r - F.x0) / CELL)); i++)
+        if (Math.hypot(F.x0 + i * CELL - x, F.z0 + j * CELL - z) <= r) sea[j * GN + i] = 0;
+  };
+  for (const w of netWays.values()) {
+    const t = w.tags;
+    if (!t.highway || (t.bridge && t.bridge !== 'no') || (t.layer && parseInt(t.layer, 10) > 0) || t.man_made === 'pier') continue;
+    const r = ['motorway', 'trunk', 'primary', 'secondary'].includes(t.highway) ? 14 : 8;
+    let prev: V2 | null = null;
+    for (const id of w.nds) {
+      const n = netNodes.get(id);
+      if (!n) { prev = null; continue; }
+      const q = proj(n);
+      if (prev) { const L = Math.hypot(q[0] - prev[0], q[1] - prev[1]), m = Math.max(1, Math.ceil(L / 4)); for (let s = 0; s <= m; s++) dry(prev[0] + ((q[0] - prev[0]) * s) / m, prev[1] + ((q[1] - prev[1]) * s) / m, r); }
+      prev = q;
+    }
+  }
+  // drop specks (zero-height pixels on land, tanks): 4-connected patches under 160 cells (~1 ha)
+  const seen = new Uint8Array(GN * GM), stack: number[] = [];
+  let nSea = 0;
+  for (let k0 = 0; k0 < GN * GM; k0++) {
+    if (!sea[k0] || seen[k0]) continue;
+    const comp: number[] = [];
+    stack.push(k0); seen[k0] = 1;
+    while (stack.length) {
+      const k = stack.pop()!; comp.push(k);
+      const i = k % GN, j = (k - i) / GN;
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const i2 = i + di, j2 = j + dj, k2 = j2 * GN + i2;
+        if (i2 >= 0 && j2 >= 0 && i2 < GN && j2 < GM && sea[k2] && !seen[k2]) { seen[k2] = 1; stack.push(k2); }
+      }
+    }
+    if (comp.length < 160) for (const k of comp) sea[k] = 0;
+    else nSea += comp.length;
+  }
+  // into the water mask, and as polygons per piece: each cell covers ±CELL/2 around its grid point
+  for (let k = 0; k < GN * GM; k++) if (sea[k]) water[k] = 1;
+  for (const p of pieces.values()) {
+    const gi0 = (p.rect[0] - F.x0) / CELL, gj0 = (p.rect[1] - F.z0) / CELL, N = P / CELL;
+    let open: Map<string, Poly> = new Map();
+    for (let j = 0; j <= N; j++) {
+      const next = new Map<string, Poly>();
+      for (let i = 0; i <= N; i++) {
+        if (!sea[(gj0 + j) * GN + gi0 + i]) continue;
+        let i1 = i;
+        while (i1 + 1 <= N && sea[(gj0 + j) * GN + gi0 + i1 + 1]) i1++;
+        const key = `${i}:${i1}`;
+        const xa = Math.max(p.rect[0], p.rect[0] + (i - 0.5) * CELL), xb = Math.min(p.rect[2], p.rect[0] + (i1 + 0.5) * CELL);
+        const za = Math.max(p.rect[1], p.rect[1] + (j - 0.5) * CELL), zb = Math.min(p.rect[3], p.rect[1] + (j + 0.5) * CELL);
+        const prev = open.get(key);
+        if (prev) { prev.outer[2][1] = zb; prev.outer[3][1] = zb; next.set(key, prev); open.delete(key); }
+        else { const poly: Poly = { outer: [[xa, za], [xb, za], [xb, zb], [xa, zb]], holes: [] }; p.waters.push(poly); next.set(key, poly); }
+        i = i1;
+      }
+      open = next;
+    }
+  }
+  log(`terrain: sea ${((nSea * CELL * CELL) / 1e6).toFixed(1)} km² (Copernicus water mask, roads and buildings kept dry)`);
 }
 function blur2(src: Float32Array, W: number, Hh: number, sigma: number) {
   const r = Math.ceil(sigma * 3), k: number[] = [];
@@ -369,7 +452,7 @@ const net = importNetwork({
   nodes: netNodes as never, ways: [...netWays.values()].filter((w) => w.tags.highway) as never,
   proj: (n) => proj(n), half: Math.max(-F.x0, F.x1, -F.z0, F.z1), bounds: [F.x0, F.z0, F.x1, F.z1],
   groundRails, viaducts, terrain: terrainAt, buildingAt,
-  dpWidths: fs.existsSync(dpFile) ? JSON.parse(fs.readFileSync(dpFile, 'utf8')) : undefined,
+  dpWidths: R.dp && fs.existsSync(dpFile) ? JSON.parse(fs.readFileSync(dpFile, 'utf8')) : undefined,
   log: (m) => log('  ' + m),
 });
 log(`network: ${net.nodes.length.toLocaleString()} nodes, ${net.segments.length.toLocaleString()} pieces, ${Object.keys(net.types).length} road types`);
@@ -577,12 +660,21 @@ fs.writeFileSync(path.join(outDir, 'region.json'), JSON.stringify({
   version: 1, id: R.id, name: R.name, city: R.city,
   frame: { lat0: R.lat0, lon0: R.lon0, kx: F.kx, kz: F.kz },
   piece: P, cell: CELL, grid: { i0: F.i0, i1: F.i1, j0: F.j0, j1: F.j1 }, bounds: [F.x0, F.z0, F.x1, F.z1],
-  base: BASE, fingerprint, legacy: R.legacy ?? {},
+  base: BASE, fingerprint, legacy: R.legacy ?? {}, start: R.start ? F.proj(R.start.lat, R.start.lon).map(Math.round) : undefined,
   pieces: pieceList,
   counts: { sections: objs.filter((o) => o.kind === 'section').length, junctions: objs.filter((o) => o.kind === 'junction').length, roads: roads.length, buildings: nB },
   attribution: '© OpenStreetMap contributors (ODbL) · Copernicus DEM GLO-30 © DLR/Airbus, provided under COPERNICUS by the EU and ESA',
   baked: new Date().toISOString(),
 }));
+// the start menu's list of cities
+{
+  const f = path.join('public', 'regions', 'index.json');
+  const ix: { regions: Record<string, unknown>[] } = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : { regions: [] };
+  const counts = { sections: objs.filter((o) => o.kind === 'section').length, roads: roads.length, buildings: nB };
+  const entry = { id: R.id, name: R.name, city: R.city, state: R.state ?? '', about: R.about ?? '', legacy: Object.keys(R.legacy ?? {}), counts, km2: Math.round(((F.x1 - F.x0) * (F.z1 - F.z0)) / 1e6), baked: new Date().toISOString() };
+  ix.regions = [...ix.regions.filter((r) => r.id !== R.id), entry];
+  fs.writeFileSync(f, JSON.stringify(ix, null, 1));
+}
 log('done');
 
 // ---------------- PNG (RGB, no filtering) ----------------

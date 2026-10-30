@@ -8,17 +8,37 @@ import { ToolPanel } from './ui/ToolPanel';
 import { startTheme } from './ui/theme';
 import { Dialogs, Profile } from './ui/dialogs';
 import { BuildPalette } from './ui/BuildPalette';
+import { Home, cities, cityOf } from './ui/Home';
+import { parse } from './doc/format';
 
 const $ = (id: string) => document.getElementById(id)!;
-// the whole city (a region streamed in pieces) unless a single tile is asked for (?tile=kp)
+// a city (a region streamed in pieces), a single tile (?tile=kp), or a published map (?map=…, on its own city);
+// with none of them, the start menu
 const Q = new URLSearchParams(location.search);
-const SRC = Q.get('tile') ? { tile: Q.get('tile')! } : { region: Q.get('region') ?? 'pune' };
+
+/** The city a published map opens on: the one it was made on. */
+async function sourceOf(): Promise<{ tile?: string; region?: string }> {
+  if (Q.get('tile')) return { tile: Q.get('tile')! };
+  if (Q.get('region')) return { region: Q.get('region')! };
+  const list = await cities();
+  try {
+    const r = await fetch(Q.get('map')!);
+    const c = r.ok ? cityOf(list, parse(await r.text()).meta.tile) : undefined;
+    if (c) return { region: c.id };
+  } catch { /* opened below, with its own error */ }
+  return { region: list[0]?.id ?? 'pune' };
+}
 
 async function boot() {
   const progress = (f: number, msg: string) => { $('load-bar').style.width = `${Math.round(f * 100)}%`; $('load-msg').textContent = msg; };
   const app = new App();
   try {
-    await app.boot(SRC, progress);
+    const src = await sourceOf();
+    if (src.region) {
+      const c = (await cities()).find((x) => x.id === src.region);
+      if (c) $('load-sub').textContent = `Edit the city in 2D, see it in 3D — ${c.name}`;
+    }
+    await app.boot(src, progress);
   } catch (e) {
     console.error(e);
     $('load-msg').textContent = `Could not start: ${(e as Error).message}`;
@@ -39,4 +59,9 @@ async function boot() {
   if (import.meta.env.DEV) Object.assign(window, { __app: app });
 }
 
-boot();
+if (Q.has('region') || Q.has('tile') || Q.has('map')) boot();
+else {
+  $('loading').hidden = true;
+  $('shell').hidden = true;
+  render(h(Home, {}), $('home'));
+}

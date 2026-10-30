@@ -155,6 +155,7 @@ const terrainTool = () => tool.value === 'terrain';
 
 export const COMMANDS: Command[] = [
   // ---- File ----
+  { id: 'file.home', label: 'Main menu (cities, your maps)', group: 'File', run: (E) => void E.app.home() },
   { id: 'file.new', label: 'New map (start from the base map)', group: 'File', run: (E) => E.app.newMap() },
   { id: 'file.open', label: 'Open…', group: 'File', keys: 'Ctrl+O', run: () => { dialog.value = 'open'; } },
   { id: 'file.save', label: 'Save', group: 'File', keys: 'Ctrl+S', run: (E) => void E.app.save() },

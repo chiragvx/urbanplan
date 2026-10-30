@@ -2,8 +2,14 @@
 
 Edit a real city like a Figma file, see it in 3D like Cities: Skylines. A personal map editor for making more
 accurate city maps — roads, junctions, utilities, metro — that you can publish and others can copy and edit.
-Illustrative concept, not engineering advice. Current data: **all of Pune and Pimpri-Chinchwad** (PMC + PCMC,
-~1,120 km², streamed in 2 km pieces); the original Koregaon Park · Kalyani Nagar tile still opens with `?tile=kp`.
+Illustrative concept, not engineering advice. Cities: **Pune and Pimpri-Chinchwad** (PMC + PCMC) and **Mumbai**
+(MCGM, Colaba to Dahisar and Mulund; not Navi Mumbai), each streamed in 2 km pieces; the original Koregaon Park ·
+Kalyani Nagar tile still opens with `?tile=kp`.
+
+The site opens on a **start menu**: the cities (with their land-cover map and size), *Continue* your last map, your
+maps saved in this browser (open or delete), published maps, and *Open a file…*. Each opens the editor on its city
+(`?region=pune`, `?region=mumbai`); a published link (`?map=…`) opens on the city it was made on. The map menu's
+*Main menu* comes back here.
 
 ## Run
 
@@ -221,9 +227,16 @@ node tools/fetch-region.mjs pune --plan
 python tools/region-extract.py data/raw/region/western-zone.osm.pbf pune
 npm run bake:region -- pune    # ≈ 1.5 min: terrain (Copernicus GLO-30 N18E073 + N18E074), the road network imported
                                # once for the whole city, cut into 306 pieces + the far view → public/regions/pune
+# Mumbai: the same with `mumbai` (DEM tiles N18E072 + N19E072, from copernicus-dem-30m.s3.amazonaws.com); ≈ 1 min,
+# 264 pieces, 34 MB
 ```
 
-The region is set in `tools/region-config.mjs` (bbox, frame origin, piece size). Its frame is the DP pipeline's city
+The region is set in `tools/region-config.mjs` (bbox, frame origin, piece size, where the editor first opens, a
+blurb for the start menu); each bake also adds the city to `public/regions/index.json`, the start menu's list. A
+**coastal** city gets the sea from the DEM: Copernicus sets open water to exactly 0 m, so those pixels (softened to
+an 8 m shoreline, patches of ~1 ha and up, never under buildings or ground-level roads) join the water mask — the
+ground is carved under them — and become water polygons per piece. `dp: true` applies the PMC DP road widths (Pune
+only). Its frame is the DP pipeline's city
 frame, so the city-wide DP data needs no conversion; tiles a region takes over (`legacy`) bring their DP sheets and
 utility networks along, moved into the city frame.
 
