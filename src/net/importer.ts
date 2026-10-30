@@ -159,7 +159,7 @@ class SegGrid {
 /** Room each side of a road may use when other roads run parallel to it in the same corridor.
  *  The centre-to-centre gap to a parallel neighbour is split in proportion to the two roads' wanted half-widths.
  *  Returns half-width limits [left, right] (left = left of the a→b direction); Infinity where the side is open. */
-function sideRoom(e: E, edges: Map<number, E>, grid: SegGrid, hwOf: (e: E) => number): [number, number] {
+function sideRoom(e: E, edges: Map<number, E>, grid: SegGrid, hwOf: (e: E) => number, apart?: (e: E, o: E) => boolean): [number, number] {
   const p = resample(e.pts, 6);
   const L = polyLen(e.pts);
   const me = hwOf(e);
@@ -174,7 +174,7 @@ function sideRoom(e: E, edges: Map<number, E>, grid: SegGrid, hwOf: (e: E) => nu
     for (const oid of grid.query(p[i], 45)) {
       if (oid === e.id) continue;
       const o = edges.get(oid);
-      if (!o || o.bridge !== e.bridge || o.layer !== e.layer || o.tunnel !== e.tunnel) continue;
+      if (!o || o.bridge !== e.bridge || o.layer !== e.layer || o.tunnel !== e.tunnel || apart?.(e, o)) continue;
       const nr = nearestOnPoly(o.pts, p[i]);
       if (nr.d > 45 || nr.d < 0.5 || Math.abs(dot(nr.dir, d)) < 0.8) continue;
       // which side: left normal of the a→b direction is (dz, -dx)
@@ -587,6 +587,9 @@ export function importNetwork(inp: ImportInput): Network {
   // road (`dpTarget`) — so a road keeps one cross-section instead of changing at every shop that sticks out
   const rawOf = new Map<number, { Rdp: number; R: number; med: number }>();
   const dpTarget = new Map<number, { R: number; med: number }>();
+  // flyovers over a road corridor (a bridge, or the untagged ramp that runs up to one, with a ground road alongside):
+  // they don't share the corridor's width with the road under them, and aren't sized from its DP reserve
+  const flyover = new Set<number>();
   // the geometry passes (corridor sharing, junction clusters, curve smoothing) keep the original width rule so road
   // shapes and ids stay stable for maps edited on earlier bakes; the cross-sections use the newer rule at the end
   let modern = false;
@@ -598,7 +601,7 @@ export function importNetwork(inp: ImportInput): Network {
     const laneW = { motorway: 3.6, trunk: 3.5, primary: 3.5, secondary: 3.3, tertiary: 3.2, busway: 3.5 }[e.cls as 'trunk'] ?? (e.cls === 'service' || e.cls === 'track' ? 4.0 : 3.0);
     const median = e.dualGap > 0 ? Math.max(0.8, Math.min(6, e.dualGap - laneW * (e.lanesF + e.lanesB) / 2)) : (!e.oneway && e.lanesF + e.lanesB >= 4 && RANK[e.cls] <= 2 ? 1.2 : 0);
     let spec: RoadTypeSpec;
-    const Rdp = !['service', 'track', 'living_street'].includes(e.cls) ? dpReserve(e.wayIds, inp.dpWidths) : null;
+    const Rdp = !['service', 'track', 'living_street'].includes(e.cls) && !flyover.has(e.id) ? dpReserve(e.wayIds, inp.dpWidths) : null;
     // today's road: the DP reserve, but never wider than the free space between existing buildings
     // ... and never wider than its share of the corridor when other roads run alongside (the DP reserve
     // covers the whole corridor: main road + service roads + BRTS, not each of them)
@@ -667,7 +670,7 @@ export function importNetwork(inp: ImportInput): Network {
       dpUsed++;
     } else {
       const sideDefault = RANK[e.cls] <= 3 ? (e.dualGap > 0 || RANK[e.cls] <= 2 ? 2.0 : 1.5) : 0; // Pune: main roads have footpaths, lanes mostly don't
-      const sw = (flag: boolean) => (flag ? Math.max(1.5, sideDefault) : sideDefault);
+      const sw = (flag: boolean) => (flyover.has(e.id) ? (flag ? 1.5 : 0) : flag ? Math.max(1.5, sideDefault) : sideDefault); // decks: crash barriers, not footpaths
       spec = {
         lanesF: Math.max(1, e.lanesF), lanesB: e.oneway ? 0 : e.lanesB, laneW, median: e.oneway ? 0 : piers ? Math.max(median, 2.5) : median,
         sidewalkL: e.cls === 'track' ? 0 : sw(e.sidewalkL), sidewalkR: e.cls === 'track' ? 0 : sw(e.sidewalkR),
@@ -812,6 +815,28 @@ export function importNetwork(inp: ImportInput): Network {
   for (const e of G.edges.values()) geomHw.set(e.id, hwOf(e));
   {
     modern = true;
+    // flyovers: decks and the ramps that touch them, wherever a ground road runs alongside most of their length
+    const decked = (e: E) => e.bridge || e.layer >= 1;
+    const deckNodes = new Set([...G.edges.values()].filter((e) => decked(e) && !e.tunnel).flatMap((e) => [e.a, e.b]));
+    const cand = [...G.edges.values()].filter((e) => !e.tunnel && (decked(e) || ((deckNodes.has(e.a) || deckNodes.has(e.b)) && RANK[e.cls] <= 4)));
+    const candIds = new Set(cand.map((e) => e.id));
+    const groundLines: V2[][] = [], gGrid = new SegGrid(40);
+    for (const e of G.edges.values()) if (!candIds.has(e.id) && !e.tunnel && RANK[e.cls] <= 5) { gGrid.add(groundLines.length, e.pts); groundLines.push(e.pts); }
+    for (const e of cand) if (parallelCover(e.pts, groundLines, gGrid, 20) >= 0.4) flyover.add(e.id);
+    // the roads alongside them get their width back (the deck is above, not beside)
+    if (flyover.size) {
+      const grid = new SegGrid(40);
+      for (const e of G.edges.values()) grid.add(e.id, e.pts);
+      const apart = (e: E, o: E) => flyover.has(e.id) !== flyover.has(o.id);
+      for (const e of G.edges.values()) {
+        if (!roomOf.has(e.id)) continue;
+        const hw = (x: E) => geomHw.get(x.id) ?? hwOf(x);
+        const r = sideRoom(e, G.edges, grid, hw, apart), r0 = sideRoom(e, G.edges, grid, hw);
+        if (r[0] === r0[0] && r[1] === r0[1]) continue; // no flyover alongside: as it was
+        if (Number.isFinite(Math.min(r[0], r[1]))) roomOf.set(e.id, r); else roomOf.delete(e.id);
+      }
+    }
+    log(`flyovers over road corridors: ${flyover.size} pieces sized on their own`);
     dpUsed = 0;
     for (const e of G.edges.values()) assignType(e); // each piece on its own (fills rawOf)
     const groups = new Map<string, E[]>();
@@ -846,6 +871,25 @@ export function importNetwork(inp: ImportInput): Network {
     }
     dpUsed = 0;
     for (const e of G.edges.values()) assignType(e);
+    // a short DP piece between two longer ones of the same road (a stub between a junction and a flyover's touchdown,
+    // with a reserve of its own) takes the cross-section of the longer road it carries straight on into — a width
+    // that jumps there and back within a few metres can't taper
+    let stubs = 0;
+    for (const e of G.edges.values()) {
+      if (!reserveOf.has(e.id) || !e.name || polyLen(e.pts) >= 40) continue;
+      let best: E | null = null, bestL = 40;
+      for (const [n, atA] of [[e.a, true], [e.b, false]] as [number, boolean][]) {
+        const de = atA ? norm(sub(e.pts[1], e.pts[0])) : norm(sub(e.pts[e.pts.length - 2], e.pts[e.pts.length - 1]));
+        for (const f of G.incident(n)) {
+          if (f.id === e.id || f.name !== e.name || f.cls !== e.cls || f.oneway !== e.oneway || flyover.has(f.id)) continue;
+          const df = n === f.a ? norm(sub(f.pts[1], f.pts[0])) : norm(sub(f.pts[f.pts.length - 2], f.pts[f.pts.length - 1]));
+          const L = polyLen(f.pts);
+          if (dot(de, df) < -0.9 && L > bestL) { best = f; bestL = L; }
+        }
+      }
+      if (best && typeOf.get(best.id) !== typeOf.get(e.id)) { typeOf.set(e.id, typeOf.get(best.id)!); stubs++; }
+    }
+    log(`DP roads: ${stubs} short pieces given the cross-section of the road they carry on into`);
     log(`DP roads: ${groups.size} roads given one cross-section (${evened} pieces evened out, ${pinched} kept narrower where buildings pinch them)`);
   }
   log(`road widths: ${dpUsed} of ${G.edges.size} roads sized from the Development Plan reserve; ${underViaduct.size} roads under the metro get a pier median`);
@@ -909,7 +953,7 @@ export function importNetwork(inp: ImportInput): Network {
     }
     return id;
   };
-  let pieces = 0;
+  let pieces = 0, straightened = 0;
   for (const e of G.edges.values()) {
     const na = G.nodes.get(e.a), nb = G.nodes.get(e.b);
     if (!na || !nb) continue;
@@ -918,6 +962,16 @@ export function importNetwork(inp: ImportInput): Network {
     let pts = e.pts.slice();
     pts[0] = [na.x, na.z];
     pts[pts.length - 1] = [nb.x, nb.z];
+    // a short, wide ground piece that only wiggles off its chord (two carriageways' midline where they converge,
+    // a junction moved by a cluster collapse) runs straight: at 15-20 m half-width a few metres of wiggle fold its kerbs
+    const chord = (() => {
+      const A = pts[0], B = pts[pts.length - 1], L0 = len2(sub(B, A));
+      if (L0 < 5 || L0 >= 40 || Math.max(t.hwL, t.hwR) < 8 || (kind.get(e.id) ?? 'none') !== 'none') return false;
+      const n: V2 = [-(B[1] - A[1]) / L0, (B[0] - A[0]) / L0];
+      const dev = Math.max(...pts.map((p) => Math.abs(dot(sub(p, A), n))));
+      return dev > 0.3 && dev < 0.12 * L0;
+    })();
+    if (chord) { pts = [pts[0], pts[pts.length - 1]]; straightened++; }
     pts = resample(smooth(pts, Math.max(radius, (geomHw.get(e.id) ?? Math.max(t.hwL, t.hwR)) + 3)), 3);
     const L = polyLen(pts);
     if (L < 0.5) continue;
@@ -968,6 +1022,6 @@ export function importNetwork(inp: ImportInput): Network {
       prevNode = to;
     });
   }
-  log(`fitted ${segments.length} Bézier segments (${pieces} shape nodes), ${Object.keys(types).length} road types`);
+  log(`fitted ${segments.length} Bézier segments (${pieces} shape nodes), ${Object.keys(types).length} road types; ${straightened} short wide pieces run straight`);
   return { half: inp.half, nodes, segments, types, paths };
 }

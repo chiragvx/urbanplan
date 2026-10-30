@@ -344,11 +344,15 @@ export interface Profile {
   parts: ProfPart[]; hl: number; hla: number; hlb: number; La: number; Lb: number; len: number; blended: boolean;
   /** room under a flyover: part k (the median, inserted if the road has none) widens by e(s); where gap(s) > 0 a
    *  ramp's walls stand in it (nothing drawn), elsewhere it's a pier median */
-  deck?: { k: number; e: (s: number) => number; gap: (s: number) => number; max: number };
+  deck?: { k: number; e: (s: number) => number; gap: (s: number) => number; paved: (s: number) => boolean; max: number };
 }
 
 /** Under-deck room along a ground road: how much wider its median gets (piers) and where a ramp fills it. */
-interface DeckRoom { e: (s: number) => number; gap: (s: number) => number; max: number }
+interface DeckRoom { e: (s: number) => number; gap: (s: number) => number; paved: (s: number) => boolean; max: number }
+/** Room a deck asks of the road under it at `s`: a gap for a ramp on walls, or a pier median. */
+interface DeckReq { s: number; gap: number; pier: number; merge?: boolean }
+/** A deck request this close to a junction end carries on over the junction (the room isn't faded there). */
+const DECK_THROUGH = 6;
 
 /** Index of a road's median, or where one goes (between the two directions; the middle of a one-way road). */
 function medianSlot(parts: { kind: PartKind; dir: Part['dir'] }[]): { k: number; insert: boolean } {
@@ -361,12 +365,12 @@ function medianSlot(parts: { kind: PartKind; dir: Part['dir'] }[]): { k: number;
   return { k: Math.floor(parts.length / 2), insert: true };
 }
 
-function profileOf(g: SegGeo, deck?: DeckRoom | null): Profile {
+export function profileOf(g: SegGeo, deck?: DeckRoom | null): Profile {
   const prof = blendProfile(g);
   if (deck && deck.max > 0.05) {
     const m = medianSlot(prof.parts);
     if (m.insert) prof.parts.splice(m.k, 0, { kind: 'median', dir: 0, w: 0, wa: 0, wb: 0 });
-    prof.deck = { k: m.k, e: deck.e, gap: deck.gap, max: deck.max };
+    prof.deck = { k: m.k, e: deck.e, gap: deck.gap, paved: deck.paved, max: deck.max };
     prof.blended = true;
   }
   return prof;
@@ -421,7 +425,7 @@ function blendProfile(g: SegGeo): Profile {
 const smooth01 = (x: number) => { const t = Math.max(0, Math.min(1, x)); return t * t * (3 - 2 * t); };
 
 /** [o0, o1] of each profile part (left-positive), fixed when the segment has no taper. */
-function profileOffsets(P: Profile): [Off, Off][] {
+export function profileOffsets(P: Profile): [Off, Off][] {
   if (!P.blended) {
     let o = P.hl;
     return P.parts.map((p) => { const r: [Off, Off] = [o, o - p.w]; o -= p.w; return r; });
@@ -570,6 +574,11 @@ export class RoadMesher {
   readonly signals = new Map<string, SignalHead[]>();
   /** merge joints (a flyover ramp landing in the middle of a road that carries on): the ramp's room at the joint */
   private mergeW = new Map<string, number>();
+  /** at a merge joint: the ground arm the ramp comes down over */
+  private mergeUp = new Map<string, End>();
+  /** decks' raw requests for room on each ground piece (this apply pass) */
+  private reqCache = new Map<SegGeo, DeckReq[]>();
+  private ownCache = new Map<SegGeo, DeckReq[]>();
   /** footpath cuts for slip lanes: per road piece, and the pieces each junction's slips cut */
   private cutsBySeg = new Map<string, { node: string; side: 'L' | 'R'; s0: number; s1: number }[]>();
   private slipSegs = new Map<string, Set<string>>();
@@ -604,9 +613,10 @@ export class RoadMesher {
   apply(ch: { nodes?: MNode[]; segs?: MSeg[]; removeNodes?: string[]; removeSegs?: string[] }): Set<string> {
     const changed = new Set<string>();
     const dirtyNodes = new Set<string>();
+    this.reqCache.clear(); this.ownCache.clear();
     // boxes of decks (elevated pieces) added / changed / removed: the ground roads under them get new room
     const decks: [number, number, number, number][] = [];
-    const deckBox = (id: string) => { const g = this.geos.get(id); if (g?.s.elevated) decks.push(geoBox(g, 15)); };
+    const deckBox = (id: string) => { const g = this.geos.get(id); if (g?.s.elevated) decks.push(geoBox(g, 40)); }; // (room reaches along the road)
     for (const id of ch.removeSegs ?? []) deckBox(id);
     for (const s of ch.segs ?? []) deckBox(s.id);
     const link = (s: MSeg) => { for (const n of [s.a, s.b]) (this.nodeSegs.get(n) ?? this.nodeSegs.set(n, new Set()).get(n)!).add(s.id); };
@@ -634,6 +644,13 @@ export class RoadMesher {
       dirtyNodes.delete(id);
       if (this.items.delete('n:' + id)) changed.add('n:' + id);
     }
+    // 1a. ground roads under a deck that changed get their room re-made, and the junctions at their ends with it
+    // (a deck carrying on over a junction widens it)
+    if (decks.length) for (const g of this.geos.values()) {
+      if (g.s.elevated || g.s.sunk) continue;
+      const b = geoBox(g, 0);
+      if (decks.some((d) => d[0] <= b[2] && d[2] >= b[0] && d[1] <= b[3] && d[3] >= b[1])) { dirtyNodes.add(g.s.a); dirtyNodes.add(g.s.b); }
+    }
     // 1. junction trims at every touched node
     for (const n of dirtyNodes) this.computeEnds(n);
     // 2. share each touched segment out between its two junctions
@@ -646,12 +663,6 @@ export class RoadMesher {
       const k = sum > max ? max / sum : 1;
       g.trimA = g.rawA * k; g.trimB = g.rawB * k;
       rebuildNodes.add(g.s.a); rebuildNodes.add(g.s.b);
-    }
-    // 2a. ground roads under a deck that changed get their room re-made
-    if (decks.length) for (const g of this.geos.values()) {
-      if (g.s.elevated || g.s.sunk || dirtySegs.has(g.s.id)) continue;
-      const b = geoBox(g, 0);
-      if (decks.some((d) => d[0] <= b[2] && d[2] >= b[0] && d[1] <= b[3] && d[3] >= b[1])) dirtySegs.add(g.s.id);
     }
     // 2b. slip lanes: the arm pieces they cut (and used to cut) are rebuilt too
     for (const n of dirtyNodes) for (const sid of this.layoutSlips(n)) if (this.geos.has(sid)) dirtySegs.add(sid);
@@ -752,10 +763,10 @@ export class RoadMesher {
         g.nrm[k] = g.n0[atA ? 0 : 2]; g.nrm[k + 1] = g.n0[atA ? 1 : 3];
         if (atA) g.blendA = undefined; else g.blendB = undefined;
         const f = frameAt(g, atA ? 0 : g.len, atA);
-        const t = g.t;
+        const t = g.t, r = this.endRoom(g, atA) / 2;
         E.push({
           g, atA, node, ux: f.ux, uz: f.uz, ang: Math.atan2(f.uz, f.ux),
-          hwL: atA ? t.hwL : t.hwR, hwR: atA ? t.hwR : t.hwL, cwL: atA ? t.cwL : t.cwR, cwR: atA ? t.cwR : t.cwL,
+          hwL: (atA ? t.hwL : t.hwR) + r, hwR: (atA ? t.hwR : t.hwL) + r, cwL: (atA ? t.cwL : t.cwR) + r, cwR: (atA ? t.cwR : t.cwL) + r,
           trim: 0, rc: node.rc ?? (t.major ? 9 : 5),
         });
       }
@@ -775,7 +786,7 @@ export class RoadMesher {
       return;
     }
     if (E.length <= 1) { this.kinds.set(id, 'end'); setRaw(); return; }
-    this.mergeW.delete(id);
+    this.mergeW.delete(id); this.mergeUp.delete(id);
     // a flyover ramp landing in the middle of a road that carries on: no junction — the ramp ends in the road's
     // widened median and the road ahead takes its lanes (the merge taper)
     if (E.length === 3 && !node.signals && !this.nodeOff(node)) {
@@ -790,6 +801,7 @@ export class RoadMesher {
           mitre(p, q);
           if (p.g.t.id !== q.g.t.id) for (const [e, f] of [[p, q], [q, p]] as [End, End][]) { const b = orient(f.g.t, e.atA === f.atA); if (e.atA) e.g.blendA = b; else e.g.blendB = b; }
           this.mergeW.set(id, ramp.g.t.hwL + ramp.g.t.hwR + 1);
+          this.mergeUp.set(id, up);
           setRaw(); return;
         }
       }
@@ -896,12 +908,26 @@ export class RoadMesher {
       const out: [number, number][] = [];
       let start = -1;
       for (let s = s0w; s <= s1w + 1e-6; s += 1) {
-        const inGap = D.gap(Math.min(s, s1w)) > 0.3;
+        const inGap = D.gap(Math.min(s, s1w)) > 0.3 && !D.paved(Math.min(s, s1w));
         if (inGap && start < 0) start = s;
         if ((!inGap || s + 1 > s1w + 1e-6) && start >= 0) { out.push([start, inGap ? s1w : s]); start = -1; }
       }
       return out;
     };
+    // where a ramp's lanes run on into the road ahead of its merge joint: asphalt, the road's median kept in the middle
+    const pavedRanges = (): [number, number][] => {
+      const D = prof.deck;
+      if (!D) return [];
+      const out: [number, number][] = [];
+      let start = -1;
+      for (let s = s0w; s <= s1w + 1e-6; s += 1) {
+        const inP = D.gap(Math.min(s, s1w)) > 0.3 && D.paved(Math.min(s, s1w));
+        if (inP && start < 0) start = s;
+        if ((!inP || s + 1 > s1w + 1e-6) && start >= 0) { out.push([start, inP ? s1w : s]); start = -1; }
+      }
+      return out.filter(([a, b]) => b - a > 0.3);
+    };
+    const paved = pavedRanges();
     // one asphalt strip per run of adjacent same-coloured flat parts (not one per lane)
     const roadCol = t.surface === 'dirt' ? COL.dirt : t.major ? COL.asphaltMajor : COL.asphalt;
     const flatCol = (k: PartKind) => (k === 'bus' ? COL.bus : k === 'cycle' ? COL.cycle : k === 'parking' ? COL.parking : roadCol);
@@ -919,7 +945,7 @@ export class RoadMesher {
     const pieces = (k: number): Sub[] => {
       const side = vergeSide(k);
       const cs: { s0: number; s1: number }[] = cuts.filter((c) => c.side === side);
-      if (prof.deck && prof.deck.k === k) for (const [a, b] of rampRanges()) cs.push({ s0: a, s1: b });
+      if (prof.deck && prof.deck.k === k) for (const [a, b] of [...rampRanges(), ...paved]) cs.push({ s0: a, s1: b });
       else if (!side) return [S];
       if (!cs.length) return [S];
       let ranges: [number, number][] = [[S.s[0], S.s[S.s.length - 1]]];
@@ -951,6 +977,21 @@ export class RoadMesher {
       }
     });
     flush();
+    if (prof.deck && paved.length) {
+      const k = prof.deck.k, [o0, o1] = offs[k];
+      const base = t.parts.find((p) => p.kind === 'median')?.width ?? 0;
+      const at = (o: Off, s: number) => (typeof o === 'number' ? o : o(s));
+      const mid = (d: number): Off => (s: number) => (at(o0, s) + at(o1, s)) / 2 + d;
+      for (const [a, b] of paved) {
+        const Sx = cutSub(S, a, b).S, zx = zOf(Sx);
+        sweep(asphalt, Sx, o0, o1, zx, roadCol);
+        if (base < 0.05) continue;
+        const top = (i: number, x: number, zz: number) => zx(i, x, zz) + KERB;
+        sweep(paving, Sx, mid(base / 2), mid(-base / 2), top, COL.median);
+        wallAlong(paving, Sx, mid(base / 2), (i, x, zz) => zx(i, x, zz) - 0.05, top, true, COL.kerb);
+        wallAlong(paving, Sx, mid(-base / 2), (i, x, zz) => zx(i, x, zz) - 0.05, top, false, COL.kerb);
+      }
+    }
     // no lane changing on the last 30 m before a signalised junction or one on a main road (IRC:35 solid lane lines)
     const solidAt = (id: string) => { const n = this.nodes.get(id); return this.kinds.get(id) === 'junction' && (this.ends.get(id)?.length ?? 0) >= 3 && (n?.signals || t.major) ? 30 : 0; };
     segmentMarkings(markings, g, S, z, prof, offs, [solidAt(g.s.a), solidAt(g.s.b)]);
@@ -1119,10 +1160,111 @@ export class RoadMesher {
    */
   private deckRoom(g: SegGeo): DeckRoom | null {
     if (g.s.elevated || g.s.sunk) return null;
+    const req = this.deckReqs(g).slice();
+    // the road ahead of a merge joint keeps the ramp's room there, tapering off
+    for (const [nid, atA] of [[g.s.a, true], [g.s.b, false]] as [string, boolean][]) {
+      let mw = this.mergeW.get(nid);
+      // as wide as the room the ramp has on the other side of the joint, so the two meet without a step
+      const up = this.mergeUp.get(nid);
+      if (mw && up && up.g !== g) mw = Math.max(mw, this.envAt(up.g, up.atA ? 0 : up.g.len));
+      if (mw && !req.some((r) => (atA ? r.s < 8 : r.s > g.len - 8))) req.push({ s: atA ? 0 : g.len, gap: mw, pier: 0, merge: true });
+    }
+    if (!req.length) return null;
+    // tapered envelopes on a 2 m grid, less what the road's own median already gives
+    const base = g.t.parts.find((p) => p.kind === 'median')?.width ?? 0;
+    const step = 2, m = Math.max(2, Math.ceil(g.len / step) + 1);
+    const gapA = new Float32Array(m), pierA = new Float32Array(m), mrgA = new Uint8Array(m);
+    for (let k = 0; k < m; k++) {
+      const s = Math.min(g.len, k * step);
+      let gp = 0, pr = 0, mg = 0;
+      for (const r of req) {
+        const fall = Math.abs(s - r.s) / (TAPER / 2);
+        if (r.merge) mg = Math.max(mg, r.gap - fall); else gp = Math.max(gp, r.gap - fall);
+        pr = Math.max(pr, r.pier - fall);
+      }
+      gapA[k] = Math.max(0, gp, mg); pierA[k] = Math.max(0, pr);
+      mrgA[k] = mg > 0.3 && mg >= gp ? 1 : 0;
+    }
+    const at = (A: Float32Array) => (s: number) => { const u = Math.max(0, Math.min(m - 1, s / step)), k = Math.min(m - 2, Math.floor(u)), f = u - k; return A[k] + (A[k + 1] - A[k]) * f; };
+    // fade to nothing before ordinary junctions (their surface is drawn at the road's own width) — except where the
+    // deck carries on over the junction: there the junction is drawn as wide as the room (computeEnds)
+    const fadeAt = (id: string, atA: boolean) => { const k = this.kinds.get(id); return (k === 'junction' || k === 'roundabout') && !this.throughEnd(g, atA); };
+    const fa = fadeAt(g.s.a, true), fb = fadeAt(g.s.b, false);
+    const fade = (s: number) => (fa ? smooth01((s - g.trimA) / 8) : 1) * (fb ? smooth01((g.len - g.trimB - s) / 8) : 1);
+    const gapF0 = at(gapA), pierF0 = at(pierA);
+    const gapF = (s: number) => gapF0(s) * fade(s), pierF = (s: number) => pierF0(s) * fade(s);
+    const e = (s: number) => Math.max(0, Math.max(gapF(s), pierF(s)) - base);
+    let max = 0;
+    for (let k = 0; k < m; k++) max = Math.max(max, Math.max(gapA[k], pierA[k]) - base);
+    const paved = (s: number) => mrgA[Math.max(0, Math.min(m - 1, Math.round(s / step)))] === 1;
+    return max > 0.05 ? { e, gap: (s: number) => (gapF(s) > pierF(s) ? gapF(s) : 0), paved, max } : null;
+  }
+
+  /** The deck runs on over this end's junction (a request right at the end). */
+  private throughEnd(g: SegGeo, atA: boolean): DeckReq | null {
+    if (this.kinds.get(atA ? g.s.a : g.s.b) === 'roundabout') return null;
+    let best: DeckReq | null = null;
+    for (const r of this.deckReqs(g)) {
+      const d = atA ? r.s : g.len - r.s;
+      if (d <= DECK_THROUGH && (!best || d < (atA ? best.s : g.len - best.s))) best = r;
+    }
+    return best;
+  }
+
+  /** How much wider this end is at its junction because a deck carries on over it (0 when none does). */
+  private endRoom(g: SegGeo, atA: boolean): number {
+    if (g.s.elevated || g.s.sunk) return 0;
+    const n = this.nodes.get(atA ? g.s.a : g.s.b);
+    if (!n || n.R) return 0;
+    const r = this.throughEnd(g, atA);
+    if (!r) return 0;
+    const base = g.t.parts.find((p) => p.kind === 'median')?.width ?? 0;
+    return Math.max(0, this.envAt(g, atA ? 0 : g.len) - base);
+  }
+
+  /** The decks' room envelope on a ground piece at `s` (before the road's own median is taken off). */
+  private envAt(g: SegGeo, s: number): number {
+    let v = 0;
+    for (const q of this.deckReqs(g)) { const fall = Math.abs(s - q.s) / (TAPER / 2); v = Math.max(v, q.gap - fall, q.pier - fall); }
+    return v;
+  }
+
+  /**
+   * Requests of the decks along a ground piece and along the pieces it carries straight on into (through shape /
+   * transition nodes, up to 80 m), so the room is one envelope across the joints; plus the flat run to a junction
+   * end the deck carries on over. Cached for the pass.
+   */
+  private deckReqs(g: SegGeo): DeckReq[] {
+    const hit = this.reqCache.get(g);
+    if (hit) return hit;
+    const req = this.ownReqs(g).slice();
+    if (g.s.elevated || g.s.sunk) { this.reqCache.set(g, req); return req; }
+    for (const atA of [true, false]) {
+      let node = atA ? g.s.a : g.s.b, prev = g, dist = 0;
+      while (dist < 80) {
+        const set = this.nodeSegs.get(node);
+        if (!set || set.size !== 2) break;
+        const fid = [...set].find((id) => id !== prev.s.id);
+        const f = fid ? this.geos.get(fid) : undefined;
+        if (!f || f === g || f.s.elevated || f.s.sunk) break;
+        const fAtA = f.s.a === node;
+        for (const r of this.ownReqs(f)) { const d = dist + (fAtA ? r.s : f.len - r.s); req.push({ ...r, s: atA ? -d : g.len + d }); }
+        dist += f.len; node = fAtA ? f.s.b : f.s.a; prev = f;
+      }
+    }
+    this.reqCache.set(g, req);
+    return req;
+  }
+
+  /** Raw requests of the decks running along this ground piece alone. */
+  private ownReqs(g: SegGeo): DeckReq[] {
+    const hit = this.ownCache.get(g);
+    if (hit) return hit;
+    const req: DeckReq[] = [];
+    this.ownCache.set(g, req);
     const hw = Math.max(g.t.hwL, g.t.hwR);
-    if (hw < 3) return null;
+    if (g.s.elevated || g.s.sunk || hw < 3) return req;
     const box = geoBox(g, hw + 10);
-    const req: { s: number; gap: number; pier: number }[] = [];
     const n = g.cum.length;
     for (const e of this.geos.values()) {
       if (!e.s.elevated || e === g) continue;
@@ -1152,33 +1294,14 @@ export class RoadMesher {
         else req.push({ s: bs, gap: 0, pier: PIER_MEDIAN + 2 * off });
       }
     }
-    // the road ahead of a merge joint keeps the ramp's room there, tapering off
-    for (const [nid, atA] of [[g.s.a, true], [g.s.b, false]] as [string, boolean][]) {
-      const mw = this.mergeW.get(nid);
-      if (mw && !req.some((r) => (atA ? r.s < 8 : r.s > g.len - 8))) req.push({ s: atA ? 0 : g.len, gap: mw, pier: 0 });
+    // a deck carrying on over a junction end (or a merge joint): its room runs flat to the end (the junction is as wide)
+    for (const atA of [true, false]) {
+      if ((this.nodeSegs.get(atA ? g.s.a : g.s.b)?.size ?? 0) === 2) continue;
+      let near: DeckReq | null = null;
+      for (const r of req) { const d = atA ? r.s : g.len - r.s; if (d <= DECK_THROUGH && (!near || d < (atA ? near.s : g.len - near.s))) near = r; }
+      if (near) req.push({ s: atA ? 0 : g.len, gap: near.gap, pier: near.pier });
     }
-    if (!req.length) return null;
-    // tapered envelopes on a 2 m grid, less what the road's own median already gives
-    const base = g.t.parts.find((p) => p.kind === 'median')?.width ?? 0;
-    const step = 2, m = Math.max(2, Math.ceil(g.len / step) + 1);
-    const gapA = new Float32Array(m), pierA = new Float32Array(m);
-    for (let k = 0; k < m; k++) {
-      const s = Math.min(g.len, k * step);
-      let gp = 0, pr = 0;
-      for (const r of req) { const fall = Math.abs(s - r.s) / (TAPER / 2); gp = Math.max(gp, r.gap - fall); pr = Math.max(pr, r.pier - fall); }
-      gapA[k] = Math.max(0, gp); pierA[k] = Math.max(0, pr);
-    }
-    const at = (A: Float32Array) => (s: number) => { const u = Math.max(0, Math.min(m - 1, s / step)), k = Math.min(m - 2, Math.floor(u)), f = u - k; return A[k] + (A[k + 1] - A[k]) * f; };
-    // fade to nothing before ordinary junctions (their surface is drawn at the road's own width)
-    const fadeAt = (id: string) => { const k = this.kinds.get(id); return k === 'junction' || k === 'roundabout'; };
-    const fa = fadeAt(g.s.a), fb = fadeAt(g.s.b);
-    const fade = (s: number) => (fa ? smooth01((s - g.trimA) / 8) : 1) * (fb ? smooth01((g.len - g.trimB - s) / 8) : 1);
-    const gapF0 = at(gapA), pierF0 = at(pierA);
-    const gapF = (s: number) => gapF0(s) * fade(s), pierF = (s: number) => pierF0(s) * fade(s);
-    const e = (s: number) => Math.max(0, Math.max(gapF(s), pierF(s)) - base);
-    let max = 0;
-    for (let k = 0; k < m; k++) max = Math.max(max, Math.max(gapA[k], pierA[k]) - base);
-    return max > 0.05 ? { e, gap: (s: number) => (gapF(s) > pierF(s) ? gapF(s) : 0), max } : null;
+    return req;
   }
 
   /** Slip lanes laid out at a junction (arms found and spaced; ones that don't fit are skipped). */
