@@ -594,6 +594,8 @@ export function importNetwork(inp: ImportInput): Network {
   // flyovers over a road corridor (a bridge, or the untagged ramp that runs up to one, with a ground road alongside):
   // they don't share the corridor's width with the road under them, and aren't sized from its DP reserve
   const flyover = new Set<number>();
+  // minor roads running inside a bigger road's DP corridor (a service lane along it): the reserve is the bigger road's
+  const inCorridor = new Set<number>();
   // the geometry passes (corridor sharing, junction clusters, curve smoothing) keep the original width rule so road
   // shapes and ids stay stable for maps edited on earlier bakes; the cross-sections use the newer rule at the end
   let modern = false;
@@ -606,7 +608,7 @@ export function importNetwork(inp: ImportInput): Network {
     const median = e.dualGap > 0 ? Math.max(0.8, Math.min(6, e.dualGap - laneW * (e.lanesF + e.lanesB) / 2)) : (!e.oneway && e.lanesF + e.lanesB >= 4 && RANK[e.cls] <= 2 ? 1.2 : 0);
     let spec: RoadTypeSpec;
     // bridges are built structures: the DP reserve is the corridor planned around them, not their width
-    const Rdp = !['service', 'track', 'living_street'].includes(e.cls) && !flyover.has(e.id) && !(modern && e.bridge) ? dpReserve(e.wayIds, inp.dpWidths) : null;
+    const Rdp = !['service', 'track', 'living_street'].includes(e.cls) && !flyover.has(e.id) && !(modern && e.bridge) && !inCorridor.has(e.id) ? dpReserve(e.wayIds, inp.dpWidths) : null;
     // today's road: the DP reserve, but never wider than the free space between existing buildings
     // ... and never wider than its share of the corridor when other roads run alongside (the DP reserve
     // covers the whole corridor: main road + service roads + BRTS, not each of them)
@@ -842,6 +844,41 @@ export function importNetwork(inp: ImportInput): Network {
       }
     }
     log(`flyovers over road corridors: ${flyover.size} pieces sized on their own`);
+    // a bridge with no lane tags carries the lanes of the same road it continues into (OSM often tags only the approach)
+    let bridgeLanes = 0;
+    for (const e of G.edges.values()) {
+      if (!(e.bridge || flyover.has(e.id)) || e.lanesTag) continue;
+      let best: E | null = null;
+      for (const n of [e.a, e.b]) for (const g of G.incident(n)) {
+        if (g.id === e.id || g.name !== e.name || !e.name || g.oneway !== e.oneway || (g.dualGap > 0) !== (e.dualGap > 0) || !g.lanesTag) continue;
+        if (!best || g.lanesF + g.lanesB > best.lanesF + best.lanesB) best = g;
+      }
+      if (best && best.lanesF + best.lanesB > e.lanesF + e.lanesB) { e.lanesF = best.lanesF; e.lanesB = best.lanesB; bridgeLanes++; }
+    }
+    // minor roads inside a bigger road's DP corridor (re-typed last, so the DP roads' own sizing isn't disturbed)
+    const corridorLanes: E[] = [];
+    {
+      const grid = new SegGrid(40);
+      for (const e of G.edges.values()) grid.add(e.id, e.pts);
+      for (const e of G.edges.values()) {
+        const R = dpReserve(e.wayIds, inp.dpWidths);
+        if (!R || RANK[e.cls] < 5) continue; // residential and below
+        const p = resample(e.pts, 8);
+        let n = 0, hit = 0;
+        for (let i = 1; i < p.length - 1; i++) {
+          n++;
+          const d = norm(sub(p[i + 1], p[i - 1]));
+          for (const oid of grid.query(p[i], R / 2 + 5)) {
+            const o = G.edges.get(oid);
+            if (!o || o.id === e.id || RANK[o.cls] > 4) continue; // alongside a tertiary or bigger road
+            const nr = nearestOnPoly(o.pts, p[i]);
+            if (nr.d <= R / 2 + 5 && Math.abs(dot(nr.dir, d)) > 0.85) { hit++; break; } // within the corridor (+ the bigger road's own half-width)
+          }
+        }
+        if (n && hit / n >= 0.5) corridorLanes.push(e);
+      }
+    }
+    log(`bridges given their approach's lanes: ${bridgeLanes}; minor roads inside a bigger road's DP corridor: ${corridorLanes.length}`);
     dpUsed = 0;
     for (const e of G.edges.values()) assignType(e); // each piece on its own (fills rawOf)
     const groups = new Map<string, E[]>();
@@ -895,6 +932,7 @@ export function importNetwork(inp: ImportInput): Network {
       if (best && typeOf.get(best.id) !== typeOf.get(e.id)) { typeOf.set(e.id, typeOf.get(best.id)!); stubs++; }
     }
     log(`DP roads: ${stubs} short pieces given the cross-section of the road they carry on into`);
+    for (const e of corridorLanes) { inCorridor.add(e.id); reserveOf.delete(e.id); assignType(e); }
     log(`DP roads: ${groups.size} roads given one cross-section (${evened} pieces evened out, ${pinched} kept narrower where buildings pinch them)`);
   }
   log(`road widths: ${dpUsed} of ${G.edges.size} roads sized from the Development Plan reserve; ${underViaduct.size} roads under the metro get a pier median`);
