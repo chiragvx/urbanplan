@@ -1560,14 +1560,24 @@ function slipLane(asphalt: GeomBuilder, paving: GeomBuilder, markings: GeomBuild
   drapePolygon(paving, new Float32Array(isl.flat()), [], (x, z) => islZ(x, z) + KERB, sp.island === 'paved' ? COL.sidewalk : COL.island, 3);
   polyWall(paving, [...isl, isl[0]], (x, z) => islZ(x, z) - 0.05, (x, z) => islZ(x, z) + KERB, COL.kerb);
   // footpath along the outside, as wide as the arms' (narrower where the curve is too tight for it)
-  const outN = outer.map((q, i) => {
+  // outward normals: set by the middle of the lane (where it has its full width), then kept continuous towards the
+  // taper tips (there the lane has no width, so "away from the inner edge" says nothing and could flip the footpath
+  // onto the road where it meets the arm's footpath)
+  const outN: V2[] = outer.map((_, i) => {
     const a = outer[Math.max(0, i - 1)], b = outer[Math.min(N - 1, i + 1)], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
-    let nx = -(b[1] - a[1]) / L, nz = (b[0] - a[0]) / L;
-    if ((q[0] - inner[i][0]) * nx + (q[1] - inner[i][1]) * nz < 0) { nx = -nx; nz = -nz; }
-    return [nx, nz] as V2;
+    return [-(b[1] - a[1]) / L, (b[0] - a[0]) / L];
   });
-  const offs = (d: number) => outer.map((q, i) => [q[0] + outN[i][0] * d, q[1] + outN[i][1] * d] as V2);
-  let fp = sp.walk ?? Math.max(eA.hwR - eA.cwR, eB.hwL - eB.cwL, sp.crossing || sp.wall ? 1.8 : 0);
+  const mN = Math.floor(N / 2);
+  if ((outer[mN][0] - inner[mN][0]) * outN[mN][0] + (outer[mN][1] - inner[mN][1]) * outN[mN][1] < 0) outN[mN] = [-outN[mN][0], -outN[mN][1]];
+  for (const step of [1, -1]) for (let i = mN + step; i >= 0 && i < N; i += step) {
+    const p = outN[i - step];
+    if (outN[i][0] * p[0] + outN[i][1] * p[1] < 0) outN[i] = [-outN[i][0], -outN[i][1]];
+  }
+  // the footpath's width: each arm's own footpath at the taper tips (so the two meet edge to edge), the slip's in between
+  const vA = Math.max(0, eA.hwR - eA.cwR), vB = Math.max(0, eB.hwL - eB.cwL);
+  const widthAt = (i: number, d: number) => (i < iA ? vA + (d - vA) * smooth01(i / iA) : i > iB ? d + (vB - d) * smooth01((i - iB) / (N - 1 - iB)) : d);
+  const offs = (d: number, extra = 0) => outer.map((q, i) => { const k = widthAt(i, d) + extra; return [q[0] + outN[i][0] * k, q[1] + outN[i][1] * k] as V2; });
+  let fp = sp.walk ?? Math.max(vA, vB, sp.crossing || sp.wall ? 1.8 : 0);
   let walk = offs(fp);
   // (a few folded slivers where a taper meets the curve don't show; a footpath folding over itself does)
   while (fp > 0.3 && !bandClean(outer, walk, 0.05)) { fp *= 0.7; walk = offs(fp); }
@@ -1583,7 +1593,7 @@ function slipLane(asphalt: GeomBuilder, paving: GeomBuilder, markings: GeomBuild
   // boundary wall along the outside of the footpath (or of the lane): 0.25 m thick, 1.2 m high
   if (sp.wall) {
     const WT = 0.25, WH = 1.2, base = fp > 0.3 ? KERB : 0;
-    const a0 = offs(fp + 0.05), a1 = offs(fp + 0.05 + WT);
+    const a0 = offs(fp, 0.05), a1 = offs(fp, 0.05 + WT);
     // (a thin band: small folds where the taper meets the curve don't show, so no all-or-nothing check here)
     band(concrete, a0, a1, base + WH, COL.concrete);
     for (const [E, flip] of [[a0, false], [a1, true]] as [V2[], boolean][]) for (let i = 0; i < N - 1; i++) {
