@@ -560,7 +560,7 @@ function geoBox(g: SegGeo, pad: number): [number, number, number, number] {
 }
 
 /** Steepest a ground junction's surface may tilt; how far (±m) a ground road's long profile is smoothed. */
-const MAX_TILT = 0.05, SMOOTH = 12;
+const MAX_TILT = 0.08, SMOOTH = 12;
 
 function pack(gb: GeomBuilder): Packed | undefined {
   if (!gb.idx.length) return undefined;
@@ -723,11 +723,14 @@ export class RoadMesher {
   private nodeZ = (n: MNode, x: number, z: number) => (this.nodeOff(n) ? this.nodeZc(n) : this.groundPlane(n)(x, z)) + LIFT;
 
   /**
-   * The ground-level surface of a junction: one plane through the terrain at the node, tilted with the slope there
-   * but never more than MAX_TILT (a junction is graded, not draped over every bump).
+   * The ground-level surface of a junction: one plane through the terrain at the node, tilted with the slope across
+   * its footprint (a long junction — a narrow fork — reaches far down a slope) but never more than MAX_TILT (a
+   * junction is graded, not draped over every bump).
    */
   groundPlane(n: MNode): (x: number, z: number) => number {
-    const T = this.T, h = T(n.x, n.z) + (n.graded ? n.lift : 0), d = 6;
+    let reach = 0;
+    for (const e of this.ends.get(n.id) ?? []) reach = Math.max(reach, e.trim);
+    const T = this.T, h = T(n.x, n.z) + (n.graded ? n.lift : 0), d = Math.max(6, Math.min(30, reach * 0.75));
     let gx = (T(n.x + d, n.z) - T(n.x - d, n.z)) / (2 * d), gz = (T(n.x, n.z + d) - T(n.x, n.z - d)) / (2 * d);
     const m = Math.hypot(gx, gz);
     if (m > MAX_TILT) { gx *= MAX_TILT / m; gz *= MAX_TILT / m; }
