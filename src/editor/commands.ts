@@ -4,7 +4,7 @@ import { isTyping } from './editor';
 import * as ops from '../doc/ops';
 import * as xs from '../doc/xsection';
 import {
-  accuracyView, anchorSel, buildAsset, buildOpen, dialog, dpRegionsOn, terrainView, leftTab, mode, paletteOpen, penLift, placeRot, profileOpen, readOnly, saveSettings, select, selection, settings, status, toast, tool, xray,
+  accuracyView, anchorSel, buildAsset, buildOpen, dialog, dpRegionsOn, terrainView, leftOpen, leftTab, mode, paletteOpen, penLift, placeRot, profileOpen, readOnly, saveSettings, select, selection, settings, status, toast, tool, xray,
   type RoadMode,
 } from './state';
 import { MODE_LABEL } from './roadtool';
@@ -201,7 +201,8 @@ export const COMMANDS: Command[] = [
       if (E.at.active) { E.at.cancel(); status.value = E.at.hint(); return; }
       if (buildOpen.value && tool.value === 'select') { buildOpen.value = false; return; }
       if (tool.value === 'terrain' && E.terra.pts.length) { E.terra.cancel(); status.value = E.terra.hint(); E.overlayDirty = true; return; }
-      if (tool.value !== 'select') { E.setTool('select'); return; }
+      // leaving a build tool closes the catalogue with it: one Esc back to plain editing
+      if (tool.value !== 'select') { if (['pen', 'route', 'place', 'area'].includes(tool.value)) buildOpen.value = false; E.setTool('select'); return; }
       const s = sel1();
       if (s?.kind === 'section') { const o = E.doc.get<'section'>(s.id); if (o) { select([{ kind: 'road', id: o.road }]); return; } }
       select([]);
@@ -349,19 +350,19 @@ export const COMMANDS: Command[] = [
   { id: 'view.zoomin', label: 'Zoom in', group: 'View', keys: '=', run: (E) => { E.view.zoomAt(E.view.w / 2, E.view.h / 2, 1.5); E.world.needsRender = true; } },
   { id: 'view.zoomout', label: 'Zoom out', group: 'View', keys: '-', run: (E) => { E.view.zoomAt(E.view.w / 2, E.view.h / 2, 1 / 1.5); E.world.needsRender = true; } },
   { id: 'view.profile', label: 'Height profile panel', group: 'View', keys: 'Shift+P', run: () => { profileOpen.value = !profileOpen.value; } },
-  { id: 'view.layers', label: 'Show layers', group: 'View', run: () => { leftTab.value = 'layers'; } },
-  { id: 'view.issues', label: 'Show issues', group: 'View', keys: 'I', run: () => { leftTab.value = 'issues'; } },
+  { id: 'view.layers', label: 'Show layers', group: 'View', run: () => { leftTab.value = 'layers'; leftOpen.value = true; } },
+  { id: 'view.issues', label: 'Show issues', group: 'View', keys: 'I', run: () => { leftTab.value = 'issues'; leftOpen.value = true; } },
   { id: 'view.palette', label: 'Command palette', group: 'View', keys: 'Ctrl+K', run: () => { paletteOpen.value = true; } },
   { id: 'view.palette2', label: 'Command palette', group: 'View', keys: 'Ctrl+/', run: () => { paletteOpen.value = true; } },
 
   // ---- Review ----
   { id: 'review.next', label: 'Next road to review (next region in the Survey tab)', group: 'Review', keys: 'N', run: (E) => (leftTab.value === 'survey' || selection.value.some((s) => s.kind === 'region') ? E.app.surveyNext() : E.app.reviewNext()) },
-  { id: 'survey.open', label: 'Survey DP regions (reserved sites first)', group: 'Review', run: (E) => { leftTab.value = 'survey'; if (!dpRegionsOn.value) { dpRegionsOn.value = true; E.overlayDirty = true; } E.dpr.load(); } },
+  { id: 'survey.open', label: 'Survey DP regions (reserved sites first)', group: 'Review', run: (E) => { leftTab.value = 'survey'; leftOpen.value = true; if (!dpRegionsOn.value) { dpRegionsOn.value = true; E.overlayDirty = true; } E.dpr.load(); } },
   ...(['matches', 'differs', 'built', 'unclear', 'unsurveyed'] as const).map((st) => ({
     id: `survey.${st}`, label: `Survey: ${SURVEY_LABEL[st]}`, group: 'Review' as const, enabled: () => editable() && regionSel().length > 0,
     run: (E: Editor) => { E.app.setSurvey(regionSel(), st); },
   })),
-  { id: 'review.open', label: 'Open the review queue', group: 'Review', run: () => { leftTab.value = 'review'; } },
+  { id: 'review.open', label: 'Open the review queue', group: 'Review', run: () => { leftTab.value = 'review'; leftOpen.value = true; } },
 
   // ---- Build (asset palette) ----
   { id: 'build.open', label: 'Build palette: roads, transit, rail, water, drainage, utilities, power', group: 'Tools', keys: 'O', enabled: editable, run: (E) => { buildOpen.value = !buildOpen.value; if (buildAsset.value) revealAsset(buildAsset.value); E.overlayDirty = true; } },

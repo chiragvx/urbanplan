@@ -109,20 +109,26 @@ export function Row(p: { label?: ComponentChildren; children: ComponentChildren;
 /** Inside an inspector tab a Section is the tab's whole body: no header, no collapsing. */
 const FlatSections = createContext(false);
 
-/** Inspector tabs; the open tab is remembered per `id` (e.g. 'road') across selections. */
+/**
+ * The inspector's groups as one scrolling list (no tabs to switch between): each group folds, the first starts open,
+ * and what's open is remembered per panel (`id`, e.g. 'road') across selections.
+ */
 export function Tabs(p: { id: string; tabs: { id: string; label: ComponentChildren; hint?: ComponentChildren; body: () => ComponentChildren }[] }) {
-  const want = inspTab.value[p.id];
-  const cur = p.tabs.find((t) => t.id === want) ?? p.tabs[0];
+  const isOpen = (t: string, i: number) => { const v = inspTab.value[`${p.id}:${t}`]; return v === undefined ? i === 0 : v === '1'; };
+  const flip = (t: string, i: number) => { inspTab.value = { ...inspTab.value, [`${p.id}:${t}`]: isOpen(t, i) ? '0' : '1' }; };
   return (
-    <div class="itabs">
-      <nav class="itabs-bar" role="tablist">
-        {p.tabs.map((t) => (
-          <button key={t.id} role="tab" aria-selected={t === cur} class={t === cur ? 'on' : ''} onClick={() => { inspTab.value = { ...inspTab.value, [p.id]: t.id }; }}>
-            {t.label}{t.hint ? <span class="itabs-hint">{t.hint}</span> : null}
-          </button>
-        ))}
-      </nav>
-      <div class="itabs-body"><FlatSections.Provider value={true}>{cur.body()}</FlatSections.Provider></div>
+    <div class="igroups">
+      {p.tabs.map((t, i) => {
+        const open = isOpen(t.id, i);
+        return (
+          <section key={t.id} class={`igroup ${open ? 'open' : ''}`}>
+            <button class="igroup-head" aria-expanded={open} onClick={() => flip(t.id, i)}>
+              <span class={`chev ${open ? 'open' : ''}`}>›</span><span>{t.label}</span>{t.hint ? <span class="itabs-hint">{t.hint}</span> : null}
+            </button>
+            {open && <div class="igroup-body"><FlatSections.Provider value={true}>{t.body()}</FlatSections.Provider></div>}
+          </section>
+        );
+      })}
     </div>
   );
 }
@@ -228,4 +234,10 @@ export const Icon = {
   bulldoze: I('M1.5 12.5h8M2.5 12.5V9h5l1.5 3.5M4 9V6.5h3L7.5 9M9.5 10l3-4.5 2 1M12.5 5.5L14 3'),
   multi: I('M2 13c2-5 4-7 6-7s4 2 6 7M8 6V2M5.5 3.5L8 2l2.5 1.5M3 9.5h2.5M10.5 9.5H13'),
   both: I('M5 13V3M2.5 5.5L5 3l2.5 2.5M11 3v10M8.5 10.5L11 13l2.5-2.5'),
+  sheet: I('M2.5 2.5h11v11h-11zM2.5 7h11M7 2.5v11'),
+  regions: I('M2 4.5l4-2 4 2 4-2v9l-4 2-4-2-4 2zM6 2.5v9M10 4.5v9'),
+  satellite: I('M2.5 3h11v10h-11zM2.5 10.5l3.5-3 3 2.5 2-1.5 2.5 2'),
+  osm: I('M1.5 12c3.5-1.5 6-5.5 13-7M1.5 6h5M9.5 14l2-6'),
+  gear: I('M8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4'),
+  survey: I('M2 11l9-9 3 3-9 9zM5 8l1.5 1.5M7.5 5.5L9 7'),
 };

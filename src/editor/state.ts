@@ -56,6 +56,8 @@ export const buildTab = signal<Record<string, string>>({});
 export const placeRot = signal(0);
 /** cursor in world metres (status bar) */
 export const cursor = signal<[number, number] | null>(null);
+/** cursor on the map in CSS px (the hint that follows it); null off the map */
+export const pointer = signal<[number, number] | null>(null);
 export const zoomScale = signal(1);
 export const toasts = signal<{ id: number; text: string; kind: 'info' | 'ok' | 'warn' | 'error'; action?: { label: string; run: () => void } }[]>([]);
 export const settings = signal(loadSettings());
@@ -80,13 +82,14 @@ export interface Settings {
   /** side panels float over the map (Cities: Skylines style) or sit beside it */ panels: 'floating' | 'docked';
   /** road tools: the mode in use */ mtMode: string;
   /** imagery access tokens (this browser only; never saved with a map) */ imageryKeys: Record<string, string>;
+  /** the things last built from the catalogue, newest first (its Recent tab) */ recentAssets: string[];
 }
 function loadSettings(): Settings {
   const def: Settings = {
     author: '', wheel: 'zoom', snap: true, showGrid: false, units: 'm',
     roadMode: 'straight', elevStep: 2.5, snapGeometry: true, snapAngles: true, snapGuides: true, snapLength: 1, grade: 0.035, roadGraded: false,
     terrainOp: 'shift', brushRadius: 40, brushStrength: 0.5, levelHeight: null, levelBalanced: true, embankOffset: 2, embankWidth: 10, pondDepth: 2, exaggeration: 1,
-    graphics: 'simple', customAssets: [], theme: 'system', panels: 'floating', mtMode: 'addNode', imageryKeys: {},
+    graphics: 'simple', customAssets: [], theme: 'system', panels: 'floating', mtMode: 'addNode', imageryKeys: {}, recentAssets: [],
   };
   // key keeps the old name so settings survive the rename
   try { return { ...def, ...JSON.parse(localStorage.getItem('pune-remix:settings') ?? '{}') }; } catch { return def; }

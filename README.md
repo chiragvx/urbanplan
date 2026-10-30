@@ -15,13 +15,17 @@ npm test        # headless document + cross-section tests
 
 ## The editor
 
-- **Layout** (Cities: Skylines style): a slim top bar (file, undo, 2D / 3D and the view switches, theme, Publish), the
-  map full-screen, and the **bottom toolbar**: tools on the left, the build categories in the middle (each opens its
-  tiles above the bar), status on the right. **Layers, Roads, Issues, Review** open from the icon rail at the top left;
-  the **inspector** is a card on the right while something is selected, with tabs (Cross-section · Catalogue · Level ·
-  Sections). Settings → Panels: *Docked* puts both panels beside the map instead. **Light / dark** theme (top bar, or
-  Settings → Theme; follows the system by default) — the 2D map has a dark style too. On a phone the panels become
-  bottom sheets.
+- **Layout** (Cities: Skylines style): the map edge to edge, and the **bottom bar**: the map (its menu — new, open,
+  save, export, publish — and name, with a tally of new road and edits), undo / redo, the **build categories** in the
+  middle (each opens its catalogue above the bar; *Recent* holds what you built last), the tools (select, edit points,
+  split, road tools, bulldozer), search, 2D / 3D and Publish; a status strip under it. **Info views** (DP sheets, DP
+  regions, terrain, accuracy, satellite, OSM lines, X-ray) are the square buttons at the top left — one at a time,
+  Shift-click to stack them; theme, help and settings at the top right. **Layers, Roads, Issues, Review** open from the
+  icon rail on the right. Bottom left, above the bar, the **tool panel** holds the options of the tool in use as
+  labelled rows (mode, elevation, step, ground, snapping…), or the **inspector** of what's selected — one scrolling
+  list whose groups fold (and stay as you left them). The next step of the tool in use follows the cursor. Settings →
+  Panels: *Docked* puts both panels beside the map instead. **Light / dark** theme (top right, or Settings → Theme;
+  follows the system by default) — the 2D map has a dark style too. On a phone the panels become bottom sheets.
 - **2D plan** (default) and **3D** with <kbd>Tab</kbd> — the same generated city, a camera flight apart. Every tool works in
   both: in 3D, click / drag roads, junctions, handles and points as in 2D; drag empty ground to pan, right-drag (or
   Alt-drag) to orbit, the wheel to zoom, <kbd>W A S D Q E R F</kbd> to fly.
@@ -73,7 +77,7 @@ npm test        # headless document + cross-section tests
 
 ### Satellite and checking against OpenStreetMap
 
-- **Satellite** (top bar, or Layers › Satellite): Esri World Imagery (no key; viewing with attribution — production
+- **Satellite** (info views, or Layers › Satellite): Esri World Imagery (no key; viewing with attribution — production
   use needs an ArcGIS account), Mapbox Satellite (your token, kept in this browser, never saved with a map) or any
   XYZ URL. *Over the map* (opacity) or *As the ground* (2D: it replaces the terrain and water, roads and buildings
   on top); roads *solid* or *ghost* (see-through, to check alignment); **Nudge** the imagery by ½ m steps (saved with
@@ -353,7 +357,7 @@ src/doc/      City Document: types, base (bake → sections / junctions / roads 
               undo), compile (→ road mesher), ops (split / join / bend / pen …), xsection, format, issues, api, export
 src/editor/   editor controller + tools, plan view, hit index, overlay, commands (menus / palette / shortcuts)
 src/scene/    World (road chunks per edit, lazy terrain / buildings / trees / rail / pipes), reference imagery
-src/ui/       Preact panels: top bar, bottom dock, layers / roads / issues / review, inspector card, cross-section, dialogs, theme
+src/ui/       Preact panels: map corners, bottom bar, tool panel, layers / roads / issues / review, inspector, cross-section, dialogs, theme
 src/app/      boot, files (autosave, repo, publish, fork), review queue, frame loop
 tools/map-cli.ts  maps from the command line
 ```

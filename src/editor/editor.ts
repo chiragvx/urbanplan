@@ -13,7 +13,7 @@ import { DP_WIDTHS, setSideWidth, setTotalWidth, totalWidth } from '../doc/xsect
 import { HitIndex, type Pick } from './hit';
 import { PlanView } from './view2d';
 import {
-  anchorSel, buildAsset, cursor, docVersion, dpRegionsOn, terrainView, hover, lineLayer, mode, penClass, penLift, readOnly, saveSettings, select, selection, settings, stale3d, status, toast, tool, xray, zoomScale,
+  anchorSel, buildAsset, cursor, pointer, docVersion, dpRegionsOn, terrainView, hover, lineLayer, mode, penClass, penLift, readOnly, saveSettings, select, selection, settings, stale3d, status, toast, tool, xray, zoomScale,
   type Sel, type Tool,
 } from './state';
 import { RoadTool, type SnapResult } from './roadtool';
@@ -358,7 +358,7 @@ export class Editor {
     el.addEventListener('pointerdown', (e) => this.down(e));
     el.addEventListener('pointermove', (e) => this.move(e));
     el.addEventListener('pointerup', (e) => this.up(e));
-    el.addEventListener('pointerleave', () => { cursor.value = null; if (!this.drag) hover.value = null; this.overlayDirty = true; });
+    el.addEventListener('pointerleave', () => { cursor.value = null; pointer.value = null; if (!this.drag) hover.value = null; this.overlayDirty = true; });
     el.addEventListener('wheel', (e) => this.wheel(e), { passive: false });
     window.addEventListener('keydown', (e) => { if (e.code === 'Space' && !isTyping(e)) { this.spaceDown = true; el.style.cursor = 'grab'; } });
     window.addEventListener('keyup', (e) => { if (e.code === 'Space') { this.spaceDown = false; this.updateCursor(); } });
@@ -461,6 +461,7 @@ export class Editor {
     const w = this.toWorld(...s);
     this.mouse = s;
     cursor.value = w;
+    pointer.value = s;
     this.overlayDirty = true;
     const d = this.drag;
     if (!d) { this.hoverAt(s, w, e); return; }
@@ -952,11 +953,12 @@ export class Editor {
   }
 
   /** Build an asset from the palette: streets go to the road tool, everything else to the asset tool. */
-  useAsset(id: string) {
+  useAsset(id: string, remember = true) {
     const a = getAsset(id);
     if (!a) return;
     if (readOnly.value) { toast('This map is read-only — use “Edit a copy” to build', 'warn'); return; }
     buildAsset.value = id;
+    if (remember) saveSettings({ recentAssets: [id, ...(settings.value.recentAssets ?? []).filter((x) => x !== id)].slice(0, 12) });
     if (a.props?.action === 'terrainPond') { saveSettings({ terrainOp: 'pond' }); this.setTool('terrain'); return; }
     penLift.value = a.lift ?? 0;
     if (a.drawer === 'network' && a.profile.type === 'street') {
@@ -971,13 +973,18 @@ export class Editor {
     this.setTool(a.drawer === 'place' ? 'place' : a.drawer === 'area' ? 'area' : 'route');
   }
 
+  /** the terrain view was switched on by the terrain tool (and goes off with it) */
+  private terrainViewByTool = false;
+
   setTool(t: Tool) {
     if (t !== 'pen' && t !== 'line') this.cancelPen();
     if (t !== 'route' && t !== 'place' && t !== 'area') this.at.cancel();
     hover.value = null;
     if (t === 'wand') { this.dpr.load(); if (!this.doc.get<'layer'>('dp')?.visible) this.app.toggleLayer('dp'); }
     if (t !== 'terrain') this.terra.cancel();
-    if (t === 'terrain' && !terrainView.value) { terrainView.value = true; this.applyExaggeration(); }
+    // the terrain tool brings its view along, and takes it away again when it brought it
+    if (t === 'terrain' && !terrainView.value) { terrainView.value = true; this.terrainViewByTool = true; this.applyExaggeration(); }
+    else if (t !== 'terrain' && this.terrainViewByTool) { this.terrainViewByTool = false; if (terrainView.value) { terrainView.value = false; this.applyExaggeration(); } }
     if (t !== 'measure') this.measure = null;
     if (t !== 'multi') this.mt.reset();
     tool.value = t;

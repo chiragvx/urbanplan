@@ -10,8 +10,20 @@ const DRAW_TOOLS = ['pen', 'route', 'place', 'area'];
 
 export function paletteVisible() { return buildOpen.value || DRAW_TOOLS.includes(tool.value); }
 
+const RECENT = 'Recent';
+
+/** What was built lately in a category (newest first). */
+function recentIn(cat: string): AssetDef[] {
+  return (settings.value.recentAssets ?? []).map((id) => getAsset(id)).filter((a): a is AssetDef => !!a && a.category === cat);
+}
+
+/** A category's tabs: Recent first once something in it has been built. */
+function tabsWithRecent(cat: Parameters<typeof tabsOf>[0]): string[] {
+  return recentIn(cat).length ? [RECENT, ...tabsOf(cat)] : tabsOf(cat);
+}
+
 export function currentTab(): string {
-  const cat = buildCat.value, tabs = tabsOf(cat);
+  const cat = buildCat.value, tabs = tabsWithRecent(cat);
   const t = buildTab.value[cat];
   return t && tabs.includes(t) ? t : tabs[0] ?? '';
 }
@@ -20,8 +32,8 @@ export function BuildPalette() {
   void settings.value.customAssets; // re-render when assets are saved
   const [hover, setHover] = useState<{ a: AssetDef; x: number } | null>(null);
   if (!paletteVisible() || readOnly.value) return null;
-  const cat = buildCat.value, tabs = tabsOf(cat), tab = currentTab();
-  const list = assetsIn(cat, tab);
+  const cat = buildCat.value, tabs = tabsWithRecent(cat), tab = currentTab();
+  const list = tab === RECENT ? recentIn(cat) : assetsIn(cat, tab);
   const close = () => { buildOpen.value = false; if (DRAW_TOOLS.includes(tool.value)) ui.E.setTool('select'); };
   return (
     <div class="buildbar" onPointerDown={(e) => e.stopPropagation()} onWheel={(e) => e.stopPropagation()}>
@@ -80,16 +92,18 @@ function Card(p: { a: AssetDef; x: number }) {
 export function stepTile(d: 1 | -1, tabs = false) {
   const cat = buildCat.value;
   if (tabs) {
-    const t = tabsOf(cat), i = t.indexOf(currentTab());
+    const t = tabsWithRecent(cat), i = t.indexOf(currentTab());
     buildTab.value = { ...buildTab.value, [cat]: t[(i + d + t.length) % t.length] };
     buildOpen.value = true;
     return;
   }
-  const list = assetsIn(cat, currentTab());
+  const tab = currentTab();
+  const list = tab === RECENT ? recentIn(cat) : assetsIn(cat, tab);
   if (!list.length) return;
   const i = list.findIndex((a) => a.id === buildAsset.value);
   const next = list[(i + d + list.length) % list.length];
-  ui.E.useAsset(next.id);
+  // stepping through Recent keeps its order
+  ui.E.useAsset(next.id, tab !== RECENT);
 }
 
 /** Open the palette on the category / tab of the asset being built. */
@@ -97,5 +111,5 @@ export function revealAsset(id: string) {
   const a = getAsset(id);
   if (!a) return;
   buildCat.value = a.category;
-  buildTab.value = { ...buildTab.value, [a.category]: a.tab };
+  if (currentTab() !== RECENT) buildTab.value = { ...buildTab.value, [a.category]: a.tab };
 }
