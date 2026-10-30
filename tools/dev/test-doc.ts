@@ -415,6 +415,27 @@ check(!!doc.get(s0.id) && C.mesher.segs.has(`${s0.id}~0`), 'undo delete restores
   D.transact('lock', () => OPS.setLocked(D, [sid], true));
   check(D.get<'section'>(sid)!.locked === true, 'lock a section');
 }
+// ---- flyover in the median: deck over the road, ramps landing in merge joints ----
+{
+  const D = new CityDoc(buildBase(net, tile, util), newMeta('kp', '', ''));
+  const CF = new Compiler(D, hf);
+  CF.full();
+  const road = D.all('road').find((r) => r.name === 'GDP Road')!;
+  const ch = OPS.chainsOf(D, D.sectionsOf(road.id).map((s) => s.id)).sort((a, b) => b.length - a.length)[0];
+  const pts: [number, number][] = [];
+  for (const c of ch) { const S = OPS.samplePath(OPS.anchorsOf(D, c.s), 16).pts as [number, number][]; const r = c.fwd ? S : [...S].reverse(); pts.push(...(pts.length ? r.slice(1) : r)); }
+  const along = (L: number): [number, number] => { let acc = 0; for (let i = 1; i < pts.length; i++) { const l = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); if (acc + l >= L) { const t = (L - acc) / l; return [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * t, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * t]; } acc += l; } return pts[pts.length - 1]; };
+  const near = (p: [number, number]) => D.sectionsOf(road.id).map((s) => ({ s, d: OPS.nearestOnPath(OPS.anchorsOf(D, s), p).d })).sort((a, b) => a.d - b.d)[0].s.id;
+  const p0 = along(150), p1 = along(650);
+  let fid: string | null = null;
+  const ids = D.transact('Flyover', () => { const r = OPS.flyoverOver(D, { section: near(p0), p: p0 }, { section: near(p1), p: p1 }, OPS.FLYOVER_PARTS['2']); fid = r?.section ?? null; return r; });
+  void ids;
+  CF.update(D.all('section').map((s) => s.id));
+  const fly = fid ? D.get<'section'>(fid) : undefined;
+  const merges = [...(CF.mesher as unknown as { kinds: Map<string, string> }).kinds.values()].filter((k) => k === 'merge').length;
+  check(!!fly && fly.elevated && Math.max(...fly.path.map((a) => a.lift)) >= 6.4 && fly.path[0].lift === 0 && fly.path[fly.path.length - 1].lift === 0, 'flyover in the median: deck at 6.5 m, ramps down to the road at both ends');
+  check(merges >= 2, `its ramps land in merge joints, not junctions (${merges})`);
+}
 // ---- imported DP roads: standard lanes, no slivers, one lane layout along a road ----
 {
   type Seg = { type: string; name?: string; reserve?: number };

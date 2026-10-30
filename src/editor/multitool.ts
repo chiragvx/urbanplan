@@ -10,7 +10,7 @@ import { arcPts, cscPaths, fitCircle, minRadius, offsetPolyline, polyLength, scs
 import type { Id, SectionObj } from '../doc/types';
 import { totalWidth } from '../doc/xsection';
 
-export type MtMode = 'addNode' | 'removeNode' | 'union' | 'splitNode' | 'intersect' | 'lock' | 'invert' | 'line' | 'circle' | 'slope' | 'loop' | 'connect' | 'parallel' | 'curve';
+export type MtMode = 'addNode' | 'removeNode' | 'union' | 'splitNode' | 'intersect' | 'lock' | 'invert' | 'line' | 'circle' | 'slope' | 'loop' | 'connect' | 'parallel' | 'curve' | 'flyover';
 
 export const MT_MODES: { m: MtMode; label: string; key: string; hint: string }[] = [
   { m: 'addNode', label: 'Add junction', key: '1', hint: 'Click a road to add a junction · Alt: whole metres from the start' },
@@ -27,6 +27,7 @@ export const MT_MODES: { m: MtMode; label: string; key: string; hint: string }[]
   { m: 'connect', label: 'Connection', key: 'Shift+2', hint: 'Click where it leaves a road, then where it joins another · = / − both radii · [ ] the second · Z next shape · Enter' },
   { m: 'parallel', label: 'Parallel', key: 'Shift+3', hint: 'Click a road (Shift: one section) · = / − offset · Z other side · PgUp / PgDn height · Enter' },
   { m: 'curve', label: 'Curve between ends', key: 'Shift+4', hint: 'Click near the end of one road, then near the end of another · = / − roundness · Enter' },
+  { m: 'flyover', label: 'Flyover in the median', key: 'Shift+5', hint: 'Click where the flyover starts on a road, then where it ends on the same road · Z lanes · = / − deck height · Enter' },
 ];
 
 interface Pick { section: Id; p: V2; h: V2 }
@@ -49,6 +50,8 @@ export class MultiTool {
   marks: { p: V2; text?: string; kind: 'node' | 'point' | 'handle' }[] = [];
   /** parameters */
   R = 20; R2 = 20; linked = true; variant = 0; side = 1; offset = 0; lift = 0; tension = 0.45; lineFromSection = false;
+  /** flyover: lanes ('2' | '4' | '2o') and deck height */
+  flyLanes: '2' | '4' | '2o' = '2'; deck = ops.FLYOVER_DECK;
   /** circle arrange */
   circle: { c: V2; R: number } | null = null;
   dist: 'keep' | 'even' | 'between' | 'inter' = 'keep';
@@ -222,7 +225,42 @@ export class MultiTool {
       case 'line': case 'circle': case 'slope': this.chainHover(w); return;
       case 'loop': case 'connect': case 'curve': this.pairHover(w); return;
       case 'parallel': this.parallelHover(w, e); return;
+      case 'flyover': this.flyHover(w); return;
     }
+  }
+
+  // ---------------- flyover in the median ----------------
+
+  private flyHover(w: V2) {
+    const d = this.E.doc;
+    this.marks = this.picks.map((p, i) => ({ p: p.p, kind: 'point' as const, text: i ? 'end' : 'start' }));
+    this.preview = [];
+    const s = this.sectionAt(w);
+    const road = this.picks[0] ? d.get<'section'>(this.picks[0].section)?.road : null;
+    if (this.picks.length >= 2) {
+      const [A, B] = this.picks, L = Math.hypot(B.p[0] - A.p[0], B.p[1] - A.p[1]);
+      const need = 2 * (this.deck / settings.value.grade);
+      this.preview = [{ pts: [A.p, B.p], dashed: false, bad: false }];
+      this.msg = { text: `${{ '2': '2 lanes', '4': '4 lanes', '2o': '2 lanes one way' }[this.flyLanes]} · deck ${this.deck} m · ${Math.round(L)} m${L < need ? ` (short: ramps steeper or the deck lower — ${Math.round(need)} m needed at ${(settings.value.grade * 100).toFixed(1)} %)` : ''} · Enter to build` };
+      return;
+    }
+    if (!s) { this.msg = { text: this.picks.length ? 'Select where the flyover comes down (same road)' : 'Select where the flyover starts on a road' }; return; }
+    const o = this.onSection(s.id, s.p);
+    this.marks.push({ p: o.p, kind: 'point' });
+    if (road && d.get<'section'>(s.id)!.road !== road) { this.msg = { text: 'Pick a point on the same road', bad: true }; return; }
+    if (this.picks.length) this.preview = [{ pts: [this.picks[0].p, o.p], dashed: true }];
+    this.msg = { text: this.picks.length ? 'Click where the flyover comes down' : 'Click where the flyover starts' };
+  }
+
+  private flyClick(w: V2) {
+    if (this.picks.length >= 2) return;
+    const s = this.sectionAt(w);
+    if (!s) return;
+    const road = this.picks[0] ? this.E.doc.get<'section'>(this.picks[0].section)?.road : null;
+    if (road && this.E.doc.get<'section'>(s.id)!.road !== road) return;
+    const o = this.onSection(s.id, s.p);
+    this.picks.push({ section: s.id, p: o.p, h: o.h });
+    this.hover(w);
   }
 
   click(w: V2, e: { shiftKey?: boolean; altKey?: boolean; ctrlKey?: boolean } = {}) {
@@ -294,6 +332,7 @@ export class MultiTool {
       case 'line': case 'circle': case 'slope': this.chainClick(w); return;
       case 'loop': case 'connect': case 'curve': this.pairClick(w); return;
       case 'parallel': this.parallelClick(w, e); return;
+      case 'flyover': this.flyClick(w); return;
     }
   }
 
@@ -307,6 +346,8 @@ export class MultiTool {
     if (name === 'Enter') { this.apply(); return true; }
     if (name === 'Escape') { if (!this.back()) return false; return true; }
     if (name === 'Backspace') { this.back(); return true; }
+    if (plain === 'Z' && this.mode === 'flyover') { this.flyLanes = this.flyLanes === '2' ? '4' : this.flyLanes === '4' ? '2o' : '2'; return redo(); }
+    if ((plain === '=' || plain === '-') && this.mode === 'flyover') { this.deck = Math.max(4.5, Math.min(15, this.deck + (plain === '=' ? 1 : -1) * this.step(k, 0.5))); return redo(); }
     if (plain === 'Z') { this.variant++; if (this.mode === 'parallel') this.side = -this.side; if (this.mode === 'line') this.lineFromSection = !this.lineFromSection; return redo(); }
     if (plain === '=' || plain === '-') {
       const sg = plain === '=' ? 1 : -1;
@@ -628,6 +669,16 @@ export class MultiTool {
           : [{ x: A.p[0], z: A.p[1], section: A.section }, { x: B.p[0], z: B.p[1], section: B.section }];
         const r = E.edit(this.mode === 'loop' ? 'Loop' : this.mode === 'curve' ? 'Curve' : 'Connection', () => ops.roadAlong(d, c.pts, ends[0], ends[1], st.cls, { parts: st.parts, asset: st.asset }));
         if (r?.section) { select([{ kind: 'road', id: r.road }]); toast(`${this.mode === 'loop' ? 'Loop' : this.mode === 'curve' ? 'Curve' : 'Connection'} built · ${Math.round(polyLength(c.pts))} m`, 'ok'); }
+        break;
+      }
+      case 'flyover': {
+        if (this.picks.length < 2) { toast('Pick where the flyover starts and ends', 'warn'); return; }
+        const [A, B] = this.picks, parts = ops.FLYOVER_PARTS[this.flyLanes], deck = this.deck;
+        const r = E.edit('Flyover', () => ops.flyoverOver(d, { section: A.section, p: A.p }, { section: B.section, p: B.p }, parts, deck, settings.value.grade));
+        if (r) {
+          select([{ kind: 'section', id: r.section }]);
+          toast(`Flyover built · deck ${r.level.deck} m${r.level.lowered ? ' (lowered: the run is short)' : ''} · ramps ${r.level.ramp} m at ${(r.level.grade * 100).toFixed(1)} %`, r.level.steep || r.level.lowered ? 'warn' : 'ok');
+        } else toast("Couldn't build it here — pick two points on the same road", 'warn');
         break;
       }
       case 'parallel': {

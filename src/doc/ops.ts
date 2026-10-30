@@ -931,3 +931,69 @@ export function roadAlong(doc: CityDoc, pts: V2[], a: PenPoint, b: PenPoint, cls
 export function setLocked(doc: CityDoc, ids: Id[], on: boolean) {
   for (const id of ids) if (doc.get<'section'>(id)) doc.set(id, 'locked', on || undefined);
 }
+
+// ---------------- flyover in the median (the Indian arterial: a flyover over the middle, lanes carry on below) ----------------
+
+/** Flyover cross-sections: two lanes (one each way), four lanes with a divider, two lanes one way. */
+export const FLYOVER_PARTS: Record<'2' | '4' | '2o', Part[]> = {
+  '2': [{ kind: 'shoulder', width: 0.5, dir: 0 }, { kind: 'lane', width: 3.5, dir: 1 }, { kind: 'lane', width: 3.5, dir: -1 }, { kind: 'shoulder', width: 0.5, dir: 0 }],
+  '4': [{ kind: 'shoulder', width: 0.5, dir: 0 }, { kind: 'lane', width: 3.5, dir: 1 }, { kind: 'lane', width: 3.5, dir: 1 }, { kind: 'median', width: 0.6, dir: 0 }, { kind: 'lane', width: 3.5, dir: -1 }, { kind: 'lane', width: 3.5, dir: -1 }, { kind: 'shoulder', width: 0.5, dir: 0 }],
+  '2o': [{ kind: 'shoulder', width: 0.5, dir: 0 }, { kind: 'lane', width: 3.5, dir: 1 }, { kind: 'lane', width: 3.5, dir: 1 }, { kind: 'shoulder', width: 0.5, dir: 0 }],
+};
+
+/** Junction on a section at a point: its end junction when within `r`, else a split there. */
+function junctionAtPoint(doc: CityDoc, section: Id, p: V2, r = 4): Id | null {
+  const s = doc.get<'section'>(section);
+  if (!s) return null;
+  for (const j of [s.a, s.b]) { const J = doc.get<'junction'>(j); if (J && Math.hypot(J.x - p[0], J.z - p[1]) < r) return j; }
+  return splitSection(doc, section, p)?.junction ?? null;
+}
+
+/** Sections of one road from junction a to junction b (shortest run along it), with the direction each is walked. */
+export function roadRun(doc: CityDoc, a: Id, b: Id, road: Id): { s: SectionObj; fwd: boolean }[] | null {
+  const prev = new Map<Id, { s: SectionObj; from: Id }>();
+  const q = [a], seen = new Set([a]);
+  while (q.length) {
+    const j = q.shift()!;
+    if (j === b) break;
+    for (const s of doc.sectionsAt(j)) {
+      if (s.road !== road) continue;
+      const o = s.a === j ? s.b : s.a;
+      if (seen.has(o)) continue;
+      seen.add(o); prev.set(o, { s, from: j }); q.push(o);
+    }
+  }
+  if (!seen.has(b)) return null;
+  const out: { s: SectionObj; fwd: boolean }[] = [];
+  for (let j = b; j !== a;) { const p = prev.get(j)!; out.unshift({ s: p.s, fwd: p.s.a === p.from }); j = p.from; }
+  return out;
+}
+
+/**
+ * A flyover over a road between two points on it: the road gets junctions there (the ramps' touchdowns), the
+ * flyover follows the road's centre line between them and is raised to `deck` with ramps at `grade` at both ends
+ * (lower when the run is short); the road below carries on. Returns the flyover section, or null.
+ */
+export function flyoverOver(doc: CityDoc, a: { section: Id; p: V2 }, b: { section: Id; p: V2 }, parts: Part[], deck = FLYOVER_DECK, grade = 0.035, name = ''): { section: Id; level: LevelResult } | null {
+  const road = doc.get<'section'>(a.section)?.road;
+  if (!road || doc.get<'section'>(b.section)?.road !== road) return null;
+  const ja = junctionAtPoint(doc, a.section, a.p);
+  // the second point's section may have been split by the first
+  const sb = doc.get<'section'>(b.section) ? b.section : doc.sectionsOf(road).map((s) => ({ s, d: nearestOnPath(anchorsOf(doc, s), b.p).d })).sort((x, y) => x.d - y.d)[0]?.s.id;
+  const jb = sb ? junctionAtPoint(doc, sb, b.p) : null;
+  if (!ja || !jb || ja === jb) return null;
+  const run = roadRun(doc, ja, jb, road);
+  if (!run?.length) return null;
+  const pts: V2[] = [];
+  for (const { s, fwd } of run) {
+    const S = samplePath(anchorsOf(doc, s), 16).pts as V2[];
+    const r = fwd ? S : [...S].reverse();
+    pts.push(...(pts.length ? r.slice(1) : r));
+  }
+  const first = run[0].s;
+  const r = drawStretch(doc, { x: pts[0][0], z: pts[0][1], junction: ja }, { x: pts[pts.length - 1][0], z: pts[pts.length - 1][1], junction: jb },
+    cubicsOf(anchorsFromPolyline(pts, pts.map(() => 0), 0.15)), first.cls, { parts, name: name || (first.name ? `${first.name} Flyover` : 'Flyover') });
+  if (!r.section) return null;
+  const level = elevate(doc, [r.section], deck, grade);
+  return { section: r.section, level };
+}

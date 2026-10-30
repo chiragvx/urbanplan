@@ -5,7 +5,7 @@ import { CLASS_LABEL, ROAD_CLASSES } from '../doc/types';
 import { MT_MODES } from '../editor/multitool';
 import { ui } from './ctx';
 
-const NEEDS_APPLY = ['line', 'circle', 'slope', 'loop', 'connect', 'parallel', 'curve'];
+const NEEDS_APPLY = ['line', 'circle', 'slope', 'loop', 'connect', 'parallel', 'curve', 'flyover'];
 
 export function MultiToolbar() {
   void mtTick.value;
@@ -42,6 +42,8 @@ export function MultiToolbar() {
         {m === 'parallel' && val('Offset', `${T.side > 0 ? 'left' : 'right'} ${T.offset || 'auto'} m`, '-', '=', '= / − · Z other side')}
         {m === 'parallel' && val('Height', `${T.lift} m`, 'PageDown', 'PageUp', 'PgUp / PgDn')}
         {m === 'curve' && val('Roundness', T.tension.toFixed(2), '-', '=', '= / −')}
+        {m === 'flyover' && <button class="small" title="Z" onClick={() => step('Z')}>{{ '2': '2 lanes', '4': '4 lanes', '2o': '2 lanes · one way' }[T.flyLanes]}</button>}
+        {m === 'flyover' && val('Deck', `${T.deck} m`, '-', '=', '= / − (clearance 5.5 m + deck)')}
         {(m === 'loop' || m === 'connect' || m === 'parallel' || m === 'line') && <button class="small" title="Z" onClick={() => step('Z')}>{m === 'parallel' ? 'Other side' : m === 'line' ? (T.lineFromSection ? 'Line: along first road' : 'Line: first → last') : 'Next shape'}</button>}
         {(m === 'loop' || m === 'connect' || m === 'curve') && (
           <div class="rb-group" title="The road type built (the same as the road tool's)">
