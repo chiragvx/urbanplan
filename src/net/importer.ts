@@ -422,6 +422,7 @@ export function importNetwork(inp: ImportInput): Network {
           const f = G.edges.get(fid)!;
           if (f.cls !== e.cls && Math.abs(RANK[f.cls] - RANK[e.cls]) > 1) continue;
           if (e.name && f.name && e.name !== f.name) continue;
+          if (f.bridge !== e.bridge || f.layer !== e.layer || f.tunnel !== e.tunnel) continue; // a deck and the road below aren't two halves of one road
           const nr = nearestOnPoly(f.pts, s.p);
           if (nr.d < 3 || nr.d > 32) continue;
           if (dot(s.dir, nr.dir) > -0.8) continue;
@@ -500,12 +501,15 @@ export function importNetwork(inp: ImportInput): Network {
     for (const f of dropped) for (const n of [f.a, f.b]) {
       if (map.has(n) || keptNodes.has(n)) continue;
       const node = G.nodes.get(n)!;
-      let best: { e: E; nr: ReturnType<typeof nearestOnPoly> } | null = null;
+      let best: { e: E; nr: ReturnType<typeof nearestOnPoly>; score: number } | null = null;
       for (const id of kgrid.query([node.x, node.z], 30)) {
         const e = G.edges.get(id);
         if (!e || !keptIds.has(id)) continue;
         const nr = nearestOnPoly(e.pts, [node.x, node.z]);
-        if (nr.d < 30 && (!best || nr.d < best.nr.d)) best = { e, nr };
+        if (nr.d >= 30) continue;
+        // the same road at the same level first — not a flyover running down the merged centre line above it
+        const score = nr.d + (e.bridge !== f.bridge || e.layer !== f.layer || e.tunnel !== f.tunnel ? 60 : 0) + (e.name && f.name && e.name !== f.name ? 30 : 0);
+        if (!best || score < best.score) best = { e, nr, score };
       }
       if (!best) continue;
       const L = polyLen(best.e.pts);
@@ -601,7 +605,8 @@ export function importNetwork(inp: ImportInput): Network {
     const laneW = { motorway: 3.6, trunk: 3.5, primary: 3.5, secondary: 3.3, tertiary: 3.2, busway: 3.5 }[e.cls as 'trunk'] ?? (e.cls === 'service' || e.cls === 'track' ? 4.0 : 3.0);
     const median = e.dualGap > 0 ? Math.max(0.8, Math.min(6, e.dualGap - laneW * (e.lanesF + e.lanesB) / 2)) : (!e.oneway && e.lanesF + e.lanesB >= 4 && RANK[e.cls] <= 2 ? 1.2 : 0);
     let spec: RoadTypeSpec;
-    const Rdp = !['service', 'track', 'living_street'].includes(e.cls) && !flyover.has(e.id) ? dpReserve(e.wayIds, inp.dpWidths) : null;
+    // bridges are built structures: the DP reserve is the corridor planned around them, not their width
+    const Rdp = !['service', 'track', 'living_street'].includes(e.cls) && !flyover.has(e.id) && !(modern && e.bridge) ? dpReserve(e.wayIds, inp.dpWidths) : null;
     // today's road: the DP reserve, but never wider than the free space between existing buildings
     // ... and never wider than its share of the corridor when other roads run alongside (the DP reserve
     // covers the whole corridor: main road + service roads + BRTS, not each of them)
@@ -913,7 +918,14 @@ export function importNetwork(inp: ImportInput): Network {
         for (const id of grid.query(lerp(a, b, 0.5), len2(sub(b, a)) / 2 + 5)) {
           const g = G.edges.get(id);
           if (!g || g.a === e.a || g.a === e.b || g.b === e.a || g.b === e.b) continue;
-          for (let k = 0; k < g.pts.length - 1 && !over; k++) if (cross(a, b, g.pts[k], g.pts[k + 1])) over = true;
+          // a road passing under it — not one that just ends under the deck (joining the carriageway below)
+          const gl = polyLen(g.pts);
+          for (let k = 0, s = 0; k < g.pts.length - 1 && !over; s += len2(sub(g.pts[k + 1], g.pts[k])), k++) {
+            if (!cross(a, b, g.pts[k], g.pts[k + 1])) continue;
+            const p = g.pts[k], q = g.pts[k + 1], o = (u: V2) => (b[0] - a[0]) * (u[1] - a[1]) - (b[1] - a[1]) * (u[0] - a[0]);
+            const t = o(p) / (o(p) - o(q)), sc = s + t * len2(sub(q, p));
+            if (sc > 4 && gl - sc > 4) over = true;
+          }
         }
         for (const r of inp.groundRails) for (let k = 0; k < r.length - 1 && !over; k++) if (cross(a, b, r[k], r[k + 1])) over = true;
       }
@@ -925,6 +937,9 @@ export function importNetwork(inp: ImportInput): Network {
   const lift = new Map<number, number>();
   for (const e of G.edges.values()) if (kind.get(e.id) === 'overpass') for (const n of [e.a, e.b]) lift.set(n, Math.max(lift.get(n) ?? 0, deck.get(e.id)!));
   {
+    // a junction of three or more ordinary roads stays on the ground: a deck that ends close to one (OSM often tags only
+    // the span as a bridge) ramps down into it, rather than lifting the junction and every road off it
+    const grounded = (n: number) => !lift.has(n) && G.incident(n).filter((g) => kind.get(g.id) === 'none').length >= 3;
     let changed = true, guard = 0;
     while (changed && guard++ < 200) {
       changed = false;
@@ -933,8 +948,8 @@ export function importNetwork(inp: ImportInput): Network {
         const L = polyLen(e.pts);
         const la = lift.get(e.a) ?? 0, lb = lift.get(e.b) ?? 0;
         const na = lb - GRADE * L, nb = la - GRADE * L;
-        if (na > 0.3 && na > la + 0.01) { lift.set(e.a, na); changed = true; }
-        if (nb > 0.3 && nb > lb + 0.01) { lift.set(e.b, nb); changed = true; }
+        if (na > 0.3 && na > la + 0.01 && !grounded(e.a)) { lift.set(e.a, na); changed = true; }
+        if (nb > 0.3 && nb > lb + 0.01 && !grounded(e.b)) { lift.set(e.b, nb); changed = true; }
       }
     }
   }
