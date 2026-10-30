@@ -1,7 +1,7 @@
 // Top bar (file menu, tools, view switches), status bar, command palette, toasts, read-only banner.
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
-  cursor, dialog, docVersion, dpRegionsOn, terrainView, lineLayer, mode, paletteOpen, readOnly, selection, stale3d, status, toasts, tool, xray, zoomScale, accuracyView, select,
+  cursor, dialog, docVersion, dpRegionsOn, terrainView, lineLayer, mode, paletteOpen, readOnly, selection, stale3d, status, toasts, tool, xray, zoomScale, accuracyView, select, osmCompare,
 } from '../editor/state';
 import { COMMANDS, type Command } from '../editor/commands';
 import { ui } from './ctx';
@@ -78,6 +78,8 @@ const VIEWS: { id: string; label: string; title: string; icon?: (p: { size?: num
   { id: 'regions', label: 'DP regions', title: 'DP regions: land use and reserved sites traced from the DP sheets — hover a region to read it (Shift+D)', on: () => dpRegionsOn.value, run: () => cmd('view.dpregions').run(ui.E) },
   { id: 'terrain', label: 'Terrain', title: 'Terrain view: heights, contours, cut & fill (Shift+T)', on: () => terrainView.value, run: () => cmd('view.terrain').run(ui.E) },
   { id: 'accuracy', label: 'Accuracy', title: 'Accuracy view: colour roads by where their width comes from (Shift+A)', on: () => accuracyView.value, run: () => cmd('view.accuracy').run(ui.E) },
+  { id: 'satellite', label: 'Satellite', title: 'Satellite imagery (Layers › Satellite: source, as the ground, ghost roads, nudge)', on: () => !!ui.doc.get<'layer'>('satellite')?.visible, run: () => ui.app.toggleLayer('satellite') },
+  { id: 'osm', label: 'OSM lines', title: 'Compare with OpenStreetMap: its road lines over the map, and where ours drift off them (Issues)', on: () => osmCompare.value, run: () => void ui.app.toggleOsmCompare() },
   { id: 'xray', label: 'X-ray', title: 'X-ray: see underground layers in 3D (X)', icon: Icon.xray, on: () => xray.value, run: () => cmd('view.xray').run(ui.E) },
 ];
 
@@ -130,6 +132,15 @@ export function Dock() {
       </div>
     </footer>
   );
+}
+
+/** Credits of the imagery on screen (2D), bottom right of the map. */
+export function Attribution() {
+  void docVersion.value;
+  if (mode.value !== '2d') return null;
+  const credits = ui.doc.all('layer').filter((l) => l.type === 'xyz' && l.visible && l.url && l.source).map((l) => l.source!);
+  if (!credits.length) return null;
+  return <div class="attribution">{[...new Set(credits)].join(' · ')}</div>;
 }
 
 export function ReadOnlyBanner() {

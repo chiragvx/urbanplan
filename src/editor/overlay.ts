@@ -1,7 +1,7 @@
 // Canvas overlay: everything interactive drawn crisply on top of the rendered city — hover / selection outlines,
 // width handles, Bézier anchors, pen and line previews, vector utility lines (2D), measure, snaps, issue markers.
 import type { Editor } from './editor';
-import { accuracyView, anchorSel, dpRegionsOn, hover, mode, terrainShow, terrainView, penClass, penLift, readOnly, selection, settings, tool } from './state';
+import { accuracyView, anchorSel, dpRegionsOn, hover, mode, terrainShow, terrainView, penClass, penLift, readOnly, selection, settings, tool, osmCompare } from './state';
 import { anchorsOf, FLYOVER_DECK } from '../doc/ops';
 import { LINE_COLOR } from '../doc/base';
 import { template, totalWidth } from '../doc/xsection';
@@ -41,6 +41,7 @@ export function drawOverlay(E: Editor) {
     if (accuracyView.value) drawAccuracy(E);
     bridgeEdges(E);
     signalSymbols(E);
+    if (osmCompare.value) osmLines(E);
   }
 
   // hover
@@ -372,6 +373,18 @@ function poly(E: Editor, pts: number[], closed: boolean, color: string, width: n
 }
 
 // ---------------- vector layers (2D) ----------------
+
+/** The raw OSM road centre lines (comparison view): yellow, over the map. */
+function osmLines(E: Editor) {
+  const ctx = E.ctx, r = E.view.rect;
+  if (!E.osm?.ways) return;
+  ctx.strokeStyle = 'rgba(255,214,0,0.95)'; ctx.lineWidth = E.ppm > 2 ? 2 : 1.2; ctx.setLineDash([]);
+  for (const w of E.osm.inRect(r[0], r[1], r[2], r[3])) {
+    ctx.beginPath();
+    for (let i = 0; i < w.p.length; i += 2) { const s = E.view.toScreen(w.p[i], w.p[i + 1]); if (i) ctx.lineTo(s[0], s[1]); else ctx.moveTo(s[0], s[1]); }
+    ctx.stroke();
+  }
+}
 
 /** Locked road sections: a padlock at their middle (2D and 3D). */
 function lockBadges(E: Editor) {

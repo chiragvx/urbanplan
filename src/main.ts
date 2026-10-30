@@ -2,7 +2,7 @@
 import { render, h } from 'preact';
 import { App } from './app/app';
 import { setUI } from './ui/ctx';
-import { TopBar, Dock, Palette, Toasts, ReadOnlyBanner } from './ui/chrome';
+import { TopBar, Dock, Palette, Toasts, ReadOnlyBanner, Attribution } from './ui/chrome';
 import { LeftPanel } from './ui/panels';
 import { InspectorCard } from './ui/Inspector';
 import { startTheme } from './ui/theme';
@@ -30,7 +30,7 @@ async function boot() {
   render(h(LeftPanel, {}), $('left'));
   render(h(InspectorCard, {}), $('right'));
   render(h(Dock, {}), $('dock'));
-  render(h('div', {}, h(ReadOnlyBanner, {}), h(RoadToolbar, {}), h(TerrainToolbar, {}), h(MultiToolbar, {}), h(BuildPalette, {}), h(Toasts, {}), h(Profile, {})), $('stage-ui'));
+  render(h('div', {}, h(ReadOnlyBanner, {}), h(RoadToolbar, {}), h(TerrainToolbar, {}), h(MultiToolbar, {}), h(Attribution, {}), h(BuildPalette, {}), h(Toasts, {}), h(Profile, {})), $('stage-ui'));
   render(h('div', {}, h(Palette, {}), h(Dialogs, {})), $('modals'));
   startTheme();
   // the map changes size with the window and docked panels: keep the renderer + overlay in step

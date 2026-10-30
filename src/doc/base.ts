@@ -17,6 +17,12 @@ const r2 = (v: number) => Math.round(v * 100) / 100;
 /** Depth (m below ground) by utility type when the data doesn't say. Typical Indian urban practice. */
 export const DEFAULT_DEPTH: Record<LineKind, number> = { sewer: 2.5, storm: 1.5, water: 1.2, power: 1.0, gas: 1.0, telecom: 0.8, metro: -9, rail: 0, path: 0, other: 1, canal: 0, nalla: 0, hv: 0, transit: 0, site: 0, zone: 0 };
 export const DEFAULT_SIZE: Record<LineKind, number> = { sewer: 0.45, storm: 0.9, water: 0.3, power: 0.15, gas: 0.15, telecom: 0.1, metro: 9, rail: 3, path: 1.8, other: 0.3, canal: 8, nalla: 12, hv: 27, transit: 4, site: 10, zone: 0 };
+/** Satellite imagery sources. `{token}` is filled from this browser's settings, never stored with a map. */
+export const IMAGERY: Record<string, { name: string; url: string; credit: string; terms: string; token?: string; maxZ: number }> = {
+  esri: { name: 'Esri World Imagery', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', credit: 'Imagery © Esri, Maxar, Earthstar Geographics, and the GIS User Community', terms: 'Esri terms of use: viewing with attribution; production / commercial use needs an ArcGIS account', maxZ: 19 },
+  mapbox: { name: 'Mapbox Satellite', url: 'https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}@2x.jpg90?access_token={token}', credit: '© Mapbox © Maxar', terms: 'Mapbox terms (free tier with your access token)', token: 'mapbox', maxZ: 20 },
+};
+
 export const LINE_COLOR: Record<LineKind, string> = {
   sewer: '#3fa34d', storm: '#7a5cd6', water: '#2f80ed', power: '#e5484d', gas: '#f5c518', telecom: '#f2994a', metro: '#d2479b', rail: '#9aa0a6', path: '#c9b98f', other: '#9e9e9e',
   canal: '#2b8fc7', nalla: '#4aa3a0', hv: '#d9822b', transit: '#c2410c', site: '#6b7280', zone: '#3b82f6',
@@ -182,6 +188,7 @@ export function buildBase(net: Network, tile: TileData, utilities?: UtilitiesFil
   layer({ id: 'dp', name: 'Development Plan sheets', group: 'reference', type: 'dp', visible: false, opacity: 0.75, source: 'Pune Municipal Corporation — sanctioned DP', url: 'tiles/' + tile.id + '/dp/index.json' });
   layer({ id: 'osm', name: 'OpenStreetMap tiles', group: 'reference', type: 'xyz', visible: false, opacity: 0.6, url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', source: '© OpenStreetMap contributors', license: 'ODbL' });
   layer({ id: 'imagery', name: 'Custom imagery (XYZ)', group: 'reference', type: 'xyz', visible: false, opacity: 0.8, url: '' });
+  layer({ id: 'satellite', name: 'Satellite', group: 'reference', type: 'xyz', visible: false, opacity: 1, preset: 'esri', mode: 'ground', roads: 'solid', url: IMAGERY.esri.url, source: IMAGERY.esri.credit, license: IMAGERY.esri.terms });
   layer({ id: 'terrain', name: 'Terrain & land use', group: 'surface', type: 'terrain', visible: true });
   layer({ id: 'water', name: 'Rivers & water', group: 'surface', type: 'water', visible: true });
   layer({ id: 'roads', name: 'Roads & junctions', group: 'surface', type: 'roads', visible: true });

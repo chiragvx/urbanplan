@@ -127,6 +127,14 @@ export interface LayerObj {
   source?: string;
   license?: string;
   order: number;
+  /** xyz imagery: which source (a preset, or 'custom' = `url`) */
+  preset?: string;
+  /** xyz imagery: drawn over the map, or as the ground under roads (2D) */
+  mode?: 'over' | 'ground';
+  /** xyz imagery: roads over it drawn solid or as see-through ghosts (to check alignment) */
+  roads?: 'solid' | 'ghost';
+  /** xyz imagery: nudge (metres east, south) to line it up with the map */
+  offset?: [number, number];
 }
 
 /** What a surveyor found at a DP region. */

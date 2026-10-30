@@ -22,13 +22,19 @@ const LEVELS = [125, 250, 500, 1000];
 
 export class Reference {
   readonly group = new THREE.Group();
+  /** imagery shown as the ground: its own group so it sorts before everything (a group's order wins over its children's) */
+  readonly groundGroup = new THREE.Group();
   private dpIndex: DpIndex | null | undefined;
   private quads = new Map<string, Quad>();
   private frame = 0;
   onLoad: () => void = () => {};
 
+  /** imagery tokens by name ({token} in a layer URL) */
+  keys: () => Record<string, string> = () => ({});
+
   constructor(readonly doc: CityDoc, readonly base: string, readonly origin: { lat: number; lon: number; kx: number; kz: number }) {
     this.group.renderOrder = 10;
+    this.groundGroup.renderOrder = -100;
   }
 
   /** bytes of imagery on the GPU (for the performance panel) */
@@ -36,8 +42,9 @@ export class Reference {
   get count() { return this.quads.size; }
 
   /** `px`: the decode size wanted (0 = the image's own size). */
-  private quad(key: string, layer: string, corners: [number, number][], url: string, opacity: number, order: number, px = 0) {
+  private quad(key: string, layer: string, corners: [number, number][], url: string, opacity: number, order: number, px = 0, ground = false) {
     let q = this.quads.get(key);
+    if (q && (q.mat.transparent === ground)) { this.remove(key, q); q = undefined; } // switched between over / ground
     if (!q) {
       const g = new THREE.BufferGeometry();
       // corners: NW, NE, SE, SW in local metres
@@ -45,17 +52,19 @@ export class Reference {
       g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
       g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([0, 1, 1, 1, 1, 0, 0, 0]), 2));
       g.setIndex([0, 2, 1, 0, 3, 2]);
-      const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthTest: false, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
+      // over the map: transparent, drawn last; as the ground: opaque and first, so roads / buildings draw over it
+      const mat = new THREE.MeshBasicMaterial({ transparent: !ground, opacity: ground ? 1 : 0, depthTest: false, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
+      if (ground) mat.visible = false;
       const mesh = new THREE.Mesh(g, mat);
-      mesh.renderOrder = 10 + order;
+      mesh.renderOrder = ground ? -100 + order : 10 + order;
       mesh.frustumCulled = false;
       q = { mesh, mat, layer, used: this.frame, shown: 0, loading: 0, bytes: 0, dead: false };
       this.quads.set(key, q);
-      this.group.add(mesh);
+      (ground ? this.groundGroup : this.group).add(mesh);
     }
     q.used = this.frame;
     q.mesh.visible = true;
-    if (q.mat.map) q.mat.opacity = opacity;
+    if (q.mat.map && q.mat.transparent) q.mat.opacity = opacity;
     // (re)load at the size the zoom needs; the current texture stays up until the new one arrives
     const want = px || -1;
     if (q.shown !== want && q.loading !== want) this.load(q, url, want);
@@ -77,7 +86,7 @@ export class Reference {
       t.needsUpdate = true;
       this.dropTexture(q);
       q.mat.map = t; q.mat.needsUpdate = true;
-      q.mat.opacity = this.opacityOf(q.layer);
+      if (q.mat.transparent) q.mat.opacity = this.opacityOf(q.layer); else q.mat.visible = true;
       q.bitmap = bmp;
       q.shown = px; q.loading = 0;
       q.bytes = bmp.width * bmp.height * 4;
@@ -101,7 +110,7 @@ export class Reference {
 
   private remove(k: string, q: Quad) {
     q.dead = true;
-    this.group.remove(q.mesh); q.mesh.geometry.dispose(); this.dropTexture(q); q.mat.dispose();
+    q.mesh.removeFromParent(); q.mesh.geometry.dispose(); this.dropTexture(q); q.mat.dispose();
     this.quads.delete(k);
   }
 
@@ -115,8 +124,12 @@ export class Reference {
     this.frame++;
     for (const q of this.quads.values()) q.mesh.visible = false;
     this.group.visible = plan;
+    this.groundGroup.visible = plan;
     if (!plan) { this.release(); return; }
     const layers = this.doc.all('layer').filter((l) => l.visible && (l.type === 'dp' || (l.type === 'xyz' && l.url)));
+    // stale tiles of a layer whose source / offset / mode changed are dropped (keys carry those)
+    const live = new Set(layers.map((l) => l.id));
+    for (const [k, q] of this.quads) if (!live.has(q.layer)) this.remove(k, q);
     layers.forEach((L, order) => (L.type === 'dp' ? this.dp(L, rect, scale) : this.xyz(L, rect, scale, order)));
     // over budget: forget the tiles seen least recently (never the ones on screen)
     let bytes = this.bytes;
@@ -150,9 +163,15 @@ export class Reference {
 
   private xyz(L: LayerObj, r: [number, number, number, number], scale: number, order: number) {
     const o = this.origin;
-    const toLL = (x: number, z: number) => ({ lon: o.lon + x / o.kx, lat: o.lat - z / o.kz });
-    const toXZ = (lat: number, lon: number): [number, number] => [(lon - o.lon) * o.kx, -(lat - o.lat) * o.kz];
-    const z = Math.max(10, Math.min(19, Math.round(Math.log2(156543.03 * Math.cos((o.lat * Math.PI) / 180) * scale))));
+    const [ox, oz] = L.offset ?? [0, 0];
+    const toLL = (x: number, z: number) => ({ lon: o.lon + (x - ox) / o.kx, lat: o.lat - (z - oz) / o.kz });
+    const toXZ = (lat: number, lon: number): [number, number] => [(lon - o.lon) * o.kx + ox, -(lat - o.lat) * o.kz + oz];
+    const maxZ = L.preset === 'mapbox' ? 20 : 19;
+    const z = Math.max(10, Math.min(maxZ, Math.round(Math.log2(156543.03 * Math.cos((o.lat * Math.PI) / 180) * scale))));
+    const keys = this.keys();
+    const tmpl = L.url!.replace('{token}', encodeURIComponent(keys[L.preset ?? ''] ?? ''));
+    if (L.url!.includes('{token}') && !keys[L.preset ?? '']) return; // no token yet
+    const ground = L.mode === 'ground';
     const n = 2 ** z;
     const tx = (lon: number) => Math.floor(((lon + 180) / 360) * n);
     const ty = (lat: number) => { const r = (lat * Math.PI) / 180; return Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n); };
@@ -162,9 +181,9 @@ export class Reference {
     const x0 = tx(a.lon), x1 = tx(b.lon), y0 = ty(a.lat), y1 = ty(b.lat);
     if ((x1 - x0 + 1) * (y1 - y0 + 1) > 120) return;
     for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) {
-      const url = L.url!.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y)).replace('{s}', 'abc'[(x + y) % 3]);
+      const url = tmpl.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y)).replace('{s}', 'abc'[(x + y) % 3]);
       const c = [toXZ(lat2(y), lon2(x)), toXZ(lat2(y), lon2(x + 1)), toXZ(lat2(y + 1), lon2(x + 1)), toXZ(lat2(y + 1), lon2(x))];
-      this.quad(`${L.id}/${z}/${x}/${y}`, L.id, c, url, L.opacity, order + 1);
+      this.quad(`${L.id}/${L.preset ?? ''}/${ox},${oz}/${z}/${x}/${y}`, L.id, c, url, L.opacity, order + 1, 0, ground);
     }
   }
 }

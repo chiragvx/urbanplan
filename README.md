@@ -70,6 +70,17 @@ npm test        # headless document + cross-section tests
   tight curves, widths beyond the DP reserve.
 - <kbd>Ctrl K</kbd> command palette (commands, road names, `lat, lon` / `x, z`), <kbd>?</kbd> all shortcuts. Everything undoes.
 
+### Satellite and checking against OpenStreetMap
+
+- **Satellite** (top bar, or Layers › Satellite): Esri World Imagery (no key; viewing with attribution — production
+  use needs an ArcGIS account), Mapbox Satellite (your token, kept in this browser, never saved with a map) or any
+  XYZ URL. *Over the map* (opacity) or *As the ground* (2D: it replaces the terrain and water, roads and buildings
+  on top); roads *solid* or *ghost* (see-through, to check alignment); **Nudge** the imagery by ½ m steps (saved with
+  the map). Credits show bottom right.
+- **OSM lines** (View): the raw OpenStreetMap road centre lines over the map in yellow, and every place where a
+  road here sits more than 6 m off them listed in Issues (divided roads measured from the midline of their halves).
+  `node tools/dev/check-roads.mjs` gives the same measure for the whole network.
+
 ### Road tools (<kbd>J</kbd>, Network Multitool style)
 
 One tool with 14 modes (keys 1–9, 0, Shift+1–4; or the options bar): each previews what it will do and says why it
@@ -92,6 +103,11 @@ Esc or right-click steps back.
 | Curve between ends | a smooth curve joining the ends of two roads |
 
 Loops, connections and curves are built as the road tool's current type (picked in the options bar).
+
+**Flyover in the median** (Shift+5): click where it starts and ends on a road; it's built along the road's centre
+line (2 / 4 / one-way lanes, deck height), ramps at the set grade. Any road under a flyover makes room in its median
+— a gap the ramp's width where it is low (its walls stand there), a pier median where the deck is high — and where
+a ramp lands in a road that carries on, the ramp merges into it (no junction).
 
 ### Maps: save, publish, copy
 

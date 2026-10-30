@@ -34,6 +34,8 @@ export const leftOpen = signal(false);
 export const inspTab = signal<Record<string, string>>({});
 /** bumps when the road tools' mode / values change (their options bar re-renders) */
 export const mtTick = signal(0);
+/** the raw OSM road lines drawn over the map (2D), with drifts listed in Issues */
+export const osmCompare = signal(false);
 /** survey tab: which regions to walk */
 export const surveyFilter = signal<'reserved' | 'all'>('reserved');
 export const paletteOpen = signal(false);
@@ -77,13 +79,14 @@ export interface Settings {
   /** UI theme: follow the system, or light / dark */ theme: 'system' | 'light' | 'dark';
   /** side panels float over the map (Cities: Skylines style) or sit beside it */ panels: 'floating' | 'docked';
   /** road tools: the mode in use */ mtMode: string;
+  /** imagery access tokens (this browser only; never saved with a map) */ imageryKeys: Record<string, string>;
 }
 function loadSettings(): Settings {
   const def: Settings = {
     author: '', wheel: 'zoom', snap: true, showGrid: false, units: 'm',
     roadMode: 'straight', elevStep: 2.5, snapGeometry: true, snapAngles: true, snapGuides: true, snapLength: 1, grade: 0.035, roadGraded: false,
     terrainOp: 'shift', brushRadius: 40, brushStrength: 0.5, levelHeight: null, levelBalanced: true, embankOffset: 2, embankWidth: 10, pondDepth: 2, exaggeration: 1,
-    graphics: 'simple', customAssets: [], theme: 'system', panels: 'floating', mtMode: 'addNode',
+    graphics: 'simple', customAssets: [], theme: 'system', panels: 'floating', mtMode: 'addNode', imageryKeys: {},
   };
   // key keeps the old name so settings survive the rename
   try { return { ...def, ...JSON.parse(localStorage.getItem('pune-remix:settings') ?? '{}') }; } catch { return def; }

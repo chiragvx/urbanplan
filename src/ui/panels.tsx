@@ -1,11 +1,11 @@
 // Left panel tabs: Layers, Roads (search), Issues, Review queue.
 import { useEffect, useMemo, useState } from 'preact/hooks';
-import { docVersion, dpRegionsOn, leftOpen, leftTab, readOnly, select, selection, settings, surveyFilter } from '../editor/state';
+import { docVersion, dpRegionsOn, leftOpen, leftTab, readOnly, saveSettings, select, selection, settings, surveyFilter } from '../editor/state';
 import { ui } from './ctx';
 import { Icon, Toggle, Menu, Seg } from './components';
 import { CLASS_LABEL, CLASS_RANK, SURVEY_COLOR, SURVEY_LABEL, type Id, type LayerGroup, type LayerObj, type LineKind, type SurveyStatus } from '../doc/types';
 import { parseCode } from '../doc/dpcodes';
-import { LINE_COLOR, LINE_LABEL } from '../doc/base';
+import { IMAGERY, LINE_COLOR, LINE_LABEL } from '../doc/base';
 import { newId } from '../doc/ids';
 import * as xs from '../doc/xsection';
 import { fmtLen } from './Inspector';
@@ -124,13 +124,52 @@ function LayerRow(p: { l: LayerObj }) {
       {open && (
         <div class="layer-more">
           <label class="range">Opacity <input type="range" min={0.1} max={1} step={0.05} value={l.opacity} onInput={(e) => set('opacity', Number((e.currentTarget as HTMLInputElement).value))} /></label>
-          {l.type === 'xyz' && <input class="text" placeholder="https://…/{z}/{x}/{y}.png" value={l.url ?? ''} onChange={(e) => set('url', (e.currentTarget as HTMLInputElement).value.trim())} />}
-          {l.type === 'xyz' && <p class="muted small">Only use imagery you have the rights to use.</p>}
+          {l.type === 'xyz' && <ImageryControls l={l} set={set} />}
           {l.type === 'lines' && <button class="link" onClick={() => ui.app.setLineLayer(l.id)}>Draw into this layer (L)</button>}
           {l.source && <p class="muted small">{l.source}{l.license ? ` · ${l.license}` : ''}</p>}
         </div>
       )}
     </div>
+  );
+}
+
+/** Imagery layer: source (preset or URL), token, over the map / as the ground, ghost roads, nudge. */
+function ImageryControls(p: { l: LayerObj; set: (k: keyof LayerObj, v: unknown) => void }) {
+  const l = p.l, set = p.set;
+  const preset = l.preset ?? 'custom';
+  const P = IMAGERY[preset];
+  const keys = settings.value.imageryKeys ?? {};
+  const off = l.offset ?? [0, 0];
+  const nudge = (i: 0 | 1, d: number) => { const o: [number, number] = [off[0], off[1]]; o[i] = Math.round((o[i] + d) * 10) / 10; set('offset', o); };
+  return (
+    <>
+      <label class="range">Source
+        <select class="select" value={preset} onChange={(e) => {
+          const v = (e.currentTarget as HTMLSelectElement).value, S = IMAGERY[v];
+          set('preset', v);
+          if (S) { set('url', S.url); set('source', S.credit); set('license', S.terms); }
+          else { set('source', undefined); set('license', undefined); }
+        }}>
+          {Object.entries(IMAGERY).map(([k, S]) => <option key={k} value={k}>{S.name}</option>)}
+          <option value="custom">Custom URL…</option>
+        </select>
+      </label>
+      {preset === 'custom' && <input class="text" placeholder="https://…/{z}/{x}/{y}.png" value={l.url ?? ''} onChange={(e) => set('url', (e.currentTarget as HTMLInputElement).value.trim())} />}
+      {P?.token && (
+        <input class="text" type="password" placeholder={`${P.name} access token (kept in this browser)`} value={keys[P.token] ?? ''}
+          onChange={(e) => { saveSettings({ imageryKeys: { ...keys, [P.token!]: (e.currentTarget as HTMLInputElement).value.trim() } }); ui.app.refreshImagery(); }} />
+      )}
+      <div class="row-inline"><Seg small value={l.mode ?? 'over'} options={[{ value: 'over', label: 'Over the map' }, { value: 'ground', label: 'As the ground' }]} onChange={(v) => set('mode', v)} /></div>
+      <div class="row-inline"><span class="muted small">Roads</span><Seg small value={l.roads ?? 'solid'} options={[{ value: 'solid', label: 'Solid' }, { value: 'ghost', label: 'Ghost' }]} onChange={(v) => set('roads', v)} /></div>
+      <div class="nudge" title="Line the imagery up with the map (metres east / south)">
+        <span class="muted small">Nudge</span>
+        <button class="icon-btn" onClick={() => nudge(0, -0.5)}>◀</button><button class="icon-btn" onClick={() => nudge(0, 0.5)}>▶</button>
+        <button class="icon-btn" onClick={() => nudge(1, -0.5)}>▲</button><button class="icon-btn" onClick={() => nudge(1, 0.5)}>▼</button>
+        <span class="small mono">{off[0]}, {off[1]} m</span>
+        {(off[0] || off[1]) ? <button class="link small" onClick={() => set('offset', undefined)}>Reset</button> : null}
+      </div>
+      {!P && <p class="muted small">Only use imagery you have the rights to use.</p>}
+    </>
   );
 }
 

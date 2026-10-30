@@ -82,4 +82,14 @@ const out = {
   paths: net.paths.map((p) => ({ ...p, pts: p.pts.map(round) })),
 };
 fs.writeFileSync(path.join(dir, 'network.json'), JSON.stringify(out));
+// the raw OSM road centre lines (projected), for the editor's "compare with OpenStreetMap" view
+const osmRoads: { id: number; hw: string; p: number[] }[] = [];
+for (const w of osm.ways.values()) {
+  const hw = w.tags?.highway;
+  if (!hw || ['footway', 'path', 'steps', 'cycleway', 'pedestrian', 'bridleway', 'corridor', 'proposed', 'construction', 'platform', 'elevator'].includes(hw)) continue;
+  const p: number[] = [];
+  for (const id of w.nds) { const n = osm.nodes.get(id); if (!n) continue; const [x, z] = [(n.lon - tile.lon) * kx, -(n.lat - tile.lat) * kz]; p.push(Math.round(x * 10) / 10, Math.round(z * 10) / 10); }
+  if (p.length >= 4 && p.some((v, i) => Math.abs(v) < hdr.half + 50 || i < 0)) osmRoads.push({ id: w.id, hw, p });
+}
+fs.writeFileSync(path.join(dir, 'osm-roads.json'), JSON.stringify({ source: '© OpenStreetMap contributors (ODbL)', ways: osmRoads }));
 console.log(`network ${id}: ${net.nodes.length} nodes, ${net.segments.length} segments, ${Object.keys(net.types).length} road types, ${net.paths.length} paths in ${Date.now() - t0} ms`);

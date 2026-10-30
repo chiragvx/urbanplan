@@ -23,12 +23,12 @@ import type { Id, LayerObj, MapMeta } from '../doc/types';
 import { CLASS_RANK } from '../doc/types';
 import * as xs from '../doc/xsection';
 import { World } from '../scene/world';
+import { OsmCompare } from '../editor/osmcompare';
 import { Reference } from '../scene/reference';
 import { Editor, type AppApi } from '../editor/editor';
 import { bindShortcuts } from '../editor/commands';
 import {
-  dialog, docVersion, dpRegionsOn, lineLayer, mode, readOnly, saveSettings, select, selection, settings, stale3d, status, surveyFilter, toast, tool,
-} from '../editor/state';
+  dialog, docVersion, dpRegionsOn, lineLayer, mode, readOnly, saveSettings, select, selection, settings, stale3d, status, surveyFilter, toast, tool, osmCompare } from '../editor/state';
 
 /** A region in the survey list. */
 export interface SurveyItem { id: string; cls: string; reserved: boolean; area: number; code?: string; status: SurveyStatus; x: number; z: number }
@@ -50,6 +50,8 @@ export class App implements AppApi {
   private saveTimer = 0;
   private lastChange = 0;
   private lastView = '';
+  /** where this tile's files are served from */
+  basePath = '';
 
   async boot(tileId: string, progress: (f: number, msg: string) => void) {
     const $ = (id: string) => document.getElementById(id) as HTMLCanvasElement;
@@ -58,6 +60,7 @@ export class App implements AppApi {
     await this.engine.init(settings.value.graphics);
     this.engine.setTimeOfDay(10.5 * 60);
     const base = `${import.meta.env.BASE_URL}tiles/${tileId}/`;
+    this.basePath = base;
     this.tile = await loadTile(tileId, progress);
     progress(0.15, 'Shaping the terrain…');
     this.hf = new Heightfield(this.tile.terrain.n, this.tile.terrain.cell, this.tile.terrain.heights);
@@ -84,6 +87,7 @@ export class App implements AppApi {
     const [lat, lon] = this.tile.center;
     this.ref = new Reference(this.doc, base, { lat, lon, kx: this.tile.proj.kx, kz: this.tile.proj.kz });
     this.ref.onLoad = () => { this.world.needsRender = true; this.lastView = ''; };
+    this.ref.keys = () => settings.value.imageryKeys ?? {};
     this.E.dpr.base = base;
     let regionsChecked = false;
     this.E.dpr.onLoad = () => {
@@ -91,7 +95,7 @@ export class App implements AppApi {
       // first time the DP regions arrive: check them (buildings on reserved open space)
       if (this.E.dpr.ready && !regionsChecked && this.issues.version) { regionsChecked = true; this.issues.regionPass(); this.showMarkers(!!this.E.markers.length); }
     };
-    this.engine.scene.add(this.ref.group);
+    this.engine.scene.add(this.ref.group, this.ref.groundGroup);
     this.issues = new IssueIndex(this.doc, this.C, (x0, z0, x1, z1) => this.E.hit.query(x0, z0, x1, z1));
     // water pooling in terraformed ground (not inside ponds, which hold water on purpose)
     this.issues.terrainIssues = () => {
@@ -398,6 +402,23 @@ export class App implements AppApi {
   setLayer(id: Id, key: keyof LayerObj, v: unknown) {
     this.doc.transact(`Layer ${String(key)}`, () => this.doc.set(id, key, v), `layer:${id}:${String(key)}`);
   }
+
+  /** The "compare with OpenStreetMap" view: load the OSM lines, list where roads drift off them. */
+  async toggleOsmCompare() {
+    osmCompare.value = !osmCompare.value;
+    if (osmCompare.value) {
+      this.E.osm ??= new OsmCompare(this.basePath);
+      await this.E.osm.load();
+      const list = this.E.osm.issues(this.doc);
+      this.issues.setExternal('osm:', list);
+      toast(this.E.osm.ways?.length ? `OpenStreetMap lines shown · ${list.length} place${list.length === 1 ? '' : 's'} off by more than 6 m (Issues)` : 'No OpenStreetMap lines for this map yet (re-bake the network)', this.E.osm.ways?.length ? 'info' : 'warn');
+    } else this.issues.setExternal('osm:', []);
+    docVersion.value++;
+    this.E.overlayDirty = true;
+  }
+
+  /** Imagery tokens changed (settings): reload what's on screen. */
+  refreshImagery() { this.ref.update(this.E.view.rect, this.E.view.scale, false); this.lastView = ''; }
 
   toggleLayer(id: Id) {
     const L = this.doc.get<'layer'>(id);

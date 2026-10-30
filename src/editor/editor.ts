@@ -19,6 +19,7 @@ import {
 import { RoadTool, type SnapResult } from './roadtool';
 import { AssetTool } from './assettool';
 import { MultiTool } from './multitool';
+import { OsmCompare } from './osmcompare';
 import { getAsset } from '../assets';
 import { DPRegions, type DPRegion } from './dpregions';
 import { traceAt } from './wand';
@@ -70,6 +71,8 @@ export class Editor {
   readonly at: AssetTool;
   /** road tools (Network Multitool style) */
   readonly mt: MultiTool;
+  /** OSM road lines for the comparison view (loaded on first use) */
+  osm: OsmCompare | null = null;
   readonly dpr = new DPRegions();
   /** terraforming: earthworks → designed ground */
   readonly terrain: TerrainCompiler;

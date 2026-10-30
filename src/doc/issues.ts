@@ -233,6 +233,12 @@ export class IssueIndex {
   /** buildings near rivers (the tile's water), set by the app */
   riverIssues: () => Issue[] = () => [];
 
+  /** Replace every issue whose key starts with `prefix` (issues computed outside the index, e.g. map vs OSM). */
+  setExternal(prefix: string, list: Issue[]) {
+    this.clearPrefix(prefix);
+    for (const i of list) this.add(i);
+  }
+
   private clearPrefix(p: string) {
     for (const k of [...this.byKey.keys()]) if (k.startsWith(p)) { const i = this.byKey.get(k)!; this.byKey.delete(k); for (const o of i.ids) this.byObj.get(o)?.delete(k); }
   }

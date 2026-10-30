@@ -495,6 +495,18 @@ export class World {
     this.needsRender = true;
   }
 
+  private ghost = false;
+  /** Roads and buildings see-through over imagery (2D), to check how they line up. */
+  setGhost(on: boolean) {
+    if (on === this.ghost) return;
+    this.ghost = on;
+    const P = this.planM;
+    for (const m of [P.asphalt, P.paving, P.markings, P.concrete, P.roofs] as THREE.Material[]) {
+      m.transparent = on; m.opacity = on ? (m === P.roofs ? 0.25 : 0.45) : 1; m.depthWrite = !on; m.needsUpdate = true;
+    }
+    this.needsRender = true;
+  }
+
   /** X-ray: see-through ground and city so underground layers show (3D). */
   setXray(on: boolean) {
     this.xray = on;
@@ -507,9 +519,14 @@ export class World {
 
   applyLayers() {
     const vis = (id: string) => this.doc.get<'layer'>(id)?.visible ?? true;
-    for (const t of this.terrain) { t.hi.visible = vis('terrain') && (this.plan || t.hi.visible || !t.lo.visible); if (!vis('terrain')) { t.hi.visible = t.lo.visible = false; } }
+    // satellite imagery as the ground (2D): it takes the place of the terrain and water; roads can go see-through
+    const imgs = this.plan ? this.doc.all('layer').filter((l) => l.type === 'xyz' && l.visible && l.url) : [];
+    const ground = imgs.some((l) => l.mode === 'ground');
+    for (const t of this.terrain) { t.hi.visible = vis('terrain') && !ground && (this.plan || t.hi.visible || !t.lo.visible); if (!vis('terrain') || ground) { t.hi.visible = t.lo.visible = false; } }
     this.skirt.visible = vis('terrain') && !this.plan;
-    this.water.visible = vis('water');
+    this.water.visible = vis('water') && !ground;
+    for (const c of this.ponds.children) c.visible = !ground;
+    this.setGhost(imgs.some((l) => l.roads === 'ghost'));
     this.roads.group.visible = vis('roads');
     this.paths.group.visible = vis('paths');
     this.buildings.group.visible = vis('buildings') && this.exag === 1;

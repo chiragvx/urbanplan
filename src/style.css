@@ -267,6 +267,10 @@ a { color: var(--accent); }
 .wprof rect:hover { opacity: 0.75; }
 .wprof-dp { stroke: var(--ok); stroke-width: 1; stroke-dasharray: 4 3; }
 .uniform { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.attribution { position: absolute; right: 8px; bottom: 6px; max-width: 60%; font-size: 10.5px; color: var(--text); background: var(--glass); border-radius: 6px; padding: 2px 7px; pointer-events: none !important; }
+.nudge { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+.nudge .icon-btn { padding: 2px 5px; font-size: 10px; }
+.layer-more .row-inline { align-items: center; gap: 6px; }
 .phase-plan { display: flex; gap: 10px; align-items: center; }
 .slip-row { display: flex; flex-direction: column; gap: 6px; padding: 6px 0; border-top: 1px solid var(--line); }
 .phase-svg { width: 112px; height: 112px; flex: none; background: var(--panel-2); border-radius: 10px; }
