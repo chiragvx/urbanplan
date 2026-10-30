@@ -722,6 +722,14 @@ export function importNetwork(inp: ImportInput): Network {
     const parent = new Map<number, number>();
     const find = (x: number): number => { let r = x; while (parent.has(r) && parent.get(r) !== r) r = parent.get(r)!; return r; };
     const nodeHw = (n: number) => Math.max(0, ...G.incident(n).map(hwOf));
+    // where a cluster's junctions meet: on the biggest road through it (a service lane's junction beside a main road
+    // pulls the side lane over, not the main road sideways); a roundabout keeps its centre
+    const nodeRank = (n: number) => Math.min(9, ...G.incident(n).map((e) => RANK[e.cls] ?? 9));
+    const centreOf = (ns: N[]): [number, number] => {
+      const top = Math.min(...ns.map((n) => nodeRank(n.id)));
+      const on = ns.filter((n) => nodeRank(n.id) === top);
+      return [on.reduce((a, n) => a + n.x, 0) / on.length, on.reduce((a, n) => a + n.z, 0) / on.length];
+    };
     // grow clusters shortest link first, and only while the cluster stays compact — otherwise a corridor of
     // short links (BRTS + service roads) chains into one long cluster that then can't be collapsed at all
     const members = new Map<number, number[]>();
@@ -742,7 +750,7 @@ export function importNetwork(inp: ImportInput): Network {
       const all = [...(members.get(ra) ?? [ra]), ...(members.get(rb) ?? [rb])];
       const ns = all.map((m) => G.nodes.get(m)!);
       const ring = ns.find((n) => n.R);
-      const cx = ring ? ring.x : ns.reduce((a, n) => a + n.x, 0) / ns.length, cz = ring ? ring.z : ns.reduce((a, n) => a + n.z, 0) / ns.length;
+      const [cx, cz] = ring ? [ring.x, ring.z] : centreOf(ns);
       if (ns.some((n) => Math.hypot(n.x - cx, n.z - cz) > (ring ? (ring.R ?? 0) + 18 : 22))) continue;
       parent.set(ra, rb); if (!parent.has(rb)) parent.set(rb, rb);
       members.set(rb, all); members.delete(ra);
@@ -754,7 +762,7 @@ export function importNetwork(inp: ImportInput): Network {
       if (ms.length < 2) continue;
       const ns = ms.map((m) => G.nodes.get(m)!).filter(Boolean);
       const rb = ns.find((n) => n.R);
-      const c: V2 = rb ? [rb.x, rb.z] : [ns.reduce((a, n) => a + n.x, 0) / ns.length, ns.reduce((a, n) => a + n.z, 0) / ns.length];
+      const c: V2 = rb ? [rb.x, rb.z] : centreOf(ns);
       if (ns.some((n) => Math.hypot(n.x - c[0], n.z - c[1]) > (rb ? (rb.R ?? 0) + 18 : 22))) continue; // too spread out to be one junction
       const target = rb ? rb : G.newNode(c[0], c[1]);
       target.signals = ns.some((n) => n.signals);
