@@ -23,6 +23,7 @@ import { buildAssets3d, carves, stampChannel, type AssetItem } from '../build/as
 import { assetOf, lineShape } from '../assets';
 import type { Graphics } from '../render/engine';
 import earcut from 'earcut';
+import { TerrainHoles } from './holes';
 
 type Region = [number, number, number, number];
 
@@ -101,6 +102,8 @@ export class World {
   private planM: ReturnType<typeof planMaterials>;
   /** set when something visible changed (plan view renders on demand) */
   needsRender = true;
+  /** open cuts (underpass trenches): the terrain isn't drawn inside them */
+  readonly holes: TerrainHoles;
 
   constructor(
     scene: THREE.Scene, readonly tile: TileData, readonly hf: Heightfield, readonly doc: CityDoc,
@@ -110,6 +113,9 @@ export class World {
     this.raster = new RoadRaster(tile.half);
     this.targets = new Float32Array(hf.n * hf.n).fill(NaN);
     this.planM = planMaterials(landuse);
+    this.holes = new TerrainHoles(tile.half);
+    M.terrain.maskNode = this.holes.keep;
+    this.planM.terrain.maskNode = this.holes.keep;
     this.assetMat = new THREE.MeshLambertNodeMaterial();
     this.assetMat.colorNode = vertexColor().rgb;
     scene.add(this.root);
@@ -135,6 +141,7 @@ export class World {
     C.mesher.stampTargets(this.targets);
     this.stampChannels();
     hf.conform(this.targets);
+    this.holes.update([-hf.half, -hf.half, hf.half, hf.half], [...C.mesher.items.values()].flatMap((it) => it.stamps));
     C.mesher.stampRaster(this.raster);
     this.terrain = buildTerrainChunks(hf, 80).map((c) => {
       releaseAfterUpload(c.high); releaseAfterUpload(c.low);
@@ -356,6 +363,7 @@ export class World {
     const box: Region = [-hf.half + s0 * hf.cell - 0.01, -hf.half + t0 * hf.cell - 0.01, -hf.half + s1 * hf.cell + 0.01, -hf.half + t1 * hf.cell + 0.01];
     C.mesher.stampTargets(this.targets, box);
     this.stampChannels(box);
+    this.holes.update(box, C.mesher.itemsIn(...box).flatMap((it) => it.stamps));
     hf.conformRegion(this.targets, Math.max(0, g.i0 - pad), Math.max(0, g.j0 - pad), Math.min(hf.n - 1, g.i1 + pad), Math.min(hf.n - 1, g.j1 + pad));
     for (const t of this.terrain) {
       if (t.i1 < g.i0 - pad || t.i0 > g.i1 + pad || t.j1 < g.j0 - pad || t.j0 > g.j1 + pad) continue;

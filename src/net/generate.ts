@@ -498,6 +498,7 @@ export interface Stamp {
   /** road surface height per line point (sunken roads: the trench floor), instead of the ground */ z?: Float32Array;
   /** ring stamps: metres below the ground (sunken junctions) */ dz?: number;
   /** ring stamps: the ground junction's surface (instead of the terrain) */ plane?: (x: number, z: number) => number;
+  /** an open cut between retaining walls: the terrain keeps its height and isn't drawn inside (TerrainHoles) */ hole?: boolean;
 }
 
 /** Below this depth a sunken road is covered (a tunnel); above it, an open trench with retaining walls. */
@@ -2070,18 +2071,33 @@ function runs(n: number, f: (i: number) => boolean): [number, number, boolean][]
 function underground(gb: GeomBuilder, S: Sub, z: (i: number, x: number, zz: number) => number, t: RoadType, T: (x: number, z: number) => number) {
   const n = S.s.length;
   if (n < 2) return;
-  const L = t.hwL + 0.3, R = -(t.hwR + 0.3);
+  const L = t.hwL + 0.3, R = -(t.hwR + 0.3), W = 0.45; // inner faces of the walls; wall thickness
   const zc = (i: number) => z(i, S.pts[i * 2], S.pts[i * 2 + 1]);
   const covered = (i: number) => T(S.pts[i * 2], S.pts[i * 2 + 1]) - zc(i) >= COVER;
   const bottom = (i: number, x: number, zz: number) => z(i, x, zz) - 0.4;
-  const top = (i: number, x: number, zz: number) => (covered(i) ? z(i, x, zz) + CEIL : Math.max(T(x, zz), z(i, x, zz)) + 0.9);
+  // open cut: the wall stands a parapet's height above the ground beside it (the ground isn't cut back)
+  const top = (i: number, x: number, zz: number) => (covered(i) ? z(i, x, zz) + CEIL : Math.max(T(x, zz), z(i, x, zz)) + 0.6);
   wallAlong(gb, S, L, bottom, top, false, COL.concrete);
   wallAlong(gb, S, R, bottom, top, true, COL.concrete);
+  // the trench floor beyond the road edges (the terrain isn't drawn inside the cut)
+  sweep(gb, S, L, R, (i, x, zz) => z(i, x, zz) - 0.12, COL.concreteDark);
+  for (const [a, b, cov] of runs(n, covered)) {
+    if (cov || b <= a) continue;
+    const sub = slice(S, a, b);
+    const zs = (k: number, x: number, zz: number) => z(k + a, x, zz);
+    const tp = (k: number, x: number, zz: number) => Math.max(T(x, zz), zs(k, x, zz)) + 0.6;
+    const dn = (k: number, x: number, zz: number) => Math.min(T(x, zz), zs(k, x, zz)) - 0.6;
+    // coping on top and the outer face down into the ground
+    sweep(gb, sub, L + W, L, tp, COL.concrete);
+    sweep(gb, sub, R, R - W, tp, COL.concrete);
+    wallAlong(gb, sub, L + W, dn, tp, true, COL.concrete);
+    wallAlong(gb, sub, R - W, dn, tp, false, COL.concrete);
+  }
   for (const [a, b, cov] of runs(n, covered)) {
     if (!cov || b <= a) continue;
     const sub = slice(S, a, b);
     sweep(gb, sub, R, L, (k, x, zz) => z(k + a, x, zz) + CEIL, COL.concreteDark); // ceiling (faces down)
-    sweep(gb, sub, L, R, (k, x, zz) => z(k + a, x, zz) + CEIL + 0.6, COL.concrete); // roof slab
+    sweep(gb, sub, L, R, (k, x, zz) => Math.min(z(k + a, x, zz) + CEIL + 0.6, T(x, zz) - 0.8), COL.concrete); // roof slab (kept under the ground)
     // portals: where the open trench meets the covered part, a face wall up to the ground
     for (const i of [a, b]) {
       if ((i === a && i === 0) || (i === b && i === n - 1)) continue;
@@ -2092,18 +2108,28 @@ function underground(gb: GeomBuilder, S: Sub, z: (i: number, x: number, zz: numb
   }
 }
 
-/** Terrain stamps of a sunken piece: the open stretches are cut down to the road; covered tunnel leaves the ground. */
+/**
+ * Terrain stamps of a sunken piece: the open stretches are holes in the ground between their retaining walls (the
+ * ground keeps its height right up to the walls); the covered tunnel leaves the ground alone.
+ */
 function trenchStamps(S: Sub, z: (i: number, x: number, zz: number) => number, hw: number, code: number, T: (x: number, z: number) => number): Stamp[] {
   const n = S.s.length;
   const zc = (i: number) => z(i, S.pts[i * 2], S.pts[i * 2 + 1]);
-  const open = (i: number) => T(S.pts[i * 2], S.pts[i * 2 + 1]) - zc(i) < COVER;
+  const depth = (i: number) => T(S.pts[i * 2], S.pts[i * 2 + 1]) - zc(i);
   const out: Stamp[] = [];
-  for (const [a, b, op] of runs(n, open)) {
-    if (!op) continue;
-    const line = new Float32Array(S.pts.slice(a * 2, b * 2 + 2));
-    const zs = new Float32Array(b - a + 1);
-    for (let i = a; i <= b; i++) zs[i - a] = zc(i) - LIFT;
-    out.push({ line, hw: hw + 0.3, carve: true, code, z: zs });
+  // 0 = at the ground (carved like any road), 1 = an open cut (a hole between the walls), 2 = covered
+  const state = (i: number) => (depth(i) >= COVER ? 2 : depth(i) > 0.5 ? 1 : 0);
+  for (let a = 0; a < n; ) {
+    let b = a;
+    while (b + 1 < n && state(b + 1) === state(a)) b++;
+    const st = state(a), e = Math.min(n - 1, b + 1); // runs share their end point
+    if (st === 1) out.push({ line: new Float32Array(S.pts.slice(a * 2, e * 2 + 2)), hw: hw + 0.3, carve: false, hole: true, code });
+    else if (st === 0) {
+      const zs = new Float32Array(e - a + 1);
+      for (let i = a; i <= e; i++) zs[i - a] = zc(i) - LIFT;
+      out.push({ line: new Float32Array(S.pts.slice(a * 2, e * 2 + 2)), hw: hw + 0.3, carve: true, code, z: zs });
+    }
+    a = b + 1;
   }
   return out;
 }
@@ -2111,24 +2137,55 @@ function trenchStamps(S: Sub, z: (i: number, x: number, zz: number) => number, h
 // ---------------- elevated structure ----------------
 
 function structure(gb: GeomBuilder, g: SegGeo, S: Sub, z: (i: number, x: number, zz: number) => number, t: RoadType, T: (x: number, z: number) => number) {
-  const L = t.hwL, R = -t.hwR;
+  // a crash barrier just outside each road edge; the deck slab reaches to its outer face (fascia), a narrower girder
+  // carries it; low ramps stand on retaining walls down to the ground instead
+  const B = 0.45, BH = 1.05, DECK = 0.45;
+  const L = t.hwL, R = -t.hwR, OL = L + B, OR = R - B;
+  const n = S.s.length;
   const clear = (i: number) => z(i, S.pts[i * 2], S.pts[i * 2 + 1]) - T(S.pts[i * 2], S.pts[i * 2 + 1]);
-  const bottom = (i: number, x: number, zz: number) => (clear(i) > 3.2 ? z(i, x, zz) - SLAB : T(x, zz) - 0.4);
-  sweep(gb, S, R, L, bottom, COL.concreteDark); // underside (faces down)
-  wallAlong(gb, S, L, bottom, (i, x, zz) => z(i, x, zz) + (clear(i) > 1.5 ? 1.0 : 0.1), true, COL.concrete);
-  wallAlong(gb, S, R, bottom, (i, x, zz) => z(i, x, zz) + (clear(i) > 1.5 ? 1.0 : 0.1), false, COL.concrete);
-  // pillars every ~26 m
-  const s0 = S.s[0], s1 = S.s[S.s.length - 1];
-  for (let s = s0 + 13; s < s1 - 5; s += 26) {
+  const high = (i: number) => clear(i) > 3.2;
+  const barrierTop = (i: number, x: number, zz: number) => z(i, x, zz) + (clear(i) > 1.5 ? BH : 0.1);
+  // barriers: inner faces towards the road, a cap on top
+  wallAlong(gb, S, L, (i, x, zz) => z(i, x, zz) - 0.05, barrierTop, false, COL.concrete);
+  wallAlong(gb, S, R, (i, x, zz) => z(i, x, zz) - 0.05, barrierTop, true, COL.concrete);
+  sweep(gb, S, OL, L, barrierTop, COL.concrete);
+  sweep(gb, S, R, OR, barrierTop, COL.concrete);
+  // outer faces: the deck's fascia (high), or a retaining wall down into the ground (low)
+  const outerBottom = (i: number, x: number, zz: number) => (high(i) ? z(i, x, zz) - DECK : T(x, zz) - 0.4);
+  wallAlong(gb, S, OL, outerBottom, barrierTop, true, COL.concrete);
+  wallAlong(gb, S, OR, outerBottom, barrierTop, false, COL.concrete);
+  const w = t.hwL + t.hwR, gw = Math.max(2.5, w * 0.62) / 2; // girder half-width
+  const mid = (L + R) / 2;
+  for (const [a, b, hi] of runs(n, high)) {
+    if (!hi || b <= a) continue;
+    const sub = slice(S, a, b);
+    const zs = (k: number, x: number, zz: number) => z(k + a, x, zz);
+    // slab underside either side of the girder, the girder's sides and soffit
+    sweep(gb, sub, OR, mid - gw, (k, x, zz) => zs(k, x, zz) - DECK, COL.concreteDark);
+    sweep(gb, sub, mid + gw, OL, (k, x, zz) => zs(k, x, zz) - DECK, COL.concreteDark);
+    wallAlong(gb, sub, mid + gw, (k, x, zz) => zs(k, x, zz) - SLAB, (k, x, zz) => zs(k, x, zz) - DECK, true, COL.concrete);
+    wallAlong(gb, sub, mid - gw, (k, x, zz) => zs(k, x, zz) - SLAB, (k, x, zz) => zs(k, x, zz) - DECK, false, COL.concrete);
+    sweep(gb, sub, mid - gw, mid + gw, (k, x, zz) => zs(k, x, zz) - SLAB, COL.concreteDark);
+  }
+  // piers every ~30 m: columns (two under a wide deck) and a stepped hammerhead cap
+  const s0 = S.s[0], s1 = S.s[n - 1];
+  for (let s = s0 + 15; s < s1 - 6; s += 30) {
     let i = 0;
-    while (i < S.s.length - 2 && S.s[i + 1] < s) i++;
-    const x = S.pts[i * 2], zz = S.pts[i * 2 + 1];
-    const top = z(i, x, zz) - SLAB, gnd = T(x, zz);
-    if (top - gnd < 2) continue;
-    const yaw = Math.atan2(-S.nrm[i * 2], S.nrm[i * 2 + 1]);
-    const w = t.hwL + t.hwR;
-    gb.box(x, zz, gnd - 1, top - 0.6, 1.4, Math.min(w * 0.45, 3.2), yaw, COL.concrete);
-    gb.box(x, zz, top - 0.6, top, 1.8, w * 0.85, yaw, COL.concreteDark);
+    while (i < n - 2 && S.s[i + 1] < s) i++;
+    const cx = S.pts[i * 2], cz = S.pts[i * 2 + 1];
+    const nx = S.nrm[i * 2], nz = S.nrm[i * 2 + 1];
+    const px = cx + nx * mid, pz = cz + nz * mid;
+    const top = z(i, px, pz) - SLAB, gnd = T(px, pz);
+    if (top - gnd < 2.5) continue;
+    const yaw = Math.atan2(-nx, nz);
+    const capW = Math.min(w + 2 * B - 1, gw * 2 + 3);
+    gb.box(px, pz, top - 0.9, top, 2.2, capW, yaw, COL.concrete);
+    gb.box(px, pz, top - 1.6, top - 0.9, 1.8, capW * 0.7, yaw, COL.concrete);
+    const cols = w > 13 ? [-capW * 0.27, capW * 0.27] : [0];
+    for (const o of cols) {
+      const x = px + nx * o, zz = pz + nz * o;
+      gb.box(x, zz, T(x, zz) - 1, top - 1.6, 1.5, cols.length > 1 ? 1.5 : Math.min(capW * 0.35, 2.6), yaw, COL.concrete);
+    }
   }
 }
 
