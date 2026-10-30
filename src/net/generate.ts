@@ -230,7 +230,7 @@ function distToRing(P: V2[], q: V2): number {
 }
 
 /** Every quad of the band between two polylines has the same orientation (no folds or crossings). */
-function bandClean(L: V2[], R: V2[]): boolean {
+function bandClean(L: V2[], R: V2[], tol = 0): boolean {
   let pos = 0, neg = 0;
   for (let i = 0; i < L.length - 1; i++) {
     for (const [a, b, c] of [[L[i], R[i], L[i + 1]], [R[i], R[i + 1], L[i + 1]]] as [V2, V2, V2][]) {
@@ -238,7 +238,7 @@ function bandClean(L: V2[], R: V2[]): boolean {
       if (ar > 1e-4) pos++; else if (ar < -1e-4) neg++;
     }
   }
-  return pos === 0 || neg === 0;
+  return Math.min(pos, neg) <= tol * (pos + neg);
 }
 
 /** A kerb corner is usable if it doesn't loop, turn back on itself, or wander far from its chord. */
@@ -460,14 +460,20 @@ export interface MNode {
   graded?: boolean;
 }
 
-export interface SlipSpec { from: string; to: string; w?: number; r?: number }
+export interface SlipSpec {
+  from: string; to: string; w?: number; r?: number;
+  /** zebra crossing across the lane (footpath ↔ island) */ crossing?: boolean;
+  /** the island between the lane and the junction: landscaped (default) or paved as a pedestrian refuge */ island?: 'green' | 'paved';
+  /** a boundary wall along the outside of the footpath */ wall?: boolean;
+  /** footpath width along the outside (m; default: the arms' footpath, 1.8 m with a crossing or wall) */ walk?: number;
+}
 
 /** A junction arm followed outwards through shape / transition nodes: pieces with their `along` ranges. */
 type Chain = { g: SegGeo; atA: boolean; a0: number; s0: number; L: number }[];
 /** Arm geometry along a chain: frame and road height `along` metres out from the junction's trim line. */
 interface ArmPath { frame: (along: number) => Frame; z: (along: number, x: number, z: number) => number; length: number }
 /** A slip lane laid out at a junction: its two arm ends and where it leaves / rejoins them (metres past the trims). */
-interface SlipG { eA: End; eB: End; w: number; r: number; dA: number; dB: number; taper: number; pA: ArmPath; pB: ArmPath; curb: V2[]; hk: number }
+interface SlipG { sp: SlipSpec; eA: End; eB: End; w: number; r: number; dA: number; dB: number; taper: number; pA: ArmPath; pB: ArmPath; curb: V2[]; hk: number }
 const SLIP_TAPER = 12;
 
 /** One cubic piece of road. */
@@ -1080,7 +1086,7 @@ export class RoadMesher {
       const sig = junctionMarkings(markings, paving, concrete, node, F, zf, armZ, poly, (e) => pathOf(e).length);
       if (sig.length) this.signals.set(id, sig); else this.signals.delete(id);
       for (const sl of slips) {
-        const out = slipLane(asphalt, paving, markings, sl, sl.curb, zf);
+        const out = slipLane(asphalt, paving, markings, concrete, sl, sl.curb, zf);
         if (out) extra.push(out);
       }
     }
@@ -1331,9 +1337,9 @@ export class RoadMesher {
         if (d < 6 || done) break;
         const taper = Math.max(4, Math.min(SLIP_TAPER, room - d));
         for (const hk of [0.42, 0.3, 0.55]) {
-          const cand: SlipG = { eA, eB, w, r, dA: d, dB: d, taper, pA, pB, curb, hk };
+          const cand: SlipG = { sp, eA, eB, w, r, dA: d, dB: d, taper, pA, pB, curb, hk };
           const g = new GeomBuilder();
-          if (slipLane(g, g, g, cand, curb, zf)) { out.push(cand); done = true; break; }
+          if (slipLane(g, g, g, g, cand, curb, zf)) { out.push(cand); done = true; break; }
         }
       }
     }
@@ -1486,8 +1492,8 @@ export function generateNetwork(net: Network, hf: Heightfield): NetMeshes {
  * radius and joins arm B with a taper; a raised island fills the space between it and the junction, a footpath runs
  * along its outside, and it gives way where it rejoins traffic. Returns its outline, or null if it doesn't fit.
  */
-function slipLane(asphalt: GeomBuilder, paving: GeomBuilder, markings: GeomBuilder, sl: SlipG, corner: V2[], zf: (x: number, z: number) => number): V2[] | null {
-  const { eA, eB, w } = sl;
+function slipLane(asphalt: GeomBuilder, paving: GeomBuilder, markings: GeomBuilder, concrete: GeomBuilder, sl: SlipG, corner: V2[], zf: (x: number, z: number) => number): V2[] | null {
+  const { eA, eB, w, sp } = sl;
   const fr = (e: End, along: number) => (e === eA ? sl.pA : sl.pB).frame(along);
   const at = (f: Frame, o: number, a = 0): V2 => [f.x + f.lx * o + f.ux * a, f.z + f.lz * o + f.uz * a];
   const kA = -eA.cwR, kB = eB.cwL; // kerb offsets (outward-left) on A's incoming side and B's outgoing side
@@ -1539,33 +1545,64 @@ function slipLane(asphalt: GeomBuilder, paving: GeomBuilder, markings: GeomBuild
       gb.v(L[i][0], zAt(L[i], t) + dz, L[i][1], 0, 1, 0, ...rgb, L[i][0] * 0.25, L[i][1] * 0.25);
       gb.v(R[i][0], zAt(R[i], t) + dz, R[i][1], 0, 1, 0, ...rgb, R[i][0] * 0.25, R[i][1] * 0.25);
     }
-    // wind upward: compare with the first quad's orientation
-    const a = L[0], b = R[0], c = L[Math.min(1, L.length - 1)];
-    const up = (b[1] - a[1]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[1] - a[1]) > 0;
+    // wind upward: the orientation most quads have (the first can be a sliver folded at a taper's tip)
+    let sum = 0;
+    for (let i = 0; i < L.length - 1; i++) { const a = L[i], b = R[i], c = L[i + 1]; sum += Math.sign((b[1] - a[1]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[1] - a[1])); }
+    const up = sum > 0;
     for (let i = 0; i < L.length - 1; i++) {
       const k = base + i * 2;
       if (up) { gb.tri(k, k + 1, k + 2); gb.tri(k + 1, k + 3, k + 2); } else { gb.tri(k, k + 2, k + 1); gb.tri(k + 1, k + 2, k + 3); }
     }
   };
   band(asphalt, inner, outer, 0, COL.junction);
-  // island (raised, landscaped) with its kerb
+  // island (raised: landscaped, or paved as a pedestrian refuge) with its kerb
   const islZ = (x: number, z: number) => { const q: V2 = [x, z]; let best = 0, bd = Infinity; for (let i = 0; i < N; i++) { const d = Math.hypot(inner[i][0] - x, inner[i][1] - z); if (d < bd) { bd = d; best = i; } } return Math.min(zAt(q, u[best]), zf(x, z) + 0.5); };
-  drapePolygon(paving, new Float32Array(isl.flat()), [], (x, z) => islZ(x, z) + KERB, COL.island, 3);
+  drapePolygon(paving, new Float32Array(isl.flat()), [], (x, z) => islZ(x, z) + KERB, sp.island === 'paved' ? COL.sidewalk : COL.island, 3);
   polyWall(paving, [...isl, isl[0]], (x, z) => islZ(x, z) - 0.05, (x, z) => islZ(x, z) + KERB, COL.kerb);
-  // footpath along the outside, as wide as arm A's
-  const fp = Math.max(eA.hwR - eA.cwR, eB.hwL - eB.cwL);
-  const walk = outer.map((q, i) => {
+  // footpath along the outside, as wide as the arms' (narrower where the curve is too tight for it)
+  const outN = outer.map((q, i) => {
     const a = outer[Math.max(0, i - 1)], b = outer[Math.min(N - 1, i + 1)], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
     let nx = -(b[1] - a[1]) / L, nz = (b[0] - a[0]) / L;
     if ((q[0] - inner[i][0]) * nx + (q[1] - inner[i][1]) * nz < 0) { nx = -nx; nz = -nz; }
-    return [q[0] + nx * fp, q[1] + nz * fp] as V2;
+    return [nx, nz] as V2;
   });
-  if (fp > 0.3 && bandClean(outer, walk)) {
+  const offs = (d: number) => outer.map((q, i) => [q[0] + outN[i][0] * d, q[1] + outN[i][1] * d] as V2);
+  let fp = sp.walk ?? Math.max(eA.hwR - eA.cwR, eB.hwL - eB.cwL, sp.crossing || sp.wall ? 1.8 : 0);
+  let walk = offs(fp);
+  // (a few folded slivers where a taper meets the curve don't show; a footpath folding over itself does)
+  while (fp > 0.3 && !bandClean(outer, walk, 0.05)) { fp *= 0.7; walk = offs(fp); }
+  if (fp <= 0.3) { fp = 0; walk = outer; }
+  if (fp > 0.3) {
     band(paving, outer, walk, KERB, COL.sidewalk);
     const base = outer.map((q, i) => ({ q, t: u[i] }));
     for (let i = 0; i < N - 1; i++) {
       const a = base[i], b = base[i + 1];
       paving.wall(a.q[0], a.q[1], b.q[0], b.q[1], zAt(a.q, a.t) - 0.05, zAt(b.q, b.t) - 0.05, zAt(a.q, a.t) + KERB, zAt(b.q, b.t) + KERB, COL.kerb);
+    }
+  }
+  // boundary wall along the outside of the footpath (or of the lane): 0.25 m thick, 1.2 m high
+  if (sp.wall) {
+    const WT = 0.25, WH = 1.2, base = fp > 0.3 ? KERB : 0;
+    const a0 = offs(fp + 0.05), a1 = offs(fp + 0.05 + WT);
+    // (a thin band: small folds where the taper meets the curve don't show, so no all-or-nothing check here)
+    band(concrete, a0, a1, base + WH, COL.concrete);
+    for (const [E, flip] of [[a0, false], [a1, true]] as [V2[], boolean][]) for (let i = 0; i < N - 1; i++) {
+      const p = flip ? E[i + 1] : E[i], q = flip ? E[i] : E[i + 1], tp = u[flip ? i + 1 : i], tq = u[flip ? i : i + 1];
+      if (Math.hypot(q[0] - p[0], q[1] - p[1]) < 0.01) continue;
+      concrete.wall(p[0], p[1], q[0], q[1], zAt(p, tp) - 0.3, zAt(q, tq) - 0.3, zAt(p, tp) + base + WH, zAt(q, tq) + base + WH, COL.concrete);
+    }
+  }
+  // zebra crossing across the lane, some 6 m before it rejoins arm B (footpath ↔ island)
+  if (sp.crossing) {
+    let ic = iB - 1, acc = 0;
+    while (ic > iA + 1 && acc < 6) { acc += Math.hypot(inner[ic][0] - inner[ic - 1][0], inner[ic][1] - inner[ic - 1][1]); ic--; }
+    const p0 = inner[ic], p1 = outer[ic];
+    const ex = p1[0] - p0[0], ez = p1[1] - p0[1], el = Math.hypot(ex, ez) || 1, ux = ex / el, uz = ez / el;
+    const tx = -uz, tz = ux; // along the lane
+    for (let s = 0.3; s < el - 0.3; s += 1.0) {
+      const c: V2 = [p0[0] + ux * s, p0[1] + uz * s];
+      const q = [c[0] - tx * 1.5, c[1] - tz * 1.5, c[0] + ux * 0.5 - tx * 1.5, c[1] + uz * 0.5 - tz * 1.5, c[0] + ux * 0.5 + tx * 1.5, c[1] + uz * 0.5 + tz * 1.5, c[0] + tx * 1.5, c[1] + tz * 1.5];
+      drapePolygon(markings, new Float32Array(q), [], (x, z) => zAt([x, z], u[ic]) + 0.03, COL.white, 50);
     }
   }
   // markings: left-turn arrow mid-way, give-way line + triangle where it rejoins arm B

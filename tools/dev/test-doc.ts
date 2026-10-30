@@ -353,6 +353,12 @@ check(!!doc.get(s0.id) && C.mesher.segs.has(`${s0.id}~0`), 'undo delete restores
   const back = new CityDoc(buildBase(net, tile, util), newMeta('kp', '', ''));
   openMap(back, parse(serialize(docJ)));
   check((back.get<'junction'>(jid)?.slips?.length ?? 0) > 0, 'slip lanes survive save / load');
+  // options: zebra across the lane, paved refuge island, boundary wall
+  const layer = (L: string) => M.items.get('n:' + jid)?.layers[L]?.idx.length ?? 0;
+  const [mk0, cc0] = [layer('markings'), layer('concrete')];
+  docJ.transact('Slip options', () => docJ.set(jid, 'slips', docJ.get<'junction'>(jid)!.slips!.map((s) => ({ ...s, crossing: true, island: 'paved' as const, wall: true }))));
+  CJ.update([jid]);
+  check(M.slipsBuilt(jid).size > 0 && layer('markings') > mk0 && layer('concrete') > cc0, `slip lane options: zebra adds markings (${mk0} → ${layer('markings')}), wall adds concrete (${cc0} → ${layer('concrete')})`);
 }
 // ---- road tools (Network Multitool style) ----
 {

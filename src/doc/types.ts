@@ -65,7 +65,7 @@ export interface JunctionObj {
   /** yellow keep-clear box */
   box?: boolean;
   /** free-left slip lanes: from one arm section to the next arm round (width / radius in metres) */
-  slips?: { from: Id; to: Id; w?: number; r?: number }[];
+  slips?: { from: Id; to: Id; w?: number; r?: number; crossing?: boolean; island?: 'green' | 'paved'; wall?: boolean; walk?: number }[];
   name?: string;
 }
 

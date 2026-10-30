@@ -500,7 +500,7 @@ function SlipsTab(p: { id: Id }) {
   if (!cands.length) return <p class="muted small">No corner here suits a slip lane (each needs two arms 35°–150° apart, at ground level).</p>;
   return (
     <>
-      <p class="muted small">A free-left lane round a corner, with a raised island, a footpath along it and a give-way line where it rejoins traffic (IRC:SP:41: 4.5–5.5 m wide, 15–25 m radius).</p>
+      <p class="muted small">A free-left lane round a corner, with a raised island (landscaped or a pedestrian refuge), a footpath along it, an optional zebra crossing and boundary wall, and a give-way line where it rejoins traffic (IRC:SP:41: 4.5–5.5 m wide, 15–25 m radius).</p>
       {cands.map((c) => {
         const k = find(c), s = k >= 0 ? slips[k] : null;
         const upd = (patch: Partial<NonNullable<typeof s>>, m?: string) => put(slips.map((x, i) => (i === k ? { ...x, ...patch } : x)), 'Slip lane', m);
@@ -512,6 +512,16 @@ function SlipsTab(p: { id: Id }) {
               <div class="grid2">
                 <NumberField label="Width" unit="m" value={s.w ?? 5} step={0.25} min={3.5} max={8} disabled={ro} onChange={(v, m) => upd({ w: v }, m)} />
                 <NumberField label="Radius" unit="m" value={s.r ?? 20} step={1} min={10} max={40} disabled={ro} onChange={(v, m) => upd({ r: v }, m)} />
+              </div>
+            )}
+            {s && (
+              <div class="slip-opts">
+                <div class="row-inline"><span class="muted small">Island</span>
+                  <Seg small value={s.island ?? 'green'} options={[{ value: 'green', label: 'Landscaped' }, { value: 'paved', label: 'Pedestrian refuge' }]} onChange={(v) => upd({ island: v === 'green' ? undefined : (v as 'paved') })} />
+                </div>
+                <Toggle label="Zebra crossing across the lane" checked={!!s.crossing} disabled={ro} onChange={(v) => upd({ crossing: v || undefined })} />
+                <Toggle label="Boundary wall along the outside" checked={!!s.wall} disabled={ro} onChange={(v) => upd({ wall: v || undefined })} />
+                <NumberField label="Footpath" unit="m" value={s.walk ?? 1.8} step={0.25} min={0} max={5} disabled={ro} onChange={(v, m) => upd({ walk: v }, m)} />
               </div>
             )}
           </div>

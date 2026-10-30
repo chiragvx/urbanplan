@@ -273,6 +273,8 @@ a { color: var(--accent); }
 .layer-more .row-inline { align-items: center; gap: 6px; }
 .phase-plan { display: flex; gap: 10px; align-items: center; }
 .slip-row { display: flex; flex-direction: column; gap: 6px; padding: 6px 0; border-top: 1px solid var(--line); }
+.slip-opts { display: flex; flex-direction: column; gap: 6px; }
+.slip-opts .row-inline { display: flex; align-items: center; gap: 8px; }
 .phase-svg { width: 112px; height: 112px; flex: none; background: var(--panel-2); border-radius: 10px; }
 .phase-svg line { stroke-width: 7; stroke-linecap: round; }
 .phase-svg .go line, .phase-svg .go circle { stroke: var(--ok); fill: var(--ok); }
