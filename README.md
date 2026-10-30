@@ -70,6 +70,29 @@ npm test        # headless document + cross-section tests
   tight curves, widths beyond the DP reserve.
 - <kbd>Ctrl K</kbd> command palette (commands, road names, `lat, lon` / `x, z`), <kbd>?</kbd> all shortcuts. Everything undoes.
 
+### Road tools (<kbd>J</kbd>, Network Multitool style)
+
+One tool with 14 modes (keys 1–9, 0, Shift+1–4; or the options bar): each previews what it will do and says why it
+can't. `=` / `−` change the radius / offset (Shift ×10, Alt ×0.1), `Z` the next shape / other side, Enter applies,
+Esc or right-click steps back.
+
+| Mode | What it does |
+|---|---|
+| Add / remove junction | split a road at a point (Alt: whole metres from its start) / remove a junction between two roads |
+| Merge junctions | merge one junction into another (≤ 8 roads, ≤ 60 m apart, not already joined) |
+| Split junction | pick some of a junction's roads and move them to a new junction (Shift keeps its height) |
+| Intersect | a junction where two roads cross (refuses roads that don't cross or cross too near an end) |
+| Lock / Invert | lock sections against edits and the bulldozer (a padlock shows) / reverse direction (Shift: whole road) |
+| Arrange on line | junctions in order onto one straight line (through first → last, or along the first road) |
+| Arrange on circle | junctions onto a fitted circle — drag the centre, ring or a junction; spacing as placed / even / even between crossings / crossings even; the roads between become arcs |
+| Even slope | one gradient from the first junction to the last; junctions between are raised / lowered and the roads graded |
+| Loop | straight – curve – straight between two roads (the 90° turn or the 270° loop) |
+| Connection | curve – straight – curve between two roads, two radii, every turn combination |
+| Parallel | a copy of a road alongside (offset, side, height), joining junctions already at its ends |
+| Curve between ends | a smooth curve joining the ends of two roads |
+
+Loops, connections and curves are built as the road tool's current type (picked in the options bar).
+
 ### Maps: save, publish, copy
 
 A map is **only your edits** (`.urbanplan.json`): one line per edited object, so `git diff` reads like "this road's

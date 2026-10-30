@@ -117,8 +117,15 @@ export class Compiler {
     return { segs, shapes };
   }
 
+  /** A junction raised / lowered as part of a graded run (not a flyover deck): its sections are graded, none off the ground. */
+  private gradedJunction(j: JunctionObj): boolean {
+    if (Math.abs(j.lift) <= 0.25) return false;
+    const S = this.doc.sectionsAt(j.id);
+    return S.some((s) => s.grade) && !S.some((s) => s.elevated || s.bridge !== 'none' || s.tunnel);
+  }
+
   private junctionNode(j: JunctionObj): MNode {
-    return { id: j.id, x: j.x, z: j.z, lift: j.lift, R: j.R, ringLanes: j.ringLanes, signals: j.signals, rc: j.rc, crossings: j.crossings, phases: j.phases, phase: j.phase, box: j.box, slips: j.slips };
+    return { id: j.id, x: j.x, z: j.z, lift: j.lift, R: j.R, ringLanes: j.ringLanes, signals: j.signals, rc: j.rc, crossings: j.crossings, phases: j.phases, phase: j.phase, box: j.box, slips: j.slips, graded: this.gradedJunction(j) };
   }
 
   /** Everything (initial load). */

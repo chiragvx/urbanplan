@@ -420,6 +420,8 @@ export interface MNode {
   box?: boolean;
   /** free-left slip lanes: from one arm (owner section id) to the next arm round, width / radius in metres */
   slips?: SlipSpec[];
+  /** raised / lowered as part of a graded run: a ground junction at terrain + lift (the ground cut / filled), not a deck */
+  graded?: boolean;
 }
 
 export interface SlipSpec { from: string; to: string; w?: number; r?: number }
@@ -620,7 +622,7 @@ export class RoadMesher {
 
   private nodeLifted = (n: MNode) => n.lift > 0.25;
   private nodeSunk = (n: MNode) => n.lift < -0.25;
-  private nodeOff = (n: MNode) => Math.abs(n.lift) > 0.25;
+  private nodeOff = (n: MNode) => Math.abs(n.lift) > 0.25 && !n.graded;
   private nodeZc = (n: MNode) => this.T(n.x, n.z) + n.lift;
   private nodeZ = (n: MNode, x: number, z: number) => (this.nodeOff(n) ? this.nodeZc(n) : this.groundPlane(n)(x, z)) + LIFT;
 
@@ -629,7 +631,7 @@ export class RoadMesher {
    * but never more than MAX_TILT (a junction is graded, not draped over every bump).
    */
   groundPlane(n: MNode): (x: number, z: number) => number {
-    const T = this.T, h = T(n.x, n.z), d = 6;
+    const T = this.T, h = T(n.x, n.z) + (n.graded ? n.lift : 0), d = 6;
     let gx = (T(n.x + d, n.z) - T(n.x - d, n.z)) / (2 * d), gz = (T(n.x, n.z + d) - T(n.x, n.z - d)) / (2 * d);
     const m = Math.hypot(gx, gz);
     if (m > MAX_TILT) { gx *= MAX_TILT / m; gz *= MAX_TILT / m; }

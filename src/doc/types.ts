@@ -32,6 +32,8 @@ export interface SectionObj {
    * ground is cut and filled to it. Undefined = the road follows the terrain.
    */
   grade?: { step: number; z: number[] };
+  /** locked against changes (the road tools' lock mode) */
+  locked?: boolean;
   viaduct: boolean;
   /** Development Plan road reserve (m), when measured */
   reserve?: number;

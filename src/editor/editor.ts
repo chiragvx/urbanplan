@@ -18,6 +18,7 @@ import {
 } from './state';
 import { RoadTool, type SnapResult } from './roadtool';
 import { AssetTool } from './assettool';
+import { MultiTool } from './multitool';
 import { getAsset } from '../assets';
 import { DPRegions, type DPRegion } from './dpregions';
 import { traceAt } from './wand';
@@ -39,7 +40,8 @@ type Drag =
   | { kind: 'width'; h: Handle; moved: boolean; n: number }
   | { kind: 'anchor'; owner: Id; k: number; handle?: 'in' | 'out'; start: [number, number]; base: Anchor[] | number[]; moved: boolean; n: number; alt: boolean }
   | { kind: 'pen'; idx: number; start: [number, number] }
-  | { kind: 'measure'; a: [number, number]; b: [number, number] };
+  | { kind: 'measure'; a: [number, number]; b: [number, number] }
+  | { kind: 'mt' };
 
 /** File / app-level actions the editor's commands need (implemented by the app shell). */
 export interface AppApi {
@@ -66,6 +68,8 @@ export class Editor {
   readonly road: RoadTool;
   /** routes, structures and areas from the asset palette */
   readonly at: AssetTool;
+  /** road tools (Network Multitool style) */
+  readonly mt: MultiTool;
   readonly dpr = new DPRegions();
   /** terraforming: earthworks → designed ground */
   readonly terrain: TerrainCompiler;
@@ -99,6 +103,7 @@ export class Editor {
     this.hit.rebuild();
     this.road = new RoadTool(this);
     this.at = new AssetTool(this);
+    this.mt = new MultiTool(this);
     this.terrain = new TerrainCompiler(doc, hf);
     this.terra = new TerrainTool(this);
     this.tview = new TerrainView(this);
@@ -221,8 +226,9 @@ export class Editor {
     return [p.x, p.z];
   }
 
-  canPick = (kind: Kind, layer?: Id) => {
+  canPick = (kind: Kind, layer?: Id, id?: Id) => {
     if (kind === 'region') return dpRegionsOn.value;
+    if (kind === 'section' && id && this.doc.get<'section'>(id)?.locked && !(tool.value === 'multi' && this.mt.mode === 'lock')) return false;
     if (kind === 'earthwork') return terrainView.value;
     const L = this.doc.get<'layer'>(layer ?? (kind === 'section' || kind === 'junction' ? 'roads' : kind === 'building' ? 'buildings' : ''));
     return !L || (L.visible && !L.locked);
@@ -405,6 +411,7 @@ export class Editor {
     if (t === 'route' || t === 'place' || t === 'area') { this.at.click(w, e.ctrlKey || e.metaKey, e.shiftKey, e.altKey); return; }
     if (t === 'measure') { this.drag = { kind: 'measure', a: w, b: w }; this.measure = { a: w, b: w }; return; }
     if (t === 'knife') return this.knife(w, e.shiftKey);
+    if (t === 'multi') { if (this.mt.down(w)) this.drag = { kind: 'mt' }; else this.mt.click(w, e); return; }
     // handles first (width handles in select, anchors in direct)
     const h = this.handleAt(s);
     if (h && !readOnly.value) {
@@ -458,6 +465,7 @@ export class Editor {
       case 'marquee': d.b = w; break;
       case 'bulldoze': this.bulldozeAt(w, e.shiftKey, d.n); break;
       case 'terrain': this.terra.move(w); break;
+      case 'mt': this.mt.dragTo(w); break;
       case 'measure': d.b = this.snapPoint(w, e.shiftKey ? d.a : null).p; this.measure = { a: d.a, b: d.b }; break;
       case 'junction': {
         if (!d.moved && !moved(d.start)) break;
@@ -502,6 +510,7 @@ export class Editor {
     if (!d) return;
     if (mode.value === '3d' && d.kind !== 'pan') this.syncSoon(0);
     const w = this.toWorld(...this.local(e));
+    if (d.kind === 'mt') { this.mt.up(); return; }
     if (d.kind === 'terrain') {
       this.terra.up(w);
       const p = this.pendingTerrain;
@@ -568,6 +577,7 @@ export class Editor {
   /** Right-click in the road tool: drop the last point, or stop the road being drawn. */
   stepBack() {
     if (tool.value === 'route' || tool.value === 'place' || tool.value === 'area') { this.at.back(); return; }
+    if (tool.value === 'multi') { this.mt.back(); return; }
     if (tool.value !== 'pen') return;
     if (settings.value.roadMode === 'freeform') {
       if (this.pen.pts.length) { this.pen.pts.pop(); this.overlayDirty = true; }
@@ -584,6 +594,7 @@ export class Editor {
       return;
     }
     if (tool.value === 'terrain') { this.terra.cursor = w; this.overlayDirty = true; return; }
+    if (tool.value === 'multi') { this.mt.hover(w, { shiftKey: shift, altKey: !!e?.altKey, ctrlKey: ctrl }); return; }
     if (tool.value === 'bulldoze') {
       const p = this.pickAt(w[0], w[1]);
       const next: Sel | null = !p ? null : p.kind === 'section' ? (shift ? { kind: 'road', id: this.doc.get<'section'>(p.id)!.road } : { kind: 'section', id: p.id }) : { kind: p.kind, id: p.id };
@@ -603,7 +614,7 @@ export class Editor {
   }
 
   private baseCursor() {
-    return { select: 'default', direct: 'default', pen: 'crosshair', knife: 'crosshair', line: 'crosshair', measure: 'crosshair', hand: 'grab', bulldoze: 'crosshair', wand: 'cell', terrain: 'crosshair', route: 'crosshair', place: 'copy', area: 'crosshair' }[tool.value];
+    return { select: 'default', direct: 'default', pen: 'crosshair', knife: 'crosshair', line: 'crosshair', measure: 'crosshair', hand: 'grab', bulldoze: 'crosshair', wand: 'cell', terrain: 'crosshair', route: 'crosshair', place: 'copy', area: 'crosshair', multi: 'crosshair' }[tool.value];
   }
   updateCursor() { this.overlay.style.cursor = this.spaceDown ? 'grab' : this.baseCursor(); }
 
@@ -963,6 +974,7 @@ export class Editor {
     if (t !== 'terrain') this.terra.cancel();
     if (t === 'terrain' && !terrainView.value) { terrainView.value = true; this.applyExaggeration(); }
     if (t !== 'measure') this.measure = null;
+    if (t !== 'multi') this.mt.reset();
     tool.value = t;
     this.updateCursor();
     this.overlayDirty = true;
@@ -978,6 +990,7 @@ export class Editor {
       measure: 'Drag to measure · hover a road to read its width',
       hand: 'Drag to pan',
       route: this.at.hint(), place: this.at.hint(), area: this.at.hint(),
+      multi: this.mt.hint(),
     }[t];
   }
 }

@@ -2,7 +2,7 @@
 import { signal, computed } from '@preact/signals';
 import type { Id, Kind } from '../doc/types';
 
-export type Tool = 'select' | 'direct' | 'pen' | 'knife' | 'line' | 'measure' | 'hand' | 'bulldoze' | 'wand' | 'terrain' | 'route' | 'place' | 'area';
+export type Tool = 'select' | 'direct' | 'pen' | 'knife' | 'line' | 'measure' | 'hand' | 'bulldoze' | 'wand' | 'terrain' | 'route' | 'place' | 'area' | 'multi';
 /** Road tool modes, as in Cities: Skylines (freeform = the Bézier pen; replace = CS's upgrade tool). */
 export type RoadMode = 'straight' | 'curve' | 'complex' | 'continuous' | 'freeform' | 'replace';
 export type ViewMode = '2d' | '3d';
@@ -32,6 +32,8 @@ export const leftTab = signal<'layers' | 'roads' | 'issues' | 'review' | 'survey
 export const leftOpen = signal(false);
 /** inspector tab per panel kind (road, section…), kept while selecting other objects of that kind */
 export const inspTab = signal<Record<string, string>>({});
+/** bumps when the road tools' mode / values change (their options bar re-renders) */
+export const mtTick = signal(0);
 /** survey tab: which regions to walk */
 export const surveyFilter = signal<'reserved' | 'all'>('reserved');
 export const paletteOpen = signal(false);
@@ -74,13 +76,14 @@ export interface Settings {
   /** assets saved from cross-sections ("Save as asset") */ customAssets: import('../assets/model').AssetDef[];
   /** UI theme: follow the system, or light / dark */ theme: 'system' | 'light' | 'dark';
   /** side panels float over the map (Cities: Skylines style) or sit beside it */ panels: 'floating' | 'docked';
+  /** road tools: the mode in use */ mtMode: string;
 }
 function loadSettings(): Settings {
   const def: Settings = {
     author: '', wheel: 'zoom', snap: true, showGrid: false, units: 'm',
     roadMode: 'straight', elevStep: 2.5, snapGeometry: true, snapAngles: true, snapGuides: true, snapLength: 1, grade: 0.035, roadGraded: false,
     terrainOp: 'shift', brushRadius: 40, brushStrength: 0.5, levelHeight: null, levelBalanced: true, embankOffset: 2, embankWidth: 10, pondDepth: 2, exaggeration: 1,
-    graphics: 'simple', customAssets: [], theme: 'system', panels: 'floating',
+    graphics: 'simple', customAssets: [], theme: 'system', panels: 'floating', mtMode: 'addNode',
   };
   // key keeps the old name so settings survive the rename
   try { return { ...def, ...JSON.parse(localStorage.getItem('pune-remix:settings') ?? '{}') }; } catch { return def; }

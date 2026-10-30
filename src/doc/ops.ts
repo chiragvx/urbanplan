@@ -788,3 +788,146 @@ export function gradeSections(doc: CityDoc, ids: Id[], ground: (x: number, z: nu
 export function ungradeSections(doc: CityDoc, ids: Id[]) {
   for (const id of ids) if (doc.get<'section'>(id)?.grade) doc.set(id, 'grade', undefined);
 }
+
+// ---------------- road tools (Network Multitool style) ----------------
+
+/** The section joining two junctions directly, if any. */
+export function sectionBetween(doc: CityDoc, a: Id, b: Id): SectionObj | undefined {
+  return doc.sectionsAt(a).find((s) => (s.a === a && s.b === b) || (s.a === b && s.b === a));
+}
+
+/** Give a section a new path running from junction `from` to the other end (reversed to the section's own a → b). */
+function setPathFrom(doc: CityDoc, s: SectionObj, from: Id, pts: V2[], lifts: number[]) {
+  const P = anchorsFromPolyline(pts, lifts, 0.05);
+  doc.set(s.id, 'path', s.a === from ? P : reversePath(P));
+}
+
+/** Why two sections can't be joined where they cross (or none: the crossing point). */
+export function intersectProblem(doc: CityDoc, a: Id, b: Id): { p?: V2; why?: 'common' | 'none' | 'edge' } {
+  const A = doc.get<'section'>(a), B = doc.get<'section'>(b);
+  if (!A || !B || a === b) return { why: 'none' };
+  if ([A.a, A.b].some((j) => j === B.a || j === B.b)) return { why: 'common' };
+  const SA = samplePath(anchorsOf(doc, A), 16);
+  const x = crossingsOf(doc, SA.pts, SA.lift, new Set([a])).filter((c) => c.other === b);
+  if (!x.length) return { why: 'none' };
+  const c = x[0];
+  const nb = nearestOnPath(anchorsOf(doc, B), c.p);
+  if (c.s < 2 || SA.len - c.s < 2 || nb.s < 2 || nb.len - nb.s < 2) return { p: c.p, why: 'edge' };
+  return { p: c.p };
+}
+
+/** A junction where two sections cross (both split there). Returns the junction. */
+export function intersectSections(doc: CityDoc, a: Id, b: Id): Id | null {
+  const q = intersectProblem(doc, a, b);
+  if (q.why || !q.p) return null;
+  const ra = splitSection(doc, a, q.p), rb = splitSection(doc, b, q.p);
+  if (!ra || !rb) return ra?.junction ?? null;
+  mergeJunctions(doc, rb.junction, ra.junction);
+  return ra.junction;
+}
+
+/**
+ * Split a junction: the chosen sections move to a new junction at (x, z) — on the ground, or at the old junction's
+ * height when `keepLift`. Returns the new junction.
+ */
+export function splitJunction(doc: CityDoc, j: Id, sections: Id[], x: number, z: number, keepLift = false): Id | null {
+  const J = doc.get<'junction'>(j);
+  const all = doc.sectionsAt(j);
+  if (!J || !sections.length || sections.length >= all.length) return null;
+  const n = newJunction(doc, x, z, keepLift ? J.lift : 0);
+  for (const id of sections) {
+    const s = doc.get<'section'>(id);
+    if (!s) continue;
+    doc.update(id, s.a === j ? { a: n.id } : { b: n.id });
+  }
+  return n.id;
+}
+
+/** Why junction `src` can't be merged into `dst` (or null when it can). */
+export function unionProblem(doc: CityDoc, src: Id, dst: Id, maxDist = 60): 'same' | 'common' | 'overflow' | 'far' | null {
+  const S = doc.get<'junction'>(src), D = doc.get<'junction'>(dst);
+  if (!S || !D || src === dst) return 'same';
+  if (sectionBetween(doc, src, dst)) return 'common';
+  if (doc.sectionsAt(src).length + doc.sectionsAt(dst).length > 8) return 'overflow';
+  if (Math.hypot(S.x - D.x, S.z - D.z) > maxDist) return 'far';
+  return null;
+}
+
+/** Sections joining consecutive junctions of a chain (null if two neighbours aren't directly joined). */
+export function chainSections(doc: CityDoc, jids: Id[]): SectionObj[] | null {
+  const out: SectionObj[] = [];
+  for (let i = 0; i + 1 < jids.length; i++) { const s = sectionBetween(doc, jids[i], jids[i + 1]); if (!s) return null; out.push(s); }
+  return out;
+}
+
+/** Line the junctions up on a straight line (through `a` along `h`); the sections between them become straight. */
+export function arrangeOnLine(doc: CityDoc, jids: Id[], a: V2, h: V2) {
+  const l = Math.hypot(h[0], h[1]) || 1, ux = h[0] / l, uz = h[1] / l;
+  for (const id of jids) {
+    const J = doc.get<'junction'>(id)!;
+    const t = (J.x - a[0]) * ux + (J.z - a[1]) * uz;
+    moveJunction(doc, id, a[0] + ux * t, a[1] + uz * t);
+  }
+  for (const s of chainSections(doc, jids) ?? []) straighten(doc, s.id);
+}
+
+/**
+ * Put the junctions on a circle (centre c, radius R) at the given angles (atan2 sense, already in travel order and
+ * unwrapped: each step is the signed sweep); the sections between them become arcs. `closed`: the last joins the first.
+ */
+export function arrangeOnCircle(doc: CityDoc, jids: Id[], c: V2, R: number, angles: number[], closed = false) {
+  jids.forEach((id, i) => moveJunction(doc, id, c[0] + Math.cos(angles[i]) * R, c[1] + Math.sin(angles[i]) * R));
+  const order = closed ? [...jids, jids[0]] : jids;
+  const span = angles[angles.length - 1] - angles[0];
+  const angs = closed ? [...angles, angles[0] + Math.sign(span || 1) * 2 * Math.PI] : angles;
+  for (let i = 0; i + 1 < order.length; i++) {
+    const s = sectionBetween(doc, order[i], order[i + 1]);
+    if (!s) continue;
+    const sweep = angs[i + 1] - angs[i];
+    const n = Math.max(8, Math.ceil(Math.abs(sweep) / 0.05));
+    const pts: V2[] = [], lifts: number[] = [];
+    const la = doc.get<'junction'>(order[i])!.lift, lb = doc.get<'junction'>(order[i + 1])!.lift;
+    for (let k = 0; k <= n; k++) { const t = angs[i] + (sweep * k) / n; pts.push([c[0] + Math.cos(t) * R, c[1] + Math.sin(t) * R]); lifts.push(la + ((lb - la) * k) / n); }
+    setPathFrom(doc, s, order[i], pts, lifts);
+  }
+}
+
+/**
+ * One even gradient along a chain of junctions (from the first's height to the last's, by distance): the junctions
+ * in between are raised / lowered and the sections graded to it (the ground is cut / filled). `ground(x, z)` =
+ * designed terrain height in the profile's units (as `gradeSections`); `rel(x, z)` = the same height in the units
+ * junction lifts are measured from. Returns the gradient.
+ */
+export function slopeChain(doc: CityDoc, jids: Id[], ground: (x: number, z: number) => number, step = GRADE_STEP): number {
+  const secs = chainSections(doc, jids);
+  if (!secs || jids.length < 2) return 0;
+  const J = jids.map((id) => doc.get<'junction'>(id)!);
+  const lens = secs.map((s) => samplePath(anchorsOf(doc, s), 24).len);
+  const L = lens.reduce((a, b) => a + b, 0) || 1;
+  const h0 = ground(J[0].x, J[0].z) + J[0].lift, h1 = ground(J[J.length - 1].x, J[J.length - 1].z) + J[J.length - 1].lift;
+  const g = (h1 - h0) / L;
+  let acc = 0;
+  secs.forEach((s, i) => {
+    const fwd = s.a === jids[i];
+    const len = lens[i], m = Math.max(2, Math.ceil(len / step) + 1);
+    const z: number[] = [];
+    for (let k = 0; k < m; k++) { const u = (len * k) / (m - 1); z.push(r2(h0 + g * (acc + (fwd ? u : len - u)))); }
+    doc.update(s.id, { grade: { step, z }, path: s.path.map((p) => ({ ...p, lift: 0 })), bridge: 'none', deck: 0, elevated: false, tunnel: false });
+    acc += len;
+    // the next junction sits on the line
+    if (i < secs.length - 1) { const nj = J[i + 1]; doc.set(nj.id, 'lift', r2(h0 + g * acc - ground(nj.x, nj.z))); }
+  });
+  return g;
+}
+
+/** A new road along a polyline between two pen ends (each a junction, a point on a section, or open). */
+export function roadAlong(doc: CityDoc, pts: V2[], a: PenPoint, b: PenPoint, cls: string, opt: { parts?: Part[]; asset?: string; name?: string; road?: Id } = {}, h0?: V2, h1?: V2): { road: Id; section: Id | null } {
+  const P = anchorsFromPolyline(pts, pts.map(() => 0), 0.08, h0, h1);
+  const r = drawStretch(doc, a, b, cubicsOf(P), cls, opt);
+  return { road: r.road, section: r.section };
+}
+
+/** Lock / unlock sections against changes (they can't be picked, moved or bulldozed while locked). */
+export function setLocked(doc: CityDoc, ids: Id[], on: boolean) {
+  for (const id of ids) if (doc.get<'section'>(id)) doc.set(id, 'locked', on || undefined);
+}

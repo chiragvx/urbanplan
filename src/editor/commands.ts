@@ -294,6 +294,7 @@ export const COMMANDS: Command[] = [
   { id: 'tool.direct', label: 'Edit points tool', group: 'Tools', keys: 'A', run: (E) => E.setTool('direct') },
   { id: 'tool.pen', label: 'Draw road tool', group: 'Tools', keys: 'P', enabled: editable, run: (E) => E.setTool('pen') },
   { id: 'tool.knife', label: 'Split / join tool', group: 'Tools', keys: 'K', enabled: editable, run: (E) => E.setTool('knife') },
+  { id: 'tool.multi', label: 'Road tools: junctions, intersect, lock, arrange, slope, loop, connection, parallel, curve', group: 'Tools', keys: 'J', enabled: editable, run: (E) => E.setTool('multi') },
   { id: 'tool.line', label: 'Draw utility / rail line tool', group: 'Tools', keys: 'L', enabled: editable, run: (E) => E.setTool('line') },
   { id: 'tool.measure', label: 'Measure tool', group: 'Tools', keys: 'M', run: (E) => E.setTool('measure') },
   { id: 'tool.hand', label: 'Hand (pan) tool', group: 'Tools', keys: 'H', run: (E) => E.setTool('hand') },
@@ -404,6 +405,8 @@ export function bindShortcuts(E: Editor) {
     const name = keyName(e);
     // the 3D camera flies with W A S D Q E R F
     if (mode.value === '3d' && /^[WASDQERF]$/.test(name)) return;
+    // the road tools take their own keys first (modes, = / −, Z, Enter, Esc …)
+    if (tool.value === 'multi' && E.mt.key(name)) { e.preventDefault(); return; }
     const cmd = COMMANDS.find((c) => c.keys === name);
     if (!cmd) return;
     e.preventDefault();

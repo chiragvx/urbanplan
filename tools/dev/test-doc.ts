@@ -352,6 +352,69 @@ check(!!doc.get(s0.id) && C.mesher.segs.has(`${s0.id}~0`), 'undo delete restores
   openMap(back, parse(serialize(docJ)));
   check((back.get<'junction'>(jid)?.slips?.length ?? 0) > 0, 'slip lanes survive save / load');
 }
+// ---- road tools (Network Multitool style) ----
+{
+  const G = await import('../../src/doc/netgeom');
+  type V2 = [number, number];
+  const near = (a: V2, b: V2, e = 0.05) => Math.hypot(a[0] - b[0], a[1] - b[1]) < e;
+  // geometry: curve–straight–curve and loops start / end where asked, turn no tighter than the radii
+  const csc = G.cscPaths([0, 0], [1, 0], 20, [120, 80], [0, 1], 30);
+  check(csc.length > 0 && csc.every((c) => near(c.pts[0], [0, 0]) && near(c.pts[c.pts.length - 1], [120, 80], 0.5) && G.minRadius(c.pts) > 19), `connections: ${csc.length} shapes, all from start to end, radius ≥ 20 m`);
+  const loops = G.scsLoops([0, 0], [1, 0], [60, 100], [0, 1], 25); // two roads crossing at (60, 0)
+  check(loops.some((l) => Math.abs(l.sweep) > Math.PI) && loops.every((l) => G.minRadius(l.pts.slice(1, -1)) > 24), `loops: ${loops.length} shapes (90° and the 270° loop), radius 25 m`);
+  const ring: V2[] = [0, 1, 2, 3, 4].map((k) => [50 + Math.cos(k) * 40, -20 + Math.sin(k) * 40]);
+  const fc = G.fitCircle(ring);
+  check(!!fc && Math.abs(fc.R - 40) < 0.01 && near(fc.c, [50, -20], 0.01), 'circle fit through junctions');
+  const off = G.offsetPolyline([[0, 0], [50, 0], [100, 30]], 10);
+  check(Math.abs(off[0][1] - -10) < 1e-6 || Math.abs(off[0][1] - 10) < 1e-6, 'parallel offset keeps its distance');
+  // operations on a test grid far from the network
+  const D = new CityDoc(buildBase(net, tile, util), newMeta('kp', '', ''));
+  const X = 2200, Z = -2200;
+  const st = (a: V2, b: V2) => D.transact('road', () => OPS.drawStretch(D, { x: a[0], z: a[1] }, { x: b[0], z: b[1] }, [OPS.line(a, b)], 'tertiary'));
+  const r1 = st([X, Z], [X + 200, Z])!, r2 = st([X + 100, Z - 100], [X + 100, Z + 100])!;
+  const ok = (v: unknown) => !!v;
+  const jx = D.transact('x', () => OPS.intersectSections(D, r1.section!, r2.section!));
+  check(ok(jx) && D.sectionsAt(jx as string).length === 4, 'intersect: two crossing roads meet in a 4-way junction');
+  // split it again: two arms to a new junction 20 m away
+  const arms = D.sectionsAt(jx as string).slice(0, 2).map((s) => s.id);
+  const js = D.transact('split', () => OPS.splitJunction(D, jx as string, arms, X + 120, Z + 20));
+  check(ok(js) && D.sectionsAt(js as string).length === 2 && D.sectionsAt(jx as string).length === 2, 'split junction: two arms move to the new junction');
+  check(OPS.unionProblem(D, js as string, jx as string) === null || OPS.unionProblem(D, js as string, jx as string) === 'common', 'merge check runs');
+  // a wiggly chain of 4 junctions: line them up, then a circle, then a slope
+  const P: V2[] = [[X, Z + 400], [X + 60, Z + 415], [X + 120, Z + 390], [X + 180, Z + 410]];
+  const ends: string[] = [];
+  for (let i = 0; i + 1 < P.length; i++) {
+    const r = D.transact('w', () => OPS.drawStretch(D, i ? { x: P[i][0], z: P[i][1], junction: ends[i] } : { x: P[i][0], z: P[i][1] }, { x: P[i + 1][0], z: P[i + 1][1] }, [OPS.line(P[i], P[i + 1])], 'residential'))!;
+    if (!i) ends.push(r.a);
+    ends.push(r.b);
+  }
+  check(!!OPS.chainSections(D, ends), 'chain of junctions joined by roads');
+  D.transact('line', () => OPS.arrangeOnLine(D, ends, [X, Z + 400], [1, 0]));
+  check(ends.every((id) => Math.abs(D.get<'junction'>(id)!.z - (Z + 400)) < 0.02), 'arrange on line: every junction on the line');
+  const c: V2 = [X + 90, Z + 480], Rr = 100;
+  const angs = [-2.4, -2.0, -1.4, -0.8];
+  D.transact('circle', () => OPS.arrangeOnCircle(D, ends, c, Rr, angs));
+  const onCircle = ends.every((id) => { const J = D.get<'junction'>(id)!; return Math.abs(Math.hypot(J.x - c[0], J.z - c[1]) - Rr) < 0.05; });
+  const S1 = OPS.chainSections(D, ends)!;
+  const mids = S1.map((s) => { const q = OPS.samplePath(OPS.anchorsOf(D, s), 8); const m = q.pts[Math.floor(q.pts.length / 2)]; return Math.hypot(m[0] - c[0], m[1] - c[1]); });
+  check(onCircle && mids.every((r) => Math.abs(r - Rr) < 0.3), 'arrange on circle: junctions and the roads between them on the circle');
+  const ground = (x: number, z: number) => hf.sample(x, z) + hf.base;
+  D.transact('slope', () => OPS.slopeChain(D, ends, ground));
+  const Js = ends.map((id) => D.get<'junction'>(id)!);
+  const lens = OPS.chainSections(D, ends)!.map((s) => OPS.samplePath(OPS.anchorsOf(D, s), 24).len);
+  const H = Js.map((j) => ground(j.x, j.z) + j.lift);
+  let acc = 0; const grades: number[] = [];
+  for (let i = 0; i + 1 < Js.length; i++) { grades.push((H[i + 1] - H[i]) / lens[i]); acc += lens[i]; }
+  check(grades.every((g) => Math.abs(g - grades[0]) < 0.002) && OPS.chainSections(D, ends)!.every((s) => !!s.grade), `even slope: one gradient along the chain (${(grades[0] * 100).toFixed(2)} %)`);
+  // a connection between the two test roads, a parallel road, locking
+  const rc = D.transact('conn', () => OPS.roadAlong(D, G.cscPaths([X, Z + 400], [1, 0], 20, [X + 300, Z + 200], [0, -1], 20)[0].pts, { x: X, z: Z + 400, junction: ends[0] }, { x: X + 300, z: Z + 200 }, 'residential'));
+  check(!!rc?.section, 'connection built as a road');
+  const par = G.offsetPolyline(OPS.samplePath(OPS.anchorsOf(D, D.get<'section'>(r1.section!) ?? D.all('section')[0]), 8).pts as V2[], 15);
+  check(par.length > 2, 'parallel polyline');
+  const sid = D.all('section').find((s) => s.road === r1.road)!.id;
+  D.transact('lock', () => OPS.setLocked(D, [sid], true));
+  check(D.get<'section'>(sid)!.locked === true, 'lock a section');
+}
 // ---- imported DP roads: standard lanes, no slivers, one lane layout along a road ----
 {
   type Seg = { type: string; name?: string; reserve?: number };

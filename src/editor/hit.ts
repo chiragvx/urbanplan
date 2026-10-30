@@ -93,7 +93,7 @@ export class HitIndex {
    * What's under the cursor. `tol` = pick slack in metres. Layers decide what's pickable.
    * Order: junction surfaces, roads, lines, buildings.
    */
-  pick(x: number, z: number, tol: number, can: (kind: Kind, layer?: Id) => boolean): Pick | null {
+  pick(x: number, z: number, tol: number, can: (kind: Kind, layer?: Id, id?: Id) => boolean): Pick | null {
     const cand = this.query(x - tol - 30, z - tol - 30, x + tol + 30, z + tol + 30);
     let best: Pick | null = null;
     const offer = (p: Pick) => { if (!best || p.d < best.d) best = p; };
@@ -106,7 +106,7 @@ export class HitIndex {
         // the centre handle wins (small junctions sit inside big junction surfaces), then the surface
         if (dc < tol + 2) offer({ kind: 'junction', id, d: -2000 + dc });
         else if (r && inPoly(r, x, z)) offer({ kind: 'junction', id, d: -1000 + dc });
-      } else if (o.kind === 'section' && can('section')) {
+      } else if (o.kind === 'section' && can('section', undefined, id)) {
         const sd = this.sectionDist(id, x, z);
         if (sd && sd.d <= sd.hw + tol) offer({ kind: 'section', id, d: sd.d - sd.hw, p: sd.p });
       } else if (o.kind === 'line' && can('line', o.layer)) {
@@ -161,12 +161,12 @@ export class HitIndex {
   }
 
   /** Ids of a kind whose geometry touches a rectangle (marquee). */
-  inRect(x0: number, z0: number, x1: number, z1: number, kinds: Kind[], can: (kind: Kind, layer?: Id) => boolean): Id[] {
+  inRect(x0: number, z0: number, x1: number, z1: number, kinds: Kind[], can: (kind: Kind, layer?: Id, id?: Id) => boolean): Id[] {
     const out: Id[] = [];
     for (const id of this.query(x0, z0, x1, z1)) {
       const o = this.doc.get(id);
       if (!o || !kinds.includes(o.kind)) continue;
-      if (!can(o.kind, o.kind === 'line' ? o.layer : undefined)) continue;
+      if (!can(o.kind, o.kind === 'line' ? o.layer : undefined, id)) continue;
       const inside = (x: number, z: number) => x >= x0 && x <= x1 && z >= z0 && z <= z1;
       if (o.kind === 'junction') { if (inside(o.x, o.z)) out.push(id); continue; }
       if (o.kind === 'section') { const P = anchorsOf(this.doc, o); const g = this.C.geo(id); const pts = g ? g.pts : P.flatMap((p) => [p.x, p.z]); for (let i = 0; i < pts.length; i += 2) if (inside(pts[i], pts[i + 1])) { out.push(id); break; } continue; }

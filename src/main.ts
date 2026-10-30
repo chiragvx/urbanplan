@@ -10,6 +10,7 @@ import { Dialogs, Profile } from './ui/dialogs';
 import { RoadToolbar } from './ui/RoadToolbar';
 import { BuildPalette } from './ui/BuildPalette';
 import { TerrainToolbar } from './ui/TerrainToolbar';
+import { MultiToolbar } from './ui/MultiToolbar';
 
 const $ = (id: string) => document.getElementById(id)!;
 const TILE = new URLSearchParams(location.search).get('tile') ?? 'kp';
@@ -29,7 +30,7 @@ async function boot() {
   render(h(LeftPanel, {}), $('left'));
   render(h(InspectorCard, {}), $('right'));
   render(h(Dock, {}), $('dock'));
-  render(h('div', {}, h(ReadOnlyBanner, {}), h(RoadToolbar, {}), h(TerrainToolbar, {}), h(BuildPalette, {}), h(Toasts, {}), h(Profile, {})), $('stage-ui'));
+  render(h('div', {}, h(ReadOnlyBanner, {}), h(RoadToolbar, {}), h(TerrainToolbar, {}), h(MultiToolbar, {}), h(BuildPalette, {}), h(Toasts, {}), h(Profile, {})), $('stage-ui'));
   render(h('div', {}, h(Palette, {}), h(Dialogs, {})), $('modals'));
   startTheme();
   // the map changes size with the window and docked panels: keep the renderer + overlay in step

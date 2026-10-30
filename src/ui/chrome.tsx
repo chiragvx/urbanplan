@@ -18,6 +18,7 @@ const TOOLS: { t: Tool; icon: (p: { size?: number }) => preact.JSX.Element; labe
   { t: 'direct', icon: Icon.direct, label: 'Edit points', key: 'A' },
   { t: 'pen', icon: Icon.pen, label: 'Draw road', key: 'P' },
   { t: 'knife', icon: Icon.knife, label: 'Split / join', key: 'K' },
+  { t: 'multi', icon: Icon.multi, label: 'Road tools: junctions, intersect, lock, arrange, slope, loop, connection, parallel, curve', key: 'J' },
   { t: 'line', icon: Icon.line, label: 'Draw line (utilities, rail)', key: 'L' },
   { t: 'measure', icon: Icon.measure, label: 'Measure', key: 'M' },
   { t: 'hand', icon: Icon.hand, label: 'Pan', key: 'H' },
@@ -80,7 +81,7 @@ const VIEWS: { id: string; label: string; title: string; icon?: (p: { size?: num
   { id: 'xray', label: 'X-ray', title: 'X-ray: see underground layers in 3D (X)', icon: Icon.xray, on: () => xray.value, run: () => cmd('view.xray').run(ui.E) },
 ];
 
-const EDIT_TOOLS = ['pen', 'knife', 'line', 'direct', 'bulldoze', 'wand', 'terrain'];
+const EDIT_TOOLS = ['pen', 'knife', 'line', 'direct', 'bulldoze', 'wand', 'terrain', 'multi'];
 
 /** The bottom toolbar (Cities: Skylines' main strip): tools, the build categories, and the status line. */
 export function Dock() {
@@ -101,7 +102,7 @@ export function Dock() {
   };
   return (
     <footer class="dock" onPointerDown={(e) => e.stopPropagation()}>
-      <div class="dk-group">{group(['select', 'direct', 'knife', 'bulldoze'])}</div>
+      <div class="dk-group">{group(['select', 'direct', 'knife', 'multi', 'bulldoze'])}</div>
       <div class="dk-group">{group(['measure', 'hand'])}</div>
       <div class="dk-group">{group(['pen', 'line', 'wand', 'terrain'])}</div>
       {tool.value === 'line' && (

@@ -56,6 +56,8 @@ export function drawOverlay(E: Editor) {
   }
   if (tool.value === 'pen' && settings.value.roadMode !== 'freeform' && settings.value.roadMode !== 'replace') roadTool(E);
   drawAssetTool(E);
+  if (tool.value === 'multi') E.mt.draw(E.ctx, (x, z) => P(x, z), (p, t, dy) => label(E.ctx, p, t, 12, dy ?? 0));
+  lockBadges(E);
   // pen preview
   if (tool.value === 'pen' && settings.value.roadMode === 'freeform') {
     const pts = E.pen.pts.map((p) => P(p.x, p.z, p.lift ?? 0));
@@ -370,6 +372,21 @@ function poly(E: Editor, pts: number[], closed: boolean, color: string, width: n
 }
 
 // ---------------- vector layers (2D) ----------------
+
+/** Locked road sections: a padlock at their middle (2D and 3D). */
+function lockBadges(E: Editor) {
+  const ctx = E.ctx;
+  for (const s of E.doc.all('section')) {
+    if (!s.locked) continue;
+    const P = anchorsOf(E.doc, s), m = P[Math.floor(P.length / 2)];
+    const q = at(E, m.x, m.z);
+    if (q === OFF) continue;
+    ctx.fillStyle = 'rgba(20,24,30,0.85)'; ctx.beginPath(); ctx.roundRect(q[0] - 9, q[1] - 9, 18, 18, 5); ctx.fill();
+    ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.arc(q[0], q[1] - 2, 3.2, Math.PI, 0); ctx.stroke();
+    ctx.fillStyle = '#ffd166'; ctx.fillRect(q[0] - 4.5, q[1] - 1.5, 9, 6.5);
+  }
+}
 
 /** Traffic signals in 2D: a small lamp housing at each signal head, lit red / green for the phase shown. */
 function signalSymbols(E: Editor) {
