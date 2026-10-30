@@ -1,6 +1,7 @@
 // Small building blocks: number fields you can scrub like Figma, toggles, segmented controls, menus, icons.
 import { useContext, useEffect, useRef, useState } from 'preact/hooks';
 import { createContext, type ComponentChildren, type JSX } from 'preact';
+import { createPortal } from 'preact/compat';
 import { inspTab } from '../editor/state';
 
 let scrubSeq = 0;
@@ -141,24 +142,40 @@ export function Section(p: { title: ComponentChildren; children: ComponentChildr
 /** Dropdown menu anchored to a button. */
 export function Menu(p: { label: ComponentChildren; items: ({ label: string; keys?: string; run: () => void; disabled?: boolean } | 'sep')[]; title?: string; class?: string }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLDivElement>(null), popRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
-    const close = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    const close = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node) && !popRef.current?.contains(e.target as Node)) setOpen(false); };
     window.addEventListener('pointerdown', close);
     return () => window.removeEventListener('pointerdown', close);
   }, [open]);
+  // placed on screen (fixed), below the button or above it near the bottom, kept inside the window — so a menu
+  // inside a scrolling card is never clipped
+  const [pos, setPos] = useState<JSX.CSSProperties>({});
+  const toggle = () => {
+    if (!open && ref.current) {
+      const r = ref.current.getBoundingClientRect(), W = window.innerWidth, H = window.innerHeight;
+      const below = H - r.bottom, up = below < 260 && r.top > below;
+      setPos({
+        position: 'fixed', minWidth: Math.max(180, r.width),
+        ...(r.left + 240 > W ? { right: Math.max(8, W - r.right), left: 'auto' } : { left: Math.max(8, r.left), right: 'auto' }),
+        ...(up ? { bottom: H - r.top + 4, top: 'auto', maxHeight: r.top - 16 } : { top: r.bottom + 4, bottom: 'auto', maxHeight: below - 16 }),
+      });
+    }
+    setOpen(!open);
+  };
   return (
     <div class={`menu ${p.class ?? ''}`} ref={ref}>
-      <button class={`menu-btn ${open ? 'on' : ''}`} title={p.title} onClick={() => setOpen(!open)}>{p.label}</button>
-      {open && (
-        <div class="menu-pop">
+      <button class={`menu-btn ${open ? 'on' : ''}`} title={p.title} onClick={toggle}>{p.label}</button>
+      {open && createPortal(
+        <div class="menu-pop" style={pos} ref={popRef}>
           {p.items.map((it, i) => it === 'sep' ? <hr key={i} /> : (
             <button key={i} disabled={it.disabled} onClick={() => { setOpen(false); it.run(); }}>
               <span>{it.label}</span>{it.keys && <kbd>{prettyKeys(it.keys)}</kbd>}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

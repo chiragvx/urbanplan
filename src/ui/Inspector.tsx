@@ -86,7 +86,7 @@ function setParts(target: Id, parts: Part[], merge?: string) {
   ui.E.edit('Cross-section', () => ui.doc.set(target, 'parts', parts), merge);
 }
 
-function WaysControls(p: { target: Id; parts: Part[]; reserve?: number; state?: 'base' | 'own' | 'road' | 'new'; mixed?: boolean; range?: [number, number] }) {
+function WaysControls(p: { target: Id; parts: Part[]; reserve?: number; state?: 'base' | 'own' | 'road' | 'new'; mixed?: boolean; range?: [number, number]; ids?: Id[] }) {
   void docVersion.value; // signals make components pure: re-render on every document change
   const ro = readOnly.value;
   const n = xs.laneCount(p.parts);
@@ -95,7 +95,8 @@ function WaysControls(p: { target: Id; parts: Part[]; reserve?: number; state?: 
   const ch = (f: (q: Part[]) => Part[], merge?: string) => setParts(p.target, f(p.parts), merge);
   return (
     <>
-      <CrossSection parts={p.parts} reserve={p.reserve} disabled={ro} state={p.state} onChange={(q, m) => setParts(p.target, q, m)} />
+      <CrossSection parts={p.parts} reserve={p.reserve} disabled={ro} state={p.state} onChange={(q, m) => setParts(p.target, q, m)}
+        onPreset={(a) => { if (a.profile.type !== 'street') return; const prof = a.profile; ui.E.edit(`Make it ${a.name}`, () => { ui.doc.set(p.target, 'parts', prof.parts.map((q) => ({ ...q }))); for (const id of p.ids ?? [p.target]) ui.doc.set(id, 'asset', a.id); }); }} />
       <div class="grid2">
         <NumberField label="Width" unit="m" value={p.mixed ? null : xs.totalWidth(p.parts)} placeholder={p.range ? `${Math.floor(p.range[0])}–${Math.ceil(p.range[1])}` : undefined} min={2.5} max={80} step={0.5} disabled={ro} state={p.state} onChange={(v, m) => ch((q) => xs.setTotalWidth(q, v), m)} title="Total width, footpath to footpath (drag the label to scrub)" />
         <NumberField label={one ? 'Lanes' : 'Lanes →'} value={one ? n.all : n.f} step={1} digits={0} min={1} max={6} disabled={ro} onChange={(v) => ch((q) => (one ? xs.setLanes(q, Math.round(v), 0) : xs.setLanes(q, Math.round(v), n.b)))} />
@@ -143,7 +144,7 @@ function RoadPanel(p: { id: Id }) {
         { id: 'xs', label: 'Cross-section', body: () => (
           <>
             {mixed && <Varies road={p.id} secs={secs} lead={lead} common={common} reserve={reserves.length === 1 ? reserves[0] : undefined} />}
-            <WaysControls target={p.id} parts={lead.parts} reserve={reserves.length === 1 ? reserves[0] : undefined} state={d.editState(lead.id, 'parts')} mixed={mixed} range={range} />
+            <WaysControls target={p.id} parts={lead.parts} reserve={reserves.length === 1 ? reserves[0] : undefined} state={d.editState(lead.id, 'parts')} mixed={mixed} range={range} ids={secs.map((x) => x.id)} />
             {reserves.length > 1 && <p class="muted small">DP reserve along this road: {reserves.sort((a, b) => a - b).join(' / ')} m</p>}
           </>
         ) },
