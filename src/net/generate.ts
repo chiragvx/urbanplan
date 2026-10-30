@@ -808,6 +808,7 @@ export class RoadMesher {
       for (const e of E) {
         const w = Math.max(e.hwL, e.hwR);
         e.trim = Math.sqrt(Math.max(0, Ro * Ro - Math.min(w, Ro - 0.5) ** 2)) + 3;
+        if (e.g.t.parts.some((p) => p.kind === 'median')) e.trim = Math.max(e.trim, Ro + 1.5);
       }
       setRaw();
       return;
@@ -1053,7 +1054,7 @@ export class RoadMesher {
     let island: Float32Array | null = null;
     const extra: V2[][] = []; // slip lane outlines (bounds, terrain, picking)
     if (kind === 'roundabout') {
-      const r = roundabout(node, E, zf, asphalt, paving, markings, concrete, (e) => this.armPath(e, 40).z);
+      const r = roundabout(node, E, zf, asphalt, paving, markings, concrete, (e) => this.armPath(e, 40));
       ring = r.poly; island = r.island;
     } else {
       const F = E.map((e) => {
@@ -1665,7 +1666,7 @@ function slipLane(asphalt: GeomBuilder, paving: GeomBuilder, markings: GeomBuild
  * triangles at every entry; lane lines and circulation arrows on the ring; a footpath round the outside joining the
  * arms' footpaths; zebra crossings a car length back from the entries; chevron boards on the island facing each entry.
  */
-function roundabout(node: MNode, E: End[], zf: (x: number, z: number) => number, asphalt: GeomBuilder, paving: GeomBuilder, markings: GeomBuilder, poles: GeomBuilder, armZ: (e: End) => (along: number, x: number, z: number) => number) {
+function roundabout(node: MNode, E: End[], zf: (x: number, z: number) => number, asphalt: GeomBuilder, paving: GeomBuilder, markings: GeomBuilder, poles: GeomBuilder, armOf: (e: End) => ArmPath) {
   const lanes = ringLanesOf(node, E);
   const rw = ringHalfWidth(node, E);
   const R = node.R!, Ro = R + rw, Ri = Math.max(2.5, R - rw);
@@ -1675,7 +1676,11 @@ function roundabout(node: MNode, E: End[], zf: (x: number, z: number) => number,
   const circ = (a: number, r: number): V2 => [cx + Math.cos(a) * r, cz + Math.sin(a) * r];
   const F = E.map((e) => {
     const fr = frameAt(e.g, e.atA ? e.trim : e.g.len - e.trim, e.atA);
-    const P = (o: number): V2 => [fr.x + fr.lx * o, fr.z + fr.lz * o];
+    const P = (o: number): V2 => {
+      const p: V2 = [fr.x + fr.lx * o, fr.z + fr.lz * o];
+      const r = Math.hypot(p[0] - cx, p[1] - cz);
+      return r < Ro + 0.3 ? circ(Math.atan2(p[1] - cz, p[0] - cx), Ro + 0.3) : p;
+    };
     return { e, fr, CL: P(e.cwL), CR: P(-e.cwR) };
   }).sort((p, q) => angOf([p.fr.x, p.fr.z]) - angOf([q.fr.x, q.fr.z]));
   const poly: V2[] = [];
@@ -1687,9 +1692,14 @@ function roundabout(node: MNode, E: End[], zf: (x: number, z: number) => number,
   for (let i = 0; i < F.length; i++) {
     const a = F[i], b = F[(i + 1) % F.length];
     poly.push(a.CL, a.CR);
-    let a1 = angOf(a.CR) + d, a2 = angOf(b.CL) - d;
-    while (a2 <= a1) a2 += Math.PI * 2;
-    if (F.length === 1) a2 = a1 + Math.PI * 2 - 2 * d;
+    // angles measured from each arm's own centre, so a mouth wider than the gap to its neighbour shows as a negative gap
+    const wrap = (v: number) => Math.atan2(Math.sin(v), Math.cos(v));
+    const ca = angOf([a.fr.x, a.fr.z]);
+    let cb = angOf([b.fr.x, b.fr.z]);
+    while (cb <= ca) cb += Math.PI * 2;
+    if (F.length === 1) cb = ca + Math.PI * 2;
+    const a1 = ca + wrap(angOf(a.CR) - ca) + d, a2 = cb + wrap(angOf(b.CL) - cb) - d;
+    if (a2 <= a1) { gaps.push([]); continue; } // the mouths meet: straight from one to the next
     const q1 = circ(a1, Ro), q2 = circ(a2, Ro);
     const tan = (a: number): V2 => [-Math.sin(a), Math.cos(a)];
     const gap: V2[] = [a.CR];
@@ -1761,7 +1771,7 @@ function roundabout(node: MNode, E: End[], zf: (x: number, z: number) => number,
   for (const f of F) {
     const t = f.e.g.t;
     if (t.surface === 'dirt') continue;
-    const za = armZ(f.e);
+    const arm = armOf(f.e), za = arm.z;
     const side = f.e.atA ? 1 : -1; // segment-left offsets → outward-left
     const offs = partOffsets(t);
     const P = (o: number, along: number): V2 => [f.fr.x + f.fr.lx * o + f.fr.ux * along, f.fr.z + f.fr.lz * o + f.fr.uz * along];
@@ -1775,17 +1785,25 @@ function roundabout(node: MNode, E: End[], zf: (x: number, z: number) => number,
       if (incoming || p.dir === 0) inc.push(seg); else out.push(seg);
     });
     // the mouth: where the arm's centre line meets the ring's outer edge
-    const dm = Math.max(0, Math.hypot(f.fr.x - cx, f.fr.z - cz) - Ro);
+    const dm = Math.hypot(f.fr.x - cx, f.fr.z - cz) - Ro; // < 0: the arm ends inside the ring (markings run on along it)
+    // how far the road runs straight on from the arm's end (across through joints): markings past it would leave a road
+    // that bends away
+    let avail = 0;
+    for (let al = 1; al <= arm.length; al += 1) {
+      const q = arm.frame(al), dx = q.x - f.fr.x, dz = q.z - f.fr.z;
+      if (q.ux * f.fr.ux + q.uz * f.fr.uz < 0.985 || Math.abs(dx * f.fr.lx + dz * f.fr.lz) > 0.6) break;
+      avail = al;
+    }
     // splitter island between the two directions (two-way arms of a full roundabout)
     let isLo = 0, isHi = 0;
-    if (!mini && inc.length && out.length) {
+    if (!mini && inc.length && out.length && -dm + 8 <= avail) {
       const med = t.parts.map((p, k) => ({ p, a: Math.min(side * offs[k][0], side * offs[k][1]), b: Math.max(side * offs[k][0], side * offs[k][1]) })).find((x) => x.p.kind === 'median');
       const ilo = Math.min(...inc.map((l) => l.lo)), ihi = Math.max(...inc.map((l) => l.hi)), olo = Math.min(...out.map((l) => l.lo)), ohi = Math.max(...out.map((l) => l.hi));
       const c = med ? (med.a + med.b) / 2 : ihi <= olo ? (ihi + olo) / 2 : (ohi + ilo) / 2;
       const h0 = med ? Math.max(0.15, (med.b - med.a) / 2) : 0.15;
       const hMouth = Math.min(h0 + 0.9, 1.6);
-      const Ls = Math.min(14, Math.max(6, f.e.g.len - (f.e.atA ? f.e.g.trimA : f.e.g.trimB) - 2) * 0.8);
       const a0 = -dm + 1.0;
+      const Ls = Math.min(avail, Math.max(a0 + 6, Math.min(14, Math.max(6, avail - 2) * 0.8)));
       const hw = (al: number) => (al <= 1 ? hMouth : hMouth + (h0 - hMouth) * Math.min(1, (al - 1) / Math.max(1, Ls - 1)));
       const L: V2[] = [], Rr: V2[] = [];
       for (let k = 0; k <= 12; k++) { const al = a0 + ((Ls - a0) * k) / 12; L.push(P(c + hw(al), al)); Rr.push(P(c - hw(al), al)); }
@@ -1805,15 +1823,15 @@ function roundabout(node: MNode, E: End[], zf: (x: number, z: number) => number,
       signFace(poles, sp, zs, f.fr.ux, f.fr.uz, [[0.12, 1.62], [0.2, 1.7], [0.0, 1.9], [0.2, 2.1], [0.12, 2.18], [-0.16, 1.9]].reverse().map(([u, v]) => [-u, v] as V2), COL.white, 0.06);
     }
     // give way to traffic on the ring: double dashed line at the mouth across the entry, a triangle behind each lane
-    if (inc.length) {
+    const gw = -dm + 0.7;
+    if (inc.length && gw + 0.8 <= avail) {
       const lo = Math.min(...inc.map((l) => l.lo)), hi = Math.max(...inc.map((l) => l.hi));
-      const gw = -dm + 0.7;
       const zl = (x: number, z: number) => zAt(x, z);
       dashedAcross(markings, f.fr, lo, hi, gw, zl);
       dashedAcross(markings, f.fr, lo, hi, gw + 0.6, zl);
       for (const l of inc) {
         const c = (l.lo + l.hi) / 2, y0 = gw + 3, y1 = gw + 6.5, w = Math.min(0.75, (l.hi - l.lo) / 2 - 0.3);
-        if (w < 0.2) continue;
+        if (w < 0.2 || y1 > avail) continue;
         const A = P(c - w, y1), B = P(c + w, y1), C = P(c, y0);
         const bar = (p: V2, q: V2) => { const dx = q[0] - p[0], dz = q[1] - p[1], Ln = Math.hypot(dx, dz) || 1, nx = -dz / Ln * 0.1, nz = dx / Ln * 0.1; flat([[p[0] + nx, p[1] + nz], [q[0] + nx, q[1] + nz], [q[0] - nx, q[1] - nz], [p[0] - nx, p[1] - nz]]); };
         bar(A, B); bar(B, C); bar(C, A);
@@ -1822,7 +1840,7 @@ function roundabout(node: MNode, E: End[], zf: (x: number, z: number) => number,
     // zebra crossing a car length back from the entry, broken at the splitter island
     if (node.crossings ?? t.major) {
       const cw = Math.max(f.e.cwL, f.e.cwR), z0 = Math.max(1, -dm + 7), z1 = z0 + 3;
-      for (let o = -cw + 0.4; o < cw - 0.5; o += 1.0) {
+      if (z1 <= avail) for (let o = -cw + 0.4; o < cw - 0.5; o += 1.0) {
         if (isHi > isLo && o + 0.5 > isLo - 0.2 && o < isHi + 0.2) continue;
         if (t.parts.some((p, k) => p.kind === 'median' && o + 0.5 > Math.min(side * offs[k][0], side * offs[k][1]) && o < Math.max(side * offs[k][0], side * offs[k][1]))) continue;
         flat([P(o, z0), P(o + 0.5, z0), P(o + 0.5, z1), P(o, z1)]);
@@ -1856,7 +1874,11 @@ function ringLanesOf(n: MNode, E?: End[]) {
     for (const p of e.g.t.parts) if ((p.kind === 'lane' || p.kind === 'bus') && (e.atA ? p.dir === -1 : p.dir === 1)) k++;
     entry = Math.max(entry, k);
   }
-  return Math.max(1, Math.min(3, Math.max(n.ringLanes ?? 1, entry)));
+  // widening keeps the ring's centre line (the mapped one), so the island shrinks: only as many extra lanes as leave
+  // an island of 4 m or 40 % of the radius — a small mapped ring stays small
+  const room = Math.floor((n.R! - 0.5 - Math.max(4, 0.4 * n.R!)) / 2);
+  const own = Math.max(1, Math.min(3, n.ringLanes ?? 1));
+  return Math.max(own, Math.min(3, entry, room));
 }
 
 /** Half the ring's width: its lanes (4 m each) plus edge clearance. */
