@@ -18,6 +18,7 @@ const COL = {
   sidewalk: rgbHex(0xbdb4a4), kerb: rgbHex(0x9d9a93), median: rgbHex(0x8f8c84), island: rgbHex(0x6f9446),
   bus: rgbHex(0x7a4a44), cycle: rgbHex(0x4f6f52), parking: rgbHex(0x55585d),
   white: rgbHex(0xe9e9e4), yellow: rgbHex(0xe2bd3f),
+  apron: rgbHex(0xb9ad97), signBlue: rgbHex(0x1f5fbf),
   pole: rgbHex(0x5d6168), head: rgbHex(0x23262a), red: rgbHex(0xff3b30), green: rgbHex(0x34e07a), lampOff: rgbHex(0x3a3d42), concrete: rgbHex(0xa8a49b), concreteDark: rgbHex(0x8e8a82), path: rgbHex(0xb3a88f),
 };
 
@@ -802,7 +803,7 @@ export class RoadMesher {
     const setRaw = () => { for (const e of E) { if (e.atA) e.g.rawA = e.trim; else e.g.rawB = e.trim; } };
     if (node.R && E.length) {
       this.kinds.set(id, 'roundabout');
-      const rw = ringHalfWidth(node);
+      const rw = ringHalfWidth(node, E);
       const Ro = node.R + rw;
       for (const e of E) {
         const w = Math.max(e.hwL, e.hwR);
@@ -1052,7 +1053,7 @@ export class RoadMesher {
     let island: Float32Array | null = null;
     const extra: V2[][] = []; // slip lane outlines (bounds, terrain, picking)
     if (kind === 'roundabout') {
-      const r = roundabout(node, E, zf, asphalt, paving, markings);
+      const r = roundabout(node, E, zf, asphalt, paving, markings, concrete, (e) => this.armPath(e, 40).z);
       ring = r.poly; island = r.island;
     } else {
       const F = E.map((e) => {
@@ -1657,9 +1658,18 @@ function slipLane(asphalt: GeomBuilder, paving: GeomBuilder, markings: GeomBuild
 
 // ===== roundabout surface =====
 
-function roundabout(node: MNode, E: End[], zf: (x: number, z: number) => number, asphalt: GeomBuilder, paving: GeomBuilder, markings: GeomBuilder) {
-  const rw = ringHalfWidth(node);
+/**
+ * A roundabout (IRC:65-2017, left-hand traffic: clockwise). The ring has as many lanes as the busiest entry (at least
+ * the node's own count, at most 3); a mountable truck apron around a raised, landscaped central island (a painted
+ * dome on a mini roundabout); splitter islands on two-way arms with keep-left signs at their noses; give-way lines and
+ * triangles at every entry; lane lines and circulation arrows on the ring; a footpath round the outside joining the
+ * arms' footpaths; zebra crossings a car length back from the entries; chevron boards on the island facing each entry.
+ */
+function roundabout(node: MNode, E: End[], zf: (x: number, z: number) => number, asphalt: GeomBuilder, paving: GeomBuilder, markings: GeomBuilder, poles: GeomBuilder, armZ: (e: End) => (along: number, x: number, z: number) => number) {
+  const lanes = ringLanesOf(node, E);
+  const rw = ringHalfWidth(node, E);
   const R = node.R!, Ro = R + rw, Ri = Math.max(2.5, R - rw);
+  const mini = Ri < 4;
   const cx = node.x, cz = node.z;
   const angOf = (p: V2) => Math.atan2(p[1] - cz, p[0] - cx);
   const circ = (a: number, r: number): V2 => [cx + Math.cos(a) * r, cz + Math.sin(a) * r];
@@ -1669,6 +1679,7 @@ function roundabout(node: MNode, E: End[], zf: (x: number, z: number) => number,
     return { e, fr, CL: P(e.cwL), CR: P(-e.cwR) };
   }).sort((p, q) => angOf([p.fr.x, p.fr.z]) - angOf([q.fr.x, q.fr.z]));
   const poly: V2[] = [];
+  const gaps: V2[][] = []; // outer edge between neighbouring arms (kerb line of the footpath)
   const d = 4 / Ro;
   if (!F.length) {
     for (let k = 0; k < 48; k++) poly.push(circ((k / 48) * Math.PI * 2, Ro));
@@ -1681,39 +1692,183 @@ function roundabout(node: MNode, E: End[], zf: (x: number, z: number) => number,
     if (F.length === 1) a2 = a1 + Math.PI * 2 - 2 * d;
     const q1 = circ(a1, Ro), q2 = circ(a2, Ro);
     const tan = (a: number): V2 => [-Math.sin(a), Math.cos(a)];
+    const gap: V2[] = [a.CR];
     const c1 = corner(a.CR, [-a.fr.ux, -a.fr.uz], q1, tan(a1));
-    for (let k = 1; k < c1.length; k++) poly.push(c1[k]);
+    for (let k = 1; k < c1.length; k++) { poly.push(c1[k]); gap.push(c1[k]); }
     const steps = Math.max(2, Math.ceil((a2 - a1) / 0.08));
-    for (let k = 1; k < steps; k++) poly.push(circ(a1 + ((a2 - a1) * k) / steps, Ro));
+    for (let k = 1; k < steps; k++) { const q = circ(a1 + ((a2 - a1) * k) / steps, Ro); poly.push(q); gap.push(q); }
     const c2 = corner(q2, tan(a2), b.CL, [b.fr.ux, b.fr.uz]);
-    for (let k = 0; k < c2.length - 1; k++) poly.push(c2[k]);
+    for (let k = 0; k < c2.length - 1; k++) { poly.push(c2[k]); gap.push(c2[k]); }
+    gap.push(b.CL);
+    gaps.push(gap);
   }
-  const island: V2[] = [];
-  for (let k = 0; k < 48; k++) island.push(circ((-k / 48) * Math.PI * 2, Ri));
+  const ring = (r: number, n = 64, rev = false) => { const out: V2[] = []; for (let k = 0; k < n; k++) out.push(circ(((rev ? -k : k) / n) * Math.PI * 2, r)); return out; };
+  const island = ring(Ri, 64, true);
   drapePolygon(asphalt, new Float32Array(poly.flat()), [new Float32Array(island.flat())], zf, COL.junction, 4);
-  // central island: raised grass with a kerb
   const isl = new Float32Array(island.flat());
-  drapePolygon(paving, isl, [], (x, z) => zf(x, z) + 0.25, COL.island, 4);
-  polyWall(paving, [...island, island[0]].reverse(), (x, z) => zf(x, z) - 0.05, (x, z) => zf(x, z) + 0.25, COL.kerb);
-  // ring markings: inner edge line + lane divider
-  ringLine(markings, cx, cz, Ri + 0.35, 0.14, zf, false, COL.white);
-  if ((node.ringLanes ?? 1) >= 2) ringLine(markings, cx, cz, R, 0.12, zf, true, COL.white);
-  // give-way lines across incoming lanes
+  if (mini) {
+    // mini roundabout: a flush painted dome (vehicles may run over it)
+    drapePolygon(markings, isl, [], (x, z) => zf(x, z) + 0.03, COL.white, 4);
+  } else {
+    // truck apron: a low, mountable paved ring (long vehicles sweep over it), then the raised landscaped island
+    const apron = Math.min(2.5, Math.max(0, (Ri - 3) * 0.35));
+    const Ra = Ri - apron;
+    const inner = ring(Ra, 64, true);
+    if (apron > 0.3) {
+      drapePolygon(paving, isl, [new Float32Array(ring(Ra, 64).flat())], (x, z) => zf(x, z) + 0.08, COL.apron, 4);
+      polyWall(paving, [...island, island[0]].reverse(), (x, z) => zf(x, z) - 0.05, (x, z) => zf(x, z) + 0.08, COL.kerb);
+    }
+    drapePolygon(paving, new Float32Array(inner.flat()), [], (x, z) => zf(x, z) + 0.3, COL.island, 4);
+    polyWall(paving, [...inner, inner[0]].reverse(), (x, z) => zf(x, z) - 0.05, (x, z) => zf(x, z) + 0.3, COL.kerb);
+    // chevron boards on the island facing each entry (white, black chevrons pointing the way round: left)
+    for (const f of F) {
+      const ang = Math.atan2(f.fr.z - cz, f.fr.x - cx);
+      const p = circ(ang, Math.max(1.2, Ra - 0.8)), nx = Math.cos(ang), nz = Math.sin(ang);
+      const y = zf(p[0], p[1]) + 0.3, w = Math.min(2.4, Ra * 0.6);
+      for (const s of [-w / 2 + 0.1, w / 2 - 0.1]) poles.box(p[0] + -nz * s, p[1] + nx * s, y, y + 1.0, 0.08, 0.08, 0, COL.pole);
+      const sign = (shape: V2[], rgb: [number, number, number], off: number) => signFace(poles, p, y + 1.0, nx, nz, shape, rgb, off);
+      sign([[-w / 2, 0], [w / 2, 0], [w / 2, 0.6], [-w / 2, 0.6]], COL.white, 0.05);
+      const n = Math.max(2, Math.floor(w / 0.6));
+      for (let k = 0; k < n; k++) {
+        const u0 = -w / 2 + 0.15 + ((w - 0.3) * (k + 0.5)) / n, s = 0.14; // '<': upper and lower strokes
+        sign([[u0 - s, 0.3], [u0 - s + 0.12, 0.3], [u0 + s + 0.12, 0.52], [u0 + s, 0.52]], COL.head, 0.06);
+        sign([[u0 - s, 0.3], [u0 + s, 0.08], [u0 + s + 0.12, 0.08], [u0 - s + 0.12, 0.3]], COL.head, 0.06);
+      }
+    }
+  }
+  // ring markings: inner edge, lane lines between ring lanes
+  ringLine(markings, cx, cz, Ri + 0.3, 0.14, zf, false, COL.white);
+  const laneW = (Ro - Ri - 0.5) / lanes;
+  for (let k = 1; k < lanes; k++) ringLine(markings, cx, cz, Ri + 0.3 + laneW * k, 0.12, zf, true, COL.white);
+  // circulation arrows (clockwise = increasing angle here) in each lane, half-way between entries
+  const entryAng = F.map((f) => Math.atan2(f.fr.z - cz, f.fr.x - cx));
+  for (let i = 0; i < entryAng.length; i++) {
+    let a0 = entryAng[i], a1 = entryAng[(i + 1) % entryAng.length];
+    while (a1 <= a0) a1 += Math.PI * 2;
+    if (entryAng.length === 1) a1 = a0 + Math.PI * 2;
+    if ((a1 - a0) * R < 14) continue;
+    const am = (a0 + a1) / 2;
+    for (let k = 0; k < lanes; k++) {
+      const r = Ri + 0.3 + laneW * (k + 0.5), c = circ(am, r);
+      const tx = -Math.sin(am), tz = Math.cos(am), lx = tz, lz = -tx; // travel direction and its left
+      for (const q of arrowPolys({ L: false, S: true, R: false })) {
+        const pts = q.map(([x, y]) => [c[0] + lx * x + tx * (y - 2.5), c[1] + lz * x + tz * (y - 2.5)] as V2);
+        drapePolygon(markings, new Float32Array(pts.flat()), [], (x, z) => zf(x, z) + 0.03, COL.white, 50);
+      }
+    }
+  }
+  // arms: give way, splitter island, zebra
   for (const f of F) {
-    const offs = partOffsets(f.e.g.t);
-    f.e.g.t.parts.forEach((p, k) => {
+    const t = f.e.g.t;
+    if (t.surface === 'dirt') continue;
+    const za = armZ(f.e);
+    const side = f.e.atA ? 1 : -1; // segment-left offsets → outward-left
+    const offs = partOffsets(t);
+    const P = (o: number, along: number): V2 => [f.fr.x + f.fr.lx * o + f.fr.ux * along, f.fr.z + f.fr.lz * o + f.fr.uz * along];
+    const zAt = (x: number, z: number) => { const al = (x - f.fr.x) * f.fr.ux + (z - f.fr.z) * f.fr.uz; return al > 0 ? za(al, x, z) : zf(x, z); };
+    const flat = (q: V2[], col = COL.white) => drapePolygon(markings, new Float32Array(q.flat()), [], (x, z) => zAt(x, z) + 0.03, col, 50);
+    const inc: { lo: number; hi: number }[] = [], out: { lo: number; hi: number }[] = [];
+    t.parts.forEach((p, k) => {
       if (p.kind !== 'lane' && p.kind !== 'bus') return;
+      const a = side * offs[k][0], b = side * offs[k][1], seg = { lo: Math.min(a, b), hi: Math.max(a, b) };
       const incoming = f.e.atA ? p.dir === -1 : p.dir === 1;
-      if (!incoming && p.dir !== 0) return;
-      const [o0, o1] = offs[k];
-      const side = f.e.atA ? 1 : -1; // outward-left = segment-left at A, segment-right at B
-      dashedAcross(markings, f.fr, side * o0, side * o1, 0.6, zf);
+      if (incoming || p.dir === 0) inc.push(seg); else out.push(seg);
     });
+    // the mouth: where the arm's centre line meets the ring's outer edge
+    const dm = Math.max(0, Math.hypot(f.fr.x - cx, f.fr.z - cz) - Ro);
+    // splitter island between the two directions (two-way arms of a full roundabout)
+    let isLo = 0, isHi = 0;
+    if (!mini && inc.length && out.length) {
+      const med = t.parts.map((p, k) => ({ p, a: Math.min(side * offs[k][0], side * offs[k][1]), b: Math.max(side * offs[k][0], side * offs[k][1]) })).find((x) => x.p.kind === 'median');
+      const ilo = Math.min(...inc.map((l) => l.lo)), ihi = Math.max(...inc.map((l) => l.hi)), olo = Math.min(...out.map((l) => l.lo)), ohi = Math.max(...out.map((l) => l.hi));
+      const c = med ? (med.a + med.b) / 2 : ihi <= olo ? (ihi + olo) / 2 : (ohi + ilo) / 2;
+      const h0 = med ? Math.max(0.15, (med.b - med.a) / 2) : 0.15;
+      const hMouth = Math.min(h0 + 0.9, 1.6);
+      const Ls = Math.min(14, Math.max(6, f.e.g.len - (f.e.atA ? f.e.g.trimA : f.e.g.trimB) - 2) * 0.8);
+      const a0 = -dm + 1.0;
+      const hw = (al: number) => (al <= 1 ? hMouth : hMouth + (h0 - hMouth) * Math.min(1, (al - 1) / Math.max(1, Ls - 1)));
+      const L: V2[] = [], Rr: V2[] = [];
+      for (let k = 0; k <= 12; k++) { const al = a0 + ((Ls - a0) * k) / 12; L.push(P(c + hw(al), al)); Rr.push(P(c - hw(al), al)); }
+      const nose: V2[] = [];
+      for (let k = 1; k < 8; k++) { const th = (k / 8) * Math.PI; nose.push(P(c + Math.cos(th) * hMouth, a0 - Math.sin(th) * hMouth)); }
+      const outline = [...L, ...Rr.reverse(), ...nose];
+      const top = (x: number, z: number) => zAt(x, z) + KERB;
+      drapePolygon(paving, new Float32Array(outline.flat()), [], top, COL.median, 50);
+      polyWall(paving, [...outline, outline[0]], (x, z) => zAt(x, z) - 0.05, top, COL.kerb);
+      isLo = c - hMouth; isHi = c + hMouth;
+      // keep-left sign at the island's far nose, facing approaching traffic
+      const sp = P(c, Ls - 0.6), zs = zAt(sp[0], sp[1]) + KERB;
+      poles.box(sp[0], sp[1], zs, zs + 2.1, 0.08, 0.08, 0, COL.pole);
+      const disc: V2[] = [];
+      for (let k = 0; k < 16; k++) { const th = (k / 16) * Math.PI * 2; disc.push([Math.cos(th) * 0.3, 1.8 + Math.sin(th) * 0.3]); }
+      signFace(poles, sp, zs, f.fr.ux, f.fr.uz, disc, COL.signBlue, 0.05);
+      signFace(poles, sp, zs, f.fr.ux, f.fr.uz, [[0.12, 1.62], [0.2, 1.7], [0.0, 1.9], [0.2, 2.1], [0.12, 2.18], [-0.16, 1.9]].reverse().map(([u, v]) => [-u, v] as V2), COL.white, 0.06);
+    }
+    // give way to traffic on the ring: double dashed line at the mouth across the entry, a triangle behind each lane
+    if (inc.length) {
+      const lo = Math.min(...inc.map((l) => l.lo)), hi = Math.max(...inc.map((l) => l.hi));
+      const gw = -dm + 0.7;
+      const zl = (x: number, z: number) => zAt(x, z);
+      dashedAcross(markings, f.fr, lo, hi, gw, zl);
+      dashedAcross(markings, f.fr, lo, hi, gw + 0.6, zl);
+      for (const l of inc) {
+        const c = (l.lo + l.hi) / 2, y0 = gw + 3, y1 = gw + 6.5, w = Math.min(0.75, (l.hi - l.lo) / 2 - 0.3);
+        if (w < 0.2) continue;
+        const A = P(c - w, y1), B = P(c + w, y1), C = P(c, y0);
+        const bar = (p: V2, q: V2) => { const dx = q[0] - p[0], dz = q[1] - p[1], Ln = Math.hypot(dx, dz) || 1, nx = -dz / Ln * 0.1, nz = dx / Ln * 0.1; flat([[p[0] + nx, p[1] + nz], [q[0] + nx, q[1] + nz], [q[0] - nx, q[1] - nz], [p[0] - nx, p[1] - nz]]); };
+        bar(A, B); bar(B, C); bar(C, A);
+      }
+    }
+    // zebra crossing a car length back from the entry, broken at the splitter island
+    if (node.crossings ?? t.major) {
+      const cw = Math.max(f.e.cwL, f.e.cwR), z0 = Math.max(1, -dm + 7), z1 = z0 + 3;
+      for (let o = -cw + 0.4; o < cw - 0.5; o += 1.0) {
+        if (isHi > isLo && o + 0.5 > isLo - 0.2 && o < isHi + 0.2) continue;
+        if (t.parts.some((p, k) => p.kind === 'median' && o + 0.5 > Math.min(side * offs[k][0], side * offs[k][1]) && o < Math.max(side * offs[k][0], side * offs[k][1]))) continue;
+        flat([P(o, z0), P(o + 0.5, z0), P(o + 0.5, z1), P(o, z1)]);
+      }
+    }
+  }
+  // footpath round the outside, between the arms (as wide as theirs; none where neither arm has one)
+  for (let i = 0; i < gaps.length && F.length; i++) {
+    const a = F[i], b = F[(i + 1) % F.length];
+    const fp = Math.max(a.e.hwR - a.e.cwR, b.e.hwL - b.e.cwL);
+    const g = gaps[i];
+    if (fp < 0.5 || g.length < 2) continue;
+    const outer = g.map((p, k) => {
+      const q0 = g[Math.max(0, k - 1)], q1 = g[Math.min(g.length - 1, k + 1)], L = Math.hypot(q1[0] - q0[0], q1[1] - q0[1]) || 1;
+      let nx = -(q1[1] - q0[1]) / L, nz = (q1[0] - q0[0]) / L;
+      if ((p[0] - cx) * nx + (p[1] - cz) * nz < 0) { nx = -nx; nz = -nz; }
+      return [p[0] + nx * fp, p[1] + nz * fp] as V2;
+    });
+    const top = (x: number, z: number) => zf(x, z) + KERB;
+    bandBetween(paving, g, outer, top, COL.sidewalk);
+    polyWall(paving, g, (x, z) => zf(x, z) - 0.05, top, COL.kerb);
   }
   return { poly, island: isl };
 }
 
-function ringHalfWidth(n: MNode) { return ((n.ringLanes ?? 1) * 4.0) / 2 + 0.5; }
+/** Ring lanes: the node's own count, raised to the busiest entry's (IRC:65: never fewer circulating than entry lanes), at most 3. */
+function ringLanesOf(n: MNode, E?: End[]) {
+  let entry = 1;
+  for (const e of E ?? []) {
+    let k = 0;
+    for (const p of e.g.t.parts) if ((p.kind === 'lane' || p.kind === 'bus') && (e.atA ? p.dir === -1 : p.dir === 1)) k++;
+    entry = Math.max(entry, k);
+  }
+  return Math.max(1, Math.min(3, Math.max(n.ringLanes ?? 1, entry)));
+}
+
+/** Half the ring's width: its lanes (4 m each) plus edge clearance. */
+function ringHalfWidth(n: MNode, E?: End[]) { return (ringLanesOf(n, E) * 4.0) / 2 + 0.5; }
+
+/** A flat shape on a vertical sign face at `p`, facing (nx, nz): shape points are (u = the viewer's right, v = up from `y`). */
+function signFace(gb: GeomBuilder, p: V2, y: number, nx: number, nz: number, shape: V2[], rgb: [number, number, number], off: number) {
+  const rx = nz, rz = -nx; // the right of someone looking at the face (along -n)
+  const base = gb.vertexCount;
+  for (const [u, v] of shape) gb.v(p[0] + rx * u + nx * off, y + v, p[1] + rz * u + nz * off, nx, 0, nz, ...rgb);
+  for (let k = 1; k < shape.length - 1; k++) { gb.tri(base, base + k, base + k + 1); gb.tri(base, base + k + 1, base + k); }
+}
 
 /** Kerb-style corner from point a (heading da) to point b (heading db). */
 function corner(a: V2, da: V2, b: V2, db: V2): V2[] {
