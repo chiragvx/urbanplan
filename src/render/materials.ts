@@ -1,7 +1,15 @@
 // Procedural textures (canvas) + node materials. No external art needed.
 import * as THREE from 'three/webgpu';
-import { texture, uv, positionWorld, mix, float, vec3, uniform, normalWorld, smoothstep, time, vertexColor } from 'three/tsl';
+import { texture, uv, positionWorld, mix, float, vec2, vec3, uniform, normalWorld, smoothstep, time, vertexColor } from 'three/tsl';
 import { FACADE_STYLES, type FacadeStyle } from '../build/buildings';
+
+/**
+ * The world square the land-use texture covers: x0, z0 (west / north edge), size. A uniform, so a region's window can
+ * move (repaint the texture, set this) without touching any terrain mesh.
+ */
+export const landuseRect = uniform(new THREE.Vector3(-2500, -2500, 5000));
+/** Land-use texture coordinates of a terrain fragment (from its world position). */
+export const landuseUV = () => vec2(positionWorld.x.sub(landuseRect.x).div(landuseRect.z), float(1).sub(positionWorld.z.sub(landuseRect.y).div(landuseRect.z)));
 
 function canvasTex(size: number, draw: (ctx: CanvasRenderingContext2D, s: number) => void, srgb = true): THREE.CanvasTexture {
   const c = document.createElement('canvas');
@@ -98,7 +106,7 @@ export function createMaterials(landuse: THREE.Texture): Materials {
   const wxz = positionWorld.xz;
   const g1 = texture(grain, wxz.mul(0.012)).r;
   const g2 = texture(grainFine, wxz.mul(0.09)).r;
-  const base = texture(landuse, uv()).rgb;
+  const base = texture(landuse, landuseUV()).rgb;
   const slope = smoothstep(0.82, 0.55, normalWorld.y);
   terrain.colorNode = mix(base, vec3(0.42, 0.36, 0.28), slope).mul(g1.mul(0.5).add(0.75)).mul(g2.mul(0.35).add(0.83));
 

@@ -46,6 +46,8 @@ type Drag =
 
 /** File / app-level actions the editor's commands need (implemented by the app shell). */
 export interface AppApi {
+  /** a region (whole city streamed in pieces): its extent */
+  region: { bounds: [number, number, number, number] } | null;
   newMap(): void;
   save(copy?: boolean): Promise<void>;
   download(): void;
@@ -141,7 +143,7 @@ export class Editor {
     this.world.onChange(c, items);
     this.hit.update(c.ids);
     if (tr) this.terrainChanged(tr);
-    else if (terrainView.value) {
+    else if (terrainView.value && c.origin !== 'page') {
       // the terrain view shows road cut / fill: keep it current in 2D
       const r = this.regionOf(c.ids);
       if (r) this.world.syncTerrain(r);

@@ -5,11 +5,11 @@ import type { Heightfield } from '../geo/heightfield';
 import type { TileData } from '../data/tile';
 
 export function buildTerrainGeometry(hf: Heightfield): THREE.BufferGeometry {
-  const n = hf.n, cell = hf.cell, half = hf.half, h = hf.surface;
+  const n = hf.n, cell = hf.cell, gx = hf.x0, gz = hf.z0, h = hf.surface;
   const pos = new Float32Array(n * n * 3), nor = new Float32Array(n * n * 3), uv = new Float32Array(n * n * 2);
   for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
     const k = j * n + i;
-    pos[k * 3] = -half + i * cell; pos[k * 3 + 1] = h[k]; pos[k * 3 + 2] = -half + j * cell;
+    pos[k * 3] = gx + i * cell; pos[k * 3 + 1] = h[k]; pos[k * 3 + 2] = gz + j * cell;
     const hl = h[j * n + Math.max(0, i - 1)], hr = h[j * n + Math.min(n - 1, i + 1)];
     const hu = h[Math.max(0, j - 1) * n + i], hd = h[Math.min(n - 1, j + 1) * n + i];
     let nx = hl - hr, ny = 2 * cell, nz = hu - hd;
@@ -37,7 +37,7 @@ export function buildTerrainGeometry(hf: Heightfield): THREE.BufferGeometry {
 /** Skirt around the tile edge so the terrain reads as a solid block, like a diorama. */
 export function buildTerrainSkirt(hf: Heightfield): THREE.BufferGeometry {
   const gb = new GeomBuilder();
-  const n = hf.n, cell = hf.cell, half = hf.half, h = hf.surface;
+  const n = hf.n, cell = hf.cell, gx = hf.x0, gz = hf.z0, gx1 = gx + (n - 1) * cell, gz1 = gz + (n - 1) * cell, h = hf.surface;
   const bottom = -12;
   const col = rgbHex(0x5d5340);
   const edge = (get: (k: number) => [number, number, number]) => {
@@ -46,10 +46,10 @@ export function buildTerrainSkirt(hf: Heightfield): THREE.BufferGeometry {
       gb.wall(ax, az, bx, bz, bottom, bottom, ay, by, col);
     }
   };
-  edge((k) => [-half + k * cell, h[k], -half]);
-  edge((k) => [half - k * cell, h[(n - 1) * n + (n - 1 - k)], half]);
-  edge((k) => [-half, h[(n - 1 - k) * n], half - k * cell]);
-  edge((k) => [half, h[k * n + n - 1], -half + k * cell]);
+  edge((k) => [gx + k * cell, h[k], gz]);
+  edge((k) => [gx1 - k * cell, h[(n - 1) * n + (n - 1 - k)], gz1]);
+  edge((k) => [gx, h[(n - 1 - k) * n], gz1 - k * cell]);
+  edge((k) => [gx1, h[k * n + n - 1], gz + k * cell]);
   return gb.build();
 }
 
@@ -58,13 +58,14 @@ const AREA_COLORS: Record<number, string> = {
   8: '#8a8984', 9: '#a88f6c', 10: '#6aa44e', 11: '#c4b48c', 12: '#7c8e59', 13: '#8b8172', 14: '#7e8a52',
 };
 
-/** Paint land use into a canvas texture that the terrain samples. */
-export function buildLanduseTexture(tile: TileData, size = 2048): THREE.CanvasTexture {
-  const cv = document.createElement('canvas');
+/** Land use painted into a canvas texture that the terrain samples (by world position: see `landuseRect`). */
+export function buildLanduseTexture(tile: TileData, size = 2048, into?: THREE.CanvasTexture): THREE.CanvasTexture {
+  const cv = (into?.image as HTMLCanvasElement | undefined) ?? document.createElement('canvas');
   cv.width = cv.height = size;
   const ctx = cv.getContext('2d')!;
+  const [rx0, rz0] = landuseRect(tile);
   const s = size / (tile.half * 2);
-  const X = (x: number) => (x + tile.half) * s, Z = (z: number) => (z + tile.half) * s;
+  const X = (x: number) => (x - rx0) * s, Z = (z: number) => (z - rz0) * s;
   ctx.fillStyle = '#8e8a66';
   ctx.fillRect(0, 0, size, size);
   // subtle large-scale variation so open ground isn't flat
@@ -94,6 +95,7 @@ export function buildLanduseTexture(tile: TileData, size = 2048): THREE.CanvasTe
   // river bed / banks
   ctx.fillStyle = '#6b6450';
   for (const w of tile.waters) { path([w.outer, ...w.holes]); ctx.fill('evenodd'); }
+  if (into) { into.needsUpdate = true; return into; }
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 8;
@@ -102,14 +104,19 @@ export function buildLanduseTexture(tile: TileData, size = 2048): THREE.CanvasTe
   return tex;
 }
 
+/** The world rectangle [x0, z0, size] the land-use texture covers: the tile, or the region window. */
+export function landuseRect(tile: TileData): [number, number, number] {
+  return [(tile.ox ?? 0) - tile.half, (tile.oz ?? 0) - tile.half, tile.half * 2];
+}
+
 /** Water surfaces draped on the water-level field (rivers slope gently downstream). */
 export function buildWater(tile: TileData, hf: Heightfield): THREE.BufferGeometry {
   const gb = new GeomBuilder();
   const n = tile.terrain.n;
   const lvl = Float32Array.from(tile.terrain.waterLevel, (v) => v - hf.base);
   const L = (x: number, z: number) => {
-    const half = hf.half, cell = hf.cell;
-    let fx = (x + half) / cell, fz = (z + half) / cell;
+    const cell = hf.cell;
+    let fx = (x - hf.x0) / cell, fz = (z - hf.z0) / cell;
     fx = Math.min(Math.max(fx, 0), n - 1.0001); fz = Math.min(Math.max(fz, 0), n - 1.0001);
     const i = Math.floor(fx), j = Math.floor(fz), tx = fx - i, tz = fz - j;
     const a = lvl[j * n + i], b = lvl[j * n + i + 1], c = lvl[(j + 1) * n + i], d = lvl[(j + 1) * n + i + 1];
@@ -138,7 +145,7 @@ export function buildWater(tile: TileData, hf: Heightfield): THREE.BufferGeometr
 
 /** One terrain chunk over grid vertices [i0..i1] × [j0..j1] (every `step`-th vertex), with a 3 m skirt. */
 export function buildTerrainPatch(hf: Heightfield, i0: number, j0: number, i1: number, j1: number, step: number): THREE.BufferGeometry {
-  const n = hf.n, cell = hf.cell, half = hf.half, h = hf.surface;
+  const n = hf.n, cell = hf.cell, gx = hf.x0, gz = hf.z0, h = hf.surface;
   const normal = (i: number, j: number): [number, number, number] => {
     const hl = h[j * n + Math.max(0, i - 1)], hr = h[j * n + Math.min(n - 1, i + 1)];
     const hu = h[Math.max(0, j - 1) * n + i], hd = h[Math.min(n - 1, j + 1) * n + i];
@@ -153,7 +160,7 @@ export function buildTerrainPatch(hf: Heightfield, i0: number, j0: number, i1: n
   const W = is.length, Hh = js.length;
   const pos: number[] = [], nor: number[] = [], uv: number[] = [], idx: number[] = [];
   for (const j of js) for (const i of is) {
-    pos.push(-half + i * cell, h[j * n + i], -half + j * cell);
+    pos.push(gx + i * cell, h[j * n + i], gz + j * cell);
     nor.push(...normal(i, j));
     uv.push(i / (n - 1), 1 - j / (n - 1));
   }
@@ -194,12 +201,12 @@ export interface TerrainChunk { cx: number; cz: number; radius: number; high: TH
  * Each chunk gets a short skirt so LOD seams never show cracks.
  */
 export function buildTerrainChunks(hf: Heightfield, cellsPerChunk = 40, lowStep = 4): TerrainChunk[] {
-  const n = hf.n, cell = hf.cell, half = hf.half;
+  const n = hf.n, cell = hf.cell, gx = hf.x0, gz = hf.z0;
   const out: TerrainChunk[] = [];
   for (let j0 = 0; j0 < n - 1; j0 += cellsPerChunk) for (let i0 = 0; i0 < n - 1; i0 += cellsPerChunk) {
     const i1 = Math.min(n - 1, i0 + cellsPerChunk), j1 = Math.min(n - 1, j0 + cellsPerChunk);
     const high = buildTerrainPatch(hf, i0, j0, i1, j1, 1);
-    out.push({ cx: -half + ((i0 + i1) / 2) * cell, cz: -half + ((j0 + j1) / 2) * cell, radius: high.boundingSphere!.radius, high, low: buildTerrainPatch(hf, i0, j0, i1, j1, lowStep), i0, j0, i1, j1 });
+    out.push({ cx: gx + ((i0 + i1) / 2) * cell, cz: gz + ((j0 + j1) / 2) * cell, radius: high.boundingSphere!.radius, high, low: buildTerrainPatch(hf, i0, j0, i1, j1, lowStep), i0, j0, i1, j1 });
   }
   return out;
 }

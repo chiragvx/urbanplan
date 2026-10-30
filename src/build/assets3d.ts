@@ -97,7 +97,7 @@ export function stampChannel(hf: Heightfield, targets: Float32Array, pts: number
   if (x0 > x1 || z0 > z1) return;
   const g = hf.gridRange(x0, z0, x1, z1), n = hf.n;
   for (let j = g.j0; j <= g.j1; j++) for (let i = g.i0; i <= g.i1; i++) {
-    const x = -hf.half + i * hf.cell, z = -hf.half + j * hf.cell;
+    const x = hf.x0 + i * hf.cell, z = hf.z0 + j * hf.cell;
     let best = Infinity, bx = 0, bz = 0;
     for (let k = 0; k + 3 < pts.length; k += 2) {
       const ax = pts[k], az = pts[k + 1], dx = pts[k + 2] - ax, dz = pts[k + 3] - az;

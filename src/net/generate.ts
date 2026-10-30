@@ -586,6 +586,21 @@ export class RoadMesher {
   /** decks' raw requests for room on each ground piece (this apply pass) */
   private reqCache = new Map<SegGeo, DeckReq[]>();
   private ownCache = new Map<SegGeo, DeckReq[]>();
+  /** elevated pieces by 256 m cell (the deck-room search looks only at the decks near a road) */
+  private elev = new Map<string, Set<SegGeo>>();
+
+  private elevCells(g: SegGeo, f: (k: string) => void) {
+    const b = geoBox(g, 0), C = 256;
+    for (let j = Math.floor(b[1] / C); j <= Math.floor(b[3] / C); j++) for (let i = Math.floor(b[0] / C); i <= Math.floor(b[2] / C); i++) f(i + ',' + j);
+  }
+  private elevAdd(g: SegGeo) { if (g.s.elevated) this.elevCells(g, (k) => (this.elev.get(k) ?? this.elev.set(k, new Set()).get(k)!).add(g)); }
+  private elevRemove(g: SegGeo | undefined) { if (g?.s.elevated) this.elevCells(g, (k) => this.elev.get(k)?.delete(g)); }
+  /** Elevated pieces whose box overlaps a box. */
+  private elevNear(box: [number, number, number, number]): Set<SegGeo> {
+    const out = new Set<SegGeo>(), C = 256;
+    for (let j = Math.floor(box[1] / C); j <= Math.floor(box[3] / C); j++) for (let i = Math.floor(box[0] / C); i <= Math.floor(box[2] / C); i++) for (const g of this.elev.get(i + ',' + j) ?? []) out.add(g);
+    return out;
+  }
   /** footpath cuts for slip lanes: per road piece, and the pieces each junction's slips cut */
   private cutsBySeg = new Map<string, { node: string; side: 'L' | 'R'; s0: number; s1: number }[]>();
   private slipSegs = new Map<string, Set<string>>();
@@ -632,6 +647,7 @@ export class RoadMesher {
       const s = this.segs.get(id);
       if (!s) continue;
       unlink(s);
+      this.elevRemove(this.geos.get(id));
       this.segs.delete(id); this.geos.delete(id);
       if (this.items.delete('s:' + id)) changed.add('s:' + id);
     }
@@ -642,7 +658,10 @@ export class RoadMesher {
       this.segs.set(s.id, s);
       link(s);
       dirtyNodes.add(s.a); dirtyNodes.add(s.b);
-      this.geos.set(s.id, this.sample(s));
+      this.elevRemove(this.geos.get(s.id));
+      const g = this.sample(s);
+      this.geos.set(s.id, g);
+      this.elevAdd(g);
       deckBox(s.id);
     }
     for (const id of ch.removeNodes ?? []) {
@@ -1273,8 +1292,8 @@ export class RoadMesher {
     if (g.s.elevated || g.s.sunk || hw < 3) return req;
     const box = geoBox(g, hw + 10);
     const n = g.cum.length;
-    for (const e of this.geos.values()) {
-      if (!e.s.elevated || e === g) continue;
+    for (const e of this.elevNear(box)) {
+      if (e === g) continue;
       const eb = geoBox(e, 0);
       if (eb[0] > box[2] || eb[2] < box[0] || eb[1] > box[3] || eb[3] < box[1]) continue;
       const zf = this.segZ(e), w = e.t.hwL + e.t.hwR;
@@ -2048,23 +2067,24 @@ function ringLine(gb: GeomBuilder, cx: number, cz: number, r: number, w: number,
 // ---------------- terrain stamping ----------------
 
 /** Region clamp for grid loops: [i0, i1] × [j0, j1] of a regular grid, optionally limited to a metric region. */
-function gridRange(cell: number, half: number, gn: number, x0: number, z0: number, x1: number, z1: number, region?: [number, number, number, number]) {
+function gridRange(hf: Heightfield, x0: number, z0: number, x1: number, z1: number, region?: [number, number, number, number]) {
   if (region) { x0 = Math.max(x0, region[0]); z0 = Math.max(z0, region[1]); x1 = Math.min(x1, region[2]); z1 = Math.min(z1, region[3]); }
+  const cell = hf.cell, gn = hf.n, gx = hf.x0, gz = hf.z0;
   return {
-    i0: Math.max(0, Math.ceil((x0 + half) / cell)), i1: Math.min(gn - 1, Math.floor((x1 + half) / cell)),
-    j0: Math.max(0, Math.ceil((z0 + half) / cell)), j1: Math.min(gn - 1, Math.floor((z1 + half) / cell)),
+    i0: Math.max(0, Math.ceil((x0 - gx) / cell)), i1: Math.min(gn - 1, Math.floor((x1 - gx) / cell)),
+    j0: Math.max(0, Math.ceil((z0 - gz) / cell)), j1: Math.min(gn - 1, Math.floor((z1 - gz) / cell)),
   };
 }
 
 /** Terrain target under a ground-level road: 0.3 m below the road surface along the centre line. */
 function stampLine(hf: Heightfield, targets: Float32Array, line: Float32Array, hw: number, T: (x: number, z: number) => number, region?: [number, number, number, number], zs?: Float32Array) {
-  const cell = hf.cell, half = hf.half, gn = hf.n;
+  const cell = hf.cell, gx = hf.x0, gz = hf.z0, gn = hf.n;
   const rad = hw + cell * 0.75, rad2 = rad * rad;
   for (let i = 0; i < line.length / 2; i++) {
     const x = line[i * 2], z = line[i * 2 + 1], tz = (zs ? zs[i] : T(x, z)) - 0.3;
-    const r = gridRange(cell, half, gn, x - rad, z - rad, x + rad, z + rad, region);
+    const r = gridRange(hf, x - rad, z - rad, x + rad, z + rad, region);
     for (let jj = r.j0; jj <= r.j1; jj++) for (let ii = r.i0; ii <= r.i1; ii++) {
-      const dx = -half + ii * cell - x, dz = -half + jj * cell - z;
+      const dx = gx + ii * cell - x, dz = gz + jj * cell - z;
       if (dx * dx + dz * dz > rad2) continue;
       const k = jj * gn + ii;
       if (Number.isNaN(targets[k]) || tz < targets[k]) targets[k] = tz;
@@ -2073,14 +2093,14 @@ function stampLine(hf: Heightfield, targets: Float32Array, line: Float32Array, h
 }
 
 function stampPolygon(hf: Heightfield, targets: Float32Array, ring: Float32Array, zf: (x: number, z: number) => number, region?: [number, number, number, number]) {
-  const cell = hf.cell, half = hf.half, gn = hf.n, m = ring.length / 2;
+  const cell = hf.cell, gx = hf.x0, gz = hf.z0, gn = hf.n, m = ring.length / 2;
   let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
   for (let i = 0; i < ring.length; i += 2) { x0 = Math.min(x0, ring[i]); x1 = Math.max(x1, ring[i]); z0 = Math.min(z0, ring[i + 1]); z1 = Math.max(z1, ring[i + 1]); }
   const pad = cell * 0.75;
-  const r = gridRange(cell, half, gn, x0 - pad - cell, z0 - pad - cell, x1 + pad + cell, z1 + pad + cell, region);
+  const r = gridRange(hf, x0 - pad - cell, z0 - pad - cell, x1 + pad + cell, z1 + pad + cell, region);
   for (let jj = r.j0; jj <= r.j1; jj++)
     for (let ii = r.i0; ii <= r.i1; ii++) {
-      const x = -half + ii * cell, z = -half + jj * cell;
+      const x = gx + ii * cell, z = gz + jj * cell;
       let inside = false, best = Infinity, px = x, pz = z;
       for (let a = 0, b = m - 1; a < m; b = a++) {
         const xa = ring[a * 2], za = ring[a * 2 + 1], xb = ring[b * 2], zb = ring[b * 2 + 1];

@@ -2,7 +2,8 @@
 
 Edit a real city like a Figma file, see it in 3D like Cities: Skylines. A personal map editor for making more
 accurate city maps — roads, junctions, utilities, metro — that you can publish and others can copy and edit.
-Illustrative concept, not engineering advice. Current data: Pune, **Koregaon Park · Kalyani Nagar** tile, 5×5 km.
+Illustrative concept, not engineering advice. Current data: **all of Pune and Pimpri-Chinchwad** (PMC + PCMC,
+~1,120 km², streamed in 2 km pieces); the original Koregaon Park · Kalyani Nagar tile still opens with `?tile=kp`.
 
 ## Run
 
@@ -187,7 +188,42 @@ cross-section, with a hover card giving its dimensions, limits and the standard 
 - **Ctrl+Shift+P**: performance panel (frame rate while drawing, CPU time, draw calls, triangles, GPU objects, imagery
   and JS memory). Add `?perf` to the URL for GPU timings.
 
+### The whole city (regions)
+
+The map is a **region**: a whole city baked once and cut into 2 km **pieces**. Around the point you're looking at, a
+window of 3 × 3 pieces (6 km) is live — editable, full detail in 2D and 3D. Everything else is the **far view**: the
+city as 32 m terrain wearing a land-cover image, with its roads as simple ribbons (out to the haze in 3D; the whole
+map when the 2D view is wider than 4.5 km, where detail would be sub-pixel anyway).
+
+- When you move more than ~400 m past the centre piece, the window follows: the pieces that left go, the grids under
+  the terrain shift (what overlaps carries over), and each arriving piece is paged in and settled on a frame of its
+  own (≈ 0.3–0.5 s each in dense areas), so the view stays live. Neighbouring pieces are fetched ahead.
+- Edits are kept whatever is in the window: an edited road out of the window keeps its edit and shows it again when
+  its piece comes back. Paging isn't an edit (no undo step, not "unsaved").
+- A map remembers where it was: it opens with its area in the window. Maps made on the Koregaon Park tile are moved
+  into the city frame and re-attached to the city's roads when opened.
+- Budgets (measured on a desktop GPU): boot ≈ 8 s, JS heap 0.6–1.1 GB, a window move 2–3 s spread over frames
+  (longest step ≈ 0.4 s). The whole city on disk: 82 MB (pieces gzipped).
+
 ## Data pipeline (offline)
+
+### A region (the whole city)
+
+```bash
+# OSM: Overpass in 4 km cells (node tools/fetch-region.mjs pune) — or, when Overpass is too busy, cut the cells out of
+# Geofabrik's western India extract (needs pyosmium: pip install osmium):
+curl -L -o data/raw/region/western-zone.osm.pbf https://download.geofabrik.de/asia/india/western-zone-latest.osm.pbf
+node tools/fetch-region.mjs pune --plan
+python tools/region-extract.py data/raw/region/western-zone.osm.pbf pune
+npm run bake:region -- pune    # ≈ 1.5 min: terrain (Copernicus GLO-30 N18E073 + N18E074), the road network imported
+                               # once for the whole city, cut into 306 pieces + the far view → public/regions/pune
+```
+
+The region is set in `tools/region-config.mjs` (bbox, frame origin, piece size). Its frame is the DP pipeline's city
+frame, so the city-wide DP data needs no conversion; tiles a region takes over (`legacy`) bring their DP sheets and
+utility networks along, moved into the city frame.
+
+### A single tile
 
 ```bash
 node tools/fetch-osm-api.mjs kp      # OSM XML via the OSM API (Overpass fallback: tools/fetch-osm-xml.mjs)

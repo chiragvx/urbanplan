@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "UrbanPlan — edit a city in 2D like Figma, see it in 3D. Built on open data.",
+  "description": "UrbanPlan \u00e2\u20ac\u201d edit a city in 2D like Figma, see it in 3D. Built on open data.",
   "scripts": {
     "fetch": "node tools/fetch-osm.mjs",
     "bake": "node tools/bake.mjs",
@@ -15,7 +15,9 @@
     "import:utilities": "node tools/import-utilities.mjs",
     "bake:network": "esbuild tools/bake-network.ts --bundle --platform=node --format=esm --outfile=tools/dev/bake-network.mjs --log-level=warning && node tools/dev/bake-network.mjs",
     "map": "esbuild tools/map-cli.ts --bundle --platform=node --format=esm --outfile=tools/dev/map-cli.mjs --log-level=warning && node tools/dev/map-cli.mjs",
-    "test": "esbuild tools/dev/test-doc.ts --bundle --platform=node --format=esm --outfile=tools/dev/test-doc.mjs --log-level=warning && node tools/dev/test-doc.mjs && esbuild tools/dev/test-xs.ts --bundle --platform=node --format=esm --outfile=tools/dev/test-xs.mjs --log-level=warning && node tools/dev/test-xs.mjs"
+    "test": "esbuild tools/dev/test-doc.ts --bundle --platform=node --format=esm --outfile=tools/dev/test-doc.mjs --log-level=warning && node tools/dev/test-doc.mjs && esbuild tools/dev/test-xs.ts --bundle --platform=node --format=esm --outfile=tools/dev/test-xs.mjs --log-level=warning && node tools/dev/test-xs.mjs && esbuild tools/dev/test-region.ts --bundle --platform=node --format=esm --outfile=tools/dev/test-region.mjs --log-level=warning && node tools/dev/test-region.mjs",
+    "fetch:region": "node tools/fetch-region.mjs",
+    "bake:region": "esbuild tools/bake-region.ts --bundle --platform=node --format=esm --packages=external --outfile=tools/dev/bake-region.mjs --log-level=warning && node --max-old-space-size=12000 tools/dev/bake-region.mjs"
   },
   "dependencies": {
     "@preact/signals": "2.10.0",

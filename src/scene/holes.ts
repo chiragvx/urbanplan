@@ -3,8 +3,9 @@
 // vertical edge, so instead the terrain material skips its pixels inside the cut. The cut is kept as a signed distance
 // field on a 2 m grid (linearly filtered, so a straight wall line stays straight to a few cm).
 import * as THREE from 'three/webgpu';
-import { texture, positionWorld, vec2, float } from 'three/tsl';
+import { texture, positionWorld, vec2, float, uniform } from 'three/tsl';
 import type { Stamp } from '../net/generate';
+import { shiftInto } from '../geo/heightfield';
 
 /** metres per texel */
 const RES = 2;
@@ -22,16 +23,31 @@ export class TerrainHoles {
   /** keep the terrain fragment (outside every cut) — a terrain material's maskNode */
   readonly keep;
 
-  constructor(private readonly half: number) {
+  /** west / north edge of the field (a uniform: the field moves with a region's window) */
+  private readonly org = uniform(new THREE.Vector2());
+
+  constructor(private readonly half: number, ox = 0, oz = 0) {
     this.n = Math.ceil((2 * half) / RES) + 1;
+    this.org.value.set(ox - half, oz - half);
     // a 1×1 "no holes" texture until the first cut appears (most maps have none)
     this.tex = new THREE.DataTexture(new Uint8Array([255]), 1, 1, THREE.RedFormat, THREE.UnsignedByteType);
     this.tex.needsUpdate = true;
     this.node = texture(this.tex, vec2(0.5, 0.5));
     const size = this.n * RES;
-    const uvw = positionWorld.xz.add(half + RES / 2).div(size);
+    const uvw = positionWorld.xz.sub(this.org).add(RES / 2).div(size);
     this.node.uvNode = uvw;
     this.keep = (this.node as unknown as { r: ReturnType<typeof float> }).r.greaterThan(float(0.5));
+  }
+
+  /** Move the field to a new centre (a region's window moved): the overlap carries over, the rest is cleared. */
+  moveTo(ox: number, oz: number) {
+    const sx = this.org.value.x, sz = this.org.value.y;
+    this.org.value.set(ox - this.half, oz - this.half);
+    if (!this.data) return;
+    const next = new Uint8Array(this.data.length).fill(255);
+    shiftInto(this.data, sx, sz, next, this.org.value.x, this.org.value.y, this.n, RES);
+    this.data.set(next);
+    this.tex.needsUpdate = true;
   }
 
   /** Re-make the field in a region from the hole stamps of the mesh items there. Returns whether anything changed. */
@@ -39,9 +55,9 @@ export class TerrainHoles {
     const holes = [...stamps].filter((s) => s.hole);
     if (!holes.length && !this.data) return false;
     this.ensure();
-    const D = this.data!, n = this.n, h = this.half;
-    const gi = (x: number) => Math.round((x + h) / RES);
-    const i0 = Math.max(0, gi(region[0])), i1 = Math.min(n - 1, gi(region[2])), j0 = Math.max(0, gi(region[1])), j1 = Math.min(n - 1, gi(region[3]));
+    const D = this.data!, n = this.n, gx = this.org.value.x, gz = this.org.value.y;
+    const gi = (x: number) => Math.round((x - gx) / RES), gj = (z: number) => Math.round((z - gz) / RES);
+    const i0 = Math.max(0, gi(region[0])), i1 = Math.min(n - 1, gi(region[2])), j0 = Math.max(0, gj(region[1])), j1 = Math.min(n - 1, gj(region[3]));
     let changed = false;
     for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (D[j * n + i] !== 255) { D[j * n + i] = 255; changed = true; }
     const put = (i: number, j: number, d: number) => {
@@ -78,8 +94,8 @@ export class TerrainHoles {
           const ax = p[s], az = p[s + 1], bx = p[s + 2], bz = p[s + 3];
           const dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1e-9;
           const pad = hw + RANGE;
-          for (let j = gi(Math.min(az, bz) - pad); j <= gi(Math.max(az, bz) + pad); j++) for (let i = gi(Math.min(ax, bx) - pad); i <= gi(Math.max(ax, bx) + pad); i++) {
-            const x = i * RES - h, z = j * RES - h;
+          for (let j = gj(Math.min(az, bz) - pad); j <= gj(Math.max(az, bz) + pad); j++) for (let i = gi(Math.min(ax, bx) - pad); i <= gi(Math.max(ax, bx) + pad); i++) {
+            const x = gx + i * RES, z = gz + j * RES;
             const out = beyond(x, z);
             if (out !== null) { put(i, j, out); continue; }
             const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / L2));
@@ -90,8 +106,8 @@ export class TerrainHoles {
         const r = st.ring, m = r.length / 2;
         let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
         for (let k = 0; k < m; k++) { x0 = Math.min(x0, r[k * 2]); x1 = Math.max(x1, r[k * 2]); z0 = Math.min(z0, r[k * 2 + 1]); z1 = Math.max(z1, r[k * 2 + 1]); }
-        for (let j = gi(z0 - RANGE); j <= gi(z1 + RANGE); j++) for (let i = gi(x0 - RANGE); i <= gi(x1 + RANGE); i++) {
-          const x = i * RES - h, z = j * RES - h;
+        for (let j = gj(z0 - RANGE); j <= gj(z1 + RANGE); j++) for (let i = gi(x0 - RANGE); i <= gi(x1 + RANGE); i++) {
+          const x = gx + i * RES, z = gz + j * RES;
           let best = Infinity, inside = false;
           for (let a = 0, b = m - 1; a < m; b = a++) {
             const ax = r[a * 2], az = r[a * 2 + 1], bx = r[b * 2], bz = r[b * 2 + 1];

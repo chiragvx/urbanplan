@@ -107,6 +107,8 @@ export interface BuildingObj {
   name: string;
   /** index in the tile's building list (render / roof style) */
   src: number;
+  /** building kind (render style) and roof shape, when the base carries them itself (regions) */
+  bk?: number; roof?: number;
 }
 
 export type LayerGroup = 'reference' | 'surface' | 'elevated' | 'underground';

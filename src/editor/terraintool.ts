@@ -48,7 +48,7 @@ export class TerrainTool {
     const g = poly ? (() => { let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity; for (let i = 0; i < poly.length; i += 2) { x0 = Math.min(x0, poly[i]); x1 = Math.max(x1, poly[i]); z0 = Math.min(z0, poly[i + 1]); z1 = Math.max(z1, poly[i + 1]); } return hf.gridRange(x0, z0, x1, z1); })() : hf.gridRange(x - r, z - r, x + r, z + r);
     let s = 0, c = 0;
     for (let j = g.j0; j <= g.j1; j++) for (let i = g.i0; i <= g.i1; i++) {
-      const px = -hf.half + i * hf.cell, pz = -hf.half + j * hf.cell;
+      const px = hf.x0 + i * hf.cell, pz = hf.z0 + j * hf.cell;
       if (poly ? !inPoly(poly, px, pz) : Math.hypot(px - x, pz - z) > r) continue;
       s += hf.designed[j * n + i]; c++;
     }

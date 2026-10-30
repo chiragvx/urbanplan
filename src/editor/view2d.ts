@@ -12,7 +12,7 @@ export class PlanView {
   maxScale = 60;
   private anim: { cx: number; cz: number; scale: number; t0: number; from: [number, number, number]; dur: number } | null = null;
 
-  constructor(private cam: THREE.OrthographicCamera, public bounds = 2500) {}
+  constructor(private cam: THREE.OrthographicCamera, public bounds: number | [number, number, number, number] = 2500) {}
 
   resize(w: number, h: number) { this.w = w; this.h = h; this.apply(); }
 
@@ -61,9 +61,9 @@ export class PlanView {
   }
 
   private clamp() {
-    const b = this.bounds + 400;
-    this.cx = Math.max(-b, Math.min(b, this.cx));
-    this.cz = Math.max(-b, Math.min(b, this.cz));
+    const B = typeof this.bounds === 'number' ? [-this.bounds, -this.bounds, this.bounds, this.bounds] : this.bounds;
+    this.cx = Math.max(B[0] - 400, Math.min(B[2] + 400, this.cx));
+    this.cz = Math.max(B[1] - 400, Math.min(B[3] + 400, this.cz));
   }
 
   apply() {

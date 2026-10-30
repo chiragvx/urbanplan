@@ -4,6 +4,7 @@
 import type { CityDoc } from '../doc/doc';
 import type { Issue } from '../doc/issues';
 import * as ops from '../doc/ops';
+import { fetchText } from '../data/region';
 
 interface Way { id: number; hw: string; p: Float32Array; box: [number, number, number, number] }
 
@@ -17,7 +18,9 @@ export class OsmCompare {
 
   load(): Promise<void> {
     if (this.ways) return Promise.resolve();
-    this.loading ??= fetch(`${this.base}osm-roads.json`).then((r) => (r.ok ? r.json() : { ways: [] })).then((j: { source?: string; ways: { id: number; hw: string; p: number[] }[] }) => {
+    // a region's file is gzipped; a tile's plain
+    const get = fetchText(`${this.base}osm-roads.json.gz`).then((t) => JSON.parse(t)).catch(() => fetch(`${this.base}osm-roads.json`).then((r) => (r.ok ? r.json() : { ways: [] })));
+    this.loading ??= get.then((j: { source?: string; ways: { id: number; hw: string; p: number[] }[] }) => {
       this.source = j.source ?? '';
       this.ways = j.ways.map((w) => {
         const p = Float32Array.from(w.p);

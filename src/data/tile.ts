@@ -15,6 +15,8 @@ export interface TileData {
   name: string;
   city: string;
   half: number;
+  /** centre of the area this data covers (a region window; 0, 0 for a tile) */
+  ox?: number; oz?: number;
   center: [number, number];
   proj: { kx: number; kz: number };
   bbox: [number, number, number, number];

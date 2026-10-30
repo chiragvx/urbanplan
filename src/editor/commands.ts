@@ -343,7 +343,7 @@ export const COMMANDS: Command[] = [
     run: (E) => { dpRegionsOn.value = !dpRegionsOn.value; if (dpRegionsOn.value) { E.dpr.load(); if (E.dpr.missing) toast('No DP regions for this map yet (tools/dp/regions.py)', 'warn'); } E.dpHover = null; E.overlayDirty = true; },
   },
   { id: 'view.accuracy', label: 'Accuracy view (where widths come from)', group: 'View', keys: 'Shift+A', run: (E) => { accuracyView.value = !accuracyView.value; E.overlayDirty = true; } },
-  { id: 'view.fit', label: 'Zoom to the whole map', group: 'View', keys: 'Shift+1', run: (E) => { const h = E.world.tile.half; E.zoomTo([-h, -h, h, h]); } },
+  { id: 'view.fit', label: 'Zoom to the whole map', group: 'View', keys: 'Shift+1', run: (E) => { const b = E.app.region?.bounds; const h = E.world.tile.half; E.zoomTo(b ?? [-h, -h, h, h]); } },
   { id: 'view.sel', label: 'Zoom to selection', group: 'View', keys: 'Shift+2', enabled: () => selection.value.length > 0, run: (E) => E.zoomToSelection() },
   { id: 'view.focus', label: 'Focus the selection', group: 'View', keys: 'U', enabled: () => selection.value.length > 0, run: (E) => E.zoomToSelection() },
   { id: 'view.zoomin', label: 'Zoom in', group: 'View', keys: '=', run: (E) => { E.view.zoomAt(E.view.w / 2, E.view.h / 2, 1.5); E.world.needsRender = true; } },

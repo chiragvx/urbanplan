@@ -20,6 +20,8 @@ export interface ImportInput {
   ways: OsmWay[];
   proj: (n: { lat: number; lon: number }) => V2;
   half: number;
+  /** clip rectangle [x0, z0, x1, z1] (a region); default the square ±half */
+  bounds?: [number, number, number, number];
   groundRails: V2[][];
   /** elevated rail lines (metro viaducts) */
   viaducts?: V2[][];
@@ -295,7 +297,7 @@ class Graph {
 export function importNetwork(inp: ImportInput): Network {
   const log = inp.log ?? (() => {});
   const G = new Graph();
-  const H = inp.half - 1;
+  const [BX0, BZ0, BX1, BZ1] = inp.bounds ? [inp.bounds[0] + 1, inp.bounds[1] + 1, inp.bounds[2] - 1, inp.bounds[3] - 1] : [-inp.half + 1, -inp.half + 1, inp.half - 1, inp.half - 1];
   const paths: PathLine[] = [];
 
   // ===== A. raw graph =====
@@ -319,10 +321,10 @@ export function importNetwork(inp: ImportInput): Network {
     }
     return id;
   };
-  const inside = (p: V2) => Math.abs(p[0]) <= H && Math.abs(p[1]) <= H;
-  const clipT = (a: V2, b: V2): number => { // first t in (0,1] where the segment leaves/enters the square
+  const inside = (p: V2) => p[0] >= BX0 && p[0] <= BX1 && p[1] >= BZ0 && p[1] <= BZ1;
+  const clipT = (a: V2, b: V2): number => { // first t in (0,1] where the segment leaves/enters the clip rectangle
     let t = 1;
-    for (const [c, d, lim] of [[a[0], b[0], H], [a[0], b[0], -H], [a[1], b[1], H], [a[1], b[1], -H]] as [number, number, number][]) {
+    for (const [c, d, lim] of [[a[0], b[0], BX1], [a[0], b[0], BX0], [a[1], b[1], BZ1], [a[1], b[1], BZ0]] as [number, number, number][]) {
       if ((c - lim) * (d - lim) < 0) t = Math.min(t, (lim - c) / (d - c));
     }
     return t;

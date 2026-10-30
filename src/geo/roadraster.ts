@@ -1,6 +1,7 @@
 // 2 m raster of the road footprint, stamped by walking each smooth centre line once.
 // Constant-time "is there a road here / which one" for terrain carving, building conflicts, trees and picking.
 import type { StreetNet } from './streets';
+import { shiftInto } from './heightfield';
 
 export class RoadRaster {
   readonly cell = 2;
@@ -8,13 +9,24 @@ export class RoadRaster {
   /** 1: road or junction · 0: nothing (a byte a cell: callers only ask "is there a road here") */
   readonly code: Uint8Array;
 
-  constructor(readonly half: number) {
+  /** west / north edge (the raster is a square of side 2·half centred on ox, oz) */
+  readonly x0: number; readonly z0: number;
+
+  constructor(readonly half: number, ox = 0, oz = 0) {
     this.n = Math.ceil((half * 2) / this.cell) + 1;
     this.code = new Uint8Array(this.n * this.n);
+    this.x0 = ox - half; this.z0 = oz - half;
+  }
+
+  /** The same raster over a square centred elsewhere (a region's window moved); the overlap carries over. */
+  movedTo(ox: number, oz: number): RoadRaster {
+    const R = new RoadRaster(this.half, ox, oz);
+    shiftInto(this.code, this.x0, this.z0, R.code, R.x0, R.z0, this.n, this.cell);
+    return R;
   }
 
   private idx(x: number, z: number) {
-    const i = Math.floor((x + this.half) / this.cell), j = Math.floor((z + this.half) / this.cell);
+    const i = Math.floor((x - this.x0) / this.cell), j = Math.floor((z - this.z0) / this.cell);
     return i < 0 || j < 0 || i >= this.n || j >= this.n ? -1 : j * this.n + i;
   }
 
@@ -23,7 +35,7 @@ export class RoadRaster {
 
   /** Disc stamps every metre along the centre line, radius = half the road width. */
   stampRoad(center: Float32Array, halfWidth: number, code: number, region?: [number, number, number, number]) {
-    const n = center.length / 2, c = this.cell, h = this.half;
+    const n = center.length / 2, c = this.cell, gx = this.x0, gz = this.z0;
     const [rx0, rz0, rx1, rz1] = region ?? [-Infinity, -Infinity, Infinity, Infinity];
     const r = halfWidth, r2 = r * r;
     for (let i = 0; i < n - 1; i++) {
@@ -32,10 +44,10 @@ export class RoadRaster {
       const steps = Math.max(1, Math.ceil(L));
       for (let s = 0; s <= steps; s++) {
         const t = s / steps, x = ax + (bx - ax) * t, z = az + (bz - az) * t;
-        const i0 = Math.max(0, Math.floor((Math.max(x - r, rx0) + h) / c)), i1 = Math.min(this.n - 1, Math.floor((Math.min(x + r, rx1) + h) / c));
-        const j0 = Math.max(0, Math.floor((Math.max(z - r, rz0) + h) / c)), j1 = Math.min(this.n - 1, Math.floor((Math.min(z + r, rz1) + h) / c));
+        const i0 = Math.max(0, Math.floor((Math.max(x - r, rx0) - gx) / c)), i1 = Math.min(this.n - 1, Math.floor((Math.min(x + r, rx1) - gx) / c));
+        const j0 = Math.max(0, Math.floor((Math.max(z - r, rz0) - gz) / c)), j1 = Math.min(this.n - 1, Math.floor((Math.min(z + r, rz1) - gz) / c));
         for (let jj = j0; jj <= j1; jj++) for (let ii = i0; ii <= i1; ii++) {
-          const cx = -h + (ii + 0.5) * c - x, cz = -h + (jj + 0.5) * c - z;
+          const cx = gx + (ii + 0.5) * c - x, cz = gz + (jj + 0.5) * c - z;
           if (cx * cx + cz * cz <= r2) this.code[jj * this.n + ii] = 1;
         }
       }
@@ -44,14 +56,14 @@ export class RoadRaster {
 
   /** Scanline fill of a (small) polygon such as a junction. */
   stampPolygon(ring: Float32Array, code: number, region?: [number, number, number, number]) {
-    const c = this.cell, h = this.half, m = ring.length / 2;
+    const c = this.cell, gx = this.x0, gz = this.z0, m = ring.length / 2;
     const [rx0, rz0, rx1, rz1] = region ?? [-Infinity, -Infinity, Infinity, Infinity];
     let z0 = Infinity, z1 = -Infinity;
     for (let i = 1; i < ring.length; i += 2) { z0 = Math.min(z0, ring[i]); z1 = Math.max(z1, ring[i]); }
     z0 = Math.max(z0, rz0); z1 = Math.min(z1, rz1);
-    const j0 = Math.max(0, Math.floor((z0 + h) / c)), j1 = Math.min(this.n - 1, Math.floor((z1 + h) / c));
+    const j0 = Math.max(0, Math.floor((z0 - gz) / c)), j1 = Math.min(this.n - 1, Math.floor((z1 - gz) / c));
     for (let j = j0; j <= j1; j++) {
-      const z = -h + (j + 0.5) * c;
+      const z = gz + (j + 0.5) * c;
       const xs: number[] = [];
       for (let a = 0; a < m; a++) {
         const b = (a + 1) % m, az = ring[a * 2 + 1], bz = ring[b * 2 + 1];
@@ -59,7 +71,7 @@ export class RoadRaster {
       }
       xs.sort((p, q) => p - q);
       for (let k = 0; k + 1 < xs.length; k += 2) {
-        const i0 = Math.max(0, Math.floor((Math.max(xs[k], rx0) + h) / c)), i1 = Math.min(this.n - 1, Math.floor((Math.min(xs[k + 1], rx1) + h) / c));
+        const i0 = Math.max(0, Math.floor((Math.max(xs[k], rx0) - gx) / c)), i1 = Math.min(this.n - 1, Math.floor((Math.min(xs[k + 1], rx1) - gx) / c));
         for (let i = i0; i <= i1; i++) this.code[j * this.n + i] = 1;
       }
     }
@@ -67,9 +79,9 @@ export class RoadRaster {
 
   /** Clear every cell in a metric region. */
   clear(region: [number, number, number, number]) {
-    const c = this.cell, h = this.half;
-    const i0 = Math.max(0, Math.floor((region[0] + h) / c)), i1 = Math.min(this.n - 1, Math.floor((region[2] + h) / c));
-    const j0 = Math.max(0, Math.floor((region[1] + h) / c)), j1 = Math.min(this.n - 1, Math.floor((region[3] + h) / c));
+    const c = this.cell, gx = this.x0, gz = this.z0;
+    const i0 = Math.max(0, Math.floor((region[0] - gx) / c)), i1 = Math.min(this.n - 1, Math.floor((region[2] - gx) / c));
+    const j0 = Math.max(0, Math.floor((region[1] - gz) / c)), j1 = Math.min(this.n - 1, Math.floor((region[3] - gz) / c));
     for (let j = j0; j <= j1; j++) this.code.fill(0, j * this.n + i0, j * this.n + i1 + 1);
   }
 

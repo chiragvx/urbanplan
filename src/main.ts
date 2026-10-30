@@ -13,13 +13,15 @@ import { TerrainToolbar } from './ui/TerrainToolbar';
 import { MultiToolbar } from './ui/MultiToolbar';
 
 const $ = (id: string) => document.getElementById(id)!;
-const TILE = new URLSearchParams(location.search).get('tile') ?? 'kp';
+// the whole city (a region streamed in pieces) unless a single tile is asked for (?tile=kp)
+const Q = new URLSearchParams(location.search);
+const SRC = Q.get('tile') ? { tile: Q.get('tile')! } : { region: Q.get('region') ?? 'pune' };
 
 async function boot() {
   const progress = (f: number, msg: string) => { $('load-bar').style.width = `${Math.round(f * 100)}%`; $('load-msg').textContent = msg; };
   const app = new App();
   try {
-    await app.boot(TILE, progress);
+    await app.boot(SRC, progress);
   } catch (e) {
     console.error(e);
     $('load-msg').textContent = `Could not start: ${(e as Error).message}`;

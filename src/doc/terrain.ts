@@ -121,12 +121,12 @@ export class TerrainCompiler {
 
   /** Apply one earthwork to grid `D` within the index range. */
   apply(o: EarthworkObj, D: Float32Array, g: { i0: number; j0: number; i1: number; j1: number }) {
-    const hf = this.hf, n = hf.n, cell = hf.cell, half = hf.half, base = hf.base;
-    const X = (i: number) => -half + i * cell, Z = (j: number) => -half + j * cell;
+    const hf = this.hf, n = hf.n, cell = hf.cell, gx = hf.x0, gz = hf.z0, base = hf.base;
+    const X = (i: number) => gx + i * cell, Z = (j: number) => gz + j * cell;
     const r = Math.max(1, o.radius);
     const each = (x: number, z: number, rad: number, f: (k: number, d: number) => void) => {
-      const i0 = Math.max(g.i0, Math.floor((x - rad + half) / cell)), i1 = Math.min(g.i1, Math.ceil((x + rad + half) / cell));
-      const j0 = Math.max(g.j0, Math.floor((z - rad + half) / cell)), j1 = Math.min(g.j1, Math.ceil((z + rad + half) / cell));
+      const i0 = Math.max(g.i0, Math.floor((x - rad - gx) / cell)), i1 = Math.min(g.i1, Math.ceil((x + rad - gx) / cell));
+      const j0 = Math.max(g.j0, Math.floor((z - rad - gz) / cell)), j1 = Math.min(g.j1, Math.ceil((z + rad - gz) / cell));
       for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const d = Math.hypot(X(i) - x, Z(j) - z); if (d < rad) f(j * n + i, d); }
     };
     const P = o.pts;
@@ -230,7 +230,7 @@ export class TerrainCompiler {
    */
   pits(minDepth = 0.5): { x: number; z: number; depth: number; area: number; region: Region }[] {
     const out: { x: number; z: number; depth: number; area: number; region: Region }[] = [];
-    const hf = this.hf, n = hf.n, cell = hf.cell, half = hf.half;
+    const hf = this.hf, n = hf.n, cell = hf.cell, gx = hf.x0, gz = hf.z0;
     const regions: Region[] = [];
     for (const b of this.boxes.values()) {
       const e: Region = [b[0] - 40, b[1] - 40, b[2] + 40, b[3] + 40];
@@ -269,7 +269,7 @@ export class TerrainCompiler {
         let deepest = 0, dx = 0, dz = 0;
         for (let c = 0; c < comp.length; c++) {
           const q = comp[c], i = q % w, j = (q - i) / w, d = fill[q] - at(i, j);
-          if (d > deepest) { deepest = d; dx = -half + (i + g.i0) * cell; dz = -half + (j + g.j0) * cell; }
+          if (d > deepest) { deepest = d; dx = gx + (i + g.i0) * cell; dz = gz + (j + g.j0) * cell; }
           for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
             const ii = i + di, jj = j + dj, p = jj * w + ii;
             if (ii < 0 || jj < 0 || ii >= w || jj >= h || seen[p] || fill[p] - at(ii, jj) < 0.05) continue;

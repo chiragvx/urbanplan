@@ -35,6 +35,77 @@ export const LINE_LABEL: Record<LineKind, string> = {
 export function buildBase(net: Network, tile: TileData, utilities?: UtilitiesFile | null): Map<Id, Obj> {
   const out = new Map<Id, Obj>();
   const put = (o: Obj) => out.set(o.id, o);
+  for (const o of networkObjects(net)) put(o);
+  // ---- buildings ----
+  tile.buildings.forEach((b, i) => put(buildingObj(b, 'b' + i, i)));
+  // ---- lines: rail, metro ----
+  tile.rails.forEach((r, i) => put(railObj(r, 'rl' + i)));
+  for (const o of baseLayers('tiles/' + tile.id + '/dp/index.json')) put(o);
+  for (const o of utilityObjects(utilities)) put(o);
+  return out;
+}
+
+/** A building from the bake as a document object. */
+export function buildingObj(b: TileData['buildings'][number], id: Id, src: number): BuildingObj {
+  return { kind: 'building', id, outer: Array.from(b.outer, r2), holes: b.holes.map((h) => Array.from(h, r2)), h: r2(b.h), minH: r2(b.minH), name: b.name, src, bk: b.kind, roof: b.roof };
+}
+
+/** A railway / metro line from the bake as a document object. */
+export function railObj(r: TileData['rails'][number], id: Id): LineObj {
+  const metro = r.metro;
+  const above = r.bridge || r.layer > 0;
+  return {
+    kind: 'line', id, layer: metro ? 'metro' : 'rail', pts: Array.from(r.pts, r2),
+    depth: r.tunnel ? 14 : above ? -(metro ? 9 : 6.5) : 0, size: metro ? 9 : 3, name: '',
+    props: { bridge: r.bridge ? 1 : 0, tunnel: r.tunnel ? 1 : 0, service: r.service ? 1 : 0 },
+  } as LineObj;
+}
+
+/** Utility networks (pipes, cables) as document lines, one layer each. */
+export function utilityObjects(utilities?: UtilitiesFile | null, firstOrder = 12): Obj[] { // (after the 12 base layers)
+  const out: Obj[] = [];
+  let order = firstOrder;
+  for (const L of utilities?.layers ?? []) {
+    out.push({ kind: 'layer', locked: false, opacity: 1, order: order++, id: 'u-' + L.id, name: L.name || LINE_LABEL[L.kind], group: 'underground', type: 'lines', lineKind: L.kind, visible: false, color: LINE_COLOR[L.kind] ?? LINE_COLOR.other, source: L.source, url: L.url, license: L.license } as LayerObj);
+    for (const ln of L.lines) {
+      const p = ln.props ?? {};
+      const props: Record<string, string | number> = {};
+      for (const [k, v] of Object.entries(p)) if (k !== 'raw' && (typeof v === 'string' || typeof v === 'number')) props[k] = v;
+      out.push({
+        kind: 'line', id: 'u' + hash(L.id + ':' + ln.id), layer: 'u-' + L.id, pts: ln.pts.map(r2),
+        depth: typeof p.depth_m === 'number' ? p.depth_m : DEFAULT_DEPTH[L.kind] ?? 1,
+        size: typeof p.diameter_mm === 'number' ? p.diameter_mm / 1000 : DEFAULT_SIZE[L.kind] ?? 0.3,
+        name: typeof p.name === 'string' ? p.name : '', props,
+      } as LineObj);
+    }
+  }
+  return out;
+}
+
+/** The layers every map starts with. */
+export function baseLayers(dpUrl: string): LayerObj[] {
+  const out: LayerObj[] = [];
+  let order = 0;
+  const layer = (o: Omit<LayerObj, 'kind' | 'order' | 'locked' | 'opacity'> & Partial<LayerObj>) => out.push({ kind: 'layer', locked: false, opacity: 1, order: order++, ...o } as LayerObj);
+  layer({ id: 'dp', name: 'Development Plan sheets', group: 'reference', type: 'dp', visible: false, opacity: 0.75, source: 'Pune Municipal Corporation — sanctioned DP', url: dpUrl });
+  layer({ id: 'osm', name: 'OpenStreetMap tiles', group: 'reference', type: 'xyz', visible: false, opacity: 0.6, url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', source: '© OpenStreetMap contributors', license: 'ODbL' });
+  layer({ id: 'imagery', name: 'Custom imagery (XYZ)', group: 'reference', type: 'xyz', visible: false, opacity: 0.8, url: '' });
+  layer({ id: 'satellite', name: 'Satellite', group: 'reference', type: 'xyz', visible: false, opacity: 1, preset: 'esri', mode: 'ground', roads: 'solid', url: IMAGERY.esri.url, source: IMAGERY.esri.credit, license: IMAGERY.esri.terms });
+  layer({ id: 'terrain', name: 'Terrain & land use', group: 'surface', type: 'terrain', visible: true });
+  layer({ id: 'water', name: 'Rivers & water', group: 'surface', type: 'water', visible: true });
+  layer({ id: 'roads', name: 'Roads & junctions', group: 'surface', type: 'roads', visible: true });
+  layer({ id: 'paths', name: LINE_LABEL.path, group: 'surface', type: 'lines', lineKind: 'path', visible: true, color: LINE_COLOR.path });
+  layer({ id: 'buildings', name: 'Buildings', group: 'surface', type: 'buildings', visible: true });
+  layer({ id: 'trees', name: 'Trees', group: 'surface', type: 'trees', visible: true });
+  layer({ id: 'rail', name: LINE_LABEL.rail, group: 'surface', type: 'lines', lineKind: 'rail', visible: true, color: LINE_COLOR.rail });
+  layer({ id: 'metro', name: LINE_LABEL.metro, group: 'elevated', type: 'lines', lineKind: 'metro', visible: true, color: LINE_COLOR.metro });
+  return out;
+}
+
+/** Junctions, sections, roads and footpaths from a baked network. */
+export function networkObjects(net: Network): Obj[] {
+  const out = new Map<Id, Obj>();
+  const put = (o: Obj) => out.set(o.id, o);
   const segs = net.segments;
   const at = new Map<number, NetSegment[]>();
   for (const s of segs) for (const n of [s.a, s.b]) (at.get(n) ?? at.set(n, []).get(n)!).push(s);
@@ -162,60 +233,17 @@ export function buildBase(net: Network, tile: TileData, utilities?: UtilitiesFil
     for (const s of list) { s.road = road.id; put(s); }
   }
 
-  // ---- buildings ----
-  tile.buildings.forEach((b, i) => {
-    const o: BuildingObj = { kind: 'building', id: 'b' + i, outer: Array.from(b.outer, r2), holes: b.holes.map((h) => Array.from(h, r2)), h: r2(b.h), minH: r2(b.minH), name: b.name, src: i };
-    put(o);
-  });
-
-  // ---- lines: footpaths, rail, metro, utilities ----
+  // ---- footpaths ----
   net.paths.forEach((p, i) => {
     put({ kind: 'line', id: 'pa' + i, layer: 'paths', pts: p.pts.map(r2), depth: 0, size: p.width, name: '', props: { kind: p.kind } } as LineObj);
   });
-  tile.rails.forEach((r, i) => {
-    const metro = r.metro;
-    const above = r.bridge || r.layer > 0;
-    put({
-      kind: 'line', id: 'rl' + i, layer: metro ? 'metro' : 'rail', pts: Array.from(r.pts, r2),
-      depth: r.tunnel ? 14 : above ? -(metro ? 9 : 6.5) : 0, size: metro ? 9 : 3, name: '',
-      props: { bridge: r.bridge ? 1 : 0, tunnel: r.tunnel ? 1 : 0, service: r.service ? 1 : 0 },
-    } as LineObj);
-  });
-
-  // ---- layers ----
-  let order = 0;
-  const layer = (o: Omit<LayerObj, 'kind' | 'order' | 'locked' | 'opacity'> & Partial<LayerObj>) => put({ kind: 'layer', locked: false, opacity: 1, order: order++, ...o } as LayerObj);
-  layer({ id: 'dp', name: 'Development Plan sheets', group: 'reference', type: 'dp', visible: false, opacity: 0.75, source: 'Pune Municipal Corporation — sanctioned DP', url: 'tiles/' + tile.id + '/dp/index.json' });
-  layer({ id: 'osm', name: 'OpenStreetMap tiles', group: 'reference', type: 'xyz', visible: false, opacity: 0.6, url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', source: '© OpenStreetMap contributors', license: 'ODbL' });
-  layer({ id: 'imagery', name: 'Custom imagery (XYZ)', group: 'reference', type: 'xyz', visible: false, opacity: 0.8, url: '' });
-  layer({ id: 'satellite', name: 'Satellite', group: 'reference', type: 'xyz', visible: false, opacity: 1, preset: 'esri', mode: 'ground', roads: 'solid', url: IMAGERY.esri.url, source: IMAGERY.esri.credit, license: IMAGERY.esri.terms });
-  layer({ id: 'terrain', name: 'Terrain & land use', group: 'surface', type: 'terrain', visible: true });
-  layer({ id: 'water', name: 'Rivers & water', group: 'surface', type: 'water', visible: true });
-  layer({ id: 'roads', name: 'Roads & junctions', group: 'surface', type: 'roads', visible: true });
-  layer({ id: 'paths', name: LINE_LABEL.path, group: 'surface', type: 'lines', lineKind: 'path', visible: true, color: LINE_COLOR.path });
-  layer({ id: 'buildings', name: 'Buildings', group: 'surface', type: 'buildings', visible: true });
-  layer({ id: 'trees', name: 'Trees', group: 'surface', type: 'trees', visible: true });
-  layer({ id: 'rail', name: LINE_LABEL.rail, group: 'surface', type: 'lines', lineKind: 'rail', visible: true, color: LINE_COLOR.rail });
-  layer({ id: 'metro', name: LINE_LABEL.metro, group: 'elevated', type: 'lines', lineKind: 'metro', visible: true, color: LINE_COLOR.metro });
-  for (const L of utilities?.layers ?? []) {
-    layer({ id: 'u-' + L.id, name: L.name || LINE_LABEL[L.kind], group: 'underground', type: 'lines', lineKind: L.kind, visible: false, color: LINE_COLOR[L.kind] ?? LINE_COLOR.other, source: L.source, url: L.url, license: L.license });
-    for (const ln of L.lines) {
-      const p = ln.props ?? {};
-      const props: Record<string, string | number> = {};
-      for (const [k, v] of Object.entries(p)) if (k !== 'raw' && (typeof v === 'string' || typeof v === 'number')) props[k] = v;
-      put({
-        kind: 'line', id: 'u' + hash(L.id + ':' + ln.id), layer: 'u-' + L.id, pts: ln.pts.map(r2),
-        depth: typeof p.depth_m === 'number' ? p.depth_m : DEFAULT_DEPTH[L.kind] ?? 1,
-        size: typeof p.diameter_mm === 'number' ? p.diameter_mm / 1000 : DEFAULT_SIZE[L.kind] ?? 0.3,
-        name: typeof p.name === 'string' ? p.name : '', props,
-      } as LineObj);
-    }
-  }
-  return out;
+  return [...out.values()];
 }
 
 /** Fingerprint of a base: changes whenever the importer produces a different network. */
-export function baseFingerprint(base: Map<Id, Obj>): string {
-  const ids = [...base.keys()].filter((k) => k[0] === 's' || k[0] === 'j').sort();
-  return hash(ids.join(','));
+export function baseFingerprint(base: Map<Id, Obj>): string { return baseFingerprintOf(base.keys()); }
+
+/** Fingerprint of a set of base object ids (only sections and junctions count). */
+export function baseFingerprintOf(ids: Iterable<Id>): string {
+  return hash([...ids].filter((k) => k[0] === 's' || k[0] === 'j').sort().join(','));
 }

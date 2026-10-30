@@ -73,12 +73,12 @@ export class TerrainView {
 
   /** Contours of one chunk at an interval, in world metres. */
   private chunkContours(ci: number, cj: number, step: number): Path2D {
-    const key = `${ci}:${cj}:${step}`;
+    const key = `${ci}:${cj}:${step}:${this.E.hf.ox},${this.E.hf.oz}`;
     let p = this.contours.get(key);
     if (p) return p;
     p = new Path2D();
-    const hf = this.E.hf, n = hf.n, S = hf.surface, cell = hf.cell, half = hf.half, base = hf.base;
-    const X = (i: number) => -half + i * cell, Z = (j: number) => -half + j * cell;
+    const hf = this.E.hf, n = hf.n, S = hf.surface, cell = hf.cell, gx = hf.x0, gz = hf.z0, base = hf.base;
+    const X = (i: number) => gx + i * cell, Z = (j: number) => gz + j * cell;
     const i0 = ci * CHUNK, j0 = cj * CHUNK, i1 = Math.min(n - 1, i0 + CHUNK), j1 = Math.min(n - 1, j0 + CHUNK);
     for (let j = j0; j < j1; j++) for (let i = i0; i < i1; i++) {
       // contour levels are in metres above sea level
@@ -106,7 +106,7 @@ export class TerrainView {
     const E = this.E, ctx = E.ctx, v = E.view, hf = E.hf;
     this.refresh(show);
     const half = hf.half + hf.cell / 2;
-    const a = v.toScreen(-half, -half), b = v.toScreen(half, half);
+    const a = v.toScreen(hf.ox - half, hf.oz - half), b = v.toScreen(hf.ox + half, hf.oz + half);
     ctx.save();
     ctx.globalAlpha = show === 'height' ? 0.72 : 0.85;
     ctx.imageSmoothingEnabled = true;
@@ -120,8 +120,8 @@ export class TerrainView {
     ctx.setTransform(s * devicePixelRatioOf(ctx), 0, 0, s * devicePixelRatioOf(ctx), (v.w / 2 - v.cx * s) * devicePixelRatioOf(ctx), (v.h / 2 - v.cz * s) * devicePixelRatioOf(ctx));
     ctx.lineWidth = 0.9 / s;
     ctx.strokeStyle = show === 'height' ? 'rgba(70,50,30,0.55)' : 'rgba(40,40,40,0.35)';
-    const ci0 = Math.max(0, Math.floor((x0 + hf.half) / cs)), ci1 = Math.min(Math.floor((n - 1) / CHUNK), Math.floor((x1 + hf.half) / cs));
-    const cj0 = Math.max(0, Math.floor((z0 + hf.half) / cs)), cj1 = Math.min(Math.floor((n - 1) / CHUNK), Math.floor((z1 + hf.half) / cs));
+    const ci0 = Math.max(0, Math.floor((x0 - hf.x0) / cs)), ci1 = Math.min(Math.floor((n - 1) / CHUNK), Math.floor((x1 - hf.x0) / cs));
+    const cj0 = Math.max(0, Math.floor((z0 - hf.z0) / cs)), cj1 = Math.min(Math.floor((n - 1) / CHUNK), Math.floor((z1 - hf.z0) / cs));
     if ((ci1 - ci0 + 1) * (cj1 - cj0 + 1) <= 260) for (let cj = cj0; cj <= cj1; cj++) for (let ci = ci0; ci <= ci1; ci++) ctx.stroke(this.chunkContours(ci, cj, step));
     ctx.restore();
   }

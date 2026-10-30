@@ -5,10 +5,15 @@ import { releaseUploaded } from '../render/release';
 import { CityControls } from '../render/controls';
 import { createMaterials } from '../render/materials';
 import { loadTile, type TileData } from '../data/tile';
+import { loadGlobal, loadManifest, type RegionManifest } from '../data/region';
+import { RegionStream } from './stream';
+import { Overview } from '../scene/overview';
+import { frameMove, mapHome, moveMap, movePoint } from '../doc/frames';
+import { landuseRect } from '../render/materials';
 import { Heightfield } from '../geo/heightfield';
 import { buildLanduseTexture } from '../build/terrain';
 import type { Network } from '../net/model';
-import { buildBase, baseFingerprint, type UtilitiesFile } from '../doc/base';
+import { buildBase, baseFingerprint, baseLayers, type UtilitiesFile } from '../doc/base';
 import { CityDoc, type Change } from '../doc/doc';
 import { Compiler } from '../doc/compile';
 import type { SurveyStatus } from '../doc/types';
@@ -19,7 +24,7 @@ import { earthworkBox } from '../doc/terrain';
 import { riverIssues } from '../doc/rules';
 import { toGeoJSON, toNetwork } from '../doc/export';
 import { CityApi } from '../doc/api';
-import type { Id, LayerObj, MapMeta } from '../doc/types';
+import type { Id, LayerObj, MapFile, MapMeta, Obj } from '../doc/types';
 import { CLASS_RANK } from '../doc/types';
 import * as xs from '../doc/xsection';
 import { World } from '../scene/world';
@@ -50,40 +55,99 @@ export class App implements AppApi {
   private saveTimer = 0;
   private lastChange = 0;
   private lastView = '';
-  /** where this tile's files are served from */
+  /** where this tile's / region's files are served from */
   basePath = '';
+  /** a region (a whole city streamed in 2 km pieces): its manifest, the streamer and the far view */
+  region: RegionManifest | null = null;
+  stream: RegionStream | null = null;
+  overview: Overview | null = null;
+  /** 2D zoomed out past the detailed window: the far view is the whole map */
+  overviewMode = false;
+  /** how long each boot stage took (ms) */
+  readonly bootTimes: Record<string, number> = {};
 
-  async boot(tileId: string, progress: (f: number, msg: string) => void) {
+  /** Boot on a region (`region`) or a single tile (`tile`). */
+  async boot(src: { tile?: string; region?: string }, progress: (f: number, msg: string) => void) {
     const $ = (id: string) => document.getElementById(id) as HTMLCanvasElement;
+    let tb = performance.now();
+    const lap = (k: string) => { const t = performance.now(); this.bootTimes[k] = Math.round(t - tb); tb = t; };
     this.engine = new Engine($('gl'));
     this.engine.onLost = () => void this.recoverGpu();
     await this.engine.init(settings.value.graphics);
     this.engine.setTimeOfDay(10.5 * 60);
-    const base = `${import.meta.env.BASE_URL}tiles/${tileId}/`;
-    this.basePath = base;
-    this.tile = await loadTile(tileId, progress);
-    progress(0.15, 'Shaping the terrain…');
-    this.hf = new Heightfield(this.tile.terrain.n, this.tile.terrain.cell, this.tile.terrain.heights);
-    progress(0.2, 'Loading the road network…');
-    const [net, util] = await Promise.all([
-      fetch(base + 'network.json').then((r) => r.json()) as Promise<Network>,
-      fetch(base + 'utilities.json').then((r) => (r.ok ? r.json() : null)).catch(() => null) as Promise<UtilitiesFile | null>,
-    ]);
+    lap('engine');
+    let baseObjs: Map<Id, Obj>, fingerprint: string, docId: string, count: number;
+    if (src.region) {
+      const base = `${import.meta.env.BASE_URL}regions/${src.region}/`;
+      this.basePath = base;
+      progress(0.04, 'Opening the city…');
+      const [R, G] = await Promise.all([loadManifest(base), loadGlobal(base)]);
+      this.region = R;
+      this.stream = new RegionStream(R, base);
+      // where to open: the last map's edits, else Koregaon Park
+      const start = await this.startPoint(R);
+      progress(0.1, 'Loading the area around you…');
+      lap('manifest');
+      const { tile, objs } = await this.stream.open(start[0], start[1]);
+      lap('pieces');
+      this.tile = tile;
+      this.hf = new Heightfield(tile.terrain.n, tile.terrain.cell, tile.terrain.heights, { base: R.base, ox: tile.ox, oz: tile.oz });
+      baseObjs = new Map<Id, Obj>();
+      for (const o of [...G.roads, ...G.lines, ...baseLayers(`${base}dp/index.json`), ...objs]) baseObjs.set(o.id, o);
+      fingerprint = R.fingerprint; docId = R.id;
+      count = objs.filter((o) => o.kind === 'section').length;
+    } else {
+      const tileId = src.tile ?? 'kp';
+      const base = `${import.meta.env.BASE_URL}tiles/${tileId}/`;
+      this.basePath = base;
+      this.tile = await loadTile(tileId, progress);
+      progress(0.15, 'Shaping the terrain…');
+      this.hf = new Heightfield(this.tile.terrain.n, this.tile.terrain.cell, this.tile.terrain.heights);
+      progress(0.2, 'Loading the road network…');
+      const [net, util] = await Promise.all([
+        fetch(base + 'network.json').then((r) => r.json()) as Promise<Network>,
+        fetch(base + 'utilities.json').then((r) => (r.ok ? r.json() : null)).catch(() => null) as Promise<UtilitiesFile | null>,
+      ]);
+      baseObjs = buildBase(net, this.tile, util);
+      fingerprint = baseFingerprint(baseObjs); docId = tileId;
+      count = net.segments.length;
+    }
+    const base = this.basePath;
     progress(0.3, 'Building the editable map…'); await frame();
-    const baseObjs = buildBase(net, this.tile, util);
-    this.doc = new CityDoc(baseObjs, newMeta(tileId, baseFingerprint(baseObjs), settings.value.author));
+    this.doc = new CityDoc(baseObjs, newMeta(docId, fingerprint, settings.value.author));
     this.C = new Compiler(this.doc, this.hf);
-    progress(0.38, `Generating ${net.segments.length.toLocaleString()} road pieces and junctions…`); await frame();
+    progress(0.38, `Generating ${count.toLocaleString()} roads and their junctions…`); await frame();
+    lap('doc');
     this.C.full();
+    lap('compile');
     const landuse = buildLanduseTexture(this.tile);
+    { const h = this.tile.half; landuseRect.value.set((this.tile.ox ?? 0) - h, (this.tile.oz ?? 0) - h, 2 * h); }
     const M = createMaterials(landuse);
     this.world = new World(this.engine.scene, this.tile, this.hf, this.doc, this.C, M, landuse);
     this.world.build((f, m) => progress(f, m));
     this.world.setGraphics(settings.value.graphics);
-    this.controls = new CityControls(this.engine.canvas, this.engine.camera, (x, z) => this.hf.sampleSurface(x, z) * (this.E?.exag ?? 1));
-    this.controls.bounds = this.tile.half;
+    lap('world');
+    if (this.region) {
+      // the rest of the city (far view): fetched now, built over the first frames, nearest first
+      this.overview = new Overview(this.region, base);
+      void this.overview.load().then(() => { this.world.root.add(this.overview!.group); this.overviewKey = ''; }).catch((e) => console.error('far view', e));
+    }
+    const heightAt = (x: number, z: number) => (this.hf.covers(x, z) || !this.overview?.ready ? this.hf.sampleSurface(x, z) : this.overview.height(x, z));
+    this.controls = new CityControls(this.engine.canvas, this.engine.camera, (x, z) => heightAt(x, z) * (this.E?.exag ?? 1));
+    this.controls.bounds = this.region?.bounds ?? this.tile.half;
     this.E = new Editor(this.engine, this.controls, this.doc, this.C, this.world, this.hf, $('overlay'));
     this.E.app = this;
+    if (this.region && this.stream) {
+      this.E.view.bounds = this.region.bounds;
+      this.E.view.minScale = 0.035;
+      this.stream.attach(this.doc, this.C, this.hf, () => this.world, () => this.E?.terrain);
+      this.stream.onMoved = (tile) => {
+        this.tile = tile;
+        buildLanduseTexture(tile, 2048, this.world.landuse as THREE.CanvasTexture);
+        landuseRect.value.set(tile.ox! - tile.half, tile.oz! - tile.half, 2 * tile.half);
+      };
+      this.overview?.setPlan(true);
+    }
     const [lat, lon] = this.tile.center;
     this.ref = new Reference(this.doc, base, { lat, lon, kx: this.tile.proj.kx, kz: this.tile.proj.kz });
     this.ref.onLoad = () => { this.world.needsRender = true; this.lastView = ''; };
@@ -119,9 +183,10 @@ export class App implements AppApi {
     this.E.onAfterChange = (c) => this.afterChange(c);
     bindShortcuts(this.E);
     this.bindDrop();
-    // start in the plan view, framing Koregaon Park
+    // start in the plan view, framing Koregaon Park (or, in a region, where the window opened)
     this.engine.setPlan(true); this.world.setPlan(true); this.engine.plan = true;
-    this.E.view.goTo(-350, 150, 0.5, 1);
+    if (this.stream) this.E.view.goTo(this.tile.ox! + this.startOffset[0], this.tile.oz! + this.startOffset[1], 0.5, 1);
+    else this.E.view.goTo(-350, 150, 0.5, 1);
     progress(0.97, 'Opening your map…');
     await this.restore();
     this.resumeView();
@@ -129,7 +194,9 @@ export class App implements AppApi {
       select: (ids) => select(ids.map((id) => ({ kind: this.doc.get(id)!.kind, id }))),
       zoom: () => this.E.zoomToSelection(),
     });
+    lap('rest');
     console.info('%cUrbanPlan editor', 'font-weight:bold;color:#ff8a3d', '— script edits with `city`, e.g. city.help()');
+    console.info('[UrbanPlan] boot', JSON.stringify(this.bootTimes));
     this.loop();
   }
 
@@ -224,22 +291,69 @@ export class App implements AppApi {
 
   // ---------------- startup: which map ----------------
 
+  /** in a region: where the first view looks, relative to the window centre */
+  private startOffset: [number, number] = [0, 0];
+
+  /** Region: open where the last map's edits are, else Koregaon Park. */
+  private async startPoint(R: RegionManifest): Promise<[number, number]> {
+    let p: [number, number] | null = null;
+    try {
+      const last = await local.last();
+      if (last) {
+        const f = this.toRegion(parse(last.text), R);
+        if (f) p = mapHome(f);
+      }
+    } catch { /* no saved map */ }
+    const kp = R.legacy.kp;
+    p ??= kp ? movePoint(frameMove(kp, R.frame), -350, 150) : [0, 0];
+    const P = R.piece;
+    this.startOffset = [p[0] - (Math.floor(p[0] / P) + 0.5) * P, p[1] - (Math.floor(p[1] / P) + 0.5) * P];
+    return p;
+  }
+
+  /** A map file for this region: as is, or moved in from a tile the region took over (null: another city). */
+  private toRegion(f: MapFile, R: RegionManifest): MapFile | null {
+    if (!f.meta.tile || f.meta.tile === R.id) return f;
+    const at = R.legacy[f.meta.tile];
+    return at ? moveMap(f, frameMove(at, R.frame), R.id) : null;
+  }
+
   private async restore() {
     const q = new URLSearchParams(location.search);
     const url = q.get('map');
     await repo.probe();
     if (url) { await this.openUrl(url, true); return; }
     const last = await local.last();
-    if (last && last.meta.tile === this.tile.id) {
-      this.load(last.text, false);
+    if (last && (last.meta.tile === this.tile.id || (this.region && this.region.legacy[last.meta.tile]))) {
+      await this.load(last.text, false);
       status.value = `Restored “${last.meta.name}” from this browser`;
     }
   }
 
-  private load(text: string, viewOnly: boolean, source?: string) {
-    const f = parse(text);
-    if (f.meta.tile && f.meta.tile !== this.tile.id) throw new Error(`This map is for tile “${f.meta.tile}”`);
+  private async load(text: string, viewOnly: boolean, source?: string) {
+    let f = parse(text);
+    if (this.region) {
+      const moved = this.toRegion(f, this.region);
+      if (!moved) throw new Error(`This map is for “${f.meta.tile}”`);
+      if (moved !== f) toast(`Map from the ${f.meta.tile} tile moved onto the whole-city map`, 'info');
+      f = moved;
+      // bring its area in first, so its edits find their roads
+      const home = mapHome(f);
+      if (home && this.stream) { const c = this.stream.wants(home[0], home[1]); if (c) await this.stream.moveTo(c[0], c[1]); }
+    } else if (f.meta.tile && f.meta.tile !== this.tile.id) throw new Error(`This map is for tile “${f.meta.tile}”`);
+    // same base: every id is valid even if its piece isn't loaded yet (no re-attaching needed)
+    if (this.region && f.meta.base === this.region.fingerprint) {
+      this.doc.load(new Map(Object.entries(f.objects)), { ...f.meta });
+      this.issues.orphans = [];
+      readOnly.value = viewOnly;
+      select([]);
+      if (source) status.value = `Opened ${source}`;
+      docVersion.value++;
+      document.title = `${this.doc.meta.name} — UrbanPlan`;
+      return;
+    }
     const r = openMap(this.doc, f);
+    if (this.region) this.doc.meta.base = this.region.fingerprint;
     this.issues.orphans = r.unresolved.map((u) => ({ id: u.id, title: u.entry.loc?.name ?? u.id }));
     readOnly.value = viewOnly;
     select([]);
@@ -258,7 +372,7 @@ export class App implements AppApi {
       // your own map (known in this browser) opens editable
       const id = parse(text).meta.id;
       const mine = !!(await local.get(id));
-      this.load(text, viewOnly && !mine, url.split('/').pop());
+      await this.load(text, viewOnly && !mine, url.split('/').pop());
       this.repoFile = null;
       dialog.value = null;
       const u = new URL(location.href); u.searchParams.set('map', url); history.replaceState(null, '', u);
@@ -268,21 +382,21 @@ export class App implements AppApi {
   async openLocal(id: string) {
     const m = await local.get(id);
     if (!m) return;
-    this.load(m.text, false, m.meta.name);
+    await this.load(m.text, false, m.meta.name);
     this.repoFile = null;
     dialog.value = null;
     this.clearUrl();
   }
 
   async openRepo(file: string) {
-    try { this.load(await repo.read(file), false, file); this.repoFile = file; dialog.value = null; this.clearUrl(); }
+    try { await this.load(await repo.read(file), false, file); this.repoFile = file; dialog.value = null; this.clearUrl(); }
     catch (e) { toast(`Couldn't open ${file}: ${(e as Error).message}`, 'error'); }
   }
 
   async openFile(file?: File) {
     const f = file ?? (await pickFile('.json'));
     if (!f) return;
-    try { this.load(await f.text(), false, f.name); this.repoFile = null; dialog.value = null; this.clearUrl(); }
+    try { await this.load(await f.text(), false, f.name); this.repoFile = null; dialog.value = null; this.clearUrl(); }
     catch (e) { toast(`Couldn't open ${f.name}: ${(e as Error).message}`, 'error'); }
   }
 
@@ -559,6 +673,39 @@ export class App implements AppApi {
 
   // ---------------- changes & frame loop ----------------
 
+  /** 2D view wider than this (m): the far view is the whole map and the window stays where it is */
+  static OVERVIEW_WIDTH = 4500;
+  private overviewKey = '';
+
+  /** Region: keep the window under the point you look at, and the far view around it. */
+  private followFocus() {
+    const S = this.stream!, O = this.overview, E = this.E, W = this.world;
+    const plan = mode.value === '2d';
+    const width = plan ? E.view.w / E.view.scale : this.controls.currentDist * 2;
+    const x = plan ? E.view.cx : this.controls.focus.x, z = plan ? E.view.cz : this.controls.focus.z;
+    const zoomedOut = plan && width > App.OVERVIEW_WIDTH;
+    if (zoomedOut !== this.overviewMode) { this.overviewMode = zoomedOut; W.setDetail(!zoomedOut); }
+    if (O?.ready) {
+      if (O.pending && O.build(x, z)) this.overviewKey = '';
+      O.minHalf.value = plan ? 0.9 / E.view.scale : 0;
+      const key = `${plan}|${zoomedOut}|${S.ci},${S.cj}|${Math.round(x / 500)},${Math.round(z / 500)}|${Math.round(Math.log2(width) * 2)}`;
+      if (key !== this.overviewKey) { this.overviewKey = key; O.setPlan(plan); O.update(S.resident, zoomedOut, { x, z, width, plan }); W.needsRender = true; }
+    }
+    if (zoomedOut || S.busy) return;
+    const want = S.wants(x, z);
+    if (!want) return;
+    status.value = 'Loading this part of the city…';
+    void S.moveTo(want[0], want[1]).then((moved) => {
+      if (!moved) return;
+      status.value = `Loaded ${S.stats.pieces} piece${S.stats.pieces === 1 ? '' : 's'} of the city (${S.stats.ms} ms)`;
+      this.overviewKey = '';
+      this.lastView = '';
+      E.overlayDirty = true;
+      W.needsRender = true;
+      docVersion.value++;
+    }).catch((e) => { console.error(e); toast(`Couldn't load this part of the city: ${(e as Error).message}`, 'error'); });
+  }
+
   private afterChange(c: Change) {
     this.lastChange = performance.now();
     if (this.issues.version) this.issues.update(c.ids);
@@ -594,6 +741,7 @@ export class App implements AppApi {
         if (moved || settle > 0) { draw = true; settle--; }
       }
       E.frame(now);
+      if (this.stream) this.followFocus();
       if (mode.value === '2d') {
         const v = `${E.view.cx.toFixed(1)},${E.view.cz.toFixed(1)},${E.view.scale.toFixed(4)},${E.view.w},${E.view.h}`;
         if (v !== this.lastView) { this.lastView = v; this.ref.update(E.view.rect, E.view.scale, true); W.needsRender = true; }

@@ -7,7 +7,8 @@ export interface Change {
   ids: Set<Id>;
   /** objects created or deleted */
   structural: boolean;
-  origin: 'edit' | 'undo' | 'redo' | 'load';
+  /** 'page': base objects streamed in / out as a region's window moved (not an edit) */
+  origin: 'edit' | 'undo' | 'redo' | 'load' | 'page';
   label: string;
 }
 
@@ -196,7 +197,7 @@ export class CityDoc {
     const ids = new Set(this.pendingIds);
     this.pendingIds.clear();
     this.version++;
-    this.meta.updated = new Date().toISOString();
+    if (origin !== 'page') this.meta.updated = new Date().toISOString();
     for (const l of this.listeners) l({ ids, structural, origin, label });
   }
 
@@ -281,6 +282,35 @@ export class CityDoc {
       case 'road': return { kind: 'road', x: 0, z: 0, name: o.name || undefined };
       default: return undefined;
     }
+  }
+
+  // ---------------- paging (regions) ----------------
+
+  /**
+   * Base objects streamed in and out as a region's window moves. Not an edit: no undo step, not "unsaved". Edits
+   * stay in the patch while their object is out of the window and apply again when it comes back.
+   */
+  page(add: Obj[], remove: Iterable<Id>) {
+    if (this.txn) throw new Error('CityDoc.page: inside a transaction');
+    for (const id of remove) {
+      if (!this.base.has(id)) continue;
+      this.collect(id, this.get(id));
+      this.unindex(id);
+      this.base.delete(id);
+      this.cache.delete(id);
+    }
+    for (const o of add) {
+      if (this.base.has(o.id)) continue;
+      this.base.set(o.id, o);
+      this.cache.delete(o.id);
+      if (o.kind === 'road') for (const s of this.roadSecs.get(o.id) ?? []) this.cache.delete(s);
+      this.index(o.id);
+      this.collect(o.id, this.get(o.id));
+    }
+    if (!this.pendingIds.size) return;
+    const saved = this.version === this.savedVersion;
+    this.flush('page', 'Load area', true);
+    if (saved) this.savedVersion = this.version;
   }
 
   // ---------------- history ----------------

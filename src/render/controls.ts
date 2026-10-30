@@ -11,7 +11,8 @@ export class CityControls {
   pitch = 0.75;
   minDist = 18;
   maxDist = 6500;
-  bounds = 2500;
+  /** how far the focus may go: ±bounds (a tile), or a rectangle [x0, z0, x1, z1] (a region) */
+  bounds: number | [number, number, number, number] = 2500;
   private cur = { x: 0, y: 0, z: 0, dist: 900, yaw: 0.6, pitch: 0.75 };
   private keys = new Set<string>();
   private drag: 'pan' | 'rotate' | null = null;
@@ -134,8 +135,9 @@ export class CityControls {
     if (k.has('r')) this.pitch = clamp(this.pitch + 0.8 * dt, 0.12, 1.5);
     if (k.has('f')) this.pitch = clamp(this.pitch - 0.8 * dt, 0.12, 1.5);
     this.dist = clamp(this.dist, this.minDist, this.maxDist);
-    this.target.x = clamp(this.target.x, -this.bounds, this.bounds);
-    this.target.z = clamp(this.target.z, -this.bounds, this.bounds);
+    const B = typeof this.bounds === 'number' ? [-this.bounds, -this.bounds, this.bounds, this.bounds] : this.bounds;
+    this.target.x = clamp(this.target.x, B[0], B[2]);
+    this.target.z = clamp(this.target.z, B[1], B[3]);
     this.target.y = this.heightAt(this.target.x, this.target.z);
     const a = damp(12, dt), c = this.cur;
     c.x += (this.target.x - c.x) * a; c.y += (this.target.y - c.y) * a; c.z += (this.target.z - c.z) * a;

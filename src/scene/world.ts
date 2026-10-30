@@ -2,13 +2,14 @@
 // roads (terrain carving, buildings shrunk away from roads, trees, rail snapping) refresh lazily per region —
 // on idle or when the 3D view is opened.
 import * as THREE from 'three/webgpu';
-import { texture, uv, vertexColor, vec3, mix, float, uniform } from 'three/tsl';
+import { texture, vertexColor, vec3, mix, float, uniform } from 'three/tsl';
 import { GeomBuilder, appendInto, rgbHex } from '../build/geom';
 import { buildBuildings, resolveConflicts } from '../build/buildings';
 import { buildRail } from '../build/rail';
-import { buildTerrainChunks, buildTerrainPatch, buildTerrainSkirt, buildWater, type TerrainChunk } from '../build/terrain';
+import { buildTerrainPatch, buildTerrainSkirt, buildWater } from '../build/terrain';
+import { shiftInto } from '../geo/heightfield';
 import { placeTrees, treeGeometry, type TreeInstance } from '../build/vegetation';
-import type { Materials } from '../render/materials';
+import { landuseRect, landuseUV, type Materials } from '../render/materials';
 import type { Building, TileData } from '../data/tile';
 import type { Heightfield } from '../geo/heightfield';
 import { RoadRaster } from '../geo/roadraster';
@@ -27,6 +28,11 @@ import { TerrainHoles } from './holes';
 
 type Region = [number, number, number, number];
 
+/** terrain / tree chunk size (m): a piece of a region is 4 × 4 of them, so chunks survive window moves */
+const CHUNK = 512;
+interface TChunk { key: string; wx0: number; wz0: number; wx1: number; wz1: number; cx: number; cz: number; radius: number; hi: THREE.Mesh; lo: THREE.Mesh }
+interface TreeChunk { list: TreeInstance[]; hi: THREE.InstancedMesh; lo: THREE.InstancedMesh; cx: number; cz: number; x0: number; z0: number }
+
 const pack = (gb: GeomBuilder): Packed | undefined => gb.idx.length
   ? { pos: new Float32Array(gb.pos), nor: new Float32Array(gb.nor), col: new Float32Array(gb.col), uv: new Float32Array(gb.uv), idx: new Uint32Array(gb.idx) }
   : undefined;
@@ -43,7 +49,7 @@ function planMaterials(landuse: THREE.Texture) {
     return m;
   };
   const terrain = new THREE.MeshBasicNodeMaterial();
-  const lu = texture(landuse, uv()).rgb;
+  const lu = texture(landuse, landuseUV()).rgb;
   terrain.colorNode = mix(mix(lu, vec3(0.93, 0.92, 0.89), float(0.35)), mix(lu, vec3(0.012, 0.014, 0.018), float(0.9)), planDark);
   const asphalt = vc(), paving = vc(), concrete = vc();
   const markings = vc();
@@ -68,7 +74,8 @@ export class World {
   roads!: ChunkSet<MeshLayer>;
   paths!: ChunkSet<MeshLayer>;
   buildings!: ChunkSet<'roofs'>;
-  terrain: (TerrainChunk & { hi: THREE.Mesh; lo: THREE.Mesh })[] = [];
+  /** terrain in 512 m chunks keyed by their world position (they outlive a region's window moves) */
+  terrain: TChunk[] = [];
   skirt!: THREE.Mesh;
   water!: THREE.Mesh;
   rail = new THREE.Group();
@@ -85,9 +92,10 @@ export class World {
   private assetMat: THREE.MeshLambertNodeMaterial;
   /** last extent of lines that cut the terrain (so an edit refreshes where they were) */
   private lineExtent = new Map<Id, Region>();
-  private treeChunks: { list: TreeInstance[]; hi: THREE.InstancedMesh; lo: THREE.InstancedMesh; cx: number; cz: number; x0: number; z0: number }[] = [];
-  readonly raster: RoadRaster;
-  readonly targets: Float32Array;
+  /** trees in 512 m chunks keyed by their world position */
+  private treeChunks = new Map<string, TreeChunk>();
+  raster: RoadRaster;
+  targets: Float32Array;
   /** building footprints' extents; their meshes are generated when their chunk is (not kept in memory) */
   private bItems = new Map<Id, ChunkItem>();
   /** buildings dropped because a road runs through them (not drawn, not pickable) */
@@ -104,16 +112,23 @@ export class World {
   needsRender = true;
   /** open cuts (underpass trenches): the terrain isn't drawn inside them */
   readonly holes: TerrainHoles;
+  /** where the heightfield's grid was when `targets` was laid out (a region's window moves it) */
+  private gx0 = 0; private gz0 = 0;
+
+  /** a region's window (pieces stream in around the camera) rather than a whole tile */
+  readonly region: boolean;
 
   constructor(
-    scene: THREE.Scene, readonly tile: TileData, readonly hf: Heightfield, readonly doc: CityDoc,
-    readonly C: Compiler, readonly M: Materials, landuse: THREE.Texture,
+    scene: THREE.Scene, public tile: TileData, readonly hf: Heightfield, readonly doc: CityDoc,
+    readonly C: Compiler, readonly M: Materials, readonly landuse: THREE.Texture,
   ) {
     this.scene = scene;
-    this.raster = new RoadRaster(tile.half);
+    this.region = tile.ox !== undefined;
+    this.raster = new RoadRaster(tile.half, tile.ox, tile.oz);
     this.targets = new Float32Array(hf.n * hf.n).fill(NaN);
+    this.gx0 = hf.x0; this.gz0 = hf.z0;
     this.planM = planMaterials(landuse);
-    this.holes = new TerrainHoles(tile.half);
+    this.holes = new TerrainHoles(tile.half, tile.ox, tile.oz);
     M.terrain.maskNode = this.holes.keep;
     this.planM.terrain.maskNode = this.holes.keep;
     this.assetMat = new THREE.MeshLambertNodeMaterial();
@@ -141,14 +156,9 @@ export class World {
     C.mesher.stampTargets(this.targets);
     this.stampChannels();
     hf.conform(this.targets);
-    this.holes.update([-hf.half, -hf.half, hf.half, hf.half], [...C.mesher.items.values()].flatMap((it) => it.stamps));
+    this.holes.update(this.gridRect(), [...C.mesher.items.values()].flatMap((it) => it.stamps));
     C.mesher.stampRaster(this.raster);
-    this.terrain = buildTerrainChunks(hf, 80).map((c) => {
-      releaseAfterUpload(c.high); releaseAfterUpload(c.low);
-      const hi = new THREE.Mesh(c.high, M.terrain), lo = new THREE.Mesh(c.low, M.terrain);
-      for (const m of [hi, lo]) { m.receiveShadow = true; m.matrixAutoUpdate = false; this.root.add(m); }
-      return { ...c, hi, lo };
-    });
+    this.ensureTerrain(this.gridRect());
     this.skirt = new THREE.Mesh(buildTerrainSkirt(hf), M.skirt);
     this.water = new THREE.Mesh(buildWater(this.tile, hf), M.water);
     this.water.receiveShadow = true;
@@ -168,11 +178,103 @@ export class World {
     this.buildTrees();
   }
 
+  /** The world square the terrain grid covers. */
+  gridRect(): Region { const h = this.hf; return [h.x0, h.z0, h.x0 + 2 * h.half, h.z0 + 2 * h.half]; }
+
+  /** Terrain chunks for every 512 m square over a rectangle (geometry built from the current heightfield). */
+  private ensureTerrain(r: Region, build = true) {
+    const g = this.gridRect(), C = CHUNK;
+    const x0 = Math.max(r[0], g[0]), z0 = Math.max(r[1], g[1]), x1 = Math.min(r[2], g[2]), z1 = Math.min(r[3], g[3]);
+    const have = new Set(this.terrain.map((c) => c.key));
+    const mat = this.plan ? this.planM.terrain : this.M.terrain;
+    for (let cz = Math.floor(z0 / C); cz * C < z1; cz++) for (let cx = Math.floor(x0 / C); cx * C < x1; cx++) {
+      const key = `${cx},${cz}`;
+      if (have.has(key)) continue;
+      const wx0 = Math.max(cx * C, g[0]), wz0 = Math.max(cz * C, g[1]), wx1 = Math.min((cx + 1) * C, g[2]), wz1 = Math.min((cz + 1) * C, g[3]);
+      if (wx1 - wx0 < this.hf.cell || wz1 - wz0 < this.hf.cell) continue;
+      const hi = new THREE.Mesh(new THREE.BufferGeometry(), mat), lo = new THREE.Mesh(new THREE.BufferGeometry(), mat);
+      for (const m of [hi, lo]) { m.receiveShadow = true; m.matrixAutoUpdate = false; m.frustumCulled = false; this.root.add(m); }
+      const c: TChunk = { key, wx0, wz0, wx1, wz1, cx: (wx0 + wx1) / 2, cz: (wz0 + wz1) / 2, radius: Math.hypot(wx1 - wx0, wz1 - wz0) / 2 + 50, hi, lo };
+      this.terrain.push(c);
+      if (build) this.rebuildChunk(c);
+    }
+  }
+
+  /** A chunk's grid range on the current heightfield. */
+  private chunkRange(c: TChunk) {
+    const h = this.hf, n = h.n - 1;
+    return { i0: Math.max(0, Math.round((c.wx0 - h.x0) / h.cell)), j0: Math.max(0, Math.round((c.wz0 - h.z0) / h.cell)), i1: Math.min(n, Math.round((c.wx1 - h.x0) / h.cell)), j1: Math.min(n, Math.round((c.wz1 - h.z0) / h.cell)) };
+  }
+
+  private rebuildChunk(c: TChunk) {
+    const g = this.chunkRange(c);
+    c.hi.geometry.dispose(); c.lo.geometry.dispose();
+    c.hi.geometry = buildTerrainPatch(this.hf, g.i0, g.j0, g.i1, g.j1, 1);
+    c.lo.geometry = buildTerrainPatch(this.hf, g.i0, g.j0, g.i1, g.j1, 4);
+    c.hi.frustumCulled = c.lo.frustumCulled = true;
+    releaseAfterUpload(c.hi.geometry); releaseAfterUpload(c.lo.geometry);
+  }
+
+  /** Drop terrain and tree chunks outside a rectangle (a region's window moved off them). */
+  private dropOutside(r: Region) {
+    const out = (x0: number, z0: number, x1: number, z1: number) => x1 <= r[0] || x0 >= r[2] || z1 <= r[1] || z0 >= r[3];
+    this.terrain = this.terrain.filter((c) => {
+      if (!out(c.wx0, c.wz0, c.wx1, c.wz1)) return true;
+      this.root.remove(c.hi, c.lo); c.hi.geometry.dispose(); c.lo.geometry.dispose();
+      return false;
+    });
+    for (const [k, c] of this.treeChunks) if (out(c.x0, c.z0, c.x0 + CHUNK, c.z0 + CHUNK)) { this.trees.remove(c.hi, c.lo); c.hi.dispose(); c.lo.dispose(); this.treeChunks.delete(k); }
+  }
+
+  /**
+   * A region's window moved: the heightfield is already on the new centre (the overlap carried over). The grids
+   * that follow it shift too (road cut targets, road footprint, cut-outs), and terrain / trees off the new window go.
+   * The pieces that arrived are then `settle`d one by one, and `endMove` finishes the window-wide things.
+   */
+  beginMove(tile: TileData) {
+    const { hf } = this;
+    const targets = new Float32Array(hf.n * hf.n).fill(NaN);
+    shiftInto(this.targets, this.gx0, this.gz0, targets, hf.x0, hf.z0, hf.n, hf.cell);
+    this.targets = targets;
+    this.gx0 = hf.x0; this.gz0 = hf.z0;
+    this.tile = tile;
+    this.raster = this.raster.movedTo(tile.ox ?? 0, tile.oz ?? 0);
+    this.holes.moveTo(tile.ox ?? 0, tile.oz ?? 0);
+    this.dropOutside(this.gridRect());
+    this.terrainRev++;
+  }
+
+  /** One piece of a region arrived (its roads are compiled): cut the ground under them, its terrain, trees and buildings. */
+  settle(rect: Region) {
+    const M = 48, r: Region = [rect[0] - M, rect[1] - M, rect[2] + M, rect[3] + M];
+    this.raster.clear(r);
+    this.C.mesher.stampRaster(this.raster, r);
+    this.ensureTerrain(rect, false);
+    this.syncTerrain(r);
+    this.plantTrees(rect);
+    const ids: Id[] = [];
+    for (const [id, it] of this.bItems) if (it.x1 >= rect[0] && it.x0 <= rect[2] && it.z1 >= rect[1] && it.z0 <= rect[3]) ids.push(id);
+    this.buildings.touch(ids);
+    this.buildings.flush();
+    this.needsRender = true;
+  }
+
+  /** A region's window move is done: water, rail and ponds over the new window. */
+  endMove() {
+    this.water.geometry.dispose();
+    this.water.geometry = buildWater(this.tile, this.hf);
+    this.railDirty = false;
+    this.buildRail();
+    this.buildPonds();
+    this.applyLayers();
+    this.needsRender = true;
+  }
+
   // ---------------- buildings ----------------
 
   private asBuilding(b: BuildingObj): Building {
     const src = this.tile.buildings[b.src];
-    return { outer: new Float32Array(b.outer), holes: b.holes.map((h) => new Float32Array(h)), h: b.h, minH: b.minH, kind: src?.kind ?? 0, roof: src?.roof ?? 0, name: b.name, id: b.src >= 0 ? b.src : 100000 + (hashId(b.id) % 100000) };
+    return { outer: new Float32Array(b.outer), holes: b.holes.map((h) => new Float32Array(h)), h: b.h, minH: b.minH, kind: b.bk ?? src?.kind ?? 0, roof: b.roof ?? src?.roof ?? 0, name: b.name, id: b.src >= 0 ? b.src : 100000 + (hashId(b.id) % 100000) };
   }
 
   /** Register a building (its extent); the mesh is made when its chunk is built. */
@@ -202,10 +304,13 @@ export class World {
   // ---------------- rail / metro ----------------
 
   private railsFromDoc(layer: 'rail' | 'metro'): TileData['rails'] {
-    return this.doc.linesOf(layer).filter((l) => lineShape(l) === 'route' && l.pts.length >= 4).map((l: LineObj) => {
+    const lines = this.doc.linesOf(layer).filter((l) => lineShape(l) === 'route' && l.pts.length >= 4);
+    // a region: city-wide lines, cut to the window (the heightfield only covers that)
+    const parts: [LineObj, number[]][] = this.region ? lines.flatMap((l) => clipPolyline(l.pts, this.gridRect(), 2).map((p) => [l, p] as [LineObj, number[]])) : lines.map((l) => [l, l.pts]);
+    return parts.filter(([, pts]) => pts.length >= 4).map(([l, pts]) => {
       const a = assetOf(l), p = a?.profile.type === 'track' ? a.profile : undefined;
       return {
-        pts: new Float32Array(l.pts),
+        pts: new Float32Array(pts),
         bridge: l.props.bridge === 1 || l.depth < -0.5, tunnel: l.depth > 3 || p?.structure === 'tunnel', layer: l.depth < -0.5 ? Math.max(1, Math.round(-l.depth / 7.5)) : 0,
         service: l.props.service === 1, metro: layer === 'metro',
         ...(p ? { tracks: p.tracks, tc: p.tc, gauge: p.gauge, formation: p.formation, deck: l.depth < -0.5 ? -l.depth : undefined } : {}),
@@ -232,28 +337,42 @@ export class World {
 
   // ---------------- trees ----------------
 
-  private buildTrees() {
-    const streets = [...this.C.mesher.geos.values()].map((g) => ({ pts: g.pts, hw: Math.max(g.t.hwL, g.t.hwR), cls: g.s.cls }));
-    const trees = placeTrees(this.tile, this.hf, streets, this.raster);
-    const CH = 500, half = this.tile.half, nc = Math.ceil((half * 2) / CH);
-    const buckets: TreeInstance[][] = Array.from({ length: nc * nc }, () => []);
+  private buildTrees() { this.plantTrees(this.gridRect()); }
+
+  /** Trees over a rectangle (replacing the chunks there): mapped trees, parks and woods, street trees, open ground. */
+  private plantTrees(r: Region) {
+    const T = this.tile, inR = (x0: number, z0: number, x1: number, z1: number) => x1 >= r[0] && x0 <= r[2] && z1 >= r[1] && z0 <= r[3];
+    const boxOf = (p: Float32Array) => { let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity; for (let i = 0; i < p.length; i += 2) { x0 = Math.min(x0, p[i]); x1 = Math.max(x1, p[i]); z0 = Math.min(z0, p[i + 1]); z1 = Math.max(z1, p[i + 1]); } return [x0, z0, x1, z1] as const; };
+    const keep = <X extends { outer: Float32Array }>(list: X[]) => list.filter((p) => inR(...boxOf(p.outer)));
+    const tr: number[] = [];
+    for (let i = 0; i < T.trees.length; i += 2) if (inR(T.trees[i], T.trees[i + 1], T.trees[i], T.trees[i + 1])) tr.push(T.trees[i], T.trees[i + 1]);
+    // the rectangle as a tile of its own (placeTrees fills its square)
+    const sub: TileData = { ...T, half: Math.max(r[2] - r[0], r[3] - r[1]) / 2, ox: (r[0] + r[2]) / 2, oz: (r[1] + r[3]) / 2, buildings: keep(T.buildings), areas: keep(T.areas), waters: keep(T.waters), trees: new Float32Array(tr) };
+    const streets = [...this.C.mesher.geos.values()].filter((g) => { const b = boxOf(g.pts); return inR(b[0], b[1], b[2], b[3]); }).map((g) => ({ pts: g.pts, hw: Math.max(g.t.hwL, g.t.hwR), cls: g.s.cls }));
+    const trees = placeTrees(sub, this.hf, streets, this.raster);
+    const buckets = new Map<string, TreeInstance[]>();
     for (const t of trees) {
-      const i = Math.min(nc - 1, Math.max(0, Math.floor((t.x + half) / CH))), j = Math.min(nc - 1, Math.max(0, Math.floor((t.z + half) / CH)));
-      buckets[j * nc + i].push(t);
+      if (t.x < r[0] || t.x >= r[2] || t.z < r[1] || t.z >= r[3]) continue;
+      const k = `${Math.floor(t.x / CHUNK)},${Math.floor(t.z / CHUNK)}`;
+      (buckets.get(k) ?? buckets.set(k, []).get(k)!).push(t);
     }
+    // chunks wholly inside the rectangle are replaced; ones it only grazes get its trees added
     const hiG = treeGeometry('high'), loG = treeGeometry('low');
-    buckets.forEach((list, k) => {
-      if (!list.length) return;
-      const i = k % nc, j = Math.floor(k / nc);
-      const hi = new THREE.InstancedMesh(hiG, this.M.trees, list.length), lo = new THREE.InstancedMesh(loG, this.M.trees, list.length);
+    for (const [k, list] of buckets) {
+      const old = this.treeChunks.get(k);
+      const [cx, cz] = k.split(',').map(Number);
+      const whole = cx * CHUNK >= r[0] && (cx + 1) * CHUNK <= r[2] && cz * CHUNK >= r[1] && (cz + 1) * CHUNK <= r[3];
+      const all = old && !whole ? [...old.list.filter((t) => t.x < r[0] || t.x >= r[2] || t.z < r[1] || t.z >= r[3]), ...list] : list;
+      if (old) { this.trees.remove(old.hi, old.lo); old.hi.dispose(); old.lo.dispose(); }
+      const hi = new THREE.InstancedMesh(hiG, this.M.trees, all.length), lo = new THREE.InstancedMesh(loG, this.M.trees, all.length);
       for (const m of [hi, lo]) { m.castShadow = this.graphics === 'high'; m.receiveShadow = true; this.trees.add(m); }
-      const c = { list, hi, lo, cx: -half + (i + 0.5) * CH, cz: -half + (j + 0.5) * CH, x0: -half + i * CH, z0: -half + j * CH };
+      const c: TreeChunk = { list: all, hi, lo, cx: (cx + 0.5) * CHUNK, cz: (cz + 0.5) * CHUNK, x0: cx * CHUNK, z0: cz * CHUNK };
       this.placeTreeInstances(c);
-      this.treeChunks.push(c);
-    });
+      this.treeChunks.set(k, c);
+    }
   }
 
-  private placeTreeInstances(c: (typeof this.treeChunks)[number]) {
+  private placeTreeInstances(c: TreeChunk) {
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
     const col = new THREE.Color();
     const GREENS = [0x4f7a32, 0x5d8a3a, 0x46702c, 0x6b9443, 0x3f6828, 0x789d48, 0x587f30, 0x6e8c3a];
@@ -341,8 +460,10 @@ export class World {
         else if (!o) { this.railDirty = true; for (const l of this.utilityLayers.keys()) this.utilDirty.add(l); }
       } else if (o?.kind === 'section' && o.viaduct) this.railDirty = true;
     }
-    if (bTouched.length) { this.buildings.touch(bTouched); this.buildings.flush(); }
-    if (region[0] < Infinity) this.dirty.push([region[0] - 20, region[1] - 20, region[2] + 20, region[3] + 20]);
+    // paging (a region's window moving): arriving buildings are made when their piece settles; nothing to re-sync
+    const page = c.origin === 'page';
+    if (bTouched.length) { this.buildings.touch(page ? bTouched.filter((id) => !this.bItems.has(id)) : bTouched); this.buildings.flush(); }
+    if (region[0] < Infinity && !page) this.dirty.push([region[0] - 20, region[1] - 20, region[2] + 20, region[3] + 20]);
     this.needsRender = true;
   }
   /**
@@ -360,17 +481,15 @@ export class World {
     // road targets are read up to `radius` cells around a vertex: stamp a little wider than we conform
     const s0 = Math.max(0, g.i0 - pad * 2), t0 = Math.max(0, g.j0 - pad * 2), s1 = Math.min(hf.n - 1, g.i1 + pad * 2), t1 = Math.min(hf.n - 1, g.j1 + pad * 2);
     for (let j = t0; j <= t1; j++) this.targets.fill(NaN, j * hf.n + s0, j * hf.n + s1 + 1);
-    const box: Region = [-hf.half + s0 * hf.cell - 0.01, -hf.half + t0 * hf.cell - 0.01, -hf.half + s1 * hf.cell + 0.01, -hf.half + t1 * hf.cell + 0.01];
+    const box: Region = [hf.x0 + s0 * hf.cell - 0.01, hf.z0 + t0 * hf.cell - 0.01, hf.x0 + s1 * hf.cell + 0.01, hf.z0 + t1 * hf.cell + 0.01];
     C.mesher.stampTargets(this.targets, box);
     this.stampChannels(box);
     this.holes.update(box, C.mesher.itemsIn(...box).flatMap((it) => it.stamps));
     hf.conformRegion(this.targets, Math.max(0, g.i0 - pad), Math.max(0, g.j0 - pad), Math.min(hf.n - 1, g.i1 + pad), Math.min(hf.n - 1, g.j1 + pad));
     for (const t of this.terrain) {
-      if (t.i1 < g.i0 - pad || t.i0 > g.i1 + pad || t.j1 < g.j0 - pad || t.j0 > g.j1 + pad) continue;
-      t.hi.geometry.dispose(); t.lo.geometry.dispose();
-      t.hi.geometry = t.high = buildTerrainPatch(hf, t.i0, t.j0, t.i1, t.j1, 1);
-      t.lo.geometry = t.low = buildTerrainPatch(hf, t.i0, t.j0, t.i1, t.j1, 4);
-      releaseAfterUpload(t.high); releaseAfterUpload(t.low);
+      const c = this.chunkRange(t);
+      if (c.i1 < g.i0 - pad || c.i0 > g.i1 + pad || c.j1 < g.j0 - pad || c.j0 > g.j1 + pad) continue;
+      this.rebuildChunk(t);
     }
     this.needsRender = true;
     return g;
@@ -476,7 +595,7 @@ export class World {
         ids.push(b.id);
       }
       this.buildings.touch(ids);
-      for (const c of this.treeChunks) if (c.x0 < r[2] && c.x0 + 500 > r[0] && c.z0 < r[3] && c.z0 + 500 > r[1]) this.placeTreeInstances(c);
+      for (const c of this.treeChunks.values()) if (c.x0 < r[2] && c.x0 + CHUNK > r[0] && c.z0 < r[3] && c.z0 + CHUNK > r[1]) this.placeTreeInstances(c);
     }
     this.buildings.flush();
     if (this.railDirty) { this.railDirty = false; this.buildRail(); }
@@ -502,6 +621,10 @@ export class World {
     this.applyLayers();
     this.needsRender = true;
   }
+
+  /** detail shown (a region's 2D view zoomed out shows only the far view) */
+  private detail = true;
+  setDetail(on: boolean) { if (on === this.detail) return; this.detail = on; this.applyLayers(); }
 
   private ghost = false;
   /** Roads and buildings see-through over imagery (2D), to check how they line up. */
@@ -531,7 +654,7 @@ export class World {
     const imgs = this.plan ? this.doc.all('layer').filter((l) => l.type === 'xyz' && l.visible && l.url) : [];
     const ground = imgs.some((l) => l.mode === 'ground');
     for (const t of this.terrain) { t.hi.visible = vis('terrain') && !ground && (this.plan || t.hi.visible || !t.lo.visible); if (!vis('terrain') || ground) { t.hi.visible = t.lo.visible = false; } }
-    this.skirt.visible = vis('terrain') && !this.plan;
+    this.skirt.visible = vis('terrain') && !this.plan && !this.region; // a region's window sits in the far-view terrain
     this.water.visible = vis('water') && !ground;
     for (const c of this.ponds.children) c.visible = !ground;
     this.setGhost(imgs.some((l) => l.roads === 'ghost'));
@@ -549,6 +672,10 @@ export class World {
       const m = this.utilityLayers.get(L.id);
       if (m) m.visible = L.visible && !this.plan;
     }
+    if (!this.detail) {
+      for (const t of this.terrain) t.hi.visible = t.lo.visible = false;
+      for (const o of [this.water, this.skirt, this.ponds, this.roads.group, this.paths.group, this.buildings.group, this.trees, this.rail, this.metro, this.assets, this.utilities]) o.visible = false;
+    }
     this.needsRender = true;
   }
 
@@ -563,7 +690,7 @@ export class World {
     // shadows: buildings always; trees, flyover concrete and rail structures in the high look only
     this.roads.opts.concrete!.cast = high;
     this.roads.setShadows(true);
-    for (const c of this.treeChunks) { c.hi.castShadow = high; c.lo.castShadow = high; }
+    for (const c of this.treeChunks.values()) { c.hi.castShadow = high; c.lo.castShadow = high; }
     for (const grp of [this.rail, this.metro]) for (const m of grp.children) m.castShadow = high && !!m.userData.cast;
     this.needsRender = true;
   }
@@ -580,7 +707,7 @@ export class World {
       const near = Math.hypot(c.cx - cam.x, c.cz - cam.z) - c.radius < D.terrainHi + camH * 0.5;
       c.hi.visible = near; c.lo.visible = !near;
     }
-    for (const c of this.treeChunks) {
+    for (const c of this.treeChunks.values()) {
       const d = Math.hypot(c.cx - cam.x, c.cz - cam.z);
       c.hi.visible = d < D.treesHi; c.lo.visible = d >= D.treesHi && d < D.treesLo + camH;
     }
@@ -595,6 +722,20 @@ export class World {
     }
     return undefined;
   }
+}
+
+/** A polyline (flat x, z pairs) cut to a rectangle shrunk by `inset`: the runs inside it. */
+function clipPolyline(p: number[], r: Region, inset = 0): number[][] {
+  const x0 = r[0] + inset, z0 = r[1] + inset, x1 = r[2] - inset, z1 = r[3] - inset;
+  const inside = (x: number, z: number) => x >= x0 && x <= x1 && z >= z0 && z <= z1;
+  const out: number[][] = [];
+  let cur: number[] = [];
+  for (let i = 0; i < p.length; i += 2) {
+    if (inside(p[i], p[i + 1])) cur.push(p[i], p[i + 1]);
+    else { if (cur.length >= 4) out.push(cur); cur = []; }
+  }
+  if (cur.length >= 4) out.push(cur);
+  return out;
 }
 
 function inRing(x: number, z: number, r: number[]) {

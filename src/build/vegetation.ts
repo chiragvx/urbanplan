@@ -21,18 +21,20 @@ class Occupancy {
   readonly cell = 2;
   readonly n: number;
   readonly grid: Uint8Array;
-  constructor(readonly half: number) {
+  readonly x0: number; readonly z0: number;
+  constructor(readonly half: number, ox = 0, oz = 0) {
     this.n = Math.ceil((half * 2) / this.cell);
     this.grid = new Uint8Array(this.n * this.n);
+    this.x0 = ox - half; this.z0 = oz - half;
   }
   fill(ring: Float32Array, pad = 0) {
     let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
     for (let i = 0; i < ring.length; i += 2) { x0 = Math.min(x0, ring[i]); x1 = Math.max(x1, ring[i]); z0 = Math.min(z0, ring[i + 1]); z1 = Math.max(z1, ring[i + 1]); }
-    const n = this.n, c = this.cell, h = this.half;
-    const j0 = Math.max(0, Math.floor((z0 - pad + h) / c)), j1 = Math.min(n - 1, Math.ceil((z1 + pad + h) / c));
+    const n = this.n, c = this.cell, gx = this.x0, gz = this.z0;
+    const j0 = Math.max(0, Math.floor((z0 - pad - gz) / c)), j1 = Math.min(n - 1, Math.ceil((z1 + pad - gz) / c));
     const m = ring.length / 2;
     for (let j = j0; j <= j1; j++) {
-      const z = -h + (j + 0.5) * c;
+      const z = gz + (j + 0.5) * c;
       const xs: number[] = [];
       for (let a = 0; a < m; a++) {
         const b = (a + 1) % m;
@@ -41,14 +43,14 @@ class Occupancy {
       }
       xs.sort((p, q) => p - q);
       for (let k = 0; k + 1 < xs.length; k += 2) {
-        const i0 = Math.max(0, Math.floor((xs[k] - pad + h) / c)), i1 = Math.min(n - 1, Math.ceil((xs[k + 1] + pad + h) / c));
+        const i0 = Math.max(0, Math.floor((xs[k] - pad - gx) / c)), i1 = Math.min(n - 1, Math.ceil((xs[k + 1] + pad - gx) / c));
         for (let i = i0; i <= i1; i++) this.grid[j * n + i] = 1;
       }
     }
   }
   free(x: number, z: number, r = 1) {
-    const n = this.n, c = this.cell, h = this.half;
-    const ci = Math.floor((x + h) / c), cj = Math.floor((z + h) / c);
+    const n = this.n, c = this.cell;
+    const ci = Math.floor((x - this.x0) / c), cj = Math.floor((z - this.z0) / c);
     for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) {
       const i = ci + di, j = cj + dj;
       if (i < 0 || j < 0 || i >= n || j >= n || this.grid[j * n + i]) return false;
@@ -56,7 +58,7 @@ class Occupancy {
     return true;
   }
   mark(x: number, z: number) {
-    const i = Math.floor((x + this.half) / this.cell), j = Math.floor((z + this.half) / this.cell);
+    const i = Math.floor((x - this.x0) / this.cell), j = Math.floor((z - this.z0) / this.cell);
     if (i >= 0 && j >= 0 && i < this.n && j < this.n) this.grid[j * this.n + i] = 1;
   }
 }
@@ -66,11 +68,12 @@ export interface TreeInstance { x: number; z: number; y: number; s: number; h: n
 export interface StreetLine { pts: Float32Array; hw: number; cls: string }
 
 export function placeTrees(tile: TileData, hf: Heightfield, streets: StreetLine[], roads: RoadRaster): TreeInstance[] {
-  const occ = new Occupancy(tile.half);
+  const ox = tile.ox ?? 0, oz = tile.oz ?? 0, H = tile.half;
+  const occ = new Occupancy(H, ox, oz);
   for (const b of tile.buildings) occ.fill(b.outer, 1);
   // roads: copy the road raster (same 2 m grid) with a 1-cell margin
   for (let j = 0; j < occ.n; j++) for (let i = 0; i < occ.n; i++) {
-    const x = -tile.half + (i + 0.5) * occ.cell, z = -tile.half + (j + 0.5) * occ.cell;
+    const x = occ.x0 + (i + 0.5) * occ.cell, z = occ.z0 + (j + 0.5) * occ.cell;
     if (roads.onRoad(x, z) || roads.onRoad(x + 1.5, z) || roads.onRoad(x - 1.5, z) || roads.onRoad(x, z + 1.5) || roads.onRoad(x, z - 1.5)) occ.grid[j * occ.n + i] = 1;
   }
   for (const w of tile.waters) occ.fill(w.outer, 1);
@@ -95,7 +98,7 @@ export function placeTrees(tile: TileData, hf: Heightfield, streets: StreetLine[
     const tries = Math.min(20000, Math.floor((x1 - x0) * (z1 - z0) * d));
     for (let k = 0; k < tries; k++) {
       const x = x0 + rand() * (x1 - x0), z = z0 + rand() * (z1 - z0);
-      if (Math.abs(x) > tile.half - 2 || Math.abs(z) > tile.half - 2) continue;
+      if (Math.abs(x - ox) > H - 2 || Math.abs(z - oz) > H - 2) continue;
       if (inRing(x, z, a.outer) && !a.holes.some((h) => inRing(x, z, h)) && occ.free(x, z, 1)) put(x, z);
     }
   }
@@ -124,8 +127,9 @@ export function placeTrees(tile: TileData, hf: Heightfield, streets: StreetLine[
   }
 
   // 4) Sparse greenery in leftover open ground
-  for (let k = 0; k < 60000; k++) {
-    const x = (rand() * 2 - 1) * (tile.half - 3), z = (rand() * 2 - 1) * (tile.half - 3);
+  const tries = Math.round(60000 * ((2 * H) * (2 * H)) / 25e6); // as many per km² as the 5 km tile had
+  for (let k = 0; k < tries; k++) {
+    const x = ox + (rand() * 2 - 1) * (H - 3), z = oz + (rand() * 2 - 1) * (H - 3);
     if (rand() < 0.75) continue;
     if (occ.free(x, z, 2)) put(x, z, 0.9);
   }

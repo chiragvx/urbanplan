@@ -1,0 +1,28 @@
+// Heap cost of each boot stage for the current tile (node --expose-gc).
+import fs from 'node:fs';
+import { parseTile } from '../../src/data/tile';
+import { Heightfield } from '../../src/geo/heightfield';
+import { buildBase } from '../../src/doc/base';
+import { CityDoc } from '../../src/doc/doc';
+import { Compiler } from '../../src/doc/compile';
+import { newMeta } from '../../src/doc/format';
+const g = (globalThis as any).gc as () => void;
+const mb = () => { g(); return (process.memoryUsage().heapUsed / 1e6).toFixed(0) + ' MB heap, ' + (process.memoryUsage().arrayBuffers / 1e6).toFixed(0) + ' MB buffers'; };
+console.log('start', mb());
+const dir = 'public/tiles/kp/';
+const hdr = JSON.parse(fs.readFileSync(dir + 'tile.json', 'utf8'));
+const buf = fs.readFileSync(dir + 'tile.bin');
+const tile = parseTile(hdr, buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+console.log('tile', mb());
+const net = JSON.parse(fs.readFileSync(dir + 'network.json', 'utf8'));
+const util = fs.existsSync(dir + 'utilities.json') ? JSON.parse(fs.readFileSync(dir + 'utilities.json', 'utf8')) : null;
+console.log('network json', mb());
+const hf = new Heightfield(tile.terrain.n, tile.terrain.cell, tile.terrain.heights);
+const base = buildBase(net, tile, util);
+const doc = new CityDoc(base, newMeta('kp', '', ''));
+console.log('doc', mb(), 'objects', doc.all('section').length, doc.all('junction').length, doc.all('building').length, doc.all('line').length);
+const C = new Compiler(doc, hf); C.full();
+console.log('compiled', mb());
+const M = C.mesher as any;
+let bytes = 0; for (const it of M.items.values()) for (const L of Object.values(it.layers) as any[]) if (L) bytes += L.pos.byteLength + L.nor.byteLength + L.col.byteLength + L.uv.byteLength + L.idx.byteLength;
+console.log('road mesh items', M.items.size, (bytes / 1e6).toFixed(0), 'MB packed geometry');
