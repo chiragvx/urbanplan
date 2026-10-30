@@ -719,7 +719,10 @@ export function importNetwork(inp: ImportInput): Network {
     for (const e of G.edges.values()) {
       if (e.a === e.b) continue;
       const L = polyLen(e.pts);
-      const thr = Math.min(26, nodeHw(e.a) + nodeHw(e.b) + 4);
+      // only when the other junction sits inside this one's widest carriageway (a divided road's crossing, a
+      // doubled point): junctions further apart — staggered T-junctions, side roads 15-20 m apart — stay apart, so
+      // their roads aren't bent sideways to meet at one point
+      const thr = Math.min(16, Math.max(nodeHw(e.a), nodeHw(e.b)) + 2);
       if (L < thr && G.degree(e.a) > 1 && G.degree(e.b) > 1) short.push([e, L]);
     }
     short.sort((p, q) => p[1] - q[1]);

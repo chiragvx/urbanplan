@@ -3,3 +3,6 @@ dist
 data/raw
 tools/dev/*.mjs
 tools/dp/__pycache__
+!tools/dev/check-roads.mjs
+!tools/dev/check-roads-spots.mjs
+tools/dev/*.json

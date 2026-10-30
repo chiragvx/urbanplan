@@ -1682,7 +1682,8 @@ function junctionMarkings(gb: GeomBuilder, paving: GeomBuilder, poles: GeomBuild
   const groups = node.signals ? phaseGroups(F.map((f) => [f.e.ux, f.e.uz] as V2), node.phases) : [];
   const greenSet = new Set(groups.length ? groups[((node.phase ?? 0) % groups.length + groups.length) % groups.length] : []);
   const white = COL.white;
-  const zebraOn = (t: RoadType) => node.crossings ?? (node.signals || t.major);
+  // zebras by default at signals, and on main roads only where they meet at a crossroads (not every T on them)
+  const zebraOn = (t: RoadType) => node.crossings ?? (node.signals || (t.major && F.length >= 4));
   F.forEach((f, ai) => {
     const t = f.e.g.t;
     if (t.surface === 'dirt') return;
