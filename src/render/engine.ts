@@ -30,6 +30,8 @@ export class Engine {
   planCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 9000);
   private planPipeline: THREE.RenderPipeline | null = null;
   plan = false;
+  /** plan-view background follows the UI theme */
+  planBg = 0xebe7df;
   sun = new THREE.DirectionalLight(0xfff1dc, 3.2);
   hemi = new THREE.HemisphereLight(0xc4d6ec, 0x6b5f48, 1.15);
   sky: SkyMesh;
@@ -119,7 +121,7 @@ export class Engine {
     const on3d = !this.plan;
     this.sky.visible = on3d && this.quality.clouds;
     this.scene.backgroundNode = on3d && !this.quality.clouds ? this.skyNode : null;
-    this.scene.background = this.plan ? new THREE.Color(0xebe7df) : null;
+    this.scene.background = this.plan ? new THREE.Color(this.planBg) : null;
     // never toggled off: three frees the light's shadow node when a material is built without it while other
     // objects still use it. The plan view's unlit materials never render the shadow map anyway.
     this.sun.castShadow = this.quality.shadows;
@@ -272,6 +274,12 @@ export class Engine {
       if (!this.pipeline) this.buildPipeline();
       this.pipeline!.render();
     }
+  }
+
+  /** Dark or light plan map (the UI theme). */
+  setPlanDark(dark: boolean) {
+    this.planBg = dark ? 0x16181b : 0xebe7df;
+    this.applySky();
   }
 
   /** Switch between the plan view (flat, unlit, no sky / fog / shadows) and the 3D view. */

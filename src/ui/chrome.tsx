@@ -7,9 +7,10 @@ import { COMMANDS, type Command } from '../editor/commands';
 import { ui } from './ctx';
 import { Icon, Menu, prettyKeys } from './components';
 import { CLASS_LABEL } from '../doc/types';
-import { allAssets, sizeLabel } from '../assets';
-import { buildOpen } from '../editor/state';
-import { revealAsset } from './BuildPalette';
+import { allAssets, CATEGORIES, sizeLabel, type Category } from '../assets';
+import { buildCat, buildOpen } from '../editor/state';
+import { paletteVisible, revealAsset } from './BuildPalette';
+import { dark, toggleTheme } from './theme';
 import type { Tool } from '../editor/state';
 
 const TOOLS: { t: Tool; icon: (p: { size?: number }) => preact.JSX.Element; label: string; key: string }[] = [
@@ -48,55 +49,84 @@ export function TopBar() {
         <button class="icon-btn" title={`Undo ${d.undoLabel ?? ''} (${prettyKeys('Ctrl+Z')})`} disabled={!d.canUndo || ro} onClick={() => d.undo()}><Icon.undo /></button>
         <button class="icon-btn" title={`Redo ${d.redoLabel ?? ''} (${prettyKeys('Ctrl+Shift+Z')})`} disabled={!d.canRedo || ro} onClick={() => d.redo()}><Icon.redo /></button>
       </div>
-      <div class="tb-tools">
-        {TOOLS.map((x) => (
-          <button key={x.t} class={`tool ${tool.value === x.t ? 'on' : ''}`} title={`${x.label} (${x.key})`} disabled={(ro && ['pen', 'knife', 'line', 'direct', 'bulldoze', 'wand', 'terrain'].includes(x.t))} onClick={() => ui.E.setTool(x.t)}>
-            <x.icon />
-          </button>
-        ))}
-        <button class={`tool build-btn ${buildOpen.value ? 'on' : ''}`} title="Build: roads, transit, rail, canals, drains, utilities, power (O)" disabled={ro} onClick={() => { buildOpen.value = !buildOpen.value; }}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></svg>
-        </button>
-        {tool.value === 'line' && (
-          <select class="select tool-opt" value={lineLayer.value} title="Layer to draw into" onChange={(e) => { lineLayer.value = (e.currentTarget as HTMLSelectElement).value; }}>
-            <option value="">Choose layer…</option>
-            {ui.doc.all('layer').filter((l) => l.type === 'lines').map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </select>
-        )}
-      </div>
-      <div class="tb-right">
-        <button class={`chip ${accuracyView.value ? 'on' : ''}`} title="Accuracy view: colour roads by where their width comes from (Shift+A)" onClick={() => cmd('view.accuracy').run(ui.E)}>Accuracy</button>
-        <button class={`chip ${ui.doc.get<'layer'>('dp')?.visible ? 'on' : ''}`} title="Development Plan sheets (D)" onClick={() => ui.app.toggleLayer('dp')}>DP</button>
-        <button class={`chip ${terrainView.value ? 'on' : ''}`} title="Terrain view: heights, contours, cut & fill (Shift+T)" onClick={() => cmd('view.terrain').run(ui.E)}>Terrain</button>
-        <button class={`chip ${dpRegionsOn.value ? 'on' : ''}`} title="DP regions: land use and reserved sites traced from the DP sheets — hover a region to read it (Shift+D)" onClick={() => cmd('view.dpregions').run(ui.E)}>DP regions</button>
+      <div class="tb-views">
         <div class="seg">
           <button class={mode.value === '2d' ? 'on' : ''} onClick={() => ui.E.setMode('2d')} title="2D plan (Tab)"><Icon.map /> 2D</button>
           <button class={mode.value === '3d' ? 'on' : ''} onClick={() => ui.E.setMode('3d')} title="3D view (Tab)"><Icon.cube /> 3D{stale3d.value && mode.value === '2d' ? <i class="dot own" title="3D refreshes when opened" /> : null}</button>
         </div>
-        <button class={`icon-btn ${xray.value ? 'on' : ''}`} title="X-ray: see underground layers in 3D (X)" onClick={() => cmd('view.xray').run(ui.E)}><Icon.xray /></button>
+        <div class="tb-chips">
+          {VIEWS.map((v) => <button key={v.id} class={`chip ${v.on() ? 'on' : ''}`} title={v.title} onClick={v.run}>{v.icon ? <v.icon size={14} /> : null}{v.label}</button>)}
+        </div>
+        <Menu class="tb-viewmenu" label={<><Icon.layers size={14} /> View</>} items={[...VIEWS.map((v) => ({ label: `${v.on() ? '✓ ' : ''}${v.label}`, run: v.run })), 'sep', { label: dark.value ? 'Light theme' : 'Dark theme', run: toggleTheme }]} />
+      </div>
+      <div class="tb-right">
+        <button class="icon-btn" title={`${dark.value ? 'Light' : 'Dark'} theme`} onClick={toggleTheme}>{dark.value ? <Icon.sun /> : <Icon.moon />}</button>
         <button class="icon-btn" title="Commands (Ctrl+K)" onClick={() => { paletteOpen.value = true; }}><Icon.search /></button>
         <button class="icon-btn" title="Help (?)" onClick={() => { dialog.value = 'help'; }}><Icon.help /></button>
         {ro
           ? <button class="primary" onClick={() => ui.app.fork()}>Edit a copy</button>
-          : <button class="primary" onClick={() => { dialog.value = 'publish'; }}><Icon.share size={14} /> Publish</button>}
+          : <button class="primary" onClick={() => { dialog.value = 'publish'; }}><Icon.share size={14} /> <span class="tb-label">Publish</span></button>}
       </div>
     </header>
   );
 }
 
-export function StatusBar() {
+/** View switches (top bar chips; a "View" menu on narrow screens). */
+const VIEWS: { id: string; label: string; title: string; icon?: (p: { size?: number }) => preact.JSX.Element; on: () => boolean; run: () => void }[] = [
+  { id: 'dp', label: 'DP', title: 'Development Plan sheets (D)', on: () => !!ui.doc.get<'layer'>('dp')?.visible, run: () => ui.app.toggleLayer('dp') },
+  { id: 'regions', label: 'DP regions', title: 'DP regions: land use and reserved sites traced from the DP sheets — hover a region to read it (Shift+D)', on: () => dpRegionsOn.value, run: () => cmd('view.dpregions').run(ui.E) },
+  { id: 'terrain', label: 'Terrain', title: 'Terrain view: heights, contours, cut & fill (Shift+T)', on: () => terrainView.value, run: () => cmd('view.terrain').run(ui.E) },
+  { id: 'accuracy', label: 'Accuracy', title: 'Accuracy view: colour roads by where their width comes from (Shift+A)', on: () => accuracyView.value, run: () => cmd('view.accuracy').run(ui.E) },
+  { id: 'xray', label: 'X-ray', title: 'X-ray: see underground layers in 3D (X)', icon: Icon.xray, on: () => xray.value, run: () => cmd('view.xray').run(ui.E) },
+];
+
+const EDIT_TOOLS = ['pen', 'knife', 'line', 'direct', 'bulldoze', 'wand', 'terrain'];
+
+/** The bottom toolbar (Cities: Skylines' main strip): tools, the build categories, and the status line. */
+export function Dock() {
   void docVersion.value;
+  const ro = readOnly.value;
   const c = cursor.value;
   const ll = c ? ui.app.toLatLon(c[0], c[1]) : null;
   const sel = selection.value;
+  const buildOn = paletteVisible();
+  const group = (ts: Tool[]) => TOOLS.filter((x) => ts.includes(x.t)).map((x) => (
+    <button key={x.t} class={`dk-tool ${tool.value === x.t ? 'on' : ''}`} title={`${x.label} (${x.key})`} disabled={ro && EDIT_TOOLS.includes(x.t)} onClick={() => ui.E.setTool(x.t)}>
+      <x.icon size={18} />
+    </button>
+  ));
+  const openCat = (id: Category) => {
+    if (buildOn && buildCat.value === id) { buildOpen.value = false; if (['pen', 'route', 'place', 'area'].includes(tool.value)) ui.E.setTool('select'); return; }
+    buildCat.value = id; buildOpen.value = true;
+  };
   return (
-    <footer class="statusbar">
-      <span class="st-msg">{status.value}</span>
-      <span class="spacer" />
-      {sel.length > 0 && <span>{sel.length} selected</span>}
-      {c && <span class="mono" title="Metres from the tile centre (x east, z south) · latitude, longitude">{c[0].toFixed(1)}, {c[1].toFixed(1)} m · {ll![0].toFixed(5)}, {ll![1].toFixed(5)}</span>}
-      {mode.value === '2d' && <span class="mono">{zoomScale.value >= 1 ? `${zoomScale.value.toFixed(1)} px/m` : `1 px = ${(1 / zoomScale.value).toFixed(1)} m`}</span>}
-      <span>{ui.doc.editCount} edits</span>
+    <footer class="dock" onPointerDown={(e) => e.stopPropagation()}>
+      <div class="dk-group">{group(['select', 'direct', 'knife', 'bulldoze'])}</div>
+      <div class="dk-group">{group(['measure', 'hand'])}</div>
+      <div class="dk-group">{group(['pen', 'line', 'wand', 'terrain'])}</div>
+      {tool.value === 'line' && (
+        <select class="select dk-opt" value={lineLayer.value} title="Layer to draw into" onChange={(e) => { lineLayer.value = (e.currentTarget as HTMLSelectElement).value; }}>
+          <option value="">Choose layer…</option>
+          {ui.doc.all('layer').filter((l) => l.type === 'lines').map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+        </select>
+      )}
+      <div class="dk-cats" title="Build (O)">
+        {CATEGORIES.map((k) => (
+          <button key={k.id} class={`dk-cat ${buildOn && buildCat.value === k.id ? 'on' : ''}`} title={`${k.label} (O)`} disabled={ro} onClick={() => openCat(k.id)}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d={k.icon} /></svg>
+            <span>{k.label}</span>
+          </button>
+        ))}
+      </div>
+      <div class="dk-status">
+        <span class="st-msg" title={status.value}>{status.value}</span>
+        <span class="st-facts">
+          {sel.length > 0 && <span>{sel.length} selected</span>}
+          {c && <span class="mono" title="Metres from the tile centre (x east, z south) · latitude, longitude">{c[0].toFixed(0)}, {c[1].toFixed(0)} m · {ll![0].toFixed(5)}, {ll![1].toFixed(5)}</span>}
+          {mode.value === '2d' && <span class="mono">{zoomScale.value >= 1 ? `${zoomScale.value.toFixed(1)} px/m` : `1 px = ${(1 / zoomScale.value).toFixed(1)} m`}</span>}
+          <span>{ui.doc.editCount} edits</span>
+        </span>
+      </div>
     </footer>
   );
 }

@@ -14,6 +14,13 @@ npm test        # headless document + cross-section tests
 
 ## The editor
 
+- **Layout** (Cities: Skylines style): a slim top bar (file, undo, 2D / 3D and the view switches, theme, Publish), the
+  map full-screen, and the **bottom toolbar**: tools on the left, the build categories in the middle (each opens its
+  tiles above the bar), status on the right. **Layers, Roads, Issues, Review** open from the icon rail at the top left;
+  the **inspector** is a card on the right while something is selected, with tabs (Cross-section · Catalogue · Level ·
+  Sections). Settings → Panels: *Docked* puts both panels beside the map instead. **Light / dark** theme (top bar, or
+  Settings → Theme; follows the system by default) — the 2D map has a dark style too. On a phone the panels become
+  bottom sheets.
 - **2D plan** (default) and **3D** with <kbd>Tab</kbd> — the same generated city, a camera flight apart. Every tool works in
   both: in 3D, click / drag roads, junctions, handles and points as in 2D; drag empty ground to pan, right-drag (or
   Alt-drag) to orbit, the wheel to zoom, <kbd>W A S D Q E R F</kbd> to fly.
@@ -99,7 +106,7 @@ npm run map -- publish maps/my.urbanplan.json
 
 ### Build palette (standard infrastructure)
 
-Like Cities: Skylines' asset panel: **O** (or the grid button) opens it; each tile is an asset drawn from its own
+Like Cities: Skylines' asset panel: **O** (or a category in the bottom toolbar) opens it; each tile is an asset drawn from its own
 cross-section, with a hover card giving its dimensions, limits and the standard it comes from. Click a tile to build.
 
 | Category | What's in it | From |
@@ -163,6 +170,14 @@ python tools/dp/measure.py S2-06 S2-07                 # perpendicular profiles 
 npm run bake:network -- kp                             # roads sized from DP reserves (capped by today's free space)
 python tools/dp/overlay.py S2-06 out.png 150 x0,z0,x1,z1   # visual check of any area
 ```
+
+How a DP road's cross-section is chosen at bake time: the road keeps **one** layout along its length — its typical
+width (length-weighted median of the pieces) and median — and narrows only where buildings pinch most of a piece at
+least 40 m long, or a parallel road (a service lane inside the DP corridor) leaves less room. Where it narrows, the
+footpaths go first, then the median, then lane width, so the lane count stays the same. Lanes come from the
+carriageway width at 3.0 / 3.25 / 3.5 m (IRC:86) when OSM's lane tags don't fit it, and leftover space under 0.6 m
+goes to the footpath instead of a shoulder. Road geometry and ids don't depend on this, so maps edited on earlier
+bakes still line up.
 
 Sheets live in `data/raw/dp/` (downloaded from PMC's public file store). Sector II–VI sheets are 1:10,000
 (≈0.84 m/px at 300 dpi). Cantonment areas are not part of the PMC plan and keep estimated widths.
@@ -247,7 +262,7 @@ src/doc/      City Document: types, base (bake → sections / junctions / roads 
               undo), compile (→ road mesher), ops (split / join / bend / pen …), xsection, format, issues, api, export
 src/editor/   editor controller + tools, plan view, hit index, overlay, commands (menus / palette / shortcuts)
 src/scene/    World (road chunks per edit, lazy terrain / buildings / trees / rail / pipes), reference imagery
-src/ui/       Preact panels: top bar, layers / roads / issues / review, inspector, cross-section, dialogs
+src/ui/       Preact panels: top bar, bottom dock, layers / roads / issues / review, inspector card, cross-section, dialogs, theme
 src/app/      boot, files (autosave, repo, publish, fork), review queue, frame loop
 tools/map-cli.ts  maps from the command line
 ```

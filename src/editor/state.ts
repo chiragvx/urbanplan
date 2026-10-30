@@ -28,6 +28,10 @@ export const terrainShow = signal<'height' | 'cutfill'>('height');
 /** DP regions overlay (land-use plots / reservations from the DP sheets) */
 export const dpRegionsOn = signal(false);
 export const leftTab = signal<'layers' | 'roads' | 'issues' | 'review' | 'survey'>('layers');
+/** the floating left panel (Layers / Roads / Issues / Review) is open */
+export const leftOpen = signal(false);
+/** inspector tab per panel kind (road, section…), kept while selecting other objects of that kind */
+export const inspTab = signal<Record<string, string>>({});
 /** survey tab: which regions to walk */
 export const surveyFilter = signal<'reserved' | 'all'>('reserved');
 export const paletteOpen = signal(false);
@@ -68,13 +72,15 @@ export interface Settings {
   /** 3D vertical exaggeration in the terrain view */ exaggeration: number;
   /** 3D look: simple (light, the default) or high (sky, ambient occlusion, sharper shadows) */ graphics: 'simple' | 'high';
   /** assets saved from cross-sections ("Save as asset") */ customAssets: import('../assets/model').AssetDef[];
+  /** UI theme: follow the system, or light / dark */ theme: 'system' | 'light' | 'dark';
+  /** side panels float over the map (Cities: Skylines style) or sit beside it */ panels: 'floating' | 'docked';
 }
 function loadSettings(): Settings {
   const def: Settings = {
     author: '', wheel: 'zoom', snap: true, showGrid: false, units: 'm',
     roadMode: 'straight', elevStep: 2.5, snapGeometry: true, snapAngles: true, snapGuides: true, snapLength: 1, grade: 0.035, roadGraded: false,
     terrainOp: 'shift', brushRadius: 40, brushStrength: 0.5, levelHeight: null, levelBalanced: true, embankOffset: 2, embankWidth: 10, pondDepth: 2, exaggeration: 1,
-    graphics: 'simple', customAssets: [],
+    graphics: 'simple', customAssets: [], theme: 'system', panels: 'floating',
   };
   // key keeps the old name so settings survive the rename
   try { return { ...def, ...JSON.parse(localStorage.getItem('pune-remix:settings') ?? '{}') }; } catch { return def; }

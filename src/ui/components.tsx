@@ -1,6 +1,7 @@
 // Small building blocks: number fields you can scrub like Figma, toggles, segmented controls, menus, icons.
-import { useEffect, useRef, useState } from 'preact/hooks';
-import type { ComponentChildren, JSX } from 'preact';
+import { useContext, useEffect, useRef, useState } from 'preact/hooks';
+import { createContext, type ComponentChildren, type JSX } from 'preact';
+import { inspTab } from '../editor/state';
 
 let scrubSeq = 0;
 
@@ -11,6 +12,8 @@ let scrubSeq = 0;
 export function NumberField(p: {
   label?: string; value: number | null; onChange: (v: number, merge?: string) => void; step?: number; min?: number; max?: number;
   unit?: string; digits?: number; state?: 'base' | 'own' | 'road' | 'new'; title?: string; disabled?: boolean; width?: number;
+  /** shown when the value is mixed (null) */
+  placeholder?: string;
 }) {
   const step = p.step ?? 0.1, digits = p.digits ?? 1;
   const [text, setText] = useState<string | null>(null);
@@ -42,7 +45,7 @@ export function NumberField(p: {
       {p.label && <span class="nf-label" onPointerDown={scrub as unknown as JSX.PointerEventHandler<HTMLSpanElement>} onClick={(e) => e.preventDefault()}>{p.state && p.state !== 'base' && <i class={`dot ${p.state}`} />}{p.label}</span>}
       <input
         value={text ?? (p.value === null ? '' : fmt(p.value))}
-        placeholder={p.value === null ? 'Mixed' : ''}
+        placeholder={p.value === null ? (p.placeholder ?? 'Mixed') : ''}
         disabled={p.disabled}
         onFocus={(e) => (e.currentTarget as HTMLInputElement).select()}
         onInput={(e) => setText((e.currentTarget as HTMLInputElement).value)}
@@ -102,8 +105,31 @@ export function Row(p: { label?: ComponentChildren; children: ComponentChildren;
   return <div class="row" title={p.hint}>{p.label !== undefined && <span class="row-label">{p.label}</span>}<div class="row-body">{p.children}</div></div>;
 }
 
+/** Inside an inspector tab a Section is the tab's whole body: no header, no collapsing. */
+const FlatSections = createContext(false);
+
+/** Inspector tabs; the open tab is remembered per `id` (e.g. 'road') across selections. */
+export function Tabs(p: { id: string; tabs: { id: string; label: ComponentChildren; hint?: ComponentChildren; body: () => ComponentChildren }[] }) {
+  const want = inspTab.value[p.id];
+  const cur = p.tabs.find((t) => t.id === want) ?? p.tabs[0];
+  return (
+    <div class="itabs">
+      <nav class="itabs-bar" role="tablist">
+        {p.tabs.map((t) => (
+          <button key={t.id} role="tab" aria-selected={t === cur} class={t === cur ? 'on' : ''} onClick={() => { inspTab.value = { ...inspTab.value, [p.id]: t.id }; }}>
+            {t.label}{t.hint ? <span class="itabs-hint">{t.hint}</span> : null}
+          </button>
+        ))}
+      </nav>
+      <div class="itabs-body"><FlatSections.Provider value={true}>{cur.body()}</FlatSections.Provider></div>
+    </div>
+  );
+}
+
 export function Section(p: { title: ComponentChildren; children: ComponentChildren; right?: ComponentChildren; open?: boolean }) {
+  const flat = useContext(FlatSections);
   const [open, setOpen] = useState(p.open ?? true);
+  if (flat) return <div class="isec-flat">{p.right ? <div class="isec-right">{p.right}</div> : null}{p.children}</div>;
   return (
     <section class="isec">
       <header onClick={() => setOpen(!open)}><span class={`chev ${open ? 'open' : ''}`}>›</span><span class="isec-title">{p.title}</span><span class="spacer" />{p.right && <span onClick={(e) => e.stopPropagation()}>{p.right}</span>}</header>
@@ -162,7 +188,9 @@ export const Icon = {
   redo: I('M11 3l3 3-3 3M14 6H7a4 4 0 0 0 0 8h3'),
   cube: I('M8 1.5l5.5 3v7L8 14.5l-5.5-3v-7zM8 8l5.5-3.5M8 8v6.5M8 8L2.5 4.5'),
   map: I('M1.5 3.5l4-1.5 5 1.5 4-1.5v10.5l-4 1.5-5-1.5-4 1.5zM5.5 2v10.5M10.5 3.5V14'),
-  xray: I('M8 2v2M8 12v2M2 8h2M12 8h2M4 4l1.4 1.4M10.6 10.6L12 12M4 12l1.4-1.4M10.6 5.4L12 4M8 10.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z'),
+  xray: I('M1.5 5h13M3 8.5h2M7 8.5h2M11 8.5h2M3 12h2M7 12h2M11 12h2M5 2.5L8 5l3-2.5'),
+  sun: I('M8 2v1.5M8 12.5V14M2 8h1.5M12.5 8H14M3.8 3.8l1 1M11.2 11.2l1 1M3.8 12.2l1-1M11.2 4.8l1-1M8 10.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z'),
+  moon: I('M13.5 9.6A5.6 5.6 0 1 1 6.4 2.5a4.4 4.4 0 0 0 7.1 7.1z'),
   search: I('M7 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM14 14l-3.5-3.5'),
   plus: I('M8 3v10M3 8h10'),
   close: I('M4 4l8 8M12 4l-8 8'),

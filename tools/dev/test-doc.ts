@@ -312,5 +312,17 @@ check(!!doc.get(s0.id) && C.mesher.segs.has(`${s0.id}~0`), 'undo delete restores
   openMap(back, parse(serialize(docA)));
   check(back.get<'line'>(lid as string)?.props.asset === 'water.nalla' && back.get<'section'>(r!.section!)?.asset === 'pune.18A' && totalWidth(back.get<'section'>(r!.section!)!.parts) === 18, 'asset lines and street assets survive save / load');
 }
+// ---- imported DP roads: standard lanes, no slivers, one lane layout along a road ----
+{
+  type Seg = { type: string; name?: string; reserve?: number };
+  const parts = (s: Seg) => net.types[s.type].parts as { kind: string; width: number }[];
+  const dpSecs = (net.segments as Seg[]).filter((s) => s.reserve);
+  const wide = dpSecs.filter((s) => parts(s).some((p) => p.kind === 'lane' && p.width > 3.65));
+  const sliver = dpSecs.filter((s) => parts(s).some((p) => p.kind === 'shoulder' && p.width < 0.6));
+  check(!wide.length && !sliver.length, `DP roads: no lanes over 3.6 m (${wide.length}), no shoulders under 0.6 m (${sliver.length})`);
+  const gdp = dpSecs.filter((s) => s.name === 'GDP Road');
+  const lanes = new Set(gdp.map((s) => parts(s).filter((p) => p.kind === 'lane').length));
+  check(gdp.length > 10 && lanes.size === 1 && lanes.has(4), `GDP Road keeps 2 + 2 lanes along its length (${[...lanes].join(', ')})`);
+}
 console.log(ok ? '\nALL OK' : '\nFAILURES');
 process.exit(ok ? 0 : 1);

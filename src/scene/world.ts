@@ -2,7 +2,7 @@
 // roads (terrain carving, buildings shrunk away from roads, trees, rail snapping) refresh lazily per region —
 // on idle or when the 3D view is opened.
 import * as THREE from 'three/webgpu';
-import { texture, uv, vertexColor, vec3, mix, float } from 'three/tsl';
+import { texture, uv, vertexColor, vec3, mix, float, uniform } from 'three/tsl';
 import { GeomBuilder, appendInto, rgbHex } from '../build/geom';
 import { buildBuildings, resolveConflicts } from '../build/buildings';
 import { buildRail } from '../build/rail';
@@ -30,18 +30,28 @@ const pack = (gb: GeomBuilder): Packed | undefined => gb.idx.length
   ? { pos: new Float32Array(gb.pos), nor: new Float32Array(gb.nor), col: new Float32Array(gb.col), uv: new Float32Array(gb.uv), idx: new Uint32Array(gb.idx) }
   : undefined;
 
-/** Unlit plan-view materials (2D): flat colours, no tone mapping surprises. */
+/** 0 = light plan map, 1 = dark (the dark UI theme). A uniform, so switching doesn't rebuild any pipeline. */
+export const planDark = uniform(0);
+
+/** Unlit plan-view materials (2D): flat colours, no tone mapping surprises — a light and a dark map style. */
 function planMaterials(landuse: THREE.Texture) {
-  const vc = () => { const m = new THREE.MeshBasicNodeMaterial(); m.colorNode = vertexColor().rgb; return m; };
+  const vc = () => {
+    const m = new THREE.MeshBasicNodeMaterial();
+    const c = vertexColor().rgb;
+    m.colorNode = mix(c, c.mul(0.55).add(0.022), planDark); // dark: roads a step above the ground, kerbs lighter (linear values)
+    return m;
+  };
   const terrain = new THREE.MeshBasicNodeMaterial();
-  terrain.colorNode = mix(texture(landuse, uv()).rgb, vec3(0.93, 0.92, 0.89), float(0.35));
+  const lu = texture(landuse, uv()).rgb;
+  terrain.colorNode = mix(mix(lu, vec3(0.93, 0.92, 0.89), float(0.35)), mix(lu, vec3(0.012, 0.014, 0.018), float(0.9)), planDark);
   const asphalt = vc(), paving = vc(), concrete = vc();
   const markings = vc();
   asphalt.polygonOffset = true; asphalt.polygonOffsetFactor = -1; asphalt.polygonOffsetUnits = -1;
   markings.polygonOffset = true; markings.polygonOffsetFactor = -4; markings.polygonOffsetUnits = -4;
   const roofs = new THREE.MeshBasicNodeMaterial();
-  roofs.colorNode = mix(vertexColor().rgb, vec3(0.86, 0.83, 0.78), float(0.7));
-  const water = new THREE.MeshBasicNodeMaterial({ color: 0x8fbcd4 });
+  roofs.colorNode = mix(mix(vertexColor().rgb, vec3(0.86, 0.83, 0.78), float(0.7)), mix(vertexColor().rgb, vec3(0.042, 0.047, 0.058), float(0.8)), planDark);
+  const water = new THREE.MeshBasicNodeMaterial();
+  water.colorNode = mix(vec3(0.27, 0.5, 0.64), vec3(0.012, 0.044, 0.084), planDark); // linear: 0x8fbcd4 / 0x1d3b52
   return { terrain, asphalt, paving, markings, concrete, roofs, water };
 }
 

@@ -192,8 +192,8 @@ function sideRoom(e: E, edges: Map<number, E>, grid: SegGrid, hwOf: (e: E) => nu
   }) as [number, number];
 }
 
-/** Median free corridor width between buildings along a polyline (metres), or Infinity when unknown. */
-function freeCorridor(pts: V2[], cap: number, at?: (x: number, z: number) => boolean): number {
+/** Free corridor width between buildings along a polyline (metres) at percentile `q`, or Infinity when unknown. */
+function freeCorridor(pts: V2[], cap: number, at?: (x: number, z: number) => boolean, q = 0.15): number {
   if (!at) return Infinity;
   const p = resample(pts, 6);
   const ws: number[] = [];
@@ -210,7 +210,7 @@ function freeCorridor(pts: V2[], cap: number, at?: (x: number, z: number) => boo
   }
   if (ws.length < 2) return Infinity;
   ws.sort((a, b) => a - b);
-  return ws[Math.floor(ws.length * 0.15)]; // conservative: 15th percentile
+  return ws[Math.floor(ws.length * q)]; // default conservative: 15th percentile
 }
 
 /** Fraction of a polyline that runs parallel to, and within `maxD` of, any of `lines`. */
@@ -583,6 +583,13 @@ export function importNetwork(inp: ImportInput): Network {
   inp.viaducts?.forEach((l, i) => viaGrid!.add(i, l));
   const underViaduct = new Set<number>();
   const roomOf = new Map<number, [number, number]>(); // corridor sharing with parallel roads
+  // DP roads: what each piece would get on its own (`rawOf`), and the width / median harmonised along the whole
+  // road (`dpTarget`) — so a road keeps one cross-section instead of changing at every shop that sticks out
+  const rawOf = new Map<number, { Rdp: number; R: number; med: number }>();
+  const dpTarget = new Map<number, { R: number; med: number }>();
+  // the geometry passes (corridor sharing, junction clusters, curve smoothing) keep the original width rule so road
+  // shapes and ids stay stable for maps edited on earlier bakes; the cross-sections use the newer rule at the end
+  let modern = false;
   let dpUsed = 0;
   const assignType = (e: E) => {
     const piers = RANK[e.cls] <= 4 && parallelCover(e.pts, inp.viaducts ?? [], viaGrid, e.oneway ? 26 : 14) >= 0.5;
@@ -597,26 +604,65 @@ export function importNetwork(inp: ImportInput): Network {
     // covers the whole corridor: main road + service roads + BRTS, not each of them)
     const [roomL, roomR] = roomOf.get(e.id) ?? [Infinity, Infinity];
     const share = 2 * Math.min(roomL, roomR);
-    const R = Rdp ? Math.max(Math.min(Rdp, freeCorridor(e.pts, Rdp, inp.buildingAt) - 0.6, share), Math.min(Rdp, 6)) : null;
-    if (R && Rdp) {
-      // Development Plan reserve: footpaths by reserve size, the rest is carriageway filled exactly with lanes
+    const Rraw = Rdp ? Math.max(Math.min(Rdp, freeCorridor(e.pts, Rdp, inp.buildingAt) - 0.6, share), Math.min(Rdp, 6)) : null;
+    const tgt = dpTarget.get(e.id);
+    const R = Rraw && Rdp && tgt ? Math.max(Math.min(tgt.R, share), Math.min(Rdp, 6)) : Rraw;
+    if (R && Rdp && !modern) {
+      // (original rule — geometry passes only)
       const fp = R >= 24 ? 3 : R >= 18 ? 2.5 : R >= 12 ? 1.8 : R >= 9 ? 1.2 : 0;
       let med = e.oneway ? 0 : e.dualGap > 0 ? Math.min(median, Math.max(1.2, 0.2 * R)) : R >= 30 ? 1.5 : 0;
-      if (piers && !e.oneway) med = Math.max(med, 2.5); // metro piers stand in the median
+      if (piers && !e.oneway) med = Math.max(med, 2.5);
       const carriage = Math.max(3, R - 2 * fp - med);
       let total: number;
-      if (e.dualGap > 0) total = e.lanesF + e.lanesB; // merged divided road: per-direction counts, not one half's tag
+      if (e.dualGap > 0) total = e.lanesF + e.lanesB;
       else if (e.lanesTag) total = e.lanesTag;
       else if (e.oneway) total = Math.max(1, Math.round(carriage / laneW));
       else total = Math.max(2, Math.round(carriage / laneW / 2) * 2);
       total = Math.min(e.oneway ? 5 : 10, total);
       const lw = Math.min(4.2, Math.max(2.8, carriage / total));
       const lf = e.oneway ? total : Math.ceil(total / 2), lb = e.oneway ? 0 : total - lf;
+      const leftover = Math.max(0, (R - lw * total - med) / 2);
+      const side = Math.min(3.5, leftover);
+      const shoulder = Math.min(3, leftover - side);
+      spec = { lanesF: lf, lanesB: lb, laneW: lw, median: med, sidewalkL: Math.round(side * 10) / 10, sidewalkR: Math.round(side * 10) / 10, shoulder: Math.round(shoulder * 10) / 10, oneway: e.oneway, surface: 'asphalt', major };
+      reserveOf.set(e.id, Rdp);
+      dpUsed++;
+    } else if (R && Rdp) {
+      // Development Plan reserve: the road is laid out at its design width (the whole road's typical width once
+      // harmonised) — footpaths by size, the rest carriageway filled with lanes — then fitted into this piece
+      const D = tgt ? Math.max(R, tgt.R) : R;
+      const fp = D >= 24 ? 3 : D >= 18 ? 2.5 : D >= 12 ? 1.8 : D >= 9 ? 1.2 : 0;
+      let med = e.oneway ? 0 : e.dualGap > 0 ? Math.min(median, Math.max(1.2, 0.2 * D)) : D >= 30 ? 1.5 : 0;
+      if (piers && !e.oneway) med = Math.max(med, 2.5); // metro piers stand in the median
+      rawOf.set(e.id, { Rdp, R: Rraw!, med });
+      if (tgt && !e.oneway && med > 0) med = Math.max(piers ? 2.5 : 0.8, tgt.med); // the road's median
+      const carriage = Math.max(3, D - 2 * fp - med);
+      // lanes: the tagged count while it fits the carriageway at a sensible width (OSM often tags one lane per
+      // half of a divided road, or none) — otherwise as many 3.0-3.5 m lanes as the carriageway holds (IRC:86)
+      const maxW = Math.max(3.5, laneW);
+      const tagged = e.dualGap > 0 ? e.lanesF + e.lanesB : e.lanesTag; // merged divided road: per-direction counts
+      let total: number;
+      if (tagged && carriage / tagged <= maxW + 0.25) total = tagged;
+      else if (e.oneway) total = Math.max(1, Math.round(carriage / laneW));
+      else total = Math.max(2, Math.round(carriage / laneW / 2) * 2);
+      total = Math.min(e.oneway ? 5 : 10, total);
+      let lw = Math.min(maxW, Math.max(2.8, carriage / total));
+      // where buildings or a parallel road pinch it: narrower footpaths first, then the median, then lanes —
+      // so a road keeps its lanes along its length instead of changing at every pinch
+      const minSide = D >= 12 ? 1.5 : D >= 9 ? 0.9 : 0;
+      const room = Math.max(3, R - 2 * minSide);
+      if (lw * total + med > room && med > 0) med = Math.max(piers ? 2.5 : 0.8, room - lw * total);
+      if (lw * total + med > room) lw = Math.max(2.8, (room - med) / total);
+      const step = e.oneway ? 1 : 2;
+      while (lw * total + med > room && total - step >= step) { total -= step; lw = Math.min(maxW, Math.max(2.8, (room - med) / total)); }
+      lw = lw >= 3 ? Math.floor(lw * 4 + 1e-6) / 4 : Math.floor(lw * 10 + 1e-6) / 10; // standard 3.0 / 3.25 / 3.5 m lanes
+      const lf = e.oneway ? total : Math.ceil(total / 2), lb = e.oneway ? 0 : total - lf;
       const used = lw * total + med;
       const leftover = Math.max(0, (R - used) / 2);
-      const side = Math.min(3.5, leftover);          // footpaths at most 3.5 m
-      const shoulder = Math.min(3, leftover - side); // the rest: kerbside asphalt (parking / service strip)
-      spec = { lanesF: lf, lanesB: lb, laneW: lw, median: med, sidewalkL: Math.round(side * 10) / 10, sidewalkR: Math.round(side * 10) / 10, shoulder: Math.round(shoulder * 10) / 10, oneway: e.oneway, surface: 'asphalt', major };
+      let side = Math.min(3.5, leftover);          // footpaths at most 3.5 m
+      let shoulder = Math.min(3, leftover - side); // the rest: kerbside asphalt (parking / service strip)
+      if (shoulder < 0.6) { side += shoulder; shoulder = 0; } // no slivers: a few cm more footpath instead
+      spec = { lanesF: lf, lanesB: lb, laneW: lw, median: Math.round(med * 10) / 10, sidewalkL: Math.round(side * 10) / 10, sidewalkR: Math.round(side * 10) / 10, shoulder: Math.round(shoulder * 10) / 10, oneway: e.oneway, surface: 'asphalt', major };
       reserveOf.set(e.id, Rdp);
       dpUsed++;
     } else {
@@ -757,6 +803,48 @@ export function importNetwork(inp: ImportInput): Network {
   // final typing (merged ways → combined DP evidence), sharing corridors with parallel roads
   const squeezed = shareCorridors();
   log(`corridor sharing (final): ${squeezed} roads narrowed`);
+  // one cross-section per DP road: the typical width and median along it (length-weighted median), except where
+  // buildings pinch it along most of a piece at least 40 m long — those keep their narrower width
+  const geomHw = new Map<number, number>();
+  for (const e of G.edges.values()) geomHw.set(e.id, hwOf(e));
+  {
+    modern = true;
+    dpUsed = 0;
+    for (const e of G.edges.values()) assignType(e); // each piece on its own (fills rawOf)
+    const groups = new Map<string, E[]>();
+    for (const e of G.edges.values()) {
+      const r = rawOf.get(e.id);
+      if (!r) continue;
+      const k = [e.name || `w${e.wayIds[0]}`, r.Rdp, e.cls, e.oneway, e.dualGap > 0].join('|');
+      (groups.get(k) ?? groups.set(k, []).get(k)!).push(e);
+    }
+    const wmedian = (xs: [number, number][]) => {
+      xs.sort((a, b) => a[0] - b[0]);
+      const tot = xs.reduce((a, x) => a + x[1], 0);
+      let acc = 0;
+      for (const [v, w] of xs) { acc += w; if (acc >= tot / 2) return v; }
+      return xs[xs.length - 1][0];
+    };
+    let pinched = 0, evened = 0;
+    for (const es of groups.values()) {
+      const L = es.map((e) => polyLen(e.pts));
+      const R = Math.round(wmedian(es.map((e, i) => [rawOf.get(e.id)!.R, L[i]])) * 2) / 2;
+      const med = Math.round(wmedian(es.map((e, i) => [rawOf.get(e.id)!.med, L[i]])) * 10) / 10;
+      es.forEach((e, i) => {
+        const r = rawOf.get(e.id)!;
+        let w = R;
+        if (r.R < R - 2 && L[i] >= 40) {
+          const typical = freeCorridor(e.pts, r.Rdp, inp.buildingAt, 0.5) - 0.6; // most of the piece, not one shop
+          if (typical < R - 2) { w = Math.max(Math.min(r.Rdp, 6), Math.floor(Math.max(r.R, typical) * 2) / 2); pinched++; }
+        }
+        if (Math.abs(w - r.R) > 0.05 || Math.abs(med - r.med) > 0.05) evened++;
+        dpTarget.set(e.id, { R: w, med });
+      });
+    }
+    dpUsed = 0;
+    for (const e of G.edges.values()) assignType(e);
+    log(`DP roads: ${groups.size} roads given one cross-section (${evened} pieces evened out, ${pinched} kept narrower where buildings pinch them)`);
+  }
   log(`road widths: ${dpUsed} of ${G.edges.size} roads sized from the Development Plan reserve; ${underViaduct.size} roads under the metro get a pier median`);
 
   // ===== H (part 1). bridges: overpass vs valley =====
@@ -827,7 +915,7 @@ export function importNetwork(inp: ImportInput): Network {
     let pts = e.pts.slice();
     pts[0] = [na.x, na.z];
     pts[pts.length - 1] = [nb.x, nb.z];
-    pts = resample(smooth(pts, Math.max(radius, Math.max(t.hwL, t.hwR) + 3)), 3);
+    pts = resample(smooth(pts, Math.max(radius, (geomHw.get(e.id) ?? Math.max(t.hwL, t.hwR)) + 3)), 3);
     const L = polyLen(pts);
     if (L < 0.5) continue;
     const endDir = (fromStart: boolean): V2 => {

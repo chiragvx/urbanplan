@@ -26,6 +26,7 @@ export function BuildPalette() {
   return (
     <div class="buildbar" onPointerDown={(e) => e.stopPropagation()} onWheel={(e) => e.stopPropagation()}>
       <div class="bb-tabs">
+        <b class="bb-title">{CATEGORIES.find((c) => c.id === cat)?.label}</b>
         {tabs.map((t) => <button key={t} class={t === tab ? 'on' : ''} onClick={() => { buildTab.value = { ...buildTab.value, [cat]: t }; }}>{t}</button>)}
         <span class="spacer" />
         <button class="bb-close" title="Close (Esc)" onClick={close}>×</button>
@@ -43,14 +44,6 @@ export function BuildPalette() {
         {!list.length && <p class="muted pad">Nothing here yet. Select a road and use “Save as asset” in the inspector to add your own.</p>}
       </div>
       {hover && <Card a={hover.a} x={hover.x} />}
-      <div class="bb-cats">
-        {CATEGORIES.map((c) => (
-          <button key={c.id} class={c.id === cat ? 'on' : ''} title={c.label} onClick={() => { buildCat.value = c.id; buildOpen.value = true; setHover(null); }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d={c.icon} /></svg>
-            <span>{c.label}</span>
-          </button>
-        ))}
-      </div>
     </div>
   );
 }

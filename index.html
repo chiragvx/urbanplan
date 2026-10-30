@@ -8,6 +8,15 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/src/style.css" />
+    <script>
+      // theme before first paint (the app keeps it in step afterwards)
+      try {
+        const s = JSON.parse(localStorage.getItem('pune-remix:settings') || '{}');
+        const d = s.theme === 'dark' || ((!s.theme || s.theme === 'system') && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.dataset.theme = d ? 'dark' : 'light';
+        document.documentElement.dataset.panels = s.panels || 'floating';
+      } catch (e) { document.documentElement.dataset.theme = 'light'; }
+    </script>
   </head>
   <body>
     <div id="loading">
@@ -21,16 +30,14 @@
 
     <div id="shell">
       <div id="topbar"></div>
-      <div id="main">
+      <div id="stage">
+        <canvas id="gl"></canvas>
+        <canvas id="overlay"></canvas>
+        <div id="stage-ui"></div>
         <div id="left"></div>
-        <div id="stage">
-          <canvas id="gl"></canvas>
-          <canvas id="overlay"></canvas>
-          <div id="stage-ui"></div>
-        </div>
         <div id="right"></div>
+        <div id="dock"></div>
       </div>
-      <div id="status"></div>
     </div>
     <div id="modals"></div>
     <script type="module" src="/src/main.ts"></script>

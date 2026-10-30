@@ -1,8 +1,9 @@
 // Right panel: properties of whatever is selected. Road-level edits pass down to the road's sections unless a section
 // sets its own value (shown with a dot: blue = edited here, purple = from the road edit, green = new object).
 import { anchorSel, docVersion, readOnly, saveSettings, select, selection, settings, tool } from '../editor/state';
+import { useEffect, useRef } from 'preact/hooks';
 import { ui } from './ctx';
-import { NumberField, Row, Section, Select, Toggle, Icon, Seg } from './components';
+import { NumberField, Row, Section, Select, Toggle, Icon, Seg, Tabs } from './components';
 import { CrossSection } from './CrossSection';
 import * as xs from '../doc/xsection';
 import * as ops from '../doc/ops';
@@ -13,7 +14,7 @@ import { EarthworkPanel } from './EarthworkPanel';
 import { LINE_LABEL } from '../doc/base';
 import { COMMANDS, setDeck } from '../editor/commands';
 import type { Part } from '../net/model';
-import { allAssets, assetOf, getAsset, lineShape, retypeLine, saveCustom, sizeLabel, type AssetDef } from '../assets';
+import { allAssets, assetOf, assetWidth, getAsset, lineShape, retypeLine, saveCustom, sizeLabel, type AssetDef } from '../assets';
 import { thumb } from '../assets/thumb';
 import { revealAsset } from './BuildPalette';
 import { buildOpen } from '../editor/state';
@@ -21,6 +22,25 @@ import { buildOpen } from '../editor/state';
 const classOptions = ROAD_CLASSES.map((c) => ({ value: c as string, label: CLASS_LABEL[c] }));
 const run = (id: string) => { const c = COMMANDS.find((x) => x.id === id)!; if (!c.enabled || c.enabled(ui.E)) c.run(ui.E); };
 const len = (id: Id) => ui.C.geo(id)?.len ?? 0;
+
+/** The inspector as a floating info card (Cities: Skylines style): shown while something is selected; always shown
+ *  (with the map's summary) when the panels are docked. */
+export function InspectorCard() {
+  void docVersion.value;
+  const sel = selection.value;
+  const has = sel.length > 0 || (!!anchorSel.value && tool.value === 'direct');
+  const docked = settings.value.panels === 'docked';
+  const ref = useRef<HTMLDivElement>(null);
+  const key = sel.map((s) => s.id).join();
+  useEffect(() => { ref.current?.scrollTo({ top: 0 }); }, [key]);
+  if (!has && !docked) return null;
+  return (
+    <div class="card insp-card" ref={ref} onPointerDown={(e) => e.stopPropagation()} onWheel={(e) => e.stopPropagation()}>
+      {has && <button class="icon-btn card-close" title="Deselect (Esc)" onClick={() => select([])}><Icon.close size={14} /></button>}
+      <Inspector />
+    </div>
+  );
+}
 
 export function Inspector() {
   void docVersion.value;
@@ -66,7 +86,7 @@ function setParts(target: Id, parts: Part[], merge?: string) {
   ui.E.edit('Cross-section', () => ui.doc.set(target, 'parts', parts), merge);
 }
 
-function WaysControls(p: { target: Id; parts: Part[]; reserve?: number; state?: 'base' | 'own' | 'road' | 'new'; mixed?: boolean }) {
+function WaysControls(p: { target: Id; parts: Part[]; reserve?: number; state?: 'base' | 'own' | 'road' | 'new'; mixed?: boolean; range?: [number, number] }) {
   void docVersion.value; // signals make components pure: re-render on every document change
   const ro = readOnly.value;
   const n = xs.laneCount(p.parts);
@@ -75,10 +95,9 @@ function WaysControls(p: { target: Id; parts: Part[]; reserve?: number; state?: 
   const ch = (f: (q: Part[]) => Part[], merge?: string) => setParts(p.target, f(p.parts), merge);
   return (
     <>
-      {p.mixed && <p class="note">Sections of this road differ — editing here gives them all this cross-section.</p>}
       <CrossSection parts={p.parts} reserve={p.reserve} disabled={ro} state={p.state} onChange={(q, m) => setParts(p.target, q, m)} />
       <div class="grid2">
-        <NumberField label="Width" unit="m" value={p.mixed ? null : xs.totalWidth(p.parts)} min={2.5} max={80} step={0.5} disabled={ro} state={p.state} onChange={(v, m) => ch((q) => xs.setTotalWidth(q, v), m)} title="Total width, footpath to footpath (drag the label to scrub)" />
+        <NumberField label="Width" unit="m" value={p.mixed ? null : xs.totalWidth(p.parts)} placeholder={p.range ? `${Math.floor(p.range[0])}–${Math.ceil(p.range[1])}` : undefined} min={2.5} max={80} step={0.5} disabled={ro} state={p.state} onChange={(v, m) => ch((q) => xs.setTotalWidth(q, v), m)} title="Total width, footpath to footpath (drag the label to scrub)" />
         <NumberField label={one ? 'Lanes' : 'Lanes →'} value={one ? n.all : n.f} step={1} digits={0} min={1} max={6} disabled={ro} onChange={(v) => ch((q) => (one ? xs.setLanes(q, Math.round(v), 0) : xs.setLanes(q, Math.round(v), n.b)))} />
         {!one && <NumberField label="Lanes ←" value={n.b} step={1} digits={0} min={0} max={6} disabled={ro} onChange={(v) => ch((q) => xs.setLanes(q, n.f, Math.round(v)))} />}
         <NumberField label="Median" unit="m" value={med} step={0.1} min={0} max={12} disabled={ro || one} onChange={(v, m) => ch((q) => xs.setMedian(q, v), m)} />
@@ -100,8 +119,17 @@ function RoadPanel(p: { id: Id }) {
   const secs = d.sectionsOf(p.id);
   const ro = readOnly.value;
   if (!secs.length) return <Empty />;
-  const lead = secs.reduce((a, b) => (len(a.id) >= len(b.id) ? a : b));
-  const mixed = secs.some((s) => JSON.stringify(s.parts) !== JSON.stringify(lead.parts));
+  // the cross-section most of the road has (by length), shown and edited as the road's
+  const byKey = new Map<string, { len: number; n: number; s: SectionObj }>();
+  for (const s of secs) {
+    const k = JSON.stringify(s.parts), g = byKey.get(k);
+    if (g) { g.len += len(s.id); g.n++; if (len(s.id) > len(g.s.id)) g.s = s; } else byKey.set(k, { len: len(s.id), n: 1, s });
+  }
+  const common = [...byKey.values()].reduce((a, b) => (b.len > a.len ? b : a));
+  const lead = common.s;
+  const mixed = byKey.size > 1;
+  const widths = secs.map((s) => xs.totalWidth(s.parts));
+  const range: [number, number] = [Math.min(...widths), Math.max(...widths)];
   const total = secs.reduce((a, s) => a + len(s.id), 0);
   const reserves = [...new Set(secs.map((s) => s.reserve).filter(Boolean))] as number[];
   const verified = secs.filter((s) => s.verified).length;
@@ -109,27 +137,115 @@ function RoadPanel(p: { id: Id }) {
     <div class="insp">
       <div class="insp-kind"><Icon.road /> Road</div>
       <input class="title-input" value={r.name} placeholder="Unnamed road" disabled={ro} onChange={(e) => ui.E.edit('Rename road', () => d.set(p.id, 'name', (e.currentTarget as HTMLInputElement).value.trim()))} />
-      <p class="muted">{secs.length} section{secs.length === 1 ? '' : 's'} · {fmtLen(total)} · {xs.describe(lead.parts)}</p>
+      <p class="muted">{secs.length} section{secs.length === 1 ? '' : 's'} · {fmtLen(total)} · {xs.describe(lead.parts)}{mixed && range[1] - range[0] >= 0.1 ? <> · <b class="varies-tag">{fmtW(range[0])}–{fmtW(range[1])} m along it</b></> : null}</p>
       <Row label="Class"><Select value={secs.every((s) => s.cls === lead.cls) ? lead.cls : r.cls} options={classOptions} disabled={ro} onChange={(v) => ui.E.edit('Road class', () => d.set(p.id, 'cls', v))} /></Row>
-      <Section title="Cross-section · whole road">
-        <WaysControls target={p.id} parts={lead.parts} reserve={reserves.length === 1 ? reserves[0] : undefined} state={d.editState(lead.id, 'parts')} mixed={mixed} />
-        {reserves.length > 1 && <p class="muted">DP reserve along this road: {reserves.sort((a, b) => a - b).join(' / ')} m</p>}
-      </Section>
-      <StreetAsset ids={secs.map((x) => x.id)} target={p.id} parts={lead.parts} cls={lead.cls} name={r.name} />
-      <LevelControls ids={secs.map((x) => x.id)} />
-      <Section title="Sections" open={secs.length <= 12} right={<span class="muted">{verified}/{secs.length} verified</span>}>
-        <div class="list">
-          {secs.sort((a, b) => len(b.id) - len(a.id)).map((s) => (
-            <button key={s.id} class="list-item" onClick={() => select([{ kind: 'section', id: s.id }])} onDblClick={() => { select([{ kind: 'section', id: s.id }]); ui.E.zoomToSelection(); }}>
-              {d.patch.has(s.id) && <i class="dot own" />}
-              <span class="grow-left">{xs.totalWidth(s.parts).toFixed(1)} m · {xs.laneCount(s.parts).all} lane{xs.laneCount(s.parts).all === 1 ? '' : 's'}</span>
-              <span class="muted">{fmtLen(len(s.id))}{s.verified ? ' ✓' : ''}</span>
-            </button>
-          ))}
+      <Tabs id="road" tabs={[
+        { id: 'xs', label: 'Cross-section', body: () => (
+          <>
+            {mixed && <Varies road={p.id} secs={secs} lead={lead} common={common} reserve={reserves.length === 1 ? reserves[0] : undefined} />}
+            <WaysControls target={p.id} parts={lead.parts} reserve={reserves.length === 1 ? reserves[0] : undefined} state={d.editState(lead.id, 'parts')} mixed={mixed} range={range} />
+            {reserves.length > 1 && <p class="muted small">DP reserve along this road: {reserves.sort((a, b) => a - b).join(' / ')} m</p>}
+          </>
+        ) },
+        { id: 'asset', label: 'Catalogue', body: () => <StreetAsset ids={secs.map((x) => x.id)} target={p.id} parts={lead.parts} cls={lead.cls} name={r.name} /> },
+        { id: 'level', label: 'Level', body: () => <LevelControls ids={secs.map((x) => x.id)} /> },
+        { id: 'secs', label: 'Sections', hint: secs.length, body: () => (
+          <>
+            <p class="muted small">{verified} of {secs.length} verified · double-click to zoom</p>
+            <div class="list">
+              {orderAlong(secs).map((s) => (
+                <button key={s.id} class="list-item" onClick={() => select([{ kind: 'section', id: s.id }])} onDblClick={() => { select([{ kind: 'section', id: s.id }]); ui.E.zoomToSelection(); }}>
+                  {d.patch.has(s.id) && <i class="dot own" />}
+                  <span class="grow-left">{xs.totalWidth(s.parts).toFixed(1)} m · {xs.laneCount(s.parts).all} lane{xs.laneCount(s.parts).all === 1 ? '' : 's'}</span>
+                  <span class="muted">{fmtLen(len(s.id))}{s.verified ? ' ✓' : ''}</span>
+                </button>
+              ))}
+            </div>
+            <Actions items={['road.verify']} />
+          </>
+        ) },
+      ]} />
+      <div class="insp-foot">
+        <Actions items={['road.straighten', 'road.smooth', 'road.reverse', 'road.reset']} />
+        <button class="icon-btn danger" title="Delete road (Del)" disabled={ro} onClick={() => run('edit.delete')}><Icon.trash size={15} /></button>
+      </div>
+    </div>
+  );
+}
+
+const fmtW = (w: number) => (Math.round(w * 10) / 10).toString();
+
+/** A road's sections in order along it (each branch / disconnected run in turn). */
+function orderAlong(secs: SectionObj[]): SectionObj[] {
+  const at = new Map<Id, SectionObj[]>();
+  for (const s of secs) for (const j of [s.a, s.b]) (at.get(j) ?? at.set(j, []).get(j)!).push(s);
+  const left = new Set(secs), out: SectionObj[] = [];
+  const free = (j: Id) => (at.get(j) ?? []).filter((x) => left.has(x)).length === 1;
+  while (left.size) {
+    const start = [...left].find((s) => free(s.a) || free(s.b)) ?? [...left][0];
+    let j = free(start.a) ? start.b : start.a;
+    let cur: SectionObj | undefined = start;
+    while (cur) {
+      out.push(cur); left.delete(cur);
+      cur = (at.get(j) ?? []).find((x) => left.has(x));
+      if (cur) j = cur.a === j ? cur.b : cur.a;
+    }
+  }
+  return out;
+}
+
+/** The catalogue street template for a DP width that best matches a cross-section (the city's pack first). */
+function dpTemplate(reserve: number, parts: Part[]): AssetDef | undefined {
+  const city = (ui.app.tile.city ?? '').toLowerCase();
+  const fits = allAssets().filter((a) => a.drawer === 'network' && a.category === 'roads' && a.profile.type === 'street' && !a.custom && Math.abs(assetWidth(a) - reserve) < 0.01);
+  const own = fits.filter((a) => a.pack === city);
+  const pool = own.length ? own : fits.filter((a) => a.pack === 'core');
+  const n = xs.laneCount(parts).all, med = xs.hasMedian(parts);
+  const score = (a: AssetDef) => (a.profile.type === 'street' ? Math.abs(xs.laneCount(a.profile.parts).all - n) + (xs.hasMedian(a.profile.parts) !== med ? 1.5 : 0) : 99);
+  return pool.sort((a, b) => score(a) - score(b))[0];
+}
+
+/** A road whose sections differ: width along the road, and one click to give it a single cross-section. */
+function Varies(p: { road: Id; secs: SectionObj[]; lead: SectionObj; common: { len: number; n: number }; reserve?: number }) {
+  const d = ui.doc, ro = readOnly.value;
+  const order = orderAlong(p.secs);
+  const L = order.map((s) => Math.max(1, len(s.id)));
+  const total = L.reduce((a, b) => a + b, 0);
+  const W = order.map((s) => xs.totalWidth(s.parts));
+  const wmax = Math.max(...W, p.reserve ?? 0);
+  const leadKey = JSON.stringify(p.lead.parts);
+  const widest = p.secs.reduce((a, b) => (xs.totalWidth(b.parts) > xs.totalWidth(a.parts) ? b : a));
+  const tpl = p.reserve ? dpTemplate(p.reserve, p.lead.parts) : undefined;
+  const uniform = (label: string, parts: Part[], asset?: string) => ui.E.edit(label, () => {
+    d.set(p.road, 'parts', parts.map((q) => ({ ...q })));
+    for (const s of p.secs) d.set(s.id, 'asset', asset);
+  });
+  let x = 0;
+  return (
+    <div class="varies">
+      <svg class="wprof" viewBox={`0 0 ${total} 40`} preserveAspectRatio="none" role="img" aria-label="Width along the road">
+        {p.reserve ? <line x1={0} x2={total} y1={40 - (p.reserve / wmax) * 36} y2={40 - (p.reserve / wmax) * 36} class="wprof-dp" vector-effect="non-scaling-stroke" /> : null}
+        {order.map((s, i) => {
+          const h = (W[i] / wmax) * 36, x0 = x;
+          x += L[i];
+          const cls = JSON.stringify(s.parts) === leadKey ? 'lead' : s.reserve && W[i] < s.reserve - 0.6 ? 'pinch' : 'other';
+          return (
+            <rect key={s.id} x={x0} y={40 - h} width={Math.max(0.5, L[i] - total * 0.003)} height={h} class={cls}
+              onClick={() => select([{ kind: 'section', id: s.id }])}>
+              <title>{`${fmtW(W[i])} m · ${xs.describe(s.parts)} · ${fmtLen(L[i])} — click to select`}</title>
+            </rect>
+          );
+        })}
+      </svg>
+      <p class="small muted">Width varies along the road. Shown and edited below: the most common cross-section ({p.common.n} of {p.secs.length} sections, {fmtLen(p.common.len)}). Editing it gives every section this one.</p>
+      {!ro && (
+        <div class="uniform">
+          <span class="small muted">Make uniform:</span>
+          {tpl && tpl.profile.type === 'street' && <button class="small" title={tpl.source} onClick={() => tpl.profile.type === 'street' && uniform(`Make it ${tpl.name}`, tpl.profile.parts, tpl.id)}>{tpl.name.split(' · ')[0]} · {fmtW(assetWidth(tpl))} m</button>}
+          <button class="small" onClick={() => uniform('Make uniform', p.lead.parts, p.lead.asset)}>Most common · {fmtW(xs.totalWidth(p.lead.parts))} m</button>
+          {xs.totalWidth(widest.parts) > xs.totalWidth(p.lead.parts) + 0.05 && <button class="small" onClick={() => uniform('Make uniform', widest.parts, widest.asset)}>Widest · {fmtW(xs.totalWidth(widest.parts))} m</button>}
         </div>
-      </Section>
-      <Actions items={['road.verify', 'road.straighten', 'road.smooth', 'road.reverse', 'road.reset']} />
-      <div class="btns"><button class="danger" disabled={ro} onClick={() => run('edit.delete')}><Icon.trash size={14} /> Delete road</button></div>
+      )}
     </div>
   );
 }
@@ -201,17 +317,37 @@ function SectionPanel(p: { id: Id }) {
       <p class="muted">{fmtLen(g?.len ?? 0)} · {xs.describe(s.parts)}</p>
       <Row label="Name"><input class="text" value={s.name} disabled={ro} onChange={(e) => ui.E.edit('Rename', () => d.set(p.id, 'name', (e.currentTarget as HTMLInputElement).value.trim()))} /></Row>
       <Row label="Class"><Select value={s.cls} options={classOptions} disabled={ro} onChange={(v) => ui.E.edit('Class', () => d.set(p.id, 'cls', v))} /></Row>
-      <Section title="Cross-section · this section">
-        <WaysControls target={p.id} parts={s.parts} reserve={s.reserve} state={d.editState(p.id, 'parts')} />
-        {d.editState(p.id, 'parts') === 'own' && <button class="link" disabled={ro} onClick={() => ui.E.edit('Reset width', () => d.reset(p.id, 'parts'))}>Reset to the road's cross-section</button>}
-      </Section>
-      <Section title="Shape" open={false}>
-        <p class="muted">{s.path.length - 1} curve piece{s.path.length > 2 ? 's' : ''}{minR < 1e5 ? ` · tightest radius ${minR.toFixed(0)} m` : ''}</p>
-        <Actions items={['road.straighten', 'road.smooth', 'road.arc', 'road.reverse']} />
-        <p class="muted small">Drag the road to bend it. Double-click it (or press <kbd>A</kbd>) to edit points and curve handles.</p>
-      </Section>
-      <StreetAsset ids={[p.id]} target={p.id} parts={s.parts} cls={s.cls} name={s.name || r?.name || ''} />
-      <LevelControls ids={[p.id]} />
+      <Tabs id="section" tabs={[
+        { id: 'xs', label: 'Cross-section', body: () => (
+          <>
+            <WaysControls target={p.id} parts={s.parts} reserve={s.reserve} state={d.editState(p.id, 'parts')} />
+            {d.editState(p.id, 'parts') === 'own' && <button class="link" disabled={ro} onClick={() => ui.E.edit('Reset width', () => d.reset(p.id, 'parts'))}>Reset to the road's cross-section</button>}
+          </>
+        ) },
+        { id: 'shape', label: 'Shape', body: () => (
+          <>
+            <p class="muted">{s.path.length - 1} curve piece{s.path.length > 2 ? 's' : ''}{minR < 1e5 ? ` · tightest radius ${minR.toFixed(0)} m` : ''}</p>
+            <Actions items={['road.straighten', 'road.smooth', 'road.arc', 'road.reverse']} />
+            <p class="muted small">Drag the road to bend it. Double-click it (or press <kbd>A</kbd>) to edit points and curve handles.</p>
+          </>
+        ) },
+        { id: 'asset', label: 'Catalogue', body: () => <StreetAsset ids={[p.id]} target={p.id} parts={s.parts} cls={s.cls} name={s.name || r?.name || ''} /> },
+        { id: 'level', label: 'Level', body: () => <LevelControls ids={[p.id]} /> },
+        { id: 'source', label: 'Source', body: () => <SectionSource id={p.id} /> },
+      ]} />
+      <div class="insp-foot">
+        <Actions items={['road.separate', 'road.reset']} />
+        <button class="icon-btn danger" title="Delete section (Del)" disabled={ro} onClick={() => run('edit.delete')}><Icon.trash size={15} /></button>
+      </div>
+    </div>
+  );
+}
+
+function SectionSource(p: { id: Id }) {
+  const d = ui.doc, ro = readOnly.value;
+  const s = d.get<'section'>(p.id)!;
+  return (
+    <>
       <Section title="Source & accuracy">
         <Row label="Width from"><span>{({ dp: 'Development Plan sheet', osm: 'OpenStreetMap tags / defaults', user: 'Edited by hand', default: 'Default', survey: 'Survey', import: 'Import' } as Record<string, string>)[s.widthSrc ?? 'default']}</span></Row>
         {s.reserve ? <Row label="DP reserve"><span>{s.reserve} m</span></Row> : null}
@@ -219,9 +355,7 @@ function SectionPanel(p: { id: Id }) {
         <Toggle label="Verified on the ground / imagery" checked={!!s.verified} disabled={ro} onChange={(v) => ui.E.edit(v ? 'Verified' : 'Unverified', () => d.set(p.id, 'verified', v))} />
         <textarea class="note-input" placeholder="Notes (survey details, source, doubts…)" value={s.note ?? ''} disabled={ro} onChange={(e) => ui.E.edit('Note', () => d.set(p.id, 'note', (e.currentTarget as HTMLTextAreaElement).value || undefined))} />
       </Section>
-      <Actions items={['road.separate', 'road.reset']} />
-      <div class="btns"><button class="danger" disabled={ro} onClick={() => run('edit.delete')}><Icon.trash size={14} /> Delete section</button></div>
-    </div>
+    </>
   );
 }
 

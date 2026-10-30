@@ -1,6 +1,6 @@
 // Left panel tabs: Layers, Roads (search), Issues, Review queue.
 import { useEffect, useMemo, useState } from 'preact/hooks';
-import { docVersion, dpRegionsOn, leftTab, readOnly, select, selection, surveyFilter } from '../editor/state';
+import { docVersion, dpRegionsOn, leftOpen, leftTab, readOnly, select, selection, settings, surveyFilter } from '../editor/state';
 import { ui } from './ctx';
 import { Icon, Toggle, Menu, Seg } from './components';
 import { CLASS_LABEL, CLASS_RANK, SURVEY_COLOR, SURVEY_LABEL, type Id, type LayerGroup, type LayerObj, type LineKind, type SurveyStatus } from '../doc/types';
@@ -10,17 +10,50 @@ import { newId } from '../doc/ids';
 import * as xs from '../doc/xsection';
 import { fmtLen } from './Inspector';
 
+const VIEWS = [
+  { id: 'layers', label: 'Layers', icon: Icon.layers },
+  { id: 'roads', label: 'Roads', icon: Icon.road },
+  { id: 'issues', label: 'Issues', icon: Icon.warn },
+  { id: 'review', label: 'Review', icon: Icon.review },
+] as const;
+
+/** Info views (Cities: Skylines' top-left buttons): a rail of icons, each opening its panel beside it. */
 export function LeftPanel() {
   const tab = leftTab.value;
   const n = issueCount();
+  const docked = settings.value.panels === 'docked';
+  const open = leftOpen.value || docked;
+  const cur = tab === 'survey' ? 'review' : tab;
+  const pick = (id: typeof VIEWS[number]['id']) => {
+    if (open && cur === id && !docked) { leftOpen.value = false; return; }
+    leftTab.value = id === 'review' && tab === 'survey' ? 'survey' : id;
+    leftOpen.value = true;
+  };
   return (
-    <aside class="left">
-      <nav class="tabs">
-        <button class={tab === 'layers' ? 'on' : ''} onClick={() => (leftTab.value = 'layers')}><Icon.layers /> Layers</button>
-        <button class={tab === 'roads' ? 'on' : ''} onClick={() => (leftTab.value = 'roads')}><Icon.road /> Roads</button>
-        <button class={tab === 'issues' ? 'on' : ''} onClick={() => (leftTab.value = 'issues')}><Icon.warn /> Issues{n ? <span class="badge">{n > 999 ? '999+' : n}</span> : null}</button>
-        <button class={tab === 'review' || tab === 'survey' ? 'on' : ''} onClick={() => (leftTab.value = tab === 'survey' ? 'survey' : 'review')}><Icon.review /> Review</button>
+    <>
+      <nav class="rail" onPointerDown={(e) => e.stopPropagation()}>
+        {VIEWS.map((v) => (
+          <button key={v.id} class={`rail-btn ${open && cur === v.id ? 'on' : ''}`} title={v.label} onClick={() => pick(v.id)}>
+            <v.icon size={17} />
+            <span>{v.label}</span>
+            {v.id === 'issues' && n ? <i class="badge">{n > 999 ? '999+' : n}</i> : null}
+          </button>
+        ))}
       </nav>
+      {open && <LeftBody tab={tab} cur={cur} docked={docked} />}
+    </>
+  );
+}
+
+function LeftBody(p: { tab: string; cur: string; docked: boolean }) {
+  const tab = p.tab;
+  return (
+    <aside class="card left" onPointerDown={(e) => e.stopPropagation()} onWheel={(e) => e.stopPropagation()}>
+      <header class="card-head">
+        <b>{VIEWS.find((v) => v.id === p.cur)?.label}</b>
+        <span class="spacer" />
+        {!p.docked && <button class="icon-btn" title="Close" onClick={() => { leftOpen.value = false; }}><Icon.close size={14} /></button>}
+      </header>
       <div class="tab-body">
         {tab === 'layers' && <Layers />}
         {tab === 'roads' && <Roads />}

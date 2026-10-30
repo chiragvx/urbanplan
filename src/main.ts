@@ -2,9 +2,10 @@
 import { render, h } from 'preact';
 import { App } from './app/app';
 import { setUI } from './ui/ctx';
-import { TopBar, StatusBar, Palette, Toasts, ReadOnlyBanner } from './ui/chrome';
+import { TopBar, Dock, Palette, Toasts, ReadOnlyBanner } from './ui/chrome';
 import { LeftPanel } from './ui/panels';
-import { Inspector } from './ui/Inspector';
+import { InspectorCard } from './ui/Inspector';
+import { startTheme } from './ui/theme';
 import { Dialogs, Profile } from './ui/dialogs';
 import { RoadToolbar } from './ui/RoadToolbar';
 import { BuildPalette } from './ui/BuildPalette';
@@ -26,12 +27,13 @@ async function boot() {
   setUI({ E: app.E, doc: app.doc, C: app.C, issues: app.issues, app });
   render(h(TopBar, {}), $('topbar'));
   render(h(LeftPanel, {}), $('left'));
-  render(h(Inspector, {}), $('right'));
-  render(h(StatusBar, {}), $('status'));
+  render(h(InspectorCard, {}), $('right'));
+  render(h(Dock, {}), $('dock'));
   render(h('div', {}, h(ReadOnlyBanner, {}), h(RoadToolbar, {}), h(TerrainToolbar, {}), h(BuildPalette, {}), h(Toasts, {}), h(Profile, {})), $('stage-ui'));
   render(h('div', {}, h(Palette, {}), h(Dialogs, {})), $('modals'));
-  // the stage changes size with the panels: keep the renderer + overlay in step
-  new ResizeObserver(() => { app.engine.resize(); app.E.resize(); }).observe($('stage'));
+  startTheme();
+  // the map changes size with the window and docked panels: keep the renderer + overlay in step
+  new ResizeObserver(() => { app.engine.resize(); app.E.resize(); }).observe($('overlay'));
   $('loading').hidden = true;
   app.engine.resize(); app.E.resize();
   if (import.meta.env.DEV) Object.assign(window, { __app: app });

@@ -10,6 +10,7 @@ import { SURVEY_COLOR, SURVEY_LABEL, type Id, type LineKind, type SurveyStatus }
 import { parseCode } from '../doc/dpcodes';
 import { drawAssetLayers, drawAssetTool, isAssetLine } from './assetoverlay';
 import { lineShape } from '../assets';
+import { ink } from './ink';
 
 export interface Handle {
   kind: 'width' | 'anchor' | 'in' | 'out';
@@ -439,7 +440,7 @@ function drawDPRegions(E: Editor) {
     ctx.globalAlpha = 1;
     if (r.status !== 'unsurveyed') { ctx.strokeStyle = SURVEY_COLOR[r.status]; ctx.lineWidth = s > 1 ? 4 : 3; ctx.stroke(); }
     if (r.reserved) { ctx.strokeStyle = 'rgba(214,40,40,0.9)'; ctx.lineWidth = s > 1 ? 2 : 1.25; ctx.stroke(); }
-    else if (s > 0.8 && r.status === 'unsurveyed') { ctx.strokeStyle = 'rgba(60,60,60,0.25)'; ctx.lineWidth = 1; ctx.stroke(); }
+    else if (s > 0.8 && r.status === 'unsurveyed') { ctx.strokeStyle = ink.faint; ctx.lineWidth = 1; ctx.stroke(); }
   }
   // circled reservation codes: a small ring where the code sits on the sheet
   if (s > 0.35) for (const r of list) if (r.marker) {
@@ -455,7 +456,7 @@ function drawDPRegions(E: Editor) {
     const o = E.doc.get<'region'>(h.id);
     const r = o ?? h;
     ctx.beginPath(); path(r.ring); for (const q of r.holes ?? []) path(q);
-    ctx.strokeStyle = '#111'; ctx.lineWidth = 2; ctx.setLineDash([]); ctx.stroke();
+    ctx.strokeStyle = ink.outline; ctx.lineWidth = 2; ctx.setLineDash([]); ctx.stroke();
     const code = parseCode(o?.code);
     readout(E, E.toWorld(...E.mouse), [
       `${D.classLabel(r.cls)}${r.reserved ? ` · reserved site${code ? ` ${o!.code}${code.purpose ? ` (${code.purpose})` : ''}` : h.marker ? ' (code on the sheet)' : ''}` : ''}`,
@@ -608,9 +609,9 @@ function scaleBar(E: Editor) {
   const steps = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000];
   const m = steps.find((x) => x >= target * 0.6) ?? 2000;
   const px = m * s, x = 16, y = E.view.h - 54;
-  ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillRect(x - 6, y - 16, px + 12, 26);
-  ctx.strokeStyle = '#1f2328'; ctx.lineWidth = 2;
+  ctx.fillStyle = ink.halo; ctx.fillRect(x - 6, y - 16, px + 12, 26);
+  ctx.strokeStyle = ink.text; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + 5); ctx.lineTo(x + px, y + 5); ctx.lineTo(x + px, y); ctx.stroke();
-  ctx.fillStyle = '#1f2328'; ctx.font = '600 11px Inter, system-ui, sans-serif'; ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = ink.text; ctx.font = '600 11px Inter, system-ui, sans-serif'; ctx.textBaseline = 'alphabetic';
   ctx.fillText(m >= 1000 ? `${m / 1000} km` : `${m} m`, x + 2, y - 3);
 }
