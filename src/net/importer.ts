@@ -30,6 +30,8 @@ export interface ImportInput {
   dpWidths?: Record<string, { w: number; n: number; iqr: number }>;
   /** is there a building footprint at (x, z)? (caps roads to today's free space) */
   buildingAt?: (x: number, z: number) => boolean;
+  /** the water surface height at (x, z), or null on land (bridges over water climb to a clearance above it) */
+  waterAt?: (x: number, z: number) => number | null;
   log?: (msg: string) => void;
 }
 
@@ -54,6 +56,8 @@ const DRIVE = new Set(['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 
 const PATHS = new Set(['footway', 'path', 'pedestrian', 'steps', 'cycleway', 'bridleway']);
 const RANK: Record<string, number> = { motorway: 0, trunk: 1, primary: 2, secondary: 3, tertiary: 4, unclassified: 5, residential: 5, busway: 4, living_street: 6, service: 7, road: 6, track: 8 };
 const DECK = 6.5, GRADE = 0.065;
+/** bridges over water: the deck's climb off each shore, and its clearance over the water (grows with the crossing) */
+const WET_GRADE = 0.03, WET_CLEAR_MAX = 20, WET_CLEAR_PER_M = 1 / 150;
 
 // ---------------- small geometry helpers ----------------
 const sub = (a: V2, b: V2): V2 => [a[0] - b[0], a[1] - b[1]];
@@ -1002,6 +1006,65 @@ export function importNetwork(inp: ImportInput): Network {
     }
   }
 
+  // bridges over water (sea, creeks, wide rivers): between two low shores the plain valley profile skims the water, so
+  // a run of water bridges climbs off its ends at WET_GRADE to a clearance that grows with the water it crosses
+  // (the Bandra–Worli Sea Link reaches 20 m; a short river bridge between high banks is left as it was)
+  const wet = new Map<number, { zw: number; clear: number; za: number; zb: number }>();
+  if (inp.waterAt) {
+    const wetOf = new Map<number, { len: number; lv: number[] }>();
+    for (const e of G.edges.values()) {
+      if (kind.get(e.id) !== 'valley') continue;
+      const p = resample(e.pts, 8), lv: number[] = [];
+      for (const q of p) { const w = inp.waterAt(q[0], q[1]); if (w !== null) lv.push(w); }
+      wetOf.set(e.id, { len: (lv.length * polyLen(e.pts)) / p.length, lv });
+    }
+    const seen = new Set<number>();
+    let runs = 0, top = 0;
+    for (const e0 of G.edges.values()) {
+      if (!wetOf.has(e0.id) || seen.has(e0.id)) continue;
+      // the run: valley bridges joined end to end
+      const run: E[] = [], stack = [e0];
+      seen.add(e0.id);
+      while (stack.length) {
+        const e = stack.pop()!;
+        run.push(e);
+        for (const n of [e.a, e.b]) for (const g of G.incident(n)) if (wetOf.has(g.id) && !seen.has(g.id)) { seen.add(g.id); stack.push(g); }
+      }
+      const wetLen = run.reduce((a, e) => a + wetOf.get(e.id)!.len, 0);
+      if (wetLen < 60) continue;
+      const lv = run.flatMap((e) => wetOf.get(e.id)!.lv).sort((a, b) => a - b);
+      const zw = lv[lv.length >> 1], clear = Math.min(WET_CLEAR_MAX, wetLen * WET_CLEAR_PER_M);
+      // the deck's height at each node: climbing from the run's ends (nodes that also touch other roads, or dead ends)
+      const inRun = new Set(run.map((e) => e.id));
+      const zOf = new Map<number, number>(), ends: number[] = [];
+      for (const e of run) for (const n of [e.a, e.b]) {
+        if (zOf.has(n)) continue;
+        const nn = G.nodes.get(n)!;
+        const isEnd = G.degree(n) === 1 || G.incident(n).some((g) => !inRun.has(g.id));
+        zOf.set(n, isEnd ? inp.terrain(nn.x, nn.z) + (lift.get(n) ?? 0) : Infinity);
+        if (isEnd) ends.push(n);
+      }
+      if (!ends.length) continue;
+      for (let changed = true, guard = 0; changed && guard++ < 500;) {
+        changed = false;
+        for (const e of run) {
+          const L = polyLen(e.pts), za = zOf.get(e.a)!, zb = zOf.get(e.b)!;
+          if (zb + WET_GRADE * L < za - 0.01) { zOf.set(e.a, zb + WET_GRADE * L); changed = true; }
+          if (za + WET_GRADE * L < zb - 0.01) { zOf.set(e.b, za + WET_GRADE * L); changed = true; }
+        }
+      }
+      for (const [n, z] of zOf) {
+        if (ends.includes(n) || !Number.isFinite(z)) continue;
+        const nn = G.nodes.get(n)!, g = inp.terrain(nn.x, nn.z);
+        lift.set(n, Math.max(lift.get(n) ?? 0, Math.min(z, zw + clear) - g));
+      }
+      for (const e of run) wet.set(e.id, { zw, clear, za: zOf.get(e.a)!, zb: zOf.get(e.b)! });
+      runs++;
+      top = Math.max(top, clear);
+    }
+    log(`bridges over water: ${runs} runs climb clear of the water (up to ${top.toFixed(1)} m)`);
+  }
+
   // ===== G. Bézier fitting =====
   const nodes: NetNode[] = [];
   const segments: NetSegment[] = [];
@@ -1069,6 +1132,8 @@ export function importNetwork(inp: ImportInput): Network {
           let z = Za + (Zb - Za) * (0.5 * s + 0.5 * s * s * (3 - 2 * s));
           if (k === 'overpass') z = Math.max(z, T(c[3][0], c[3][1]) + (deck.get(e.id) ?? 0) * 0.85);
           if (k === 'valley') z = Za + (Zb - Za) * s;
+          const w = wet.get(e.id);
+          if (w) z = Math.max(z, Math.min(w.zw + w.clear, w.za + WET_GRADE * acc, w.zb + WET_GRADE * (L - acc)));
           lf = Math.max(0, z - T(c[3][0], c[3][1]));
         }
         to = nodes.length;

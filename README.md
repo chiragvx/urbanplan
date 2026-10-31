@@ -235,7 +235,9 @@ The region is set in `tools/region-config.mjs` (bbox, frame origin, piece size, 
 blurb for the start menu); each bake also adds the city to `public/regions/index.json`, the start menu's list. A
 **coastal** city gets the sea from the DEM: Copernicus sets open water to exactly 0 m, so those pixels (softened to
 an 8 m shoreline, patches of ~1 ha and up, never under buildings or ground-level roads) join the water mask — the
-ground is carved under them — and become water polygons per piece. `dp: true` applies the PMC DP road widths (Pune
+ground is carved under them — and become water polygons per piece. Bridges over water climb off each shore at 3 % to a clearance that grows
+with the water they cross (1 m per 150 m, up to 20 m: the Bandra–Worli Sea Link), instead of skimming the water between
+two low banks. `dp: true` applies the PMC DP road widths (Pune
 only). Its frame is the DP pipeline's city
 frame, so the city-wide DP data needs no conversion; tiles a region takes over (`legacy`) bring their DP sheets and
 utility networks along, moved into the city frame.

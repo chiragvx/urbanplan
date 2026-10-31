@@ -452,6 +452,11 @@ const net = importNetwork({
   nodes: netNodes as never, ways: [...netWays.values()].filter((w) => w.tags.highway) as never,
   proj: (n) => proj(n), half: Math.max(-F.x0, F.x1, -F.z0, F.z1), bounds: [F.x0, F.z0, F.x1, F.z1],
   groundRails, viaducts, terrain: terrainAt, buildingAt,
+  waterAt: (x, z) => {
+    const i = Math.round((x - F.x0) / CELL), j = Math.round((z - F.z0) / CELL);
+    if (i < 0 || j < 0 || i >= GN || j >= GM || !water[j * GN + i]) return null;
+    return waterLevel[j * GN + i] - BASE;
+  },
   dpWidths: R.dp && fs.existsSync(dpFile) ? JSON.parse(fs.readFileSync(dpFile, 'utf8')) : undefined,
   log: (m) => log('  ' + m),
 });
@@ -672,7 +677,8 @@ fs.writeFileSync(path.join(outDir, 'region.json'), JSON.stringify({
   const ix: { regions: Record<string, unknown>[] } = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : { regions: [] };
   const counts = { sections: objs.filter((o) => o.kind === 'section').length, roads: roads.length, buildings: nB };
   const entry = { id: R.id, name: R.name, city: R.city, state: R.state ?? '', about: R.about ?? '', legacy: Object.keys(R.legacy ?? {}), counts, km2: Math.round(((F.x1 - F.x0) * (F.z1 - F.z0)) / 1e6), baked: new Date().toISOString() };
-  ix.regions = [...ix.regions.filter((r) => r.id !== R.id), entry];
+  const at = ix.regions.findIndex((r) => r.id === R.id); // a rebake keeps the city's place in the list
+  if (at >= 0) ix.regions[at] = entry; else ix.regions.push(entry);
   fs.writeFileSync(f, JSON.stringify(ix, null, 1));
 }
 log('done');
