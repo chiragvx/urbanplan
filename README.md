@@ -93,6 +93,25 @@ editor for the account pages saves the map in the browser first.
   (saved, undoable, editable in the inspector with its own cut / fill); they apply in order on the original terrain
   (Copernicus GLO-30 on an 8 m grid) to make the designed ground. **Terrain view** (<kbd>Shift T</kbd>): heights, hill shade and
   contours, or cut & fill; in 3D, height ×1–5 (buildings and trees hidden). Checks: steep roads, water pooling.
+- **Plot sandbox** (<kbd>F</kbd>): click a plot's corners (they snap to building corners), Enter to finish. It finds the
+  road the plot fronts and shows the strip the Development Plan road takes (red), the area left, the FSI for that road
+  width (basic + premium + TDR + ancillary), the footprint inside the margins and the envelope that fits: floors and
+  height, as a glass block in 3D. Rules go by the DP width or today's; every rule can be changed per plot. The defaults
+  are indicative UDCPR 2020 values (src/doc/plot.ts), not a zoning certificate.
+  **Site Studio** (double-click a plot, or *Open in Site Studio*) designs what goes on it (src/doc/site.ts): the plan on
+  the left, the live 3D view on the right, the numbers and rule checks across the top. A building is a spine with a
+  depth, as in TestFit: draw one node by node (<kbd>B</kbd>), drag it to move it, drag its nodes to reshape it, the
+  round handle to turn it, the square one to change its depth; double-click the spine to add a node, Alt-click a node
+  to drop it; Ctrl+D duplicates. Moves snap to the road's 45° angles. Or start from a bar, L, U, courtyard, tower or
+  twin towers, or let **Generate** (src/doc/generate.ts) try every shape at a range of depths and parking set-ups and
+  rank them by profit, IRR, flats or carpet, rule-breakers last.
+  Floors fill with 1 / 2 / 3 BHK flats to a mix, both sides of a corridor, with corner flats where wings meet and
+  cores no further apart than the 30 m escape distance allows; floors go up as far as the FSI, the height limit and
+  the margins at that height allow, and a building past the margins or into another turns red. Parking follows UDCPR
+  Table 8-B, laid out bay by bay on stilts, podiums, basements and the open ground. Buildings over 15 m are checked
+  for a 6 m fire tender's way round (NBC 2016 Part 4), large plots for 10 % open space (UDCPR 3.5.1). Costs and
+  returns with a month-by-month cash flow (IRR, peak funding, payback), options side by side, DXF / OBJ / glTF
+  exports of the site and its surroundings, an area statement and unit schedule (CSV) and a printable report.
 - **Roads and terrain**: roads, flyovers and tunnels follow the (terraformed) ground by default. **Graded** roads
   (<kbd>G</kbd> on a selection, Shift+<kbd>G</kbd> back; or the **Graded** chip in the road tool for new roads) get a fixed
   profile with stations every ≤ 96 m (12 cells of 8 m, Cities: Skylines' segment length), eased to ≤ 8 %; the ground is

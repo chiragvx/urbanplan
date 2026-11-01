@@ -211,7 +211,32 @@ export interface EarthworkObj {
   name?: string;
 }
 
-export type Obj = SectionObj | JunctionObj | RoadObj | LineObj | BuildingObj | LayerObj | RegionObj | EarthworkObj;
+/**
+ * A plot in the sandbox: its outline, what it's for and which road width its rules go by. What it loses to the DP
+ * road and what can be built on it are worked out from the map (src/doc/plot.ts); `rules` overrides the defaults.
+ */
+export interface PlotObj {
+  kind: 'plot';
+  id: Id;
+  name: string;
+  /** outline x,z,… in tile metres */
+  ring: number[];
+  use: 'residential' | 'commercial';
+  /** the section it fronts (undefined = the nearest road) */
+  front?: Id;
+  /** the rules follow the road's DP width or today's (undefined = DP when the road has one) */
+  basis?: 'today' | 'dp';
+  /** UDCPR: in a congested area (gaothan, old core: Table 6-A) */
+  congested?: boolean;
+  /** count the FSI of the strip handed over for the DP road on the rest of the plot */
+  credit?: boolean;
+  rules?: Partial<import('./plot').PlotRules>;
+  /** its buildings, flat mix, parking and rates (Site Studio), and sites saved to compare */
+  site?: import('./site').PlotSite;
+  options?: import('./site').PlotOption[];
+}
+
+export type Obj = SectionObj | JunctionObj | RoadObj | LineObj | BuildingObj | LayerObj | RegionObj | EarthworkObj | PlotObj;
 export type Kind = Obj['kind'];
 export type ObjOf<K extends Kind> = Extract<Obj, { kind: K }>;
 

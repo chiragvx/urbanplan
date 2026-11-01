@@ -11,6 +11,7 @@ import { CLASS_LABEL, ROAD_CLASSES, type Id, type SectionObj } from '../doc/type
 import { COVER } from '../net/generate';
 import { RegionPanel } from './RegionPanel';
 import { EarthworkPanel } from './EarthworkPanel';
+import { PlotPanel } from './PlotPanel';
 import { LINE_LABEL } from '../doc/base';
 import { COMMANDS, setDeck } from '../editor/commands';
 import type { Part } from '../net/model';
@@ -60,6 +61,7 @@ export function Inspector() {
     case 'line': return <LinePanel id={o.id} />;
     case 'building': return <BuildingPanel id={o.id} />;
     case 'earthwork': return <EarthworkPanel id={o.id} />;
+    case 'plot': return <PlotPanel id={o.id} />;
     default: return <Empty />;
   }
 }

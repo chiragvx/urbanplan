@@ -13,7 +13,7 @@ import { DP_WIDTHS, setSideWidth, setTotalWidth, totalWidth } from '../doc/xsect
 import { HitIndex, type Pick } from './hit';
 import { PlanView } from './view2d';
 import {
-  anchorSel, buildAsset, cursor, pointer, docVersion, dpRegionsOn, terrainView, hover, lineLayer, mode, penClass, penLift, readOnly, saveSettings, select, selection, settings, stale3d, status, toast, tool, xray, zoomScale,
+  anchorSel, buildAsset, cursor, pointer, docVersion, dpRegionsOn, terrainView, hover, lineLayer, mode, penClass, penLift, readOnly, saveSettings, select, selection, settings, stale3d, status, studio, studioLevel, studioSel, studioTool, toast, tool, xray, zoomScale,
   type Sel, type Tool,
 } from './state';
 import { RoadTool, type SnapResult } from './roadtool';
@@ -25,6 +25,7 @@ import { DPRegions, type DPRegion } from './dpregions';
 import { traceAt } from './wand';
 import { TerrainCompiler, type Region } from '../doc/terrain';
 import { TerrainTool } from './terraintool';
+import { PlotTool } from './plottool';
 import { TerrainView } from './terrainview';
 import { newId } from '../doc/ids';
 import { drawOverlay, type Handle } from './overlay';
@@ -47,7 +48,9 @@ type Drag =
 /** File / app-level actions the editor's commands need (implemented by the app shell). */
 export interface AppApi {
   /** a region (whole city streamed in pieces): its extent */
-  region: { bounds: [number, number, number, number] } | null;
+  region: { id: string; bounds: [number, number, number, number] } | null;
+  /** latitude, longitude of a point in map metres */
+  toLatLon(x: number, z: number): [number, number];
   newMap(): void;
   /** back to the start menu */
   home(): Promise<void>;
@@ -66,6 +69,8 @@ export interface PenState { pts: ops.PenPoint[]; cursor: [number, number] | null
 export interface Snap { kind: 'junction' | 'section' | 'anchor' | 'angle' | 'width' | 'guide' | 'cross'; p: [number, number]; id?: Id; label?: string }
 
 let dragSeq = 0;
+/** the side of the square of city Site Studio shows in 3D (m) */
+const STUDIO_SITE = 1000;
 
 export class Editor {
   readonly hit: HitIndex;
@@ -81,6 +86,7 @@ export class Editor {
   /** terraforming: earthworks → designed ground */
   readonly terrain: TerrainCompiler;
   readonly terra: TerrainTool;
+  readonly plot: PlotTool;
   readonly tview: TerrainView;
   /** terrain changed under a brush stroke: roads re-drape there when it ends */
   private pendingTerrain: Region | null = null;
@@ -113,6 +119,7 @@ export class Editor {
     this.mt = new MultiTool(this);
     this.terrain = new TerrainCompiler(doc, hf);
     this.terra = new TerrainTool(this);
+    this.plot = new PlotTool(this);
     this.tview = new TerrainView(this);
     this.dpr.onLoad = () => { this.overlayDirty = true; };
     this.view = new PlanView(engine.planCamera, world.tile.half);
@@ -143,6 +150,7 @@ export class Editor {
     const tr = ew.length ? this.terrain.update(ew) : null;
     const items = this.C.update(c.ids);
     this.world.onChange(c, items);
+    this.syncPlots(c.ids);
     this.hit.update(c.ids);
     if (tr) this.terrainChanged(tr);
     else if (terrainView.value && c.origin !== 'page') {
@@ -316,6 +324,49 @@ export class Editor {
     this.overlayDirty = true;
   }
 
+  // ---------------- Site Studio ----------------
+
+  /** Open a plot in Site Studio: the plan on the left, the 3D view of it on the right. */
+  openStudio(id: Id) {
+    const o = this.doc.get<'plot'>(id);
+    if (!o) return;
+    this.setTool('select');
+    select([{ kind: 'plot', id }]);
+    studioSel.value = null; studioTool.value = 'select'; studioLevel.value = -1;
+    studio.value = id;
+    this.setMode('3d');
+    // the map's chrome goes; the 3D view fills the stage, its centre moved right of the studio's panel
+    document.body.classList.add('studio-on');
+    this.engine.shiftX = Math.min(780, window.innerWidth * 0.52) / 2;
+    window.dispatchEvent(new Event('resize'));
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (let i = 0; i < o.ring.length; i += 2) { x0 = Math.min(x0, o.ring[i]); x1 = Math.max(x1, o.ring[i]); z0 = Math.min(z0, o.ring[i + 1]); z1 = Math.max(z1, o.ring[i + 1]); }
+    const c = this.controls, mx = (x0 + x1) / 2, mz = (z0 + z1) / 2;
+    c.target.set(mx, this.hf.sampleSurface(mx, mz), mz);
+    c.dist = Math.max(140, Math.hypot(x1 - x0, z1 - z0) * 2.4);
+    c.pitch = 0.62;
+    // the 3D view is the site model: a square kilometre round the plot, the camera kept over it
+    const H = STUDIO_SITE / 2;
+    this.studioCam ??= { bounds: c.bounds, maxDist: c.maxDist };
+    this.world.setClip([mx - H, mz - H, mx + H, mz + H]);
+    c.bounds = [mx - H * 0.8, mz - H * 0.8, mx + H * 0.8, mz + H * 0.8];
+    c.maxDist = STUDIO_SITE * 1.4;
+    this.world.needsRender = true;
+  }
+  /** the camera's limits before the studio opened */
+  private studioCam: { bounds: CityControls['bounds']; maxDist: number } | null = null;
+
+  closeStudio() {
+    if (!studio.value) return;
+    studio.value = null;
+    document.body.classList.remove('studio-on');
+    this.world.setClip(null);
+    if (this.studioCam) { this.controls.bounds = this.studioCam.bounds; this.controls.maxDist = this.studioCam.maxDist; this.studioCam = null; }
+    this.engine.shiftX = 0;
+    window.dispatchEvent(new Event('resize'));
+    this.world.needsRender = true;
+  }
+
   zoomToSelection() {
     const b = this.selectionBox();
     if (b) this.zoomTo(b);
@@ -412,6 +463,7 @@ export class Editor {
     const t = tool.value;
     if (t === 'pen') { if (settings.value.roadMode === 'freeform') return this.penDown(w, e); this.road.click(w, e.ctrlKey || e.metaKey, e.shiftKey, e.altKey); return; }
     if (t === 'wand') { void this.fillAt(w); return; }
+    if (t === 'plot') { this.plot.click(w); this.overlayDirty = true; return; }
     if (t === 'terrain') { const n = ++dragSeq; if (this.terra.down(w, 0, e.altKey, n) && this.terra.stroke) this.drag = { kind: 'terrain', n }; this.overlayDirty = true; return; }
     if (t === 'bulldoze') { const n = ++dragSeq; this.drag = { kind: 'bulldoze', n }; this.bulldozeAt(w, e.shiftKey, n); return; }
     if (t === 'line') return this.lineDown(w);
@@ -567,10 +619,12 @@ export class Editor {
   private doubleClick(w: [number, number], e: PointerEvent) {
     const t = tool.value;
     if (t === 'terrain') { this.terra.finish(); return; }
+    if (t === 'plot') { this.plot.finish(); this.overlayDirty = true; return; }
     if (t === 'pen') { this.finishPen(); return; }
     if (t === 'line') { this.finishLine(); return; }
     if (t === 'route' || t === 'area') { this.at.finish(); return; }
     const p = this.pickAt(w[0], w[1]);
+    if (p?.kind === 'plot' && t === 'select' && !studio.value) { this.openStudio(p.id); return; }
     if (t === 'direct' && p && (p.kind === 'section' || p.kind === 'line')) { this.insertAnchor(p, w); return; }
     if (p?.kind === 'section') {
       const cur = selection.value;
@@ -586,6 +640,7 @@ export class Editor {
   stepBack() {
     if (tool.value === 'route' || tool.value === 'place' || tool.value === 'area') { this.at.back(); return; }
     if (tool.value === 'multi') { this.mt.back(); return; }
+    if (tool.value === 'plot') { this.plot.back(); this.overlayDirty = true; return; }
     if (tool.value !== 'pen') return;
     if (settings.value.roadMode === 'freeform') {
       if (this.pen.pts.length) { this.pen.pts.pop(); this.overlayDirty = true; }
@@ -602,6 +657,7 @@ export class Editor {
       return;
     }
     if (tool.value === 'terrain') { this.terra.cursor = w; this.overlayDirty = true; return; }
+    if (tool.value === 'plot') { this.plot.hover(w); this.overlayDirty = true; return; }
     if (tool.value === 'multi') { this.mt.hover(w, { shiftKey: shift, altKey: !!e?.altKey, ctrlKey: ctrl }); return; }
     if (tool.value === 'bulldoze') {
       const p = this.pickAt(w[0], w[1]);
@@ -622,7 +678,7 @@ export class Editor {
   }
 
   private baseCursor() {
-    return { select: 'default', direct: 'default', pen: 'crosshair', knife: 'crosshair', line: 'crosshair', measure: 'crosshair', hand: 'grab', bulldoze: 'crosshair', wand: 'cell', terrain: 'crosshair', route: 'crosshair', place: 'copy', area: 'crosshair', multi: 'crosshair' }[tool.value];
+    return { select: 'default', direct: 'default', pen: 'crosshair', knife: 'crosshair', line: 'crosshair', measure: 'crosshair', hand: 'grab', bulldoze: 'crosshair', wand: 'cell', terrain: 'crosshair', route: 'crosshair', place: 'copy', area: 'crosshair', multi: 'crosshair', plot: 'crosshair' }[tool.value];
   }
   updateCursor() { this.overlay.style.cursor = this.spaceDown ? 'grab' : this.baseCursor(); }
 
@@ -975,6 +1031,13 @@ export class Editor {
     this.setTool(a.drawer === 'place' ? 'place' : a.drawer === 'area' ? 'area' : 'route');
   }
 
+  /** Plot reports follow the map (a road's width or DP reserve changes them); their 3D envelopes are rebuilt. */
+  private syncPlots(ids: Iterable<Id>) {
+    if (!this.doc.ids('plot').size && ![...ids].some((id) => id.startsWith('plot'))) return;
+    this.plot.invalidate();
+    this.world.buildPlots(this.doc.all('plot').map((o) => ({ o, r: this.plot.report(o.id), d: this.plot.layout(o.id) })));
+  }
+
   /** the terrain view was switched on by the terrain tool (and goes off with it) */
   private terrainViewByTool = false;
 
@@ -984,6 +1047,7 @@ export class Editor {
     hover.value = null;
     if (t === 'wand') { this.dpr.load(); if (!this.doc.get<'layer'>('dp')?.visible) this.app.toggleLayer('dp'); }
     if (t !== 'terrain') this.terra.cancel();
+    if (t !== 'plot') this.plot.cancel();
     // the terrain tool brings its view along, and takes it away again when it brought it
     if (t === 'terrain' && !terrainView.value) { terrainView.value = true; this.terrainViewByTool = true; this.applyExaggeration(); }
     else if (t !== 'terrain' && this.terrainViewByTool) { this.terrainViewByTool = false; if (terrainView.value) { terrainView.value = false; this.applyExaggeration(); } }
@@ -1005,6 +1069,7 @@ export class Editor {
       hand: 'Drag to pan',
       route: this.at.hint(), place: this.at.hint(), area: this.at.hint(),
       multi: this.mt.hint(),
+      plot: this.plot.hint(),
     }[t];
   }
 }

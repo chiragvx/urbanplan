@@ -178,12 +178,17 @@ export class Engine {
   }
   private planPass: ReturnType<typeof pass> | null = null;
 
+  /** the 3D view's centre moved right by this many CSS pixels (a panel covers the left: Site Studio) */
+  shiftX = 0;
+
   resize() {
     const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
     // quality.scale is the absolute pixel ratio: 1 = CSS pixels
     this.renderer.setPixelRatio(this.quality.scale);
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
+    if (this.shiftX) this.camera.setViewOffset(w, h, -this.shiftX, 0, w, h);
+    else this.camera.clearViewOffset();
     this.camera.updateProjectionMatrix();
   }
 

@@ -180,13 +180,13 @@ export const COMMANDS: Command[] = [
           if (s.kind === 'road') ops.deleteRoad(E.doc, s.id);
           else if (s.kind === 'section') ops.deleteSections(E.doc, [s.id]);
           else if (s.kind === 'junction') ops.deleteJunction(E.doc, s.id);
-          else if (s.kind === 'line' || s.kind === 'building' || s.kind === 'earthwork' || (s.kind === 'region' && E.doc.get(s.id))) E.doc.remove(s.id);
+          else if (s.kind === 'line' || s.kind === 'building' || s.kind === 'earthwork' || s.kind === 'plot' || (s.kind === 'region' && E.doc.get(s.id))) E.doc.remove(s.id);
         }
       });
       select([]);
     },
   },
-  { id: 'edit.delete2', label: 'Delete', group: 'Edit', keys: 'Backspace', enabled: () => selection.value.length > 0 || !!anchorSel.value, run: (E) => COMMANDS.find((c) => c.id === 'edit.delete')!.run(E) },
+  { id: 'edit.delete2', label: 'Delete', group: 'Edit', keys: 'Backspace', enabled: (E) => selection.value.length > 0 || !!anchorSel.value || (tool.value === 'plot' && E.plot.pts.length > 0), run: (E) => { if (tool.value === 'plot' && E.plot.pts.length) { E.plot.back(); E.overlayDirty = true; return; } COMMANDS.find((c) => c.id === 'edit.delete')!.run(E); } },
   {
     id: 'edit.selectview', label: 'Select all roads in view', group: 'Edit', keys: 'Ctrl+A',
     run: (E) => {
@@ -202,6 +202,7 @@ export const COMMANDS: Command[] = [
       if (E.at.active) { E.at.cancel(); status.value = E.at.hint(); return; }
       if (buildOpen.value && tool.value === 'select') { buildOpen.value = false; return; }
       if (tool.value === 'terrain' && E.terra.pts.length) { E.terra.cancel(); status.value = E.terra.hint(); E.overlayDirty = true; return; }
+      if (tool.value === 'plot' && E.plot.pts.length) { E.plot.cancel(); status.value = E.plot.hint(); E.overlayDirty = true; return; }
       // leaving a build tool closes the catalogue with it: one Esc back to plain editing
       if (tool.value !== 'select') { if (['pen', 'route', 'place', 'area'].includes(tool.value)) buildOpen.value = false; E.setTool('select'); return; }
       const s = sel1();
@@ -214,6 +215,7 @@ export const COMMANDS: Command[] = [
     run: (E) => {
       if (tool.value === 'pen') { if (E.road.active) { E.road.cancel(); status.value = E.road.hint(); } else E.finishPen(); return; }
       if (tool.value === 'terrain') { E.terra.finish(); return; }
+      if (tool.value === 'plot') { E.plot.finish(); E.overlayDirty = true; return; }
       if (tool.value === 'line') { E.finishLine(); return; }
       if (tool.value === 'route' || tool.value === 'area') { E.at.finish(); return; }
       const s = sel1();
@@ -305,6 +307,7 @@ export const COMMANDS: Command[] = [
     id: 'tool.terrain', label: 'Terrain tool (raise, level, soften, slope, restore, pad, embankment, pond)', group: 'Tools', keys: 'T', enabled: editable,
     run: (E) => { E.setTool('terrain'); E.overlayDirty = true; },
   },
+  { id: 'tool.plot', label: 'Plot sandbox: draw a plot, see the DP road and what you can build', group: 'Tools', keys: 'F', enabled: editable, run: (E) => { E.setTool('plot'); E.overlayDirty = true; } },
   { id: 'tool.wand', label: 'Fill tool: trace a plot on the DP sheet as a survey region', group: 'Tools', keys: 'W', enabled: editable, run: (E) => E.setTool('wand') },
   ...[7, 8].map((k) => ({
     id: `terrain.op.${k}`, label: `Terrain tool: ${TERRAIN_OPS[k - 1].label}`, group: 'Tools' as const, keys: String(k), enabled: terrainTool,

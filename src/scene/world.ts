@@ -16,7 +16,10 @@ import { RoadRaster } from '../geo/roadraster';
 import { MESH_LAYERS, type MeshLayer, type Packed } from '../net/generate';
 import type { Compiler } from '../doc/compile';
 import type { CityDoc, Change } from '../doc/doc';
-import type { BuildingObj, Id, LineObj } from '../doc/types';
+import type { BuildingObj, Id, LineObj, PlotObj } from '../doc/types';
+import type { PlotReport } from '../doc/plot';
+import { UNIT_COLOR, type SiteReport } from '../doc/site';
+import { hex, prismTris, type Box } from '../build/prism';
 import { LINE_COLOR } from '../doc/base';
 import { ChunkSet, type ChunkItem } from './chunks';
 import { releaseAfterUpload } from '../render/release';
@@ -70,7 +73,8 @@ const DIST: Record<Graphics, { treesHi: number; treesLo: number; buildings?: num
 
 export class World {
   readonly scene: THREE.Scene;
-  readonly root = new THREE.Group();
+  /** everything; clipped to a small square round a plot in Site Studio (see setClip) */
+  readonly root = new THREE.ClippingGroup();
   roads!: ChunkSet<MeshLayer>;
   paths!: ChunkSet<MeshLayer>;
   buildings!: ChunkSet<'roofs'>;
@@ -84,6 +88,9 @@ export class World {
   utilities = new THREE.Group();
   /** pond water surfaces (terraforming) */
   ponds = new THREE.Group();
+  /** sandbox plots: the land lost to the DP road, the buildable footprint and the envelope (3D only) */
+  plots = new THREE.Group();
+  private plotM?: { lost: THREE.Material; net: THREE.Material; mass: THREE.Material; edge: THREE.LineBasicNodeMaterial; build: THREE.Material; floor: THREE.LineBasicNodeMaterial; clash: THREE.LineBasicNodeMaterial };
   private utilityLayers = new Map<Id, THREE.Mesh>();
   /** catalogue assets that aren't streets / tracks / pipes (canals, power lines, structures, areas), per layer */
   readonly assets = new THREE.Group();
@@ -134,7 +141,7 @@ export class World {
     this.assetMat = new THREE.MeshLambertNodeMaterial();
     this.assetMat.colorNode = vertexColor().rgb;
     scene.add(this.root);
-    this.root.add(this.rail, this.metro, this.trees, this.utilities, this.ponds, this.assets);
+    this.root.add(this.rail, this.metro, this.trees, this.utilities, this.ponds, this.assets, this.plots);
   }
 
   /** Initial build of everything (after compiler.full()). */
@@ -526,6 +533,114 @@ export class World {
     this.needsRender = true;
   }
 
+  /** Sandbox plots in 3D: the DP strip (red) and the rest (blue) on the ground, the envelope as a glass outline,
+   *  and the building in it: flats coloured by type floor by floor, cores, and the stilt / podium levels. */
+  buildPlots(list: { o: PlotObj; r: PlotReport | null; d: SiteReport | null }[]) {
+    for (const c of [...this.plots.children]) { this.plots.remove(c); (c as THREE.Mesh).geometry.dispose(); }
+    if (!this.plotM) {
+      const flat = (color: number, opacity: number) => new THREE.MeshBasicNodeMaterial({ color, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4 });
+      this.plotM = {
+        lost: flat(0xe5484d, 0.45), net: flat(0x2f5bff, 0.22),
+        mass: new THREE.MeshLambertNodeMaterial({ color: 0x8fa6ff, transparent: true, opacity: 0.12, depthWrite: false, side: THREE.DoubleSide }),
+        edge: new THREE.LineBasicNodeMaterial({ color: 0x2f5bff, transparent: true, opacity: 0.6 }),
+        build: new THREE.MeshLambertNodeMaterial({ vertexColors: true }),
+        floor: new THREE.LineBasicNodeMaterial({ color: 0x1c2333, transparent: true, opacity: 0.35 }),
+        clash: new THREE.LineBasicNodeMaterial({ color: 0xe5484d }),
+      };
+    }
+    const M = this.plotM;
+    const ground = (x: number, z: number) => this.hf.sample(x, z);
+    // a ring laid on the ground, a little above it so it doesn't flicker
+    const drape = (ring: number[], mat: THREE.Material) => {
+      if (ring.length < 6) return;
+      const tris = earcut(ring);
+      const pos = new Float32Array((ring.length / 2) * 3);
+      for (let i = 0; i < ring.length / 2; i++) { pos[i * 3] = ring[i * 2]; pos[i * 3 + 1] = ground(ring[i * 2], ring[i * 2 + 1]) + 0.25; pos[i * 3 + 2] = ring[i * 2 + 1]; }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setIndex(tris);
+      const m = new THREE.Mesh(geo, mat);
+      m.renderOrder = 2;
+      this.plots.add(m);
+    };
+    for (const { o, r, d } of list) {
+      if (!r) { drape(o.ring, M.net); continue; }
+      drape(r.net, M.net);
+      if (r.lost > 0.5) drape(r.lostRing, M.lost);
+      const F = d?.envelope.length ? d.envelope : r.footprint, H = d?.buildings.length ? d.height : r.height;
+      if (F.length < 6 || H <= 0) continue;
+      let base = Infinity;
+      for (let i = 0; i < F.length; i += 2) base = Math.min(base, ground(F[i], F[i + 1]));
+      // the envelope: a faint glass block with its outline
+      const env = prism([{ ring: F, y0: base, y1: base + H, color: [1, 1, 1] }], false);
+      const mass = new THREE.Mesh(env, M.mass);
+      mass.renderOrder = 3;
+      this.plots.add(mass);
+      const e: number[] = [], n = F.length / 2;
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n;
+        for (const y of [base, base + H]) e.push(F[i * 2], y, F[i * 2 + 1], F[j * 2], y, F[j * 2 + 1]);
+        e.push(F[i * 2], base, F[i * 2 + 1], F[i * 2], base + H, F[i * 2 + 1]);
+      }
+      const eg = new THREE.BufferGeometry();
+      eg.setAttribute('position', new THREE.Float32BufferAttribute(e, 3));
+      const lines = new THREE.LineSegments(eg, M.edge);
+      lines.renderOrder = 4;
+      this.plots.add(lines);
+      if (!d?.buildings.length) continue;
+      // the buildings: stilt and podium levels, then the flats floor by floor, the cores the whole height
+      const fh = r.rules.floorH, boxes: Box[] = [], fl: number[] = [], red: number[] = [];
+      const grey = hex('#b9bec9'), core = hex('#6b7280'), hall = hex('#d9dce3');
+      const colors = UNIT_COLOR.map(hex);
+      for (let k = 0; k < d.under; k++) {
+        const stilt = d.site.stilt && k === 0;
+        for (const w of stilt ? d.buildings.flatMap((b) => b.quads) : [d.envelope]) boxes.push({ ring: w, y0: base + k * fh + (stilt ? fh - 0.4 : 0), y1: base + (k + 1) * fh - (stilt ? 0 : 0.3), color: grey });
+      }
+      // surface bays, marked out on the ground
+      const bay = hex('#9aa0ab');
+      for (const q of d.parking.levels.find((l) => l.kind === 'surface')?.bays ?? []) boxes.push({ ring: insetQuad(q, 0.12), y0: base + 0.02, y1: base + 0.07, color: bay });
+      for (const b of d.buildings) {
+        for (let f = 0; f < b.floors; f++) {
+          const y0 = base + (d.under + f) * fh, y1 = y0 + fh - 0.25;
+          for (const u of b.units) boxes.push({ ring: u.ring, y0, y1, color: colors[u.t] });
+          for (const c of b.corridors) boxes.push({ ring: c, y0, y1, color: hall });
+        }
+        for (const c of b.cores) boxes.push({ ring: c, y0: base, y1: base + b.height + 2.5, color: core });
+        // a line round every floor; red all the way up where it breaks the margins or runs into another building
+        for (const q of b.quads) for (let i = 0; i < q.length; i += 2) {
+          const j = (i + 2) % q.length;
+          for (let f = 1; f <= b.floors; f++) { const y = base + (d.under + f) * fh - 0.13; fl.push(q[i], y, q[i + 1], q[j], y, q[j + 1]); }
+          if (b.clash) red.push(q[i], base, q[i + 1], q[i], base + b.height, q[i + 1], q[i], base + b.height + 0.05, q[i + 1], q[j], base + b.height + 0.05, q[j + 1]);
+        }
+      }
+      const bm = new THREE.Mesh(prism(boxes, true), M.build);
+      bm.castShadow = true; bm.receiveShadow = true;
+      this.plots.add(bm);
+      const segs = (pts: number[], mat: THREE.LineBasicNodeMaterial) => {
+        if (!pts.length) return;
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+        this.plots.add(new THREE.LineSegments(g, mat));
+      };
+      segs(fl, M.floor);
+      segs(red, M.clash);
+    }
+    this.plots.visible = !this.plan;
+    this.needsRender = true;
+  }
+
+  /** Show only a square of the city (x0, z0, x1, z1), cut clean at its edges; null shows it all. */
+  setClip(b: [number, number, number, number] | null) {
+    const R = this.root;
+    R.enabled = !!b;
+    R.clipShadows = true;
+    R.clippingPlanes = b ? [
+      new THREE.Plane(new THREE.Vector3(1, 0, 0), -b[0]), new THREE.Plane(new THREE.Vector3(-1, 0, 0), b[2]),
+      new THREE.Plane(new THREE.Vector3(0, 0, 1), -b[1]), new THREE.Plane(new THREE.Vector3(0, 0, -1), b[3]),
+    ] : [];
+    this.needsRender = true;
+  }
+
   /** Vertical exaggeration of everything (terrain view in 3D: Pune's relief is gentle). */
   setExaggeration(k: number) { this.exag = k; this.root.scale.y = k; this.root.updateMatrixWorld(true); this.applyLayers(); }
   /** vertical exaggeration (buildings and trees are hidden while it's on: stretched they'd hide the ground) */
@@ -657,6 +772,7 @@ export class World {
     this.skirt.visible = vis('terrain') && !this.plan && !this.region; // a region's window sits in the far-view terrain
     this.water.visible = vis('water') && !ground;
     for (const c of this.ponds.children) c.visible = !ground;
+    this.plots.visible = !this.plan;
     this.setGhost(imgs.some((l) => l.roads === 'ghost'));
     this.roads.group.visible = vis('roads');
     this.paths.group.visible = vis('paths');
@@ -775,4 +891,23 @@ function mergeRegions(rs: Region[]): Region[] {
     out.push(cur);
   }
   return out;
+}
+
+// ---------------- plot buildings ----------------
+
+function prism(boxes: Box[], floors: boolean): THREE.BufferGeometry {
+  const { pos, col } = prismTris(boxes, floors);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+/** A convex quad drawn in by `k` towards its centre (bays read as marked out, not one slab). */
+function insetQuad(q: number[], k: number): number[] {
+  let cx = 0, cz = 0;
+  for (let i = 0; i < q.length; i += 2) { cx += q[i]; cz += q[i + 1]; }
+  cx /= q.length / 2; cz /= q.length / 2;
+  return q.map((v, i) => { const c = i % 2 ? cz : cx, dx = v - c; return c + dx * Math.max(0, 1 - k / (Math.abs(dx) || 1)); });
 }

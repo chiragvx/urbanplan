@@ -73,7 +73,7 @@ const TOOLS: { t: Tool; icon: IconFn; label: string; key: string }[] = [
   { t: 'multi', icon: Icon.multi, label: 'Road tools: junctions, intersect, arrange, slope, loop, parallel, curve, flyover', key: 'J' },
   { t: 'bulldoze', icon: Icon.bulldoze, label: 'Bulldozer', key: 'B' },
 ];
-const EDIT_TOOLS = ['pen', 'knife', 'line', 'direct', 'bulldoze', 'wand', 'terrain', 'multi'];
+const EDIT_TOOLS = ['pen', 'knife', 'line', 'direct', 'bulldoze', 'wand', 'terrain', 'multi', 'plot'];
 const DRAW_TOOLS = ['pen', 'route', 'place', 'area'];
 const SURVEY_TOOLS: Tool[] = ['measure', 'line', 'wand'];
 
@@ -136,6 +136,7 @@ export function Dock() {
             </button>
           ))}
           <button class={`bb-cat ${t === 'terrain' ? 'on' : ''}`} aria-label="Terrain" title="Terrain: raise, level, soften, slope, pads, ponds (T)" disabled={ro} onClick={() => ui.E.setTool(t === 'terrain' ? 'select' : 'terrain')}><Icon.terrain size={21} /></button>
+          <button class={`bb-cat ${t === 'plot' ? 'on' : ''}`} aria-label="Plot sandbox" title="Plot sandbox: draw a plot, see what the DP takes and what you can build (F)" disabled={ro} onClick={() => ui.E.setTool(t === 'plot' ? 'select' : 'plot')}><Icon.plot size={21} /></button>
           <Menu class={`bb-menu ${survey ? 'on' : ''}`} title="Survey tools: measure, draw a line, trace a DP plot" label={<Icon.survey size={21} />} items={[
             { label: 'Measure', keys: 'M', run: () => ui.E.setTool('measure') },
             { label: 'Draw a line (utilities, rail)', keys: 'L', run: () => ui.E.setTool('line'), disabled: ro },
@@ -168,7 +169,7 @@ export function Dock() {
 
 // ---------------- the hint at the cursor ----------------
 
-const HINT_TOOLS = ['pen', 'route', 'place', 'area', 'line', 'measure', 'multi', 'terrain', 'knife', 'bulldoze', 'wand', 'direct'];
+const HINT_TOOLS = ['pen', 'route', 'place', 'area', 'line', 'measure', 'multi', 'terrain', 'plot', 'knife', 'bulldoze', 'wand', 'direct'];
 
 /** While a tool is in use, its next step follows the cursor (the status strip keeps it too). */
 export function CursorHint() {

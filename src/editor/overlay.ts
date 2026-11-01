@@ -11,6 +11,7 @@ import { parseCode } from '../doc/dpcodes';
 import { drawAssetLayers, drawAssetTool, isAssetLine } from './assetoverlay';
 import { lineShape } from '../assets';
 import { ink } from './ink';
+import { UNIT_COLOR } from '../doc/site';
 
 export interface Handle {
   kind: 'width' | 'anchor' | 'in' | 'out';
@@ -42,6 +43,7 @@ export function drawOverlay(E: Editor) {
     bridgeEdges(E);
     signalSymbols(E);
     if (osmCompare.value) osmLines(E);
+    drawPlots(E);
   }
 
   // hover
@@ -95,6 +97,7 @@ export function drawOverlay(E: Editor) {
     else if (sn.kind === 'section') { ctx.beginPath(); ctx.moveTo(p[0] - 6, p[1] - 6); ctx.lineTo(p[0] + 6, p[1] + 6); ctx.moveTo(p[0] + 6, p[1] - 6); ctx.lineTo(p[0] - 6, p[1] + 6); ctx.stroke(); }
     if (sn.label) label(ctx, p, sn.label, 12, 18);
   }
+  if (tool.value === 'plot') plotTool(E);
   if (terrainView.value) earthworks(E);
   if (tool.value === 'terrain') terrainTool(E);
   else if (terrainView.value && is2d && !E.drag && tool.value === 'select') terrainReadout(E);
@@ -123,6 +126,67 @@ export function drawOverlay(E: Editor) {
     dot(ctx, p, 6, m.sev === 'error' ? WARN : '#f5a524', '#fff');
   }
   if (is2d) scaleBar(E);
+}
+
+// ---------------- plot sandbox ----------------
+
+const PLOT = '#2f5bff', DPRED = '#e5484d';
+
+/** Plots in the plan: the strip the DP road takes (red), the plot's edge, the buildable footprint, the numbers. */
+function drawPlots(E: Editor) {
+  const ctx = E.ctx;
+  for (const o of E.doc.all('plot')) {
+    const r = E.plot.report(o.id);
+    if (r && r.lostRing.length >= 6) poly(E, r.lostRing, true, DPRED, 1.5, 0.3);
+    ctx.setLineDash([7, 5]);
+    poly(E, o.ring, true, PLOT, 2, 0.06);
+    ctx.setLineDash([]);
+    if (!r) continue;
+    // the envelope (dashed), then the building's typical floor: flats by type, cores, corridors
+    const d = E.plot.layout(o.id);
+    const env = d?.envelope.length ? d.envelope : r.footprint;
+    const built = !!d?.buildings.length;
+    if (env.length >= 6) { ctx.setLineDash([3, 3]); poly(E, env, true, PLOT, 1, built ? 0.05 : 0.22); ctx.setLineDash([]); }
+    if (d && built) {
+      const fine = E.view.scale >= 1.2;
+      for (const b of d.buildings) {
+        for (const u of b.units) poly(E, u.ring, true, UNIT_COLOR[u.t], fine ? 0.75 : 0.01, 0.75);
+        for (const c of b.corridors) poly(E, c, true, '#c9ccd4', 0.01, 0.8);
+        for (const c of b.cores) poly(E, c, true, '#6b7280', 0.5, 0.85);
+        for (const q of b.quads) poly(E, q, true, b.clash ? DPRED : '#1c2333', b.clash ? 2 : 1.25, 0);
+      }
+    }
+    if (E.view.scale < 0.6) continue;
+    let x = 0, z = 0;
+    const F = env.length >= 6 ? env : o.ring;
+    for (let i = 0; i < F.length; i += 2) { x += F[i]; z += F[i + 1]; }
+    const p = at(E, x / (F.length / 2), z / (F.length / 2));
+    label(ctx, p, d && built ? `${o.name} · ${d.flats} flats · ${Math.max(...d.buildings.map((b) => b.floors)) + d.under} floors` : `${o.name} · ${Math.round(r.netArea).toLocaleString('en-IN')} m² · ${r.floors} floors`, 11);
+  }
+}
+
+/** The plot being drawn: its corners, the edge to the cursor, the snap and the area so far. */
+function plotTool(E: Editor) {
+  const T = E.plot, ctx = E.ctx, c = T.snap ?? T.cursor;
+  if (T.pts.length) {
+    ctx.strokeStyle = PLOT; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    for (let i = 0; i < T.pts.length; i += 2) { const p = at(E, T.pts[i], T.pts[i + 1]); if (i) ctx.lineTo(p[0], p[1]); else ctx.moveTo(p[0], p[1]); }
+    if (c) { const p = at(E, c[0], c[1]); ctx.lineTo(p[0], p[1]); }
+    ctx.closePath();
+    ctx.globalAlpha = 0.08; ctx.fillStyle = PLOT; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.stroke(); ctx.setLineDash([]);
+    for (let i = 0; i < T.pts.length; i += 2) dot(ctx, at(E, T.pts[i], T.pts[i + 1]), 4, '#fff', PLOT);
+    if (c) {
+      const n = T.pts.length, L = Math.hypot(c[0] - T.pts[n - 2], c[1] - T.pts[n - 1]);
+      const ring = [...T.pts, c[0], c[1]];
+      let a = 0;
+      for (let i = 0; i < ring.length; i += 2) { const j = (i + 2) % ring.length; a += ring[i] * ring[j + 1] - ring[j] * ring[i + 1]; }
+      readout(E, c, [`${L.toFixed(1)} m`, ring.length >= 6 ? `${Math.round(Math.abs(a) / 2).toLocaleString('en-IN')} m²` : '']);
+    }
+  }
+  if (T.snap) { const p = at(E, T.snap[0], T.snap[1]); ctx.strokeStyle = '#ff6a2b'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p[0], p[1], 7, 0, Math.PI * 2); ctx.stroke(); }
+  else if (T.cursor) dot(ctx, at(E, T.cursor[0], T.cursor[1]), 3, PLOT, PLOT);
 }
 
 // ---------------- terrain ----------------
@@ -325,6 +389,7 @@ function outline(E: Editor, id: Id, color: string, width: number, fill: number) 
     return;
   }
   if (o.kind === 'building') poly(E, o.outer, true, color, width, fill);
+  if (o.kind === 'plot') poly(E, o.ring, true, color, width + 0.5, 0);
 }
 
 /** In the plan, bridges and flyovers get a purple edge so they read as above the roads they cross. */

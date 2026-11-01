@@ -5,6 +5,7 @@ import { setUI } from './ui/ctx';
 import { MapCorners, Dock, Palette, Toasts, ReadOnlyBanner, Attribution, CursorHint } from './ui/chrome';
 import { LeftPanel } from './ui/panels';
 import { ToolPanel } from './ui/ToolPanel';
+import { Studio } from './ui/Studio';
 import { startTheme } from './ui/theme';
 import { Dialogs, Profile } from './ui/dialogs';
 import { BuildPalette } from './ui/BuildPalette';
@@ -49,6 +50,7 @@ async function boot() {
   render(h(LeftPanel, {}), $('right'));
   render(h(ToolPanel, {}), $('left'));
   render(h(Dock, {}), $('dock'));
+  render(h(Studio, {}), $('studio'));
   render(h('div', {}, h(MapCorners, {}), h(ReadOnlyBanner, {}), h(Attribution, {}), h(BuildPalette, {}), h(Toasts, {}), h(Profile, {}), h(CursorHint, {})), $('stage-ui'));
   render(h('div', {}, h(Palette, {}), h(Dialogs, {})), $('modals'));
   startTheme();

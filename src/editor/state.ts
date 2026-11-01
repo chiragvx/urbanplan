@@ -2,7 +2,7 @@
 import { signal, computed } from '@preact/signals';
 import type { Id, Kind } from '../doc/types';
 
-export type Tool = 'select' | 'direct' | 'pen' | 'knife' | 'line' | 'measure' | 'hand' | 'bulldoze' | 'wand' | 'terrain' | 'route' | 'place' | 'area' | 'multi';
+export type Tool = 'select' | 'direct' | 'pen' | 'knife' | 'line' | 'measure' | 'hand' | 'bulldoze' | 'wand' | 'terrain' | 'route' | 'place' | 'area' | 'multi' | 'plot';
 /** Road tool modes, as in Cities: Skylines (freeform = the Bézier pen; replace = CS's upgrade tool). */
 export type RoadMode = 'straight' | 'curve' | 'complex' | 'continuous' | 'freeform' | 'replace';
 export type ViewMode = '2d' | '3d';
@@ -20,6 +20,11 @@ export const anchorSel = signal<AnchorRef | null>(null);
 export const docVersion = signal(0);
 /** viewing someone's published map: editing locked until "Edit a copy" */
 export const readOnly = signal(false);
+/** Site Studio: the plot open in it, its tool, the building and node selected, the level shown (-1 = flats) */
+export const studio = signal<Id | null>(null);
+export const studioTool = signal<'select' | 'draw'>('select');
+export const studioSel = signal<string | null>(null);
+export const studioLevel = signal(-1);
 export const xray = signal(false);
 export const accuracyView = signal(false);
 /** terrain view: heights, hill shade and contours (or cut / fill) over the plan */

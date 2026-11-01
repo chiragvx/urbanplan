@@ -29,7 +29,7 @@ export class HitIndex {
       return [x0, z0, x1, z1];
     }
     if (o.kind === 'earthwork') return earthworkBox(o);
-    const pts = o.kind === 'line' ? o.pts : o.kind === 'building' ? o.outer : o.kind === 'region' ? o.ring : null;
+    const pts = o.kind === 'line' ? o.pts : o.kind === 'building' ? o.outer : o.kind === 'region' || o.kind === 'plot' ? o.ring : null;
     if (!pts || pts.length < 2) return null;
     let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
     for (let i = 0; i < pts.length; i += 2) { x0 = Math.min(x0, pts[i]); x1 = Math.max(x1, pts[i]); z0 = Math.min(z0, pts[i + 1]); z1 = Math.max(z1, pts[i + 1]); }
@@ -56,7 +56,7 @@ export class HitIndex {
 
   rebuild() {
     this.cells.clear(); this.idCells.clear();
-    for (const k of ['section', 'junction', 'line', 'building', 'region', 'earthwork'] as Kind[]) for (const id of this.doc.ids(k)) this.add(id);
+    for (const k of ['section', 'junction', 'line', 'building', 'region', 'earthwork', 'plot'] as Kind[]) for (const id of this.doc.ids(k)) this.add(id);
   }
 
   update(ids: Iterable<Id>) {
@@ -123,6 +123,10 @@ export class HitIndex {
           const d = polyDist(o.pts, x, z);
           if (d <= o.size / 2 + tol) offer({ kind: 'line', id, d: d - o.size / 2 + 0.5 });
         }
+      } else if (o.kind === 'plot' && can('plot')) {
+        // a sandbox plot sits over the buildings on it
+        if (inRing(o.ring, x, z)) offer({ kind: 'plot', id, d: 4 });
+        else { const d = polyDist([...o.ring, o.ring[0], o.ring[1]], x, z); if (d <= tol) offer({ kind: 'plot', id, d: d + 0.5 }); }
       } else if (o.kind === 'building' && can('building')) {
         if (inRing(o.outer, x, z)) offer({ kind: 'building', id, d: 5 });
       } else if (o.kind === 'earthwork' && can('earthwork')) {
