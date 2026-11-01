@@ -254,13 +254,13 @@ function ProfileChart(p: { id: string }) {
     <svg class="profile-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
       <path d={`${path(ground)}L${X(L)},${H}L${X(0)},${H}Z`} fill="rgba(160,120,80,0.25)" stroke="#a07850" stroke-width="1.5" />
       {terraformed && <path d={path(orig)} fill="none" stroke="#a07850" stroke-width="1" stroke-dasharray="4 3" opacity="0.8" />}
-      <path d={path(road)} fill="none" stroke="#2f7cf6" stroke-width="2.5" />
+      <path d={path(road)} fill="none" stroke="#2f5bff" stroke-width="2.5" />
       {G && stS.map((u, i) => (
-        <rect key={'g' + i} x={X(u) - 5} y={Y(stZ[i]) - 5} width={10} height={10} fill={i === 0 || i === m - 1 ? '#ff8a3d' : '#fff'} stroke="#2f7cf6" stroke-width="2"
+        <rect key={'g' + i} x={X(u) - 5} y={Y(stZ[i]) - 5} width={10} height={10} fill={i === 0 || i === m - 1 ? '#ff6a2b' : '#fff'} stroke="#2f5bff" stroke-width="2"
           style={{ cursor: i === 0 || i === m - 1 ? 'default' : 'ns-resize' }} onPointerDown={(e) => dragStation(i, e as unknown as PointerEvent)}><title>{`station ${i} · ${stZ[i].toFixed(2)} m`}</title></rect>
       ))}
       {!G && P.map((a, k) => (
-        <circle key={k} cx={X(anchorS[k])} cy={Y(hf.sample(a.x, a.z) + hf.base + a.lift)} r={k === 0 || k === P.length - 1 ? 4 : 6} fill={k === 0 || k === P.length - 1 ? '#ff8a3d' : '#fff'} stroke="#2f7cf6" stroke-width="2"
+        <circle key={k} cx={X(anchorS[k])} cy={Y(hf.sample(a.x, a.z) + hf.base + a.lift)} r={k === 0 || k === P.length - 1 ? 4 : 6} fill={k === 0 || k === P.length - 1 ? '#ff6a2b' : '#fff'} stroke="#2f5bff" stroke-width="2"
           style={{ cursor: k === 0 || k === P.length - 1 ? 'default' : 'ns-resize' }} onPointerDown={(e) => drag(k, e as unknown as PointerEvent)} />
       ))}
       <text x="4" y="12" class="axis">{hi.toFixed(0)} m</text><text x="4" y={H - 22} class="axis">{lo.toFixed(0)} m</text>

@@ -701,7 +701,7 @@ export class MultiTool {
   // ---------------- drawing ----------------
 
   draw(ctx: CanvasRenderingContext2D, at: (x: number, z: number) => [number, number], label: (p: [number, number], text: string, dy?: number) => void) {
-    const ACC = '#ff8a3d', BAD = '#e5484d', OK = '#2f7cf6';
+    const ACC = '#ff6a2b', BAD = '#e5484d', OK = '#2f5bff';
     for (const pv of this.preview) {
       if (pv.pts.length < 2) continue;
       ctx.strokeStyle = pv.bad ? BAD : pv.dashed ? 'rgba(47,124,246,0.8)' : ACC;

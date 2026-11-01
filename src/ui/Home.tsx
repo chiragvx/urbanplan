@@ -5,6 +5,7 @@ import { gallery, local, pickFile, type LocalMap, type Published } from '../app/
 import { parse } from '../doc/format';
 import { saveSettings, settings } from '../editor/state';
 import { Icon } from './components';
+import { AccountButton } from './account';
 
 export interface CityEntry {
   id: string; name: string; city: string; state: string; about: string; legacy: string[];
@@ -21,7 +22,7 @@ export async function cities(): Promise<CityEntry[]> {
 /** The city a map was made on: its own id, or the city that took over the tile it was made on. */
 export const cityOf = (list: CityEntry[], tile: string) => list.find((c) => c.id === tile || c.legacy.includes(tile));
 
-const go = (q: Record<string, string>) => { location.href = `${BASE}?${new URLSearchParams(q)}`; };
+const go = (q: Record<string, string>) => { location.href = `${BASE}app/?${new URLSearchParams(q)}`; };
 
 function ago(iso: string) {
   const s = (Date.now() - Date.parse(iso)) / 1000;
@@ -79,14 +80,15 @@ export function Home() {
   return (
     <div class="home">
       <header class="home-top">
-        <div class="logo">Urban<span>Plan</span></div>
+        <a class="logo" href={BASE} title="UrbanPlan website">Urban<span>Plan</span></a>
         <span class="spacer" />
+        <AccountButton />
         <button class="sq" aria-label={dark ? 'Light theme' : 'Dark theme'} title={dark ? 'Light theme' : 'Dark theme'} onClick={flipTheme}>{dark ? <Icon.sun size={16} /> : <Icon.moon size={16} />}</button>
       </header>
       <main class="home-main">
         <section class="home-hero">
-          <h1>Redesign your city, street by street.</h1>
-          <p>Draw roads, junctions, flyovers and transit in 2D and see them in 3D, on the real city from open data: roads, buildings and terrain.</p>
+          <h1>Pick a city.<br />Make it better.</h1>
+          <p>Edit in 2D. See it in 3D.</p>
           <div class="home-actions">
             {last && lastCity && (
               <button class="primary big" onClick={() => openMap(last)}>
@@ -114,8 +116,7 @@ export function Home() {
                     <div class="city-body">
                       <h3>{c.name}</h3>
                       <p class="muted small">{c.state}{n ? ` · ${n} map${n === 1 ? '' : 's'} of yours` : ''}</p>
-                      <p class="city-about">{c.about}</p>
-                      <dl class="city-stats">
+                                            <dl class="city-stats">
                         <div><dt>Road sections</dt><dd>{big(c.counts.sections)}</dd></div>
                         <div><dt>Buildings</dt><dd>{big(c.counts.buildings)}</dd></div>
                       </dl>

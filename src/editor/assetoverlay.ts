@@ -232,7 +232,7 @@ export function drawAssetTool(E: Editor) {
   const is2d = mode.value === '2d', s = E.view.scale;
   const lift = penLift.value;
   const P = (x: number, z: number): V2 => E.project(x, z, Math.max(0, lift)) ?? OFF;
-  const color = a.layer?.color ?? '#2f7cf6';
+  const color = a.layer?.color ?? '#2f5bff';
   const c = T.cursor;
   if (tool.value === 'route') {
     const pv = T.preview;
@@ -240,8 +240,8 @@ export function drawAssetTool(E: Editor) {
       const flat = pv.pts.flat();
       if (is2d) { ctx.save(); ctx.globalAlpha = 0.7; route(ctx, flat, a, P, s, pv.bad ? '#e5484d' : color, lift); ctx.restore(); }
       strokePts(ctx, flat, P);
-      ctx.strokeStyle = pv.bad ? '#e5484d' : '#ff8a3d'; ctx.lineWidth = 2; ctx.setLineDash(pv.bad ? [6, 4] : []); ctx.stroke(); ctx.setLineDash([]);
-      for (const q of T.ctrl) { const p = P(q[0], q[1]); ctx.beginPath(); ctx.arc(p[0], p[1], 4, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = '#ff8a3d'; ctx.stroke(); }
+      ctx.strokeStyle = pv.bad ? '#e5484d' : '#ff6a2b'; ctx.lineWidth = 2; ctx.setLineDash(pv.bad ? [6, 4] : []); ctx.stroke(); ctx.setLineDash([]);
+      for (const q of T.ctrl) { const p = P(q[0], q[1]); ctx.beginPath(); ctx.arc(p[0], p[1], 4, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = '#ff6a2b'; ctx.stroke(); }
       const end = pv.pts[pv.pts.length - 1], prev = pv.pts[pv.pts.length - 2];
       const d = [end[0] - prev[0], end[1] - prev[1]], L = Math.hypot(d[0], d[1]) || 1;
       const lines = [`${pv.len.toFixed(1)} m · ${bearing([d[0] / L, d[1] / L])}°`];
@@ -256,8 +256,8 @@ export function drawAssetTool(E: Editor) {
     const flat = [...T.ring.flat(), ...(c ? c.p : [])];
     strokePts(ctx, flat, P, T.ring.length >= 2);
     ctx.fillStyle = a.profile.type === 'area' ? a.profile.fill : color; ctx.globalAlpha = 0.18; ctx.fill(); ctx.globalAlpha = 1;
-    ctx.strokeStyle = '#ff8a3d'; ctx.lineWidth = 2; ctx.stroke();
-    for (const q of T.ring) { const p = P(q[0], q[1]); ctx.beginPath(); ctx.arc(p[0], p[1], 3.5, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = '#ff8a3d'; ctx.stroke(); }
+    ctx.strokeStyle = '#ff6a2b'; ctx.lineWidth = 2; ctx.stroke();
+    for (const q of T.ring) { const p = P(q[0], q[1]); ctx.beginPath(); ctx.arc(p[0], p[1], 3.5, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = '#ff6a2b'; ctx.stroke(); }
   }
   if (tool.value === 'place' && c && is2d) {
     const rot = c.dir ? (Math.atan2(c.dir[1], c.dir[0]) * 180) / Math.PI : placeRot.value;
@@ -273,7 +273,7 @@ export function drawAssetTool(E: Editor) {
       ctx.beginPath(); ctx.moveTo(...g0); ctx.lineTo(...g1); ctx.setLineDash([4, 5]); ctx.strokeStyle = 'rgba(255,138,61,0.8)'; ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]);
     }
     ctx.beginPath(); ctx.arc(p[0], p[1], c.kind ? 6 : 3.5, 0, Math.PI * 2);
-    ctx.strokeStyle = '#ff8a3d'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.strokeStyle = '#ff6a2b'; ctx.lineWidth = 2; ctx.stroke();
     if (c.label) label(ctx, p, c.label, 11, -14);
   }
 }

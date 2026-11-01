@@ -6,3 +6,6 @@ tools/dp/__pycache__
 !tools/dev/check-roads.mjs
 !tools/dev/check-roads-spots.mjs
 tools/dev/*.json
+.env
+.env.local
+.env.*.local

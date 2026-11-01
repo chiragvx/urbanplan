@@ -195,7 +195,7 @@ export class App implements AppApi {
       zoom: () => this.E.zoomToSelection(),
     });
     lap('rest');
-    console.info('%cUrbanPlan editor', 'font-weight:bold;color:#ff8a3d', '— script edits with `city`, e.g. city.help()');
+    console.info('%cUrbanPlan editor', 'font-weight:bold;color:#ff6a2b', '— script edits with `city`, e.g. city.help()');
     console.info('[UrbanPlan] boot', JSON.stringify(this.bootTimes));
     this.loop();
   }
@@ -430,9 +430,12 @@ export class App implements AppApi {
   }
 
   /** Back to the start menu (the map stays saved in this browser). */
-  async home() {
+  home() { return this.leaveTo(`${import.meta.env.BASE_URL}app/`); }
+
+  /** Go to another page (the website, the account pages) once the map is saved in this browser. */
+  async leaveTo(url: string) {
     try { await this.persist(); } catch (e) { console.error(e); }
-    location.href = import.meta.env.BASE_URL;
+    location.href = url;
   }
 
   newMap(ask = true) {

@@ -13,6 +13,7 @@ import { allAssets, CATEGORIES, sizeLabel, type Category } from '../assets';
 import { buildCat, buildOpen } from '../editor/state';
 import { paletteVisible, revealAsset } from './BuildPalette';
 import { dark, toggleTheme } from './theme';
+import { AccountButton } from './account';
 import { fmtVol } from '../editor/terraintool';
 import type { Tool } from '../editor/state';
 
@@ -57,6 +58,7 @@ export function MapCorners() {
         <button class="sq" aria-label={dark.value ? 'Light theme' : 'Dark theme'} title={`${dark.value ? 'Light' : 'Dark'} theme`} onClick={toggleTheme}>{dark.value ? <Icon.sun size={17} /> : <Icon.moon size={17} />}</button>
         <button class="sq" aria-label="Help" title="Help and keyboard shortcuts (?)" onClick={() => { dialog.value = 'help'; }}><Icon.help size={17} /></button>
         <button class="sq" aria-label="Settings" title="Settings" onClick={() => { dialog.value = 'settings'; }}><Icon.gear size={17} /></button>
+        <AccountButton leave={(url) => void ui.app.leaveTo(url)} />
       </div>
     </>
   );

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "UrbanPlan \u00e2\u20ac\u201d edit a city in 2D like Figma, see it in 3D. Built on open data.",
+  "description": "UrbanPlan â€” edit a city in 2D like Figma, see it in 3D. Built on open data.",
   "scripts": {
     "fetch": "node tools/fetch-osm.mjs",
     "bake": "node tools/bake.mjs",
@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@preact/signals": "2.10.0",
+    "@supabase/supabase-js": "^2.118.0",
     "@types/three": "^0.186.0",
     "earcut": "^3.0.1",
     "geotiff": "^3.0.5",

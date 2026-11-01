@@ -3,43 +3,31 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>UrbanPlan — map editor</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231d2126'/%3E%3Cpath d='M9 26L14 6M23 26L18 6' stroke='%23ff8a3d' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M16 8v3M16 15v3M16 22v3' stroke='%23fff' stroke-width='2'/%3E%3C/svg%3E" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/src/style.css" />
+    <title>UrbanPlan: edit the real city, see what it becomes</title>
+    <meta name="description" content="A map editor for Indian cities. Draw roads, flyovers and tunnels, shape the ground, and lay the Development Plan over what exists today, in 2D and 3D." />
+    <meta property="og:title" content="UrbanPlan: edit the real city, see what it becomes" />
+    <meta property="og:description" content="A map editor for Indian cities. Draw roads, flyovers and tunnels, shape the ground, and lay the Development Plan over what exists today, in 2D and 3D." />
+    <meta property="og:type" content="website" />
+    <meta name="theme-color" content="#0c0c0d" />
     <script>
-      // theme before first paint (the app keeps it in step afterwards)
+      // links to the editor from before the website (/?map=…, /?region=…) open the editor at /app/
+      if (/[?&](map|region|tile|local|new|open)=/.test(location.search)) location.replace('%BASE_URL%app/' + location.search + location.hash);
+    </script>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%230c0c0d'/%3E%3Cpath d='M9 26L14 6M23 26L18 6' stroke='%23ff6a2b' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M16 8v3M16 15v3M16 22v3' stroke='%23fff' stroke-width='2'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@500;600&display=swap" rel="stylesheet" />
+    <script>
+      // theme before first paint: the same setting as the editor's
       try {
         const s = JSON.parse(localStorage.getItem('pune-remix:settings') || '{}');
         const d = s.theme === 'dark' || ((!s.theme || s.theme === 'system') && matchMedia('(prefers-color-scheme: dark)').matches);
         document.documentElement.dataset.theme = d ? 'dark' : 'light';
-        document.documentElement.dataset.panels = s.panels || 'floating';
       } catch (e) { document.documentElement.dataset.theme = 'light'; }
     </script>
   </head>
   <body>
-    <div id="loading">
-      <div class="load-card">
-        <div class="logo big">Urban<span>Plan</span></div>
-        <div class="load-sub" id="load-sub">Edit the city in 2D, see it in 3D</div>
-        <div class="bar"><div id="load-bar"></div></div>
-        <div id="load-msg">Starting engine…</div>
-      </div>
-    </div>
-
-    <div id="shell">
-      <div id="stage">
-        <canvas id="gl"></canvas>
-        <canvas id="overlay"></canvas>
-        <div id="stage-ui"></div>
-        <div id="left"></div>
-        <div id="right"></div>
-        <div id="dock"></div>
-      </div>
-    </div>
-    <div id="home"></div>
-    <div id="modals"></div>
-    <script type="module" src="/src/main.ts"></script>
+    <div id="site" data-page="landing"></div>
+    <script type="module" src="/src/site/main.tsx"></script>
   </body>
 </html>

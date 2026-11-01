@@ -64,10 +64,16 @@ function mapsPlugin(): Plugin {
   };
 }
 
+/** The site's pages: the website (landing, pricing, accounts, legal) and the editor at /app/. */
+const PAGES = ['index', 'app', 'pricing', 'login', 'signup', 'forgot', 'reset', 'account', 'terms', 'privacy'];
+
 export default defineConfig({
   plugins: [mapsPlugin()],
   // osm2streets is a wasm-bindgen package; keep it out of dependency pre-bundling so its .wasm resolves cleanly
   optimizeDeps: { exclude: ['osm2streets-js'] },
   worker: { format: 'es' },
-  build: { target: 'es2022', chunkSizeWarningLimit: 4000 },
+  build: {
+    target: 'es2022', chunkSizeWarningLimit: 4000,
+    rollupOptions: { input: Object.fromEntries(PAGES.map((p) => [p, path.resolve(p === 'index' ? 'index.html' : `${p}/index.html`)])) },
+  },
 });

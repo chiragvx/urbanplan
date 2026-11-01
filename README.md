@@ -19,6 +19,37 @@ npm run dev     # http://localhost:5173 (Chrome/Edge; three.js WebGPU with WebGL
 npm test        # headless document + cross-section tests
 ```
 
+## Website and accounts
+
+The site is a few static pages around the editor, all built by `npm run build`:
+
+| Path | What |
+|---|---|
+| `/` | landing page (`index.html`); old editor links (`/?map=…`, `/?region=…`) forward to `/app/` |
+| `/app/` | the editor (`app/index.html`, `src/main.ts`) |
+| `/pricing/`, `/terms/`, `/privacy/` | pricing and the beta's terms and privacy notice |
+| `/login/`, `/signup/`, `/forgot/`, `/reset/`, `/account/` | accounts |
+
+Pages are Preact components in `src/site/` (one entry, `src/site/main.tsx`, picks the page from `data-page`). The design
+theme — colours, type, spacing, for light and dark — is `src/theme/tokens.css`; the site and the editor share the theme
+setting, so switching it in one switches both.
+
+**Accounts** run on Supabase Auth: email + password, a one-time email link, or Google; password reset. They're
+optional: without the env vars below the editor works as before and the account pages say accounts aren't set up.
+To switch them on:
+
+1. Create a Supabase project. Copy `.env.example` to `.env.local` and fill in `VITE_SUPABASE_URL` and the anon (or
+   publishable) key from *Project settings → API*. Set the same two variables on the host that builds the site.
+2. Run `supabase/migrations/0001_profiles.sql` in the SQL editor: a `profiles` row per user (name, organisation, role,
+   plan), filled from sign-up, readable and editable only by its owner (the plan can't be changed from the browser).
+3. *Authentication → URL configuration*: set the Site URL to the site's address and add `<site>/account/` and
+   `<site>/reset/` (and `http://localhost:5173/**` for development) to the redirect URLs.
+4. Optional: *Authentication → Providers → Google* for "Continue with Google" (a Google Cloud OAuth client whose
+   redirect URI is the callback URL Supabase shows there).
+
+The editor shows a *Sign in* button (top right of the map, and on the start menu) once accounts are on; leaving the
+editor for the account pages saves the map in the browser first.
+
 ## The editor
 
 - **Layout** (Cities: Skylines style): the map edge to edge, and the **bottom bar**: the map (its menu — new, open,
@@ -128,7 +159,7 @@ when the base is re-imported; anything that no longer matches is kept and listed
 
 - Autosaves in the browser. **Save** (<kbd>Ctrl S</kbd>) writes `maps/<name>.urbanplan.json` in this repo when running `npm run dev`
   (elsewhere: a file on disk / download).
-- **Publish** copies the map into `public/maps/` and its gallery; `npm run build` → upload `dist/` to any static host.
+- **Publish** copies the map into `public/maps/` and its gallery; `npm run build` → upload `dist/` to any static host (the editor is at `/app/`).
   `?map=<url>` opens any hosted map read-only with **Edit a copy** (a fork that remembers where it came from).
 - Export **GeoJSON** (WGS84, for QGIS / JOSM) or the edited **network.json** for the offline tools.
 - The base data is © OpenStreetMap contributors (ODbL): a published map built on it is shared under the ODbL too.

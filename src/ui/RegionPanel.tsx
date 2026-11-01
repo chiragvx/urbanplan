@@ -120,7 +120,7 @@ function SheetCrop(p: { region: RegionObj }) {
       const P = (x: number, z: number): [number, number] => [(x - bx0) * k, (z - bz0) * k];
       ctx.beginPath();
       for (let i = 0; i < r.ring.length; i += 2) { const q = P(r.ring[i], r.ring[i + 1]); if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); }
-      ctx.closePath(); ctx.strokeStyle = '#2f7cf6'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]); ctx.stroke(); ctx.setLineDash([]);
+      ctx.closePath(); ctx.strokeStyle = '#2f5bff'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]); ctx.stroke(); ctx.setLineDash([]);
       if (r.marker) { const m = P(r.marker[0], r.marker[1]); ctx.strokeStyle = 'rgba(214,40,40,0.9)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(m[0], m[1], 24 * k, 0, Math.PI * 2); ctx.stroke(); }
       if (missing && tries++ < 30) timer = window.setTimeout(draw, 300);
     };

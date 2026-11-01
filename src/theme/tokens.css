@@ -1,0 +1,102 @@
+/* UrbanPlan design theme — the tokens the website, the account pages and the editor share (the editor mirrors these
+ * values in src/style.css under its own names).
+ *
+ * Monochrome and quiet, so the city is the colour: near-white paper and near-black ink, hairline borders, large soft
+ * radii, pill buttons. One accent, cobalt, for actions and selection; the logo's orange only for the brand mark and the
+ * odd highlight. Two colours borrowed from the Development Plan sheets for graphics: red for a DP road line
+ * ("planned") and green for a reserved open space. Type: Geist throughout, set tight; Geist Mono for figures.
+ *
+ * Light by default; dark under [data-theme="dark"] (set before first paint from the same setting the editor uses,
+ * localStorage 'pune-remix:settings'.theme), so the site and the app always agree.
+ */
+:root {
+  /* colour: neutrals */
+  --up-paper: #fafaf9;
+  --up-surface: #ffffff;
+  --up-surface-2: #f4f4f3;
+  --up-line: #ebebea;
+  --up-line-strong: #dcdcda;
+  --up-ink: #0c0c0d;
+  --up-ink-2: #3f3f46;
+  --up-muted: #71717a;
+  /* colour: brand and roles */
+  --up-orange: #ff6a2b;          /* the brand mark */
+  --up-orange-ink: #d9480f;
+  --up-orange-soft: #fff1ea;
+  --up-blue: #2f5bff;            /* actions, links, selection */
+  --up-blue-hover: #1f47e6;
+  --up-blue-soft: #eef1ff;
+  --up-verge: #e5484d;           /* DP road line: "planned" */
+  --up-reserve: #30a46c;         /* DP reserved open space */
+  --up-today: #a1a1aa;           /* existing conditions */
+  --up-asphalt: #3f3f46;         /* roads in illustrations */
+  --up-night: #0c0c0d;           /* dark panels in both themes */
+  --up-on-night: #fafafa;
+  --up-ok: #30a46c;
+  --up-warn: #f5a524;
+  --up-danger: #e5484d;
+  --up-focus: 0 0 0 3px rgba(47, 91, 255, 0.3);
+
+  /* type */
+  --up-font-display: "Geist", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --up-font-body: "Geist", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --up-font-mono: "Geist Mono", ui-monospace, "Cascadia Mono", monospace;
+  --up-text-xs: 0.75rem;
+  --up-text-sm: 0.875rem;
+  --up-text-md: 1rem;
+  --up-text-lg: 1.125rem;
+  --up-text-xl: 1.375rem;
+  --up-text-2xl: 1.75rem;
+  --up-text-3xl: clamp(2rem, 4.4vw, 3.25rem);
+  --up-text-hero: clamp(3rem, 8.5vw, 6.5rem);
+  --up-track: -0.045em;           /* headings */
+
+  /* shape and space */
+  --up-radius-sm: 8px;
+  --up-radius: 12px;
+  --up-radius-lg: 20px;
+  --up-radius-xl: 28px;
+  --up-space-1: 4px;
+  --up-space-2: 8px;
+  --up-space-3: 12px;
+  --up-space-4: 16px;
+  --up-space-5: 24px;
+  --up-space-6: 32px;
+  --up-space-7: 48px;
+  --up-space-8: 80px;
+  --up-space-9: 128px;
+  --up-shadow-sm: 0 1px 2px rgba(12, 12, 13, 0.06), 0 0 0 1px rgba(12, 12, 13, 0.04);
+  --up-shadow: 0 24px 60px -20px rgba(12, 12, 13, 0.22), 0 0 0 1px rgba(12, 12, 13, 0.05);
+  --up-max: 1200px;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --up-paper: #09090b;
+  --up-surface: #111113;
+  --up-surface-2: #18181b;
+  --up-line: #232326;
+  --up-line-strong: #2e2e33;
+  --up-ink: #fafafa;
+  --up-ink-2: #d4d4d8;
+  --up-muted: #a1a1aa;
+  --up-orange: #ff7a3d;
+  --up-orange-ink: #ff9a66;
+  --up-orange-soft: rgba(255, 122, 61, 0.12);
+  --up-blue: #5b7cff;
+  --up-blue-hover: #7a95ff;
+  --up-blue-soft: rgba(91, 124, 255, 0.14);
+  --up-verge: #f2555a;
+  --up-reserve: #3dd68c;
+  --up-today: #71717a;
+  --up-asphalt: #3a3a40;
+  --up-night: #000000;
+  --up-on-night: #fafafa;
+  --up-ok: #3dd68c;
+  --up-warn: #f5b13d;
+  --up-danger: #f2555a;
+  --up-focus: 0 0 0 3px rgba(91, 124, 255, 0.4);
+  --up-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --up-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  color-scheme: dark;
+}

@@ -20,7 +20,7 @@ export interface Handle {
   cx?: number; cz?: number; nx?: number; nz?: number;
 }
 
-const ACCENT = '#2f7cf6', HOVER = '#5aa0ff', WARN = '#e5484d';
+const ACCENT = '#2f5bff', HOVER = '#5aa0ff', WARN = '#e5484d';
 const OFF: [number, number] = [NaN, NaN]; // canvas ignores NaN points: things behind the 3D camera aren't drawn
 
 /** World → overlay pixels in either view (lift = metres above the ground). */
@@ -90,7 +90,7 @@ export function drawOverlay(E: Editor) {
   const sn = E.snap ?? (tool.value === 'pen' ? E.pen.snap : null);
   if (sn) {
     const p = P(...sn.p)!;
-    ctx.strokeStyle = '#ff8a3d'; ctx.lineWidth = 2;
+    ctx.strokeStyle = '#ff6a2b'; ctx.lineWidth = 2;
     if (sn.kind === 'junction') { ctx.beginPath(); ctx.arc(p[0], p[1], 8, 0, Math.PI * 2); ctx.stroke(); }
     else if (sn.kind === 'section') { ctx.beginPath(); ctx.moveTo(p[0] - 6, p[1] - 6); ctx.lineTo(p[0] + 6, p[1] + 6); ctx.moveTo(p[0] + 6, p[1] - 6); ctx.lineTo(p[0] - 6, p[1] + 6); ctx.stroke(); }
     if (sn.label) label(ctx, p, sn.label, 12, 18);
@@ -109,9 +109,9 @@ export function drawOverlay(E: Editor) {
   // measure
   if (E.measure) {
     const a = P(...E.measure.a)!, b = P(...E.measure.b)!;
-    ctx.strokeStyle = '#ff8a3d'; ctx.lineWidth = 2; ctx.setLineDash([]);
+    ctx.strokeStyle = '#ff6a2b'; ctx.lineWidth = 2; ctx.setLineDash([]);
     ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
-    dot(ctx, a, 3, '#ff8a3d', '#ff8a3d'); dot(ctx, b, 3, '#ff8a3d', '#ff8a3d');
+    dot(ctx, a, 3, '#ff6a2b', '#ff6a2b'); dot(ctx, b, 3, '#ff6a2b', '#ff6a2b');
     const L = Math.hypot(E.measure.b[0] - E.measure.a[0], E.measure.b[1] - E.measure.a[1]);
     label(ctx, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], `${L.toFixed(1)} m`, 12, -12);
   }
@@ -272,7 +272,7 @@ function guidesAndSnap(E: Editor, c: SnapResult) {
   }
   if (!c.kind) return;
   const p = P(c.p[0], c.p[1]);
-  ctx.strokeStyle = '#ff8a3d'; ctx.lineWidth = 2;
+  ctx.strokeStyle = '#ff6a2b'; ctx.lineWidth = 2;
   if (c.kind === 'junction') { ctx.beginPath(); ctx.arc(p[0], p[1], 8, 0, Math.PI * 2); ctx.stroke(); }
   else if (c.kind === 'section') { ctx.beginPath(); ctx.moveTo(p[0] - 6, p[1] - 6); ctx.lineTo(p[0] + 6, p[1] + 6); ctx.moveTo(p[0] + 6, p[1] - 6); ctx.lineTo(p[0] - 6, p[1] + 6); ctx.stroke(); }
   else { ctx.beginPath(); ctx.moveTo(p[0] - 7, p[1]); ctx.lineTo(p[0] + 7, p[1]); ctx.moveTo(p[0], p[1] - 7); ctx.lineTo(p[0], p[1] + 7); ctx.stroke(); }
@@ -285,7 +285,7 @@ function readout(E: Editor, at: [number, number], lines: string[]) {
   if (!L.length) return;
   const ctx = E.ctx, p = E.project(at[0], at[1]) ?? OFF;
   if (Number.isNaN(p[0])) return;
-  ctx.font = '600 12px Inter, system-ui, sans-serif';
+  ctx.font = '600 12px Geist, Inter, system-ui, sans-serif';
   const w = Math.max(...L.map((t) => ctx.measureText(t).width)) + 14, h = L.length * 16 + 8;
   let x = p[0] + 16, y = p[1] - h - 12;
   if (x + w > E.view.w - 4) x = p[0] - w - 16;
@@ -523,7 +523,7 @@ function drawAccuracy(E: Editor) {
     const g = E.C.geo(id);
     if (!g) continue;
     const edited = E.doc.patch.has(id) || E.doc.patch.has(s.road);
-    const color = s.verified ? '#2fb344' : edited ? '#8e5cf7' : s.widthSrc === 'dp' ? '#2f7cf6' : s.widthSrc === 'osm' ? '#f5a524' : '#8a8f98';
+    const color = s.verified ? '#2fb344' : edited ? '#8e5cf7' : s.widthSrc === 'dp' ? '#2f5bff' : s.widthSrc === 'osm' ? '#f5a524' : '#8a8f98';
     ctx.strokeStyle = color; ctx.globalAlpha = 0.65;
     ctx.lineWidth = Math.max(3, (g.t.hwL + g.t.hwR) * E.view.scale * 0.55);
     ctx.beginPath();
@@ -605,7 +605,7 @@ function anchors(E: Editor) {
       }
       const end = k === 0 || k === P.length - 1;
       const on = as?.owner === id && as.k === k && !as.handle;
-      if (end) dot(ctx, p, 5, on ? ACCENT : '#fff', '#ff8a3d');
+      if (end) dot(ctx, p, 5, on ? ACCENT : '#fff', '#ff6a2b');
       else square(ctx, p, on ? ACCENT : '#fff', ACCENT);
       E.handles.push({ kind: 'anchor', sx: p[0], sy: p[1], owner: id, k });
     });
@@ -641,7 +641,7 @@ function square(ctx: CanvasRenderingContext2D, p: [number, number], fill: string
   ctx.fillRect(p[0] - 4, p[1] - 4, 8, 8); ctx.strokeRect(p[0] - 4, p[1] - 4, 8, 8);
 }
 export function label(ctx: CanvasRenderingContext2D, p: [number, number], text: string, size = 12, dy = 0) {
-  ctx.font = `600 ${size}px Inter, system-ui, sans-serif`;
+  ctx.font = `600 ${size}px Geist, Inter, system-ui, sans-serif`;
   const w = ctx.measureText(text).width + 12;
   const x = p[0] - w / 2, y = p[1] + dy - size / 2 - 4;
   ctx.fillStyle = 'rgba(20,24,30,0.88)';
@@ -659,6 +659,6 @@ function scaleBar(E: Editor) {
   ctx.fillStyle = ink.halo; ctx.fillRect(x - 6, y - 16, px + 12, 26);
   ctx.strokeStyle = ink.text; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + 5); ctx.lineTo(x + px, y + 5); ctx.lineTo(x + px, y); ctx.stroke();
-  ctx.fillStyle = ink.text; ctx.font = '600 11px Inter, system-ui, sans-serif'; ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = ink.text; ctx.font = '600 11px Geist, Inter, system-ui, sans-serif'; ctx.textBaseline = 'alphabetic';
   ctx.fillText(m >= 1000 ? `${m / 1000} km` : `${m} m`, x + 2, y - 3);
 }
