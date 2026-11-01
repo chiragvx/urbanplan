@@ -1,4 +1,5 @@
 // Dialogs: open, publish, export, settings, help, about. Plus the height profile drawer.
+import { listVersions, type Version } from '../app/cloud';
 import { useEffect, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { dialog, docVersion, profileOpen, readOnly, saveSettings, selection, settings } from '../editor/state';
@@ -27,8 +28,41 @@ export function Dialogs() {
     case 'settings': return <SettingsDialog />;
     case 'help': return <HelpDialog />;
     case 'about': return <AboutDialog />;
+    case 'versions': return <VersionsDialog />;
     default: return null;
   }
+}
+
+/** The versions the account keeps of this map: restore one, or name the map as it is now. */
+function VersionsDialog() {
+  const pid = ui.doc.meta.cloud?.id;
+  const [list, setList] = useState<Version[] | null>(null);
+  const [err, setErr] = useState('');
+  const [label, setLabel] = useState('');
+  const load = () => { if (pid) listVersions(pid).then(setList, (e) => setErr((e as Error).message)); else setList([]); };
+  useEffect(load, [pid]);
+  const keep = async () => {
+    if (!(await ui.app.cloudSave({ version: true, label: label.trim() || undefined }))) { setErr('Couldn’t reach your account. Try again in a moment.'); return; }
+    setLabel(''); load();
+  };
+  return (
+    <Modal title="Versions">
+      <p class="muted small">Kept in your account as you work: everything from today, then one a day for a month, then one a week (up to 50). Named versions are always kept.</p>
+      <div style="display:flex;gap:8px;margin:10px 0">
+        <input class="grow" placeholder="Name this version (optional)" value={label} onInput={(e) => setLabel((e.currentTarget as HTMLInputElement).value)} />
+        <button class="primary" onClick={keep}>Keep a version now</button>
+      </div>
+      {err && <p class="home-err">{err}</p>}
+      <div class="list">
+        {list === null ? <p class="muted small">Loading…</p> : !list.length ? <p class="muted small">{pid ? 'No versions yet: one is kept every 10 minutes you work, and each time you press Save.' : 'This map isn’t in your account yet: it will be after your next change.'}</p> : list.map((v) => (
+          <div key={v.id} class="list-item">
+            <span class="grow"><b>{v.label ?? when(v.created_at)}</b><span class="muted small">{v.label ? `${when(v.created_at)} · ` : ''}{v.edits} edits · {Math.max(1, Math.round(v.bytes / 1024))} KB</span></span>
+            <button onClick={() => { if (confirm('Open this version as the map? The map as it is now is kept as a version first.')) void ui.app.cloudSave({ version: true }).then(() => ui.app.restoreVersion(v)); }}>Restore</button>
+          </div>
+        ))}
+      </div>
+    </Modal>
+  );
 }
 
 function when(iso: string) { const d = new Date(iso); return isNaN(+d) ? '' : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }); }

@@ -73,7 +73,7 @@ export function AccountLink() {
   return <a class="chip-account" href={href('account/')} title={s.user.email ?? ''}><span class="avatar">{name[0]?.toUpperCase()}</span><span class="hide-sm">{name}</span></a>;
 }
 
-const NAV: [string, string][] = [['#features', 'Product'], ['#plan', 'Today vs. plan'], ['pricing/', 'Pricing']];
+const NAV: [string, string][] = [['#studio', 'Site Studio'], ['#features', 'Product'], ['#plan', 'Today vs. plan'], ['pricing/', 'Pricing']];
 
 export function Header({ current }: { current?: string }) {
   const [open, setOpen] = useState(false);

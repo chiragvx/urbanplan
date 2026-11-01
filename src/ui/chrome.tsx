@@ -1,6 +1,7 @@
 // The map's frame, Cities: Skylines style: info views and help in the top corners, the bottom bar (the map, the build
 // categories, the tools, the view, publish) with a status strip under it, a hint that follows the cursor, the
 // command palette, toasts and the read-only banner.
+import { cloudOn, cloudState } from '../app/cloud';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
   cursor, dialog, docVersion, dpRegionsOn, terrainView, mode, paletteOpen, pointer, readOnly, selection, stale3d, status, toasts, tool, xray, zoomScale, accuracyView, select, osmCompare,
@@ -94,6 +95,7 @@ export function Dock() {
   const ro = readOnly.value;
   const d = ui.doc;
   const dirty = d.version !== d.savedVersion;
+  const cs = cloudState.value;
   const c = cursor.value;
   const ll = c ? ui.app.toLatLon(c[0], c[1]) : null;
   const sel = selection.value;
@@ -116,7 +118,7 @@ export function Dock() {
       <div class="bar">
         <div class="mapcard">
           <Menu class="logo-menu" title="Map: new, open, save, export, publish" label={<span class="logo-badge" aria-label="Map menu">UP</span>} items={[
-            item('file.home'), 'sep', item('file.new'), item('file.open'), 'sep', item('file.save'), item('file.saveas'), item('file.download'), 'sep', item('file.export'), item('file.publish'), 'sep', item('file.settings'), item('help.keys'), item('help.about'),
+            item('file.home'), 'sep', item('file.new'), item('file.open'), 'sep', item('file.save'), item('file.saveas'), item('file.download'), ...(cloudOn() ? [item('file.versions')] : []), 'sep', item('file.export'), item('file.publish'), 'sep', item('file.settings'), item('help.keys'), item('help.about'),
           ]} />
           <div class="mapcard-text">
             <input class="map-name" value={name ?? d.meta.name} disabled={ro} aria-label="Map name"
@@ -155,7 +157,11 @@ export function Dock() {
           : <button class="primary publish" onClick={() => { dialog.value = 'publish'; }}><Icon.share size={14} /> <span class="tb-label">Publish</span></button>}
       </div>
       <div class="status">
-        <span class={`saved ${dirty ? 'dirty' : ''}`} title={dirty ? 'Unsaved changes (autosaved in this browser)' : 'Saved'}>{ro ? 'View only' : dirty ? '● Unsaved' : '✓ Saved'}</span>
+        {cs.s !== 'off' && !ro
+          ? <span class={`saved ${cs.s === 'error' || cs.s === 'offline' ? 'dirty' : ''}`} title={cs.s === 'error' ? `Not saved to your account: ${cs.msg ?? ''} (it is saved in this browser)` : cs.s === 'offline' ? 'Offline: saved in this browser, and to your account when back online' : cs.at ? `Saved to your account ${new Date(cs.at).toLocaleTimeString()}` : 'Saved to your account'}>
+              {cs.s === 'saving' ? 'Saving…' : cs.s === 'saved' ? '✓ Saved to account' : cs.s === 'offline' ? '○ Offline' : '! Not saved'}
+            </span>
+          : <span class={`saved ${dirty ? 'dirty' : ''}`} title={dirty ? 'Unsaved changes (autosaved in this browser)' : 'Saved'}>{ro ? 'View only' : dirty ? '● Unsaved' : '✓ Saved'}</span>}
         <span class="st-msg" title={status.value}>{status.value}</span>
         <span class="spacer" />
         {sel.length > 0 && <span>{sel.length} selected</span>}

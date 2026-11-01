@@ -1,11 +1,14 @@
-// The start menu: pick a city, carry on with a map saved in this browser, open a file or a published map. Shown when
-// the page opens without a city or map in its address; each choice opens the editor on that city (?region=…).
+// The start menu: pick a city, carry on with a map saved in this browser or in the account, open a file or a
+// published map. Shown when the page opens without a city or map in its address; each choice opens the editor on that
+// city (?region=…).
 import { useEffect, useState } from 'preact/hooks';
 import { gallery, local, pickFile, type LocalMap, type Published } from '../app/storage';
 import { parse } from '../doc/format';
 import { saveSettings, settings } from '../editor/state';
 import { Icon } from './components';
 import { AccountButton } from './account';
+import { session } from '../auth/auth';
+import { deleteProject, listProjects, saveProject, type Project } from '../app/cloud';
 
 export interface CityEntry {
   id: string; name: string; city: string; state: string; about: string; legacy: string[];
@@ -44,11 +47,15 @@ export function Home() {
   const [pub, setPub] = useState<Published[]>([]);
   const [dark, setDark] = useState(isDark());
   const [err, setErr] = useState('');
+  const [projects, setProjects] = useState<Project[] | null>(null);
+  const [moving, setMoving] = useState('');
+  const user = session.value?.user;
   useEffect(() => {
     void cities().then(setList);
     void local.list().then(setMaps);
     void gallery().then(setPub);
   }, []);
+  useEffect(() => { if (user) listProjects().then(setProjects, (e) => setErr(`Couldn't load your projects: ${(e as Error).message}`)); else setProjects(null); }, [user?.id]);
   const flipTheme = () => {
     const d = !isDark();
     document.documentElement.dataset.theme = d ? 'dark' : 'light';
@@ -64,6 +71,25 @@ export function Home() {
     if (!confirm(`Delete “${m.meta.name}” from this browser? This can't be undone (files you saved stay).`)) return;
     await local.remove(m.meta.id);
     setMaps(await local.list());
+  };
+  const openProject = (p: Project) => { const c = cityOf(C, p.region); if (c) go({ region: c.id, project: p.id }); };
+  const removeProject = async (p: Project) => {
+    if (!confirm(`Delete “${p.name}” from your account, with its versions? This can't be undone.`)) return;
+    try { await deleteProject(p.id); setProjects(await listProjects()); } catch (e) { setErr(`Couldn't delete: ${(e as Error).message}`); }
+  };
+  // this browser's maps that aren't in the account yet
+  const toMove = user ? mine.filter((m) => !m.meta.cloud && m.edits > 0) : [];
+  const moveAll = async () => {
+    for (const [i, m] of toMove.entries()) {
+      setMoving(`Saving ${i + 1} of ${toMove.length}…`);
+      try {
+        const r = await saveProject(m.meta, m.text, m.edits, { version: true });
+        await local.put({ ...m, meta: { ...m.meta, cloud: { id: r.id, rev: r.revision } } });
+      } catch (e) { setErr(`Couldn't save “${m.meta.name}”: ${(e as Error).message}`); break; }
+    }
+    setMoving('');
+    setMaps(await local.list());
+    setProjects(await listProjects());
   };
   const openFile = async () => {
     const f = await pickFile('.json');
@@ -132,6 +158,32 @@ export function Home() {
           )}
         </section>
 
+        {user && (
+          <section>
+            <h2>Your projects <span class="muted small">saved in your account</span></h2>
+            {toMove.length > 0 && (
+              <p class="home-move">
+                <span>{toMove.length} map{toMove.length === 1 ? '' : 's'} in this browser {toMove.length === 1 ? 'isn’t' : 'aren’t'} in your account yet.</span>
+                <button class="primary" disabled={!!moving} onClick={() => void moveAll()}>{moving || 'Save to my account'}</button>
+              </p>
+            )}
+            {projects === null ? <p class="muted">Loading…</p> : !projects.length ? <p class="muted small">None yet: maps you edit while signed in are saved here, with their versions.</p> : (
+              <ul class="home-list">
+                {projects.map((p) => (
+                  <li key={p.id}>
+                    <button class="home-row" onClick={() => openProject(p)}>
+                      <b>{p.name}</b>
+                      {cityOf(C, p.region) && <span class="tag">{cityOf(C, p.region)!.city}</span>}
+                      <span class="muted small">{p.edits} edit{p.edits === 1 ? '' : 's'} · {ago(p.updated_at)}</span>
+                    </button>
+                    <button class="icon-btn" aria-label={`Delete ${p.name}`} title="Delete from your account" onClick={() => void removeProject(p)}><Icon.trash size={15} /></button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
+
         {mine.length > 0 && (
           <section>
             <h2>Your maps <span class="muted small">saved in this browser</span></h2>
@@ -141,6 +193,7 @@ export function Home() {
                   <button class="home-row" onClick={() => openMap(m)}>
                     <b>{m.meta.name}</b>
                     <span class="tag">{cityOf(C, m.meta.tile)!.city}</span>
+                    {m.meta.cloud && user && <span class="tag">In your account</span>}
                     <span class="muted small">{m.edits} edit{m.edits === 1 ? '' : 's'} · {ago(m.savedAt)}</span>
                   </button>
                   <button class="icon-btn" aria-label={`Delete ${m.meta.name}`} title="Delete from this browser" onClick={() => void remove(m)}><Icon.trash size={15} /></button>
@@ -167,7 +220,7 @@ export function Home() {
         )}
       </main>
       <footer class="home-foot muted small">
-        {author ? <>Signed as {author} · </> : null}Maps are saved in this browser as you work. Data © OpenStreetMap contributors (ODbL) · Copernicus DEM GLO-30 © DLR/Airbus.
+        {author ? <>Signed as {author} · </> : null}{user ? 'Maps are saved in this browser and your account as you work.' : 'Maps are saved in this browser as you work; sign in to keep them in your account.'} Data © OpenStreetMap contributors (ODbL) · Copernicus DEM GLO-30 © DLR/Airbus.
       </footer>
     </div>
   );

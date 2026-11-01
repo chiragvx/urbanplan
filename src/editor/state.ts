@@ -48,7 +48,7 @@ export const osmCompare = signal(false);
 /** survey tab: which regions to walk */
 export const surveyFilter = signal<'reserved' | 'all'>('reserved');
 export const paletteOpen = signal(false);
-export const dialog = signal<null | 'open' | 'publish' | 'settings' | 'help' | 'about' | 'export'>(null);
+export const dialog = signal<null | 'open' | 'publish' | 'settings' | 'help' | 'about' | 'export' | 'versions'>(null);
 export const status = signal('');
 /** pen / line tool options */
 export const penClass = signal('residential');

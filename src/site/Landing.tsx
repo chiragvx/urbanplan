@@ -15,9 +15,19 @@ function Tile({ w, media, title, sub }: { w?: 'w3' | 'w4'; media: ComponentChild
   );
 }
 
+// what Site Studio does, a line each
+const STUDIO = [
+  { icon: Icon.road, title: 'Internal roads', body: 'A drive round the edge, a spine, a grid or none. Roundabouts too.' },
+  { icon: Icon.pin, title: 'More than one gate', body: 'Entrances on every road a large plot touches.' },
+  { icon: Icon.building, title: 'Car parks, lots, gardens', body: 'Place them, size them; the buildings make room.' },
+  { icon: Icon.check, title: 'Checked as you go', body: 'FSI, height, margins, fire access, open space, parking.' },
+  { icon: Icon.sheet, title: 'Costs and returns', body: 'Land to sales: profit, IRR, peak funding, cash flow.' },
+  { icon: Icon.share, title: 'Hand it on', body: 'Report as PDF; area statement and unit schedule as CSV; DXF.' },
+];
+
 const SOON = [
-  { icon: Icon.cube, title: 'Plot sandbox', body: 'FSI, setbacks and height, in 3D.' },
-  { icon: Icon.share, title: 'Export', body: 'glTF, OBJ, DXF and STL.' },
+  { icon: Icon.pin, title: 'More cities', body: 'Their roads, terrain and Development Plans.' },
+  { icon: Icon.share, title: 'Export the city', body: 'glTF, OBJ and STL.' },
   { icon: Icon.terrain, title: 'Analysis', body: 'Flood, sun, noise and earthworks.' },
 ];
 
@@ -27,9 +37,9 @@ export function Landing() {
     <Page current="landing">
       <section class="hero">
         <div class="wrap">
-          <a class="pill" href={APP}><i />Beta · Pune and Mumbai</a>
+          <a class="pill" href={APP}><i />Beta · Pune and Mumbai · New: Site Studio</a>
           <h1 class="grad">The city, editable.</h1>
-          <p class="lede">Roads, flyovers, terrain and the Development Plan. In 2D and 3D, in your browser.</p>
+          <p class="lede">Roads, flyovers, terrain and the Development Plan. Draw a plot and see the most it can hold. In 2D and 3D, in your browser.</p>
           <div class="cta-row">
             <a class="btn btn-primary btn-lg" href={APP}>Open the editor <Icon.arrow /></a>
             {authReady && !signedIn && <a class="btn btn-lg" href={href('signup/')}>Create an account</a>}
@@ -51,6 +61,38 @@ export function Landing() {
           <div><b>21</b><span>DP sheets</span></div>
         </div>
       </div>
+
+      <section class="section" id="studio">
+        <div class="wrap">
+          <div class="section-head center">
+            <span class="tag tag-now">New</span>
+            <h2>Site Studio.</h2>
+            <p>Draw a plot. It plans the most built-up scheme the rules allow, with roads, parking and open space, and tells you what it's worth.</p>
+          </div>
+          <div class="frame" style="margin-top:0">
+            <img src={img('studio.webp')} alt="Site Studio: a plot's plan on the left with three towers, their flats and the rules checked; the towers in 3D over satellite imagery on the right." width="1600" height="900" loading="lazy" />
+            <span class="float" style="left:-18px;top:22%"><span class="dot" style="background:var(--up-blue)" /><span><b>FSI 4.33</b><small>of 4.35 allowed</small></span></span>
+            <span class="float" style="right:-18px;top:56%"><span class="dot" style="background:var(--up-reserve)" /><span><b>300 flats</b><small>planned for you</small></span></span>
+          </div>
+          <div class="bento" style="margin-top:var(--up-space-3)">
+            <Tile w="w4" media={<img src={img('studio-towers.webp')} alt="Three residential towers on a plot with an internal road and a roundabout, over satellite imagery." loading="lazy" />} title="The most it can hold" sub="Towers or slabs. FSI by road width, as built or as the DP widens it." />
+            <Tile media={<img src={img('studio-dp.webp')} alt="The Development Plan sheet draped over the 3D terrain around a plot." loading="lazy" />} title="On satellite or the DP" sub="Lay either under the 3D." />
+            <Tile w="w3" media={<img src={img('studio-offices.webp')} alt="Glass office towers on the same plot." loading="lazy" />} title="Offices" sub="Curtain walls, deeper plates, parking by floor area." />
+            <Tile w="w3" media={<img src={img('studio-sheds.webp')} alt="Two industrial sheds with loading docks." loading="lazy" />} title="Industrial sheds" sub="Wide spans, loading bays, truck parking." />
+            <Tile w="w4" media={<img src={img('report.webp')} alt="The cover of a feasibility report: the scheme in 3D and its headline figures." loading="lazy" style="object-position:top center" />} title="A report for the meeting" sub="Plans to scale, rules with clauses, compliance, costs and cash flow. Print or PDF." />
+            <Tile media={<SectionArt />} title="Roads, what if" sub="Widen a road in the study; see the FSI move." />
+          </div>
+          <div class="soon" style="margin-top:var(--up-space-3)">
+            {STUDIO.map((s) => (
+              <article key={s.title}>
+                <span class="ic"><s.icon /></span>
+                <h3>{s.title}</h3>
+                <p>{s.body}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
 
       <section class="section" id="features">
         <div class="wrap">
@@ -98,7 +140,7 @@ export function Landing() {
 
       <section class="section" id="roadmap">
         <div class="wrap">
-          <div class="section-head center"><span class="tag tag-soon">Coming next</span><h2>Plot to proposal.</h2></div>
+          <div class="section-head center"><span class="tag tag-soon">Coming next</span><h2>What's next.</h2></div>
           <div class="soon">
             {SOON.map((s) => (
               <article key={s.title}>
@@ -114,7 +156,7 @@ export function Landing() {
       <section class="wrap">
         <div class="cta-panel">
           <img src={img('dp-2d.webp')} alt="" loading="lazy" />
-          <h2>Start with your street.</h2>
+          <h2>Start with your plot.</h2>
           <p>Free in beta. No install.</p>
           <div class="cta-row">
             <a class="btn btn-primary btn-lg" href={APP}>Open the editor <Icon.arrow /></a>

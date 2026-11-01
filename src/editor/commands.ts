@@ -161,6 +161,7 @@ export const COMMANDS: Command[] = [
   { id: 'file.save', label: 'Save', group: 'File', keys: 'Ctrl+S', run: (E) => void E.app.save() },
   { id: 'file.saveas', label: 'Save a copy…', group: 'File', keys: 'Ctrl+Shift+S', run: (E) => void E.app.save(true) },
   { id: 'file.download', label: 'Download map file', group: 'File', run: (E) => E.app.download() },
+  { id: 'file.versions', label: 'Versions (saved in your account)…', group: 'File', run: () => { dialog.value = 'versions'; } },
   { id: 'file.export', label: 'Export (GeoJSON, network)…', group: 'File', run: () => { dialog.value = 'export'; } },
   { id: 'file.publish', label: 'Publish…', group: 'File', run: () => { dialog.value = 'publish'; } },
   { id: 'file.fork', label: 'Edit a copy of this map', group: 'File', enabled: () => readOnly.value, run: (E) => E.app.fork() },

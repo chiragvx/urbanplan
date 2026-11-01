@@ -270,6 +270,8 @@ export interface MapMeta {
   forkedFrom?: { name: string; author: string; url?: string; id: string } | null;
   /** fingerprint of the base network the edits were made on */
   base?: string;
+  /** the project in the signed-in user's account this map saves to, and the revision this copy is at */
+  cloud?: { id: string; rev: number } | null;
 }
 
 export interface MapFile {

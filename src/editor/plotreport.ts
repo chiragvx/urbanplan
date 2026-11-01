@@ -65,7 +65,7 @@ const num = (v: number) => Math.round(v).toLocaleString('en-IN');
 // ---------------- drawings ----------------
 
 /** A plan drawn to scale with the road along the bottom: rings in, an SVG out. */
-function planSvg(r: PlotReport, layers: { ring: number[]; fill?: string; stroke?: string; w?: number; dash?: string; op?: number; open?: boolean }[], labels: { x: number; z: number; t: string; dark?: boolean }[], opts: { width?: number; frame?: number[]; pad?: number; maxH?: number } = {}) {
+function planSvg(r: PlotReport, layers: { ring: number[]; fill?: string; stroke?: string; w?: number; dash?: string; op?: number; open?: boolean }[], labels: { x: number; z: number; t: string; dark?: boolean; fill?: string }[], opts: { width?: number; frame?: number[]; pad?: number; maxH?: number } = {}) {
   const F = roadFrame(r), R = F.toL(opts.frame ?? (r.net.length >= 6 ? r.net : r.footprint));
   let u0 = Infinity, v0 = Infinity, u1 = -Infinity, v1 = -Infinity;
   for (let i = 0; i < R.length; i += 2) { u0 = Math.min(u0, R[i]); u1 = Math.max(u1, R[i]); v0 = Math.min(v0, R[i + 1]); v1 = Math.max(v1, R[i + 1]); }
@@ -75,32 +75,32 @@ function planSvg(r: PlotReport, layers: { ring: number[]; fill?: string; stroke?
   const X = (u: number) => u - u0, Y = (v: number) => v1 - v;
   const pts = (ring: number[]) => { const L = F.toL(ring); const o: string[] = []; for (let i = 0; i < L.length; i += 2) o.push(`${X(L[i]).toFixed(2)},${Y(L[i + 1]).toFixed(2)}`); return o.join(' '); };
   const Wm = u1 - u0, Hm = v1 - v0, k = Wm / 100;
-  const body = layers.filter((l) => l.ring.length >= 4).map((l) => `<${l.open ? 'polyline' : 'polygon'} points="${pts(l.ring)}" fill="${l.open ? 'none' : l.fill ?? 'none'}" ${l.op !== undefined ? `fill-opacity="${l.op}"` : ''} stroke="${l.stroke ?? 'none'}" stroke-width="${(l.w ?? 0.6) * k}" ${l.dash ? `stroke-dasharray="${l.dash.split(',').map((x) => +x * k).join(',')}"` : ''} stroke-linejoin="round"/>`).join('');
-  const text = labels.map((t) => { const L = F.toL([t.x, t.z]); return `<text x="${X(L[0]).toFixed(1)}" y="${Y(L[1]).toFixed(1)}" font-size="${2.6 * k}" text-anchor="middle" dominant-baseline="middle" fill="${t.dark ? '#fff' : '#1c2333'}" font-weight="600">${esc(t.t)}</text>`; }).join('');
+  const body = layers.filter((l) => l.ring.length >= 4).map((l) => `<${l.open ? 'polyline' : 'polygon'} points="${pts(l.ring)}" style="fill:${l.open ? 'none' : l.fill ?? 'none'};${l.op !== undefined ? `fill-opacity:${l.op};` : ''}stroke:${l.stroke ?? 'none'};stroke-width:${((l.w ?? 0.6) * k).toFixed(3)};${l.dash ? `stroke-dasharray:${l.dash.split(',').map((x) => +x * k).join(',')};` : ''}stroke-linejoin:round"/>`).join('');
+  const text = labels.map((t) => { const L = F.toL([t.x, t.z]); return `<text x="${X(L[0]).toFixed(1)}" y="${Y(L[1]).toFixed(1)}" font-size="${2.6 * k}" text-anchor="middle" dominant-baseline="middle" style="fill:${t.fill ?? (t.dark ? 'var(--p-bldg-text)' : 'var(--p-ink)')}" font-weight="600" font-family="Geist, Inter, system-ui">${esc(t.t)}</text>`; }).join('');
   // scale bar and north
   const bar = [10, 20, 50, 100, 200].find((m) => m > Wm * 0.15) ?? 200;
   // world north is −z: on the page it points (−uz) right and (−vz) up
   const ang = (Math.atan2(-F.uz, -F.vz) * 180) / Math.PI;
-  const deco = `<g transform="translate(${2 * k},${Hm - 3 * k})"><rect width="${bar}" height="${0.8 * k}" fill="#1c2333"/><text y="${-1.2 * k}" font-size="${2.4 * k}" fill="#1c2333">${bar} m</text></g>
-<g transform="translate(${Wm - 6 * k},${6 * k}) rotate(${ang.toFixed(1)})"><path d="M0,${-4 * k} L${1.6 * k},${2 * k} L0,${1 * k} L${-1.6 * k},${2 * k}Z" fill="#1c2333"/><text y="${-5 * k}" font-size="${2.4 * k}" text-anchor="middle" fill="#1c2333">N</text></g>`;
-  return `<svg viewBox="0 0 ${Wm.toFixed(1)} ${Hm.toFixed(1)}" width="${opts.width ?? 100}%" style="max-height:${opts.maxH ?? 560}px" xmlns="http://www.w3.org/2000/svg" style="background:#fbfaf7">${body}${text}${deco}</svg>`;
+  const deco = `<g transform="translate(${2 * k},${Hm - 3 * k})"><rect width="${bar}" height="${0.8 * k}" style="fill:var(--p-ink)"/><text y="${-1.2 * k}" font-size="${2.4 * k}" style="fill:var(--p-muted)" font-family="Geist, Inter, system-ui">${bar} m</text></g>
+<g transform="translate(${Wm - 6 * k},${6 * k}) rotate(${ang.toFixed(1)})"><path d="M0,${-4 * k} L${1.6 * k},${2 * k} L0,${1 * k} L${-1.6 * k},${2 * k}Z" style="fill:var(--p-ink)"/><text y="${-5 * k}" font-size="${2.4 * k}" text-anchor="middle" style="fill:var(--p-muted)" font-family="Geist, Inter, system-ui">N</text></g>`;
+  return `<svg viewBox="0 0 ${Wm.toFixed(1)} ${Hm.toFixed(1)}" width="${opts.width ?? 100}%" class="plan" style="max-height:${opts.maxH ?? 560}px" xmlns="http://www.w3.org/2000/svg">${body}${text}${deco}</svg>`;
 }
 
 function sitePlan(o: PlotObj, r: PlotReport, d: SiteReport) {
   const G = d.ground, L: Parameters<typeof planSvg>[1] = [];
-  L.push({ ring: o.ring, fill: '#ffffff', stroke: '#2f5bff', w: 0.5, dash: '2,1.5' });
-  for (const q of r.lostRings) L.push({ ring: q, fill: '#e5484d', op: 0.18, stroke: '#e5484d', w: 0.3 });
-  if (d.envelope.length >= 6) L.push({ ring: d.envelope, stroke: '#2f5bff', w: 0.3, dash: '1,1' });
-  if (G.rg) L.push({ ring: G.rg, fill: '#86b46a', op: 0.55 });
-  for (const g of G.gardens) L.push({ ring: g, fill: '#86b46a', op: 0.55 });
-  for (const line of G.drive) for (let i = 0; i + 3 < line.length; i += 2) L.push({ ring: [line[i], line[i + 1], line[i + 2], line[i + 3]], stroke: '#9aa0a8', w: G.driveW, open: true });
-  for (const x of G.roads) L.push({ ring: x.pts, stroke: '#9aa0a8', w: x.w, open: true });
-  for (const [x, z, rad] of G.circles) L.push({ ring: circleRing({ id: '', spine: [x - rad, z, x + rad, z], depth: rad * 2, floors: 0 }, 28), fill: '#9aa0a8' });
-  for (const l of d.parking.levels) if (l.kind === 'surface' || l.kind === 'lot') for (const b of l.bays) L.push({ ring: b, stroke: '#9aa0a8', w: 0.15 });
-  for (const e of d.site.elements ?? []) if (e.kind === 'parking') for (const q of buildingQuads(e)) L.push({ ring: q, fill: '#c3c7cf', stroke: '#1c2333', w: 0.35 });
-  for (const w of G.wall) L.push({ ring: w, stroke: '#1c2333', w: 0.6, open: true });
-  for (const g of G.gates) L.push({ ring: g, stroke: '#e08a00', w: 0.8, open: true });
-  for (const b of d.buildings) for (const q of b.quads) L.push({ ring: q, fill: '#1c2333', op: 0.86, stroke: '#1c2333', w: 0.4 });
+  L.push({ ring: o.ring, fill: 'var(--p-plot)', stroke: 'var(--p-accent)', w: 0.5, dash: '2,1.5' });
+  for (const q of r.lostRings) L.push({ ring: q, fill: 'var(--p-red)', op: 0.18, stroke: 'var(--p-red)', w: 0.3 });
+  if (d.envelope.length >= 6) L.push({ ring: d.envelope, stroke: 'var(--p-accent)', w: 0.3, dash: '1,1' });
+  if (G.rg) L.push({ ring: G.rg, fill: 'var(--p-green)', op: 0.55 });
+  for (const g of G.gardens) L.push({ ring: g, fill: 'var(--p-green)', op: 0.55 });
+  for (const line of G.drive) for (let i = 0; i + 3 < line.length; i += 2) L.push({ ring: [line[i], line[i + 1], line[i + 2], line[i + 3]], stroke: 'var(--p-road)', w: G.driveW, open: true });
+  for (const x of G.roads) L.push({ ring: x.pts, stroke: 'var(--p-road)', w: x.w, open: true });
+  for (const [x, z, rad] of G.circles) L.push({ ring: circleRing({ id: '', spine: [x - rad, z, x + rad, z], depth: rad * 2, floors: 0 }, 28), fill: 'var(--p-road)' });
+  for (const l of d.parking.levels) if (l.kind === 'surface' || l.kind === 'lot') for (const b of l.bays) L.push({ ring: b, stroke: 'var(--p-road)', w: 0.15 });
+  for (const e of d.site.elements ?? []) if (e.kind === 'parking') for (const q of buildingQuads(e)) L.push({ ring: q, fill: 'var(--p-park)', stroke: 'var(--p-ink)', w: 0.35 });
+  for (const w of G.wall) L.push({ ring: w, stroke: 'var(--p-ink)', w: 0.6, open: true });
+  for (const g of G.gates) L.push({ ring: g, stroke: 'var(--p-gate)', w: 0.8, open: true });
+  for (const b of d.buildings) for (const q of b.quads) L.push({ ring: q, fill: 'var(--p-bldg)', op: 1, stroke: 'var(--p-bldg)', w: 0.4 });
   const labels = d.buildings.map((b, i) => { const q = b.quads[0]; let x = 0, z = 0; for (let k = 0; k < q.length; k += 2) { x += q[k]; z += q[k + 1]; } return { x: x / (q.length / 2), z: z / (q.length / 2), t: `${bName(i)} · ${b.floors + d.under} fl`, dark: true }; });
   for (const e of d.site.elements ?? []) if (e.kind === 'parking') { const q = buildingQuads(e)[0]; labels.push({ x: (q[0] + q[4]) / 2, z: (q[1] + q[5]) / 2, t: `P · ${e.levels ?? 3}`, dark: false }); }
   return planSvg(r, L, labels);
@@ -108,20 +108,20 @@ function sitePlan(o: PlotObj, r: PlotReport, d: SiteReport) {
 
 function floorPlan(r: PlotReport, d: SiteReport, i: number) {
   const b = d.buildings[i], L: Parameters<typeof planSvg>[1] = [];
-  for (const q of b.quads) L.push({ ring: q, fill: '#ffffff', stroke: '#1c2333', w: 0.5 });
-  for (const u of b.units) L.push({ ring: u.ring, fill: UNIT_COLOR[u.t], op: 0.85, stroke: '#ffffff', w: 0.25 });
-  for (const c of b.corridors) L.push({ ring: c, fill: '#d9dce3' });
-  for (const c of b.cores) L.push({ ring: c, fill: '#6b7280' });
-  const labels = b.units.map((u) => { let x = 0, z = 0; for (let k = 0; k < u.ring.length; k += 2) { x += u.ring[k]; z += u.ring[k + 1]; } return { x: x / (u.ring.length / 2), z: z / (u.ring.length / 2), t: `${UNIT_LABEL[u.t]} ${Math.round(u.carpet)}` }; });
+  for (const q of b.quads) L.push({ ring: q, fill: 'var(--p-plot)', stroke: 'var(--p-ink)', w: 0.5 });
+  for (const u of b.units) L.push({ ring: u.ring, fill: UNIT_COLOR[u.t], op: 0.85, stroke: 'var(--p-plot)', w: 0.25 });
+  for (const c of b.corridors) L.push({ ring: c, fill: 'var(--p-corr)' });
+  for (const c of b.cores) L.push({ ring: c, fill: 'var(--p-core)' });
+  const labels = b.units.map((u) => { let x = 0, z = 0; for (let k = 0; k < u.ring.length; k += 2) { x += u.ring[k]; z += u.ring[k + 1]; } return { x: x / (u.ring.length / 2), z: z / (u.ring.length / 2), t: `${UNIT_LABEL[u.t]} ${Math.round(u.carpet)}`, fill: '#0c0c0d' }; });
   return planSvg(r, L, labels, { frame: b.quads.flat(), pad: 3, maxH: 300 });
 }
 
 function parkingPlan(r: PlotReport, d: SiteReport, li: number) {
   const l = d.parking.levels[li], L: Parameters<typeof planSvg>[1] = [];
-  L.push({ ring: r.net, fill: '#ffffff', stroke: '#9aa0a8', w: 0.3, dash: '1,1' });
-  for (const b of d.buildings) for (const q of b.quads) L.push({ ring: q, stroke: '#1c2333', w: 0.3, dash: '0.8,0.8' });
-  for (const bay of l.bays) L.push({ ring: bay, fill: '#2f5bff', op: 0.14, stroke: '#2f5bff', w: 0.15 });
-  if (l.ramp) L.push({ ring: l.ramp, fill: '#f5a524', op: 0.8 });
+  L.push({ ring: r.net, fill: 'var(--p-plot)', stroke: 'var(--p-road)', w: 0.3, dash: '1,1' });
+  for (const b of d.buildings) for (const q of b.quads) L.push({ ring: q, stroke: 'var(--p-ink)', w: 0.3, dash: '0.8,0.8' });
+  for (const bay of l.bays) L.push({ ring: bay, fill: 'var(--p-accent)', op: 0.14, stroke: 'var(--p-accent)', w: 0.15 });
+  if (l.ramp) L.push({ ring: l.ramp, fill: 'var(--p-ramp)', op: 0.8 });
   return planSvg(r, L, [], { maxH: 300 });
 }
 
@@ -138,10 +138,10 @@ function cashChart(cum: number[]) {
   const path = cum.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');
   const xt = Array.from({ length: Math.floor((n - 1) / 6) + 1 }, (_, k) => k * 6);
   return `<div class="chart"><svg viewBox="0 0 ${W} ${H}" width="100%" data-cum='${JSON.stringify(cum.map((v) => Math.round(v)))}' data-geo='${JSON.stringify({ W, H, pl, pr, pt, pb, lo, hi })}'>
-${ticks.map((v) => `<line x1="${pl}" x2="${W - pr}" y1="${y(v)}" y2="${y(v)}" stroke="${v === 0 ? '#9aa0a8' : '#eef0f3'}" stroke-width="1"/><text x="${pl - 6}" y="${y(v) + 3}" font-size="10" text-anchor="end" fill="#667">${esc(cr(v))}</text>`).join('')}
-${xt.map((m) => `<text x="${x(m)}" y="${H - 8}" font-size="10" text-anchor="middle" fill="#667">${m}</text>`).join('')}
-<path d="${path}" fill="none" stroke="#2f5bff" stroke-width="2" stroke-linejoin="round"/>
-<line class="xh" y1="${pt}" y2="${H - pb}" stroke="#1c2333" stroke-width="1" visibility="hidden"/><circle class="dot" r="4" fill="#2f5bff" stroke="#fff" stroke-width="2" visibility="hidden"/>
+${ticks.map((v) => `<line x1="${pl}" x2="${W - pr}" y1="${y(v)}" y2="${y(v)}" style="stroke:${v === 0 ? 'var(--muted)' : 'var(--line)'}" stroke-width="1"/><text x="${pl - 6}" y="${y(v) + 3}" font-size="10" text-anchor="end" style="fill:var(--muted)">${esc(cr(v))}</text>`).join('')}
+${xt.map((m) => `<text x="${x(m)}" y="${H - 8}" font-size="10" text-anchor="middle" style="fill:var(--muted)">${m}</text>`).join('')}
+<path d="${path}" fill="none" style="stroke:var(--accent)" stroke-width="2" stroke-linejoin="round"/>
+<line class="xh" y1="${pt}" y2="${H - pb}" style="stroke:var(--muted)" stroke-width="1" visibility="hidden"/><circle class="dot" r="4" style="fill:var(--accent);stroke:var(--surface)" stroke-width="2" visibility="hidden"/>
 <rect x="${pl}" y="${pt}" width="${W - pl - pr}" height="${H - pt - pb}" fill="transparent" class="hit"/></svg><div class="tip" hidden></div><small class="muted">Month</small></div>`;
 }
 
@@ -211,38 +211,67 @@ export function printReport(o: PlotObj, r: PlotReport, d: SiteReport, plan: HTML
   const floorPlans = d.buildings.slice(0, 6).map((b, i) => `<figure><figcaption>Building ${bName(i)}: typical floor · ${m2(b.plate)} · ${b.perFloor.reduce((a, x) => a + x, 0)} ${unitWord} a floor · ${b.cores.length} core${b.cores.length === 1 ? '' : 's'}</figcaption>${floorPlan(r, d, i)}</figure>`).join('');
   const parkPlans = d.parking.levels.map((l, i) => [l, i] as const).filter(([l]) => l.kind !== 'stilt' && l.bays.length).slice(0, 2).map(([l, i]) => `<figure><figcaption>${level(l.kind)}: ${l.bays.length} bays${l.ramp ? ' · ramp in orange' : ''}</figcaption>${parkingPlan(r, d, i)}</figure>`).join('');
 
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(o.name)}: feasibility report</title><style>
-:root{--ink:#1c2333;--muted:#667085;--line:#e4e6eb;--accent:#2f5bff}
-*{box-sizing:border-box}body{font:12.5px/1.5 Inter,system-ui,sans-serif;color:var(--ink);margin:0;background:#f4f4f2}
-.page{background:#fff;max-width:960px;margin:20px auto;padding:36px 44px;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
-h1{font-size:28px;margin:0 0 4px;letter-spacing:-.01em}h2{font-size:17px;margin:0 0 12px;padding-bottom:6px;border-bottom:2px solid var(--ink)}h3{font-size:13px;margin:18px 0 6px}
-.eyebrow{text-transform:uppercase;letter-spacing:.08em;font-size:11px;color:var(--accent);font-weight:700}.sub{color:var(--muted);margin:0 0 16px}
-.hero{width:100%;border-radius:6px;display:block;margin:12px 0;border:1px solid var(--line)}
-.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:14px 0}.tiles div{border:1px solid var(--line);border-radius:6px;padding:9px 11px}
-.tiles small{display:block;color:var(--muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em}.tiles b{font-size:19px;display:block;margin:1px 0}.tiles em{font-style:normal;color:var(--muted);font-size:11px}
-table{width:100%;border-collapse:collapse;margin:4px 0 8px}th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:600;border-bottom:1px solid var(--ink);padding:5px 6px}
-td{padding:5px 6px;border-bottom:1px solid #eef0f3;vertical-align:top}td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}tr.tot td{font-weight:700;border-top:1px solid var(--ink)}
-small.note,.muted{color:var(--muted)}.ok{color:#1e7a3c;font-weight:600}.bad{color:#b42318;font-weight:600}
-.cols{display:grid;grid-template-columns:1fr 1fr;gap:24px}figure{margin:0 0 14px}figcaption{font-weight:600;margin-bottom:4px;font-size:12px}
-svg{display:block;border:1px solid var(--line);border-radius:4px}.chart{position:relative}.chart svg{border:none}.tip{position:absolute;background:var(--ink);color:#fff;padding:4px 8px;border-radius:4px;font-size:11px;pointer-events:none;white-space:nowrap}
-.legend span{display:inline-flex;align-items:center;gap:5px;margin-right:12px;font-size:11.5px}.legend i{width:10px;height:10px;border-radius:2px;display:inline-block}
-.sens td{text-align:right}.sens td.base{background:#eef2ff;font-weight:700}
-footer{color:var(--muted);font-size:10.5px;margin-top:14px}
-.print{position:fixed;top:12px;right:16px;background:var(--accent);color:#fff;border:0;border-radius:6px;padding:8px 14px;font:600 13px Inter,system-ui;cursor:pointer}
-@media print{body{background:#fff}.page{box-shadow:none;margin:0;max-width:none;padding:10mm 12mm;page-break-after:always;border-radius:0}.print{display:none}.page:last-child{page-break-after:auto}}
-</style></head><body><button class="print" onclick="print()">Print / save as PDF</button>
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(o.name)}: feasibility report</title><link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@500&display=swap" rel="stylesheet"><style>
+:root{--paper:#09090b;--surface:#111113;--surface-2:#18181b;--line:#232326;--line-strong:#2e2e33;--ink:#fafafa;--ink-2:#d4d4d8;--muted:#a1a1aa;--accent:#5b7cff;--accent-soft:rgba(91,124,255,.14);--orange:#ff7a3d;--ok:#3dd68c;--ok-soft:rgba(61,214,140,.12);--bad:#f2555a;--bad-soft:rgba(242,85,90,.12);
+--p-bg:#0d0d0f;--p-plot:#16161a;--p-ink:#e4e4e7;--p-muted:#a1a1aa;--p-accent:#5b7cff;--p-red:#f2555a;--p-green:#2d6b4c;--p-road:#3a3a40;--p-park:#52525b;--p-gate:#ff7a3d;--p-bldg:#e4e4e7;--p-bldg-text:#09090b;--p-corr:#3f3f46;--p-core:#71717a;--p-ramp:#f5b13d;color-scheme:dark}
+:root[data-theme=light]{--paper:#fafaf9;--surface:#ffffff;--surface-2:#f4f4f3;--line:#ebebea;--line-strong:#dcdcda;--ink:#0c0c0d;--ink-2:#3f3f46;--muted:#71717a;--accent:#2f5bff;--accent-soft:#eef1ff;--orange:#d9480f;--ok:#1f8a52;--ok-soft:#e8f6ee;--bad:#d92d33;--bad-soft:#fdecec;
+--p-bg:#fbfbfa;--p-plot:#ffffff;--p-ink:#0c0c0d;--p-muted:#71717a;--p-accent:#2f5bff;--p-red:#e5484d;--p-green:#a8d5b9;--p-road:#c4c4c8;--p-park:#d4d4d8;--p-gate:#ff6a2b;--p-bldg:#18181b;--p-bldg-text:#fafafa;--p-corr:#e4e4e7;--p-core:#71717a;--p-ramp:#f5a524;color-scheme:light}
+*{box-sizing:border-box}html{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+body{font:400 13px/1.55 Geist,Inter,system-ui,sans-serif;letter-spacing:-.006em;color:var(--ink-2);margin:0;padding:8px 0 40px;background:var(--paper);-webkit-font-smoothing:antialiased}
+.page{background:var(--surface);max-width:980px;margin:24px auto;padding:44px 52px;border-radius:20px;border:1px solid var(--line)}
+h1,h2,h3{font-family:Geist,Inter,system-ui,sans-serif;color:var(--ink);font-weight:600;margin:0}
+h1{font-size:56px;line-height:1;letter-spacing:-.05em;margin:12px 0 12px}
+h2{font-size:26px;letter-spacing:-.035em;line-height:1.1}
+h3{font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);font-weight:500;margin:32px 0 10px}
+header.sec{display:flex;align-items:baseline;gap:14px;padding-bottom:18px;margin-bottom:6px;border-bottom:1px solid var(--line)}
+header.sec span{font:500 12px/1 'Geist Mono',ui-monospace,'Cascadia Mono',Consolas,monospace;color:var(--orange)}
+.brand{display:flex;align-items:center;gap:10px;font:600 14px/1 Geist,system-ui;color:var(--ink);letter-spacing:-.03em}.brand svg{width:24px;height:24px}
+.brand em{font-style:normal;margin-left:auto;font:500 11px/1 'Geist Mono',ui-monospace,'Cascadia Mono',Consolas,monospace;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.eyebrow{font:500 12px/1 'Geist Mono',ui-monospace,'Cascadia Mono',Consolas,monospace;color:var(--orange);margin-top:44px;text-transform:uppercase;letter-spacing:.04em}
+.sub{color:var(--muted);margin:0;font-size:14px}
+.hero{width:100%;border-radius:14px;display:block;margin:28px 0 20px;border:1px solid var(--line)}
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.tiles div{background:var(--surface);padding:16px 18px}
+.tiles small{display:block;color:var(--muted);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase}
+.tiles b{font:600 25px/1.15 Geist,system-ui;letter-spacing:-.04em;color:var(--ink);display:block;margin:10px 0 4px;font-variant-numeric:tabular-nums}
+.tiles em{font-style:normal;color:var(--muted);font-size:11.5px}
+.lead{font-size:15.5px;line-height:1.65;color:var(--ink-2);margin:0;max-width:74ch}
+table{width:100%;border-collapse:collapse;margin:2px 0 4px}
+th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:500;border-bottom:1px solid var(--line-strong);padding:10px}
+td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+td.n,th.n{text-align:right;white-space:nowrap}td.n{font-weight:500;color:var(--ink);font-variant-numeric:tabular-nums}
+tr.tot td{font-weight:600;color:var(--ink);border-top:1px solid var(--line-strong);border-bottom:0}
+tbody tr:hover td,table tr:hover td{background:var(--surface-2)}
+small.note,.muted{color:var(--muted)}small.note{display:block;font-size:11.5px;margin-top:10px;line-height:1.6}
+.ok,.bad{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:500;padding:3px 10px;border-radius:999px;white-space:nowrap}
+.ok{color:var(--ok);background:var(--ok-soft)}.bad{color:var(--bad);background:var(--bad-soft)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:28px}figure{margin:0 0 18px}
+figcaption{font-weight:500;color:var(--ink);margin-bottom:10px;font-size:12.5px}
+svg.plan{display:block;width:100%;background:var(--p-bg);border:1px solid var(--line);border-radius:12px}
+.chart{position:relative;padding:8px 0 0}.chart svg{display:block;overflow:visible}.chart text{font-family:Geist,Inter,system-ui;font-variant-numeric:tabular-nums}
+.tip{position:absolute;background:var(--ink);color:var(--paper);padding:5px 9px;border-radius:8px;font:500 11px/1.3 'Geist Mono',ui-monospace,'Cascadia Mono',Consolas,monospace;pointer-events:none;white-space:nowrap}
+.legend{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:12px}.legend span{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;color:var(--muted)}.legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+.sens td{text-align:right;color:var(--ink);font-variant-numeric:tabular-nums}.sens td:first-child{color:var(--ink-2)}.sens td.base{background:var(--accent-soft)}
+footer{color:var(--muted);font:500 11px/1 'Geist Mono',ui-monospace,'Cascadia Mono',Consolas,monospace;margin-top:32px;padding-top:16px;border-top:1px solid var(--line);display:flex;justify-content:space-between}
+.bar{position:fixed;top:14px;right:16px;display:flex;gap:8px;z-index:5}
+.bar button{background:var(--surface);color:var(--ink);border:1px solid var(--line-strong);border-radius:999px;padding:9px 16px;font:500 13px/1 Geist,system-ui;cursor:pointer}
+.bar button.primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+@page{size:A4;margin:0}
+@media print{body{background:var(--surface);padding:0}.page{border:0;margin:0;max-width:none;min-height:100vh;padding:14mm 15mm;page-break-after:always;border-radius:0}.bar{display:none}.page:last-child{page-break-after:auto}table tr:hover td{background:none}}
+</style></head><body><div class="bar"><button onclick="document.documentElement.dataset.theme=document.documentElement.dataset.theme==='light'?'':'light'">Light / dark</button><button class="primary" onclick="print()">Print / save as PDF</button></div>
 
 <section class="page">
-<div class="eyebrow">Feasibility report · Site Studio</div>
+<div class="brand"><svg viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#0c0c0d"/><path d="M9 26L14 6M23 26L18 6" stroke="#ff6a2b" stroke-width="3" stroke-linecap="round"/><path d="M16 8v3M16 15v3M16 22v3" stroke="#fff" stroke-width="2"/></svg>UrbanPlan<em>Site Studio</em></div>
+<div class="eyebrow">Feasibility report</div>
 <h1>${esc(o.name)}</h1>
 <p class="sub">${esc(CODE_LABEL[r.code])} · ${esc(use[0].toUpperCase() + use.slice(1))} · ${m2(r.area)} · ${n2(r.roadW)} m road basis${r.road ? ` (${esc(r.road.name)})` : ''} · ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
 ${shot ? `<img class="hero" src="${shot}" alt="The scheme in 3D">` : plan ? `<img class="hero" src="${plan.toDataURL('image/png')}" alt="Site plan">` : ''}
 <div class="tiles">${tiles.map(([k, v, e]) => `<div><small>${k}</small><b>${esc(v)}</b><em>${esc(e)}</em></div>`).join('')}</div>
-<h3>Summary</h3><p>${summary}</p>
+<h3>Summary</h3><p class="lead">${summary}</p>
 </section>
 
 <section class="page">
-<h2>1 · The site and its roads</h2>
+<header class="sec"><span>01</span><h2>The site and its roads</h2></header>
 <div class="cols"><div><table>
 <tr><td>Plot area</td><td class="n">${m2(r.area)}</td></tr>
 <tr><td>Under the DP road (handed over)</td><td class="n">${m2(r.lost)}</td></tr>
@@ -256,11 +285,11 @@ ${r.roads.map((x) => `<tr><td>${esc(x.name)}</td><td class="n">${n2(x.today)} m<
 </table><small class="note">Gates: ${d.ground.gates.length} · internal roads: ${esc(access.label.toLowerCase())}${design.roundabouts ? ', with roundabouts' : ''}.</small></div></div>
 <h3>Site plan</h3>
 ${sitePlan(o, r, d)}
-<div class="legend" style="margin-top:6px"><span><i style="background:#1c2333"></i>Buildings</span><span><i style="background:#9aa0a8"></i>Drive, roads, bays</span><span><i style="background:#86b46a"></i>Open space, gardens</span><span><i style="background:#e5484d;opacity:.4"></i>DP road strip</span><span><i style="border:1px dashed #2f5bff"></i>Building envelope</span><span><i style="background:#e08a00"></i>Gates</span></div>
+<div class="legend" style="margin-top:6px"><span><i style="background:var(--p-bldg)"></i>Buildings</span><span><i style="background:var(--p-road)"></i>Drive, roads, bays</span><span><i style="background:var(--p-green)"></i>Open space, gardens</span><span><i style="background:var(--p-red);opacity:.4"></i>DP road strip</span><span><i style="border:1px dashed var(--p-accent)"></i>Building envelope</span><span><i style="background:var(--p-gate)"></i>Gates</span></div>
 </section>
 
 <section class="page">
-<h2>2 · Rules applied</h2>
+<header class="sec"><span>02</span><h2>Rules applied</h2></header>
 <table><tr><th>Rule</th><th class="n">Value</th><th>Source</th></tr>
 <tr><td>Basic FSI</td><td class="n">${n2(R.basic)}</td><td>${r.code === 'udcpr' ? (o.congested ? 'UDCPR Table 6-A (congested)' : 'UDCPR Table 6-G') : 'DCPR 2034 Table 12'}</td></tr>
 <tr><td>Premium FSI (paid)</td><td class="n">${n2(R.premium)}</td><td>by road width</td></tr>
@@ -281,18 +310,18 @@ ${sitePlan(o, r, d)}
 </section>
 
 <section class="page">
-<h2>3 · The buildings</h2>
+<header class="sec"><span>03</span><h2>The buildings</h2></header>
 <table><tr><th>Building</th><th class="n">Plate</th><th class="n">Floors</th><th class="n">Height</th><th class="n">${unitWord[0].toUpperCase() + unitWord.slice(1)} / floor</th><th class="n">${unitWord[0].toUpperCase() + unitWord.slice(1)}</th><th class="n">Cores</th><th class="n">Built-up</th><th>Status</th></tr>
 ${d.buildings.map((b, i) => { const pf = b.perFloor.reduce((a, x) => a + x, 0); return `<tr><td>${bName(i)} · ${b.b.depth} m deep</td><td class="n">${m2(b.plate)}</td><td class="n">${b.floors}${d.under ? ` + ${d.under}` : ''}</td><td class="n">${n2(b.height)} m</td><td class="n">${pf}</td><td class="n">${pf * b.floors}</td><td class="n">${b.cores.length}</td><td class="n">${m2(b.plate * b.floors)}</td><td>${b.clash ? `<span class="bad">${b.clash === 'margins' ? 'past the margins' : 'overlaps'}</span>` : b.fire.length && !b.fireOk ? '<span class="bad">fire access blocked</span>' : '<span class="ok">✓</span>'}</td></tr>`; }).join('')}
 <tr class="tot"><td>Total</td><td class="n">${m2(d.buildings.reduce((a, b) => a + b.plate, 0))}</td><td></td><td class="n">${n2(d.height)} m</td><td></td><td class="n">${num(d.flats)}</td><td class="n">${d.buildings.reduce((a, b) => a + b.cores.length, 0)}</td><td class="n">${m2(d.bua)}</td><td></td></tr></table>
 ${els.length ? `<h3>Placed on the site</h3><table><tr><th>Element</th><th class="n">Size</th><th>Note</th></tr>${els.map((e) => { const m = ELEMENTS.find((x) => x.value === e.kind)!; const len = Math.hypot(e.spine[2] - e.spine[0], e.spine[3] - e.spine[1]); return `<tr><td>${m.label}</td><td class="n">${e.kind === 'roundabout' ? `${n2(e.depth)} m across` : e.kind === 'road' ? `${n2(e.depth)} m wide` : `${Math.round(len)} × ${Math.round(e.depth)} m`}</td><td class="muted">${e.kind === 'parking' ? `${e.levels ?? 3} levels` : ''}</td></tr>`; }).join('')}</table>` : ''}
 <h3>Typical floors</h3>
 <div class="cols">${floorPlans}</div>
-<div class="legend">${(res ? [0, 1, 2] : [3]).map((t) => `<span><i style="background:${UNIT_COLOR[t]}"></i>${UNIT_LABEL[t]}</span>`).join('')}<span><i style="background:#6b7280"></i>Core (lifts, stairs)</span><span><i style="background:#d9dce3"></i>Corridor</span></div>
+<div class="legend">${(res ? [0, 1, 2] : [3]).map((t) => `<span><i style="background:${UNIT_COLOR[t]}"></i>${UNIT_LABEL[t]}</span>`).join('')}<span><i style="background:var(--p-core)"></i>Core (lifts, stairs)</span><span><i style="background:var(--p-corr)"></i>Corridor</span></div>
 </section>
 
 <section class="page">
-<h2>4 · ${res ? 'Flats' : 'Units'} and parking</h2>
+<header class="sec"><span>04</span><h2>${res ? 'Flats' : 'Units'} and parking</h2></header>
 <table><tr><th>Type</th><th class="n">Count</th><th class="n">Share</th><th class="n">Average carpet</th><th class="n">Carpet</th><th class="n">ft²</th></tr>
 ${mixRows.map((row) => `<tr>${row.map((c, i) => `<td${i ? ' class="n"' : ''}>${esc(c)}</td>`).join('')}</tr>`).join('')}
 <tr class="tot"><td>Total</td><td class="n">${num(d.flats)}</td><td class="n">100 %</td><td class="n">${d.flats ? m2(d.carpet / d.flats) : '–'}</td><td class="n">${m2(d.carpet)}</td><td class="n">${num(d.carpet * SQFT)}</td></tr></table>
@@ -308,7 +337,7 @@ ${d.parking.trucks ? `<tr><td>Loading bays (each the room of three cars)</td><td
 </section>
 
 <section class="page">
-<h2>5 · Compliance</h2>
+<header class="sec"><span>05</span><h2>Compliance</h2></header>
 <table><tr><th>Check</th><th>Required</th><th>Provided</th><th>Status</th></tr>
 ${checks.map(([k, a, b, ok]) => `<tr><td>${esc(k)}</td><td>${esc(a)}</td><td>${esc(b)}</td><td>${passes(ok)}</td></tr>`).join('')}</table>
 <h3>Schemes compared</h3>
@@ -317,7 +346,7 @@ ${checks.map(([k, a, b, ok]) => `<tr><td>${esc(k)}</td><td>${esc(a)}</td><td>${e
 </section>
 
 <section class="page">
-<h2>6 · Costs and returns</h2>
+<header class="sec"><span>06</span><h2>Costs and returns</h2></header>
 <div class="cols"><div><table><tr><th>Cost</th><th class="n">₹</th><th>Basis</th></tr>
 ${cost.map(([k, v, b]) => `<tr><td>${k}</td><td class="n">${cr(v)}</td><td class="muted">${esc(b)}</td></tr>`).join('')}
 <tr class="tot"><td>Total cost</td><td class="n">${cr(M.cost)}</td><td></td></tr>
@@ -337,7 +366,7 @@ ${sens.map((row, i) => `<tr><td style="text-align:left">${['−10 %', 'as assume
 </section>
 
 <section class="page">
-<h2>7 · Assumptions</h2>
+<header class="sec"><span>07</span><h2>Assumptions</h2></header>
 <table>
 <tr><td>Land</td><td class="n">₹${num(M.costs.land)} a ft² of plot</td></tr>
 <tr><td>Ready reckoner (ASR)</td><td class="n">₹${num(M.costs.asr)} a ft²</td></tr>
@@ -351,7 +380,7 @@ ${sens.map((row, i) => `<tr><td style="text-align:left">${['−10 %', 'as assume
 <tr><td>Car bay</td><td class="n">2.5 × 5 m on 6 m aisles</td></tr>
 </table>
 <p class="muted">A feasibility study, not an approval drawing. Road widths and DP reserves come from the map and the sanctioned Development Plan sheets as traced; the rules are summarised from UDCPR 2020, DCPR 2034 and NBC 2016 and differ by authority, zone and amendment (TOD zones, special schemes, aviation and fire clearances). Rates are placeholders to set for the project. Check every figure with the architect and the authority before relying on it.</p>
-<footer>UrbanPlan Site Studio · ${new Date().toLocaleString('en-IN')}</footer>
+<footer><span>UrbanPlan · Site Studio</span><span>${new Date().toLocaleString('en-IN')}</span></footer>
 </section>
 
 <script>

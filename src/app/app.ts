@@ -38,6 +38,8 @@ import {
 /** A region in the survey list. */
 export interface SurveyItem { id: string; cls: string; reserved: boolean; area: number; code?: string; status: SurveyStatus; x: number; z: number }
 import { download, local, pickFile, repo, saveToDisk, slug } from './storage';
+import { cloudOn, cloudState, readProject, readVersion, saveProject, type Version } from './cloud';
+import { session } from '../auth/auth';
 
 export class App implements AppApi {
   engine!: Engine;
@@ -190,6 +192,9 @@ export class App implements AppApi {
     progress(0.97, 'Opening your map…');
     await this.restore();
     this.resumeView();
+    // signed in (now or later): the map goes to the account too
+    let was = false;
+    session.subscribe((x) => { const on = !!x?.user; if (on && !was) this.scheduleCloud(1500); if (!on) cloudState.value = { s: 'off' }; was = on; });
     (window as unknown as Record<string, unknown>).city = new CityApi(this.doc, {
       select: (ids) => select(ids.map((id) => ({ kind: this.doc.get(id)!.kind, id }))),
       zoom: () => this.E.zoomToSelection(),
@@ -330,10 +335,11 @@ export class App implements AppApi {
     const url = q.get('map');
     await repo.probe();
     if (url) { await this.openUrl(url, true); return; }
-    // from the start menu: one of this browser's maps, a new map, or a file picked there
-    const lid = q.get('local'), fresh = q.has('new'), picked = q.get('open') === 'file';
-    for (const k of ['local', 'new', 'open']) q.delete(k);
-    if (lid || fresh || picked) history.replaceState(null, '', `${location.pathname}?${q}`);
+    // from the start menu: one of this browser's maps, a project in the account, a new map, or a file picked there
+    const lid = q.get('local'), pid = q.get('project'), fresh = q.has('new'), picked = q.get('open') === 'file';
+    for (const k of ['local', 'project', 'new', 'open']) q.delete(k);
+    if (lid || pid || fresh || picked) history.replaceState(null, '', `${location.pathname}?${q}`);
+    if (pid) { await this.openProject(pid); return; }
     if (lid && (await local.get(lid))) { await this.openLocal(lid); return; }
     if (fresh) { this.newMap(false); return; }
     if (picked) {
@@ -400,10 +406,59 @@ export class App implements AppApi {
   async openLocal(id: string) {
     const m = await local.get(id);
     if (!m) return;
+    // saved to the account too, and newer there (another computer): open that
+    const c = m.meta.cloud;
+    if (c && (await this.signedIn())) {
+      try {
+        const { text, project } = await readProject(c.id);
+        if (project.revision > c.rev && Date.parse(project.updated_at) > Date.parse(m.savedAt)) {
+          await this.load(text, false, `${project.name} (newer, from your account)`);
+          this.doc.meta.cloud = { id: project.id, rev: project.revision };
+          this.repoFile = null; dialog.value = null; this.clearUrl();
+          void this.persist(false);
+          return;
+        }
+      } catch { /* not reachable or not ours: the browser's copy */ }
+    }
     await this.load(m.text, false, m.meta.name);
     this.repoFile = null;
     dialog.value = null;
     this.clearUrl();
+  }
+
+  /** A project from the signed-in user's account. */
+  async openProject(id: string) {
+    if (!(await this.signedIn())) { toast('Sign in to open your projects', 'warn'); return; }
+    try {
+      const { text, project } = await readProject(id);
+      await this.load(text, false, project.name);
+      this.doc.meta.cloud = { id: project.id, rev: project.revision };
+      this.doc.meta.name = project.name;
+      this.repoFile = null; dialog.value = null; this.clearUrl();
+      cloudState.value = { s: 'saved', at: project.updated_at };
+      void this.persist(false);
+    } catch (e) { toast(`Couldn't open the project: ${(e as Error).message}`, 'error'); }
+  }
+
+  /** An earlier version of this project, as the map now (the next save makes it the newest). */
+  async restoreVersion(v: Version) {
+    try {
+      const text = await readVersion(v);
+      const keep = this.doc.meta.cloud;
+      await this.load(text, false, `the version from ${new Date(v.created_at).toLocaleString()}`);
+      this.doc.meta.cloud = keep;
+      this.doc.version++;
+      dialog.value = null;
+      docVersion.value++;
+      await this.persist();
+      toast('Restored. The version before it is kept too.', 'ok');
+    } catch (e) { toast(`Couldn't restore: ${(e as Error).message}`, 'error'); }
+  }
+
+  /** Signed in (waiting for the first session check). */
+  private async signedIn() {
+    for (let i = 0; i < 50 && session.value === undefined; i++) await new Promise((r) => setTimeout(r, 100));
+    return cloudOn();
   }
 
   async openRepo(file: string) {
@@ -443,6 +498,7 @@ export class App implements AppApi {
     void this.persist();
     this.doc.load(new Map(), newMeta(this.tile.id, this.doc.meta.base ?? '', settings.value.author));
     readOnly.value = false; this.repoFile = null; this.issues.orphans = [];
+    cloudState.value = { s: cloudOn() ? 'saved' : 'off' };
     select([]); dialog.value = null; this.clearUrl();
     toast('New map — edit away', 'ok');
   }
@@ -450,7 +506,7 @@ export class App implements AppApi {
   fork() {
     const m = this.doc.meta;
     const fresh = newMeta(this.tile.id, m.base ?? '', settings.value.author);
-    this.doc.meta = { ...fresh, name: `${m.name} (my copy)`, description: m.description, forkedFrom: { name: m.name, author: m.author, id: m.id, url: new URLSearchParams(location.search).get('map') ?? undefined } };
+    this.doc.meta = { ...fresh, cloud: null, name: `${m.name} (my copy)`, description: m.description, forkedFrom: { name: m.name, author: m.author, id: m.id, url: new URLSearchParams(location.search).get('map') ?? undefined } };
     readOnly.value = false; this.repoFile = null;
     this.clearUrl();
     this.doc.version++;
@@ -476,10 +532,57 @@ export class App implements AppApi {
     this.saveTimer = window.setTimeout(() => void this.persist(), 900);
   }
 
-  /** Autosave into this browser. */
-  private async persist() {
+  /** Autosave into this browser; then, signed in, into the account a few seconds behind. */
+  private async persist(cloud = true) {
     if (readOnly.value) return;
     await local.put({ meta: { ...this.doc.meta }, text: serialize(this.doc), savedAt: new Date().toISOString(), edits: this.doc.editCount });
+    if (cloud) this.scheduleCloud();
+  }
+
+  // ---------------- the account's copy ----------------
+
+  private cloudTimer = 0;
+  private cloudBusy: Promise<void> | null = null;
+  private cloudAgain = false;
+
+  private scheduleCloud(delay = 4000) {
+    if (!cloudOn()) { cloudState.value = { s: 'off' }; return; }
+    // an untouched new map isn't worth a project
+    if (!this.doc.meta.cloud && !this.doc.editCount) return;
+    clearTimeout(this.cloudTimer);
+    this.cloudTimer = window.setTimeout(() => void this.cloudSave(), delay);
+  }
+
+  /** Save to the account now (one at a time; a change during a save saves again after it). */
+  async cloudSave(opts: { version?: boolean; label?: string } = {}): Promise<boolean> {
+    if (readOnly.value || !cloudOn()) return false;
+    if (this.cloudBusy) { this.cloudAgain = true; await this.cloudBusy; if (!opts.version) return true; }
+    clearTimeout(this.cloudTimer);
+    let ok = false;
+    this.cloudBusy = (async () => {
+      cloudState.value = { s: 'saving' };
+      try {
+        const r = await saveProject(this.doc.meta, serialize(this.doc), this.doc.editCount, opts);
+        if (r.copied) {
+          this.doc.meta.name = `${this.doc.meta.name} (copy)`;
+          document.title = `${this.doc.meta.name} — UrbanPlan`;
+          toast('This map was changed elsewhere since you opened it: your work is saved as a copy beside it', 'warn');
+        }
+        this.doc.meta.cloud = { id: r.id, rev: r.revision };
+        await local.put({ meta: { ...this.doc.meta }, text: serialize(this.doc), savedAt: new Date().toISOString(), edits: this.doc.editCount });
+        cloudState.value = { s: 'saved', at: new Date().toISOString() };
+        docVersion.value++;
+        ok = true;
+      } catch (e) {
+        const m = (e as Error).message ?? String(e);
+        cloudState.value = /fetch|network/i.test(m) || !navigator.onLine ? { s: 'offline' } : { s: 'error', msg: m };
+        console.warn('cloud save:', e);
+      }
+    })();
+    await this.cloudBusy;
+    this.cloudBusy = null;
+    if (this.cloudAgain) { this.cloudAgain = false; this.scheduleCloud(1000); }
+    return ok;
   }
 
   get fileName() { return this.repoFile ?? `${slug(this.doc.meta.name)}${FILE_EXT}`; }
@@ -491,8 +594,18 @@ export class App implements AppApi {
       const name = prompt('Name for the copy', `${this.doc.meta.name} copy`);
       if (!name) return;
       const fresh = newMeta(this.tile.id, this.doc.meta.base ?? '', settings.value.author);
-      this.doc.meta = { ...this.doc.meta, id: fresh.id, name, created: fresh.created };
+      this.doc.meta = { ...this.doc.meta, id: fresh.id, name, created: fresh.created, cloud: null };
       this.repoFile = null;
+    }
+    // signed in: Save is a save to the account (a version kept); Download still gives the file
+    if (cloudOn() && !repo.available) {
+      await this.persist(false);
+      if (await this.cloudSave({ version: true })) {
+        this.doc.savedVersion = this.doc.version;
+        docVersion.value++;
+        toast('Saved to your account', 'ok');
+      } else toast('Couldn’t reach your account: saved in this browser, and it will try again', 'warn');
+      return;
     }
     const text = serialize(this.doc);
     try {
