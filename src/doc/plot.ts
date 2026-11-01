@@ -15,7 +15,7 @@ import type { Near } from './issues';
 import type { Id, PlotObj, SectionObj } from './types';
 import { totalWidth } from './xsection';
 
-export type PlotUse = 'residential' | 'commercial';
+export type PlotUse = 'residential' | 'commercial' | 'industrial';
 /** which development control regulations apply */
 export type PlotCode = 'udcpr' | 'dcpr-island' | 'dcpr-suburbs';
 
@@ -60,33 +60,50 @@ export const CODE_NOTE: Record<PlotCode, string> = {
   'dcpr-suburbs': 'DCPR 2034 Table 12 from published summaries; the margins are UDCPR’s as placeholders. Check both with your architect.',
 };
 
+export const USE_NOTE: Record<PlotUse, string> = {
+  residential: 'Flats to a mix, parking by UDCPR Table 8-B.',
+  commercial: 'Offices on 3.6 m floors, flats none; ancillary FSI 80 %, parking a car per 100 m² of carpet.',
+  industrial: 'Sheds in an industrial zone: FSI 1.0 with no premium or TDR, margins at least 6 m in front and 4.5 m round, a car per 300 m² and a loading bay per 1,000 m². Placeholders: check the zone and the MIDC / UDCPR rules that apply.',
+};
+
 /** Default rules for a plot on a road this wide. */
 export function defaultRules(roadW: number, use: PlotUse, code: PlotCode = 'udcpr', congested = false): PlotRules {
   const [, basic, premium, tdr] = row(FSI[code === 'udcpr' && congested ? 'udcpr-congested' : code], roadW);
   const [, front, side, sideTo] = row(MARGINS, roadW);
+  // industrial: FSI 1.0 on the plot, no premium or TDR, wider margins for trucks and fire; sheds a tall storey each
+  if (use === 'industrial') return { basic: 1, premium: 0, tdr: 0, ancillary: 0, front: Math.max(front, 6), side: Math.max(side, 4.5), sideTo: 15, floorH: 7.5, maxH: 24 };
   return {
     basic, premium, tdr,
     ancillary: code === 'udcpr' ? (use === 'commercial' ? 0.8 : 0.6) : 0.35,
-    front, side, sideTo, floorH: 3, maxH: 70,
+    // offices a taller storey; no fixed height limit in either code: a placeholder for fire and airport limits
+    front, side, sideTo, floorH: use === 'commercial' ? 3.6 : 3, maxH: code === 'udcpr' ? 70 : 120,
   };
 }
 
 /** Side / rear margin for a building this tall. */
 export const sideMargin = (r: PlotRules, h: number) => (h <= r.sideTo ? r.side : Math.min(12, Math.max(r.side, h / 5)));
 
+export interface PlotRoad {
+  id: Id; name: string;
+  /** width today and in the DP (m), with the plot's what-ifs; whether it has one */
+  today: number; dp?: number; edited: boolean;
+  /** the plot is entered from it */
+  entry: boolean;
+}
+
 export interface PlotReport {
   code: PlotCode;
   area: number;
-  /** the road it fronts */
-  road: { id: Id; name: string; today: number; dp?: number } | null;
+  /** the road it's entered from (its width sets the rules), and every road along it */
+  road: PlotRoad | null; roads: PlotRoad[];
   /** the road runs over the plot (it was drawn across the carriageway) */
   onRoad: boolean;
   /** the road width the rules use */
   roadW: number;
   /** land inside the DP road line, and what's left */
   lost: number; net: number[]; netArea: number;
-  /** the part inside the DP road line */
-  lostRing: number[];
+  /** the parts inside the DP road lines */
+  lostRings: number[][];
   rules: PlotRules;
   fsi: number;
   /** built-up area by source: basic (on the net plot), premium and TDR (on the whole plot), the DP strip's FSI when
@@ -103,8 +120,8 @@ export interface PlotReport {
   limit: 'height' | 'margins' | null;
   /** built-up area that fits under the height limit */
   buildable: number;
-  /** which edges of `net` face the road (front margin), and the road's direction (unit x, z) */
-  edges: boolean[]; axis: [number, number];
+  /** which edges of `net` face a road (front margin), and which road; the entry road's direction (unit x, z) */
+  edges: boolean[]; edgeRoad: (Id | null)[]; axis: [number, number];
 }
 
 /** Analyse a plot against the map, under these regulations. */
@@ -112,24 +129,31 @@ export function analysePlot(doc: CityDoc, C: Compiler, near: Near, p: PlotObj, c
   const ring = ccw(p.ring);
   const area = polyArea(ring);
   const [cx, cz] = centroid(ring);
-  const road = frontRoad(doc, C, near, p, ring);
-  const today = road ? totalWidth(road.s.parts) : 0;
-  const dp = road?.s.reserve;
-  const basis = p.basis ?? (dp ? 'dp' : 'today');
-  const roadW = basis === 'dp' && dp ? dp : today;
+  // the roads along the plot (the nearest when none is: a plot reached down a lane); the rules go by the entry road,
+  // the widest unless one is picked
+  const found = plotRoads(doc, C, near, p, ring);
+  const widthOf = (x: FoundRoad) => ((p.basis ?? (x.dp ? 'dp' : 'today')) === 'dp' && x.dp ? x.dp : x.today);
+  const road = found.find((x) => x.s.id === p.front) ?? [...found].sort((a, b) => widthOf(b) - widthOf(a))[0] ?? null;
+  const today = road?.today ?? 0, dp = road?.dp;
+  const roadW = road ? widthOf(road) : 0;
   const rules: PlotRules = { ...defaultRules(roadW, p.use, code, p.congested), ...p.rules };
 
-  // the DP road line: the reserve's edge, parallel to the nearest stretch of the road
-  let net = ring, lostRing: number[] = [];
-  let frontLine: { ax: number; az: number; nx: number; nz: number } | null = null;
-  if (road) {
-    const { ax, az, dx, dz } = road.seg;
+  // each road's DP line: the reserve's edge, parallel to the road's nearest stretch
+  let net = ring;
+  const lostRings: number[][] = [];
+  const lines = found.map((x) => {
+    const { ax, az, dx, dz } = x.seg;
     const L = Math.hypot(dx, dz) || 1;
     let nx = -dz / L, nz = dx / L;
     if ((cx - ax) * nx + (cz - az) * nz < 0) { nx = -nx; nz = -nz; }
-    frontLine = { ax, az, nx, nz };
-    if (dp) { net = clipHalf(ring, ax, az, nx, nz, dp / 2); lostRing = clipHalf(ring, ax, az, -nx, -nz, -dp / 2); }
-  }
+    if (x.dp && x.dp > 0) {
+      net = clipHalf(net, ax, az, nx, nz, x.dp / 2);
+      const lr = clipHalf(ring, ax, az, -nx, -nz, -x.dp / 2);
+      if (lr.length >= 6 && polyArea(lr) > 0.5) lostRings.push(lr);
+    }
+    return { ax, az, nx, nz, entry: x === road, id: x.s.id };
+  });
+  const frontLine = lines.find((l) => l.entry) ?? null;
   const netArea = net.length >= 6 ? polyArea(net) : 0;
   const lost = Math.max(0, area - netArea);
 
@@ -141,21 +165,25 @@ export function analysePlot(doc: CityDoc, C: Compiler, near: Near, p: PlotObj, c
 
   // margins: front edges (facing the road) by the front margin, the others by the side margin, which depends on the
   // height, which depends on the footprint: a few rounds settle it
-  const front: boolean[] = [];
+  // (every road side is a front: the edges facing a road, nearest it)
+  const front: boolean[] = [], edgeRoad: (Id | null)[] = [];
   if (net.length >= 6) {
-    let nearest = Infinity;
-    const dist: number[] = [];
-    for (let i = 0; i < net.length; i += 2) {
-      const j = (i + 2) % net.length;
-      const mx = (net[i] + net[j]) / 2, mz = (net[i + 1] + net[j + 1]) / 2;
-      const d = frontLine ? (mx - frontLine.ax) * frontLine.nx + (mz - frontLine.az) * frontLine.nz : Infinity;
-      dist.push(d); nearest = Math.min(nearest, d);
-    }
-    for (let i = 0, k = 0; i < net.length; i += 2, k++) {
-      const j = (i + 2) % net.length;
-      const ex = net[j] - net[i], ez = net[j + 1] - net[i + 1], L = Math.hypot(ex, ez) || 1;
-      const parallel = frontLine ? Math.abs((ex / L) * frontLine.nz - (ez / L) * frontLine.nx) > 0.85 : false;
-      front.push(parallel && dist[k] < nearest + 2);
+    const n = net.length / 2;
+    for (let k = 0; k < n; k++) { front.push(false); edgeRoad.push(null); }
+    for (const l of lines) {
+      let nearest = Infinity;
+      const dist: number[] = [];
+      for (let i = 0; i < net.length; i += 2) {
+        const j = (i + 2) % net.length;
+        const mx = (net[i] + net[j]) / 2, mz = (net[i + 1] + net[j + 1]) / 2;
+        const d = (mx - l.ax) * l.nx + (mz - l.az) * l.nz;
+        dist.push(d); nearest = Math.min(nearest, d);
+      }
+      for (let i = 0, k = 0; i < net.length; i += 2, k++) {
+        const j = (i + 2) % net.length;
+        const ex = net[j] - net[i], ez = net[j + 1] - net[i + 1], L = Math.hypot(ex, ez) || 1;
+        if (Math.abs((ex / L) * l.nz - (ez / L) * l.nx) > 0.85 && dist[k] < nearest + 2) { front[k] = true; edgeRoad[k] ??= l.id; }
+      }
     }
   }
   // taller needs wider side margins (H/5), so a smaller footprint: try every height and keep the lowest one that
@@ -177,9 +205,10 @@ export function analysePlot(doc: CityDoc, C: Compiler, near: Near, p: PlotObj, c
   const short = bua - buildable > 1;
   const limit: PlotReport['limit'] = !short ? null : floors === maxFloors ? 'height' : 'margins';
   return {
-    code, area, onRoad: !!road && road.d < -0.5, road: road ? { id: road.s.id, name: road.s.name || 'Unnamed road', today, dp } : null, roadW,
-    lost, net, netArea, lostRing, rules, fsi, parts, bua, side, footprint, footprintArea, floors, height: floors * rules.floorH,
-    limit, buildable, edges: front, axis: frontLine ? [frontLine.nz, -frontLine.nx] : longest(net),
+    code, area, onRoad: !!road && road.d < -0.5, roadW,
+    road: road ? info(road, true) : null, roads: found.map((x) => info(x, x === road)),
+    lost, net, netArea, lostRings, rules, fsi, parts, bua, side, footprint, footprintArea, floors, height: floors * rules.floorH,
+    limit, buildable, edges: front, edgeRoad, axis: frontAxis(net, edgeRoad, road?.s.id) ?? (frontLine ? [frontLine.nz, -frontLine.nx] : longest(net)),
   };
 }
 
@@ -196,6 +225,18 @@ export function inset(net: number[], front: boolean[], f: number, s: number): nu
   return out;
 }
 
+/** The direction of the plot's longest side on the entry road (the road itself may curve away from it), along the
+ *  ring's winding. */
+function frontAxis(net: number[], edgeRoad: (Id | null)[], id: Id | undefined): [number, number] | null {
+  let best: [number, number] | null = null, bl = 0;
+  for (let i = 0, k = 0; i < net.length; i += 2, k++) {
+    if (!id || edgeRoad[k] !== id) continue;
+    const j = (i + 2) % net.length, ex = net[j] - net[i], ez = net[j + 1] - net[i + 1], L = Math.hypot(ex, ez);
+    if (L > bl) { bl = L; best = [ex / L, ez / L]; }
+  }
+  return best;
+}
+
 /** The direction of a ring's longest edge. */
 function longest(r: number[]): [number, number] {
   let best: [number, number] = [1, 0], bl = 0;
@@ -206,27 +247,55 @@ function longest(r: number[]): [number, number] {
   return best;
 }
 
-/** The road a plot fronts: the one it names, else the nearest section (and that section's nearest stretch). */
-function frontRoad(doc: CityDoc, C: Compiler, near: Near, p: PlotObj, ring: number[]) {
+interface FoundRoad {
+  s: SectionObj;
+  /** how far the plot is from the road's edge (negative: over it), and the road's nearest stretch */
+  d: number; seg: { ax: number; az: number; dx: number; dz: number };
+  /** width today and in the DP, with the plot's what-ifs */
+  today: number; dp?: number; edited: boolean;
+}
+const info = (x: FoundRoad, entry: boolean): PlotRoad => ({ id: x.s.id, name: x.s.name || 'Unnamed road', today: x.today, dp: x.dp, edited: x.edited, entry });
+
+/** The roads a plot lies along: a section running beside one of its edges, near enough to reach (its DP reserve
+ *  counts). None: the nearest road, the one a lane leads from. A road the plot names always counts. */
+function plotRoads(doc: CityDoc, C: Compiler, near: Near, p: PlotObj, ring: number[]): FoundRoad[] {
   let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
   for (let i = 0; i < ring.length; i += 2) { x0 = Math.min(x0, ring[i]); x1 = Math.max(x1, ring[i]); z0 = Math.min(z0, ring[i + 1]); z1 = Math.max(z1, ring[i + 1]); }
-  const cand = p.front ? [p.front] : [...near(x0 - 60, z0 - 60, x1 + 60, z1 + 60)];
-  let best: { s: SectionObj; d: number; seg: { ax: number; az: number; dx: number; dz: number } } | null = null;
+  const cand = new Set(near(x0 - 60, z0 - 60, x1 + 60, z1 + 60));
+  if (p.front) cand.add(p.front);
+  const out: FoundRoad[] = [];
+  let nearest: FoundRoad | null = null;
   for (const id of cand) {
     const s = doc.get(id);
     if (s?.kind !== 'section' || s.elevated || s.tunnel || s.cls === 'busway') continue;
     const g = C.geo(id);
     if (!g) continue;
+    const e = p.roadEdits?.[id];
+    const today = e?.width ?? totalWidth(s.parts), dp = e?.reserve ?? s.reserve, hw = today / 2;
+    // beside an edge: running the same way (within 25°), the edge's middle alongside it, within reach
+    const reach = Math.max(0, (dp ?? 0) / 2 - hw) + 4;
+    let best: FoundRoad | null = null, along = false;
     for (let k = 0; k + 3 < g.pts.length; k += 2) {
-      const ax = g.pts[k], az = g.pts[k + 1], dx = g.pts[k + 2] - ax, dz = g.pts[k + 3] - az;
+      const ax = g.pts[k], az = g.pts[k + 1], dx = g.pts[k + 2] - ax, dz = g.pts[k + 3] - az, Ls = Math.hypot(dx, dz);
+      if (Ls < 0.01) continue;
       for (let i = 0; i < ring.length; i += 2) {
-        const d = segDist(ring[i], ring[i + 1], ax, az, dx, dz) - totalWidth(s.parts) / 2;
-        if (!best || d < best.d) best = { s, d, seg: { ax, az, dx, dz } };
+        const d = segDist(ring[i], ring[i + 1], ax, az, dx, dz) - hw;
+        if (!best || d < best.d) best = { s, d, seg: { ax, az, dx, dz }, today, dp, edited: !!e };
+        const j = (i + 2) % ring.length, ex = ring[j] - ring[i], ez = ring[j + 1] - ring[i + 1], Le = Math.hypot(ex, ez);
+        if (Le < 2 || Math.abs(ex * dz - ez * dx) / (Le * Ls) > 0.42) continue;
+        const mx = (ring[i] + ring[j]) / 2, mz = (ring[i + 1] + ring[j + 1]) / 2;
+        const t = ((mx - ax) * dx + (mz - az) * dz) / (Ls * Ls);
+        if (t > -0.15 && t < 1.15 && segDist(mx, mz, ax, az, dx, dz) - hw < reach) along = true;
       }
     }
+    if (!best) continue;
+    if (along || id === p.front) out.push(best);
+    if (!nearest || best.d < nearest.d) nearest = best;
   }
-  return best;
+  if (!out.length && nearest) out.push(nearest);
+  return out.sort((a, b) => a.d - b.d);
 }
+
 
 // ---------------- polygon helpers (flat x,z rings) ----------------
 

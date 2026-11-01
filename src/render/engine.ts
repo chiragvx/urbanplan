@@ -265,6 +265,11 @@ export class Engine {
     this.cpuMs = performance.now() - t0;
   }
 
+  /** The view as an image (a fresh frame, read back before it's shown); null where the canvas can't be read. */
+  snapshot(type = 'image/jpeg'): string | null {
+    try { this.render(); const u = this.renderer.domElement.toDataURL(type, 0.9); return u.length > 2000 ? u : null; } catch { return null; }
+  }
+
   private renderOnce() {
     if (this.plan) {
       if (!this.planPipeline) {

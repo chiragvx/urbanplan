@@ -159,7 +159,7 @@ export class App implements AppApi {
       // first time the DP regions arrive: check them (buildings on reserved open space)
       if (this.E.dpr.ready && !regionsChecked && this.issues.version) { regionsChecked = true; this.issues.regionPass(); this.showMarkers(!!this.E.markers.length); }
     };
-    this.engine.scene.add(this.ref.group, this.ref.groundGroup);
+    this.engine.scene.add(this.ref.group, this.ref.groundGroup, this.ref.drapeGroup);
     this.issues = new IssueIndex(this.doc, this.C, (x0, z0, x1, z1) => this.E.hit.query(x0, z0, x1, z1));
     // water pooling in terraformed ground (not inside ponds, which hold water on purpose)
     this.issues.terrainIssues = () => {

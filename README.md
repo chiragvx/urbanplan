@@ -99,12 +99,17 @@ editor for the account pages saves the map in the browser first.
   height, as a glass block in 3D. Rules go by the DP width or today's; every rule can be changed per plot. The defaults
   are indicative UDCPR 2020 values (src/doc/plot.ts), not a zoning certificate.
   **Site Studio** (double-click a plot, or *Open in Site Studio*) designs what goes on it (src/doc/site.ts): the plan on
-  the left, the live 3D view on the right, the numbers and rule checks across the top. A building is a spine with a
-  depth, as in TestFit: draw one node by node (<kbd>B</kbd>), drag it to move it, drag its nodes to reshape it, the
-  round handle to turn it, the square one to change its depth; double-click the spine to add a node, Alt-click a node
-  to drop it; Ctrl+D duplicates. Moves snap to the road's 45° angles. Or start from a bar, L, U, courtyard, tower or
-  twin towers, or let **Generate** (src/doc/generate.ts) try every shape at a range of depths and parking set-ups and
-  rank them by profit, IRR, flats or carpet, rule-breakers last.
+  the left, the live 3D view on the right, the numbers and rule checks across the top. It opens on the **most the plot
+  can build** (src/doc/optimise.ts): slabs (Pune) or towers (Mumbai) filling the margins at every height, kept clear
+  of the fire tender's drive and the open space, using as much of the permissible built-up area as the rules allow,
+  with the compound wall, gates, the internal drive and the parking it needs. Settings (slabs / towers, most floors,
+  most buildings, the flat mix, parking) re-plan it. **Roads** lists every road along the plot: try other widths
+  (today's or the DP's) and the plot, its FSI and its buildings follow, with what changed against the map; the map
+  takes the widths when the studio closes. To shape it by hand: a building is a spine with a depth, as in TestFit:
+  draw one node by node (<kbd>B</kbd>), drag it to move it, drag its nodes to reshape it, the round handle to turn it,
+  the square one to change its depth; double-click the spine to add a node, Alt-click a node to drop it; Ctrl+D
+  duplicates. Moves snap to the road's 45° angles. Or start from a bar, L, U, courtyard, tower or twin towers;
+  *Re-optimise* hands it back.
   Floors fill with 1 / 2 / 3 BHK flats to a mix, both sides of a corridor, with corner flats where wings meet and
   cores no further apart than the 30 m escape distance allows; floors go up as far as the FSI, the height limit and
   the margins at that height allow, and a building past the margins or into another turns red. Parking follows UDCPR

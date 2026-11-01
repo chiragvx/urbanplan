@@ -137,7 +137,7 @@ function drawPlots(E: Editor) {
   const ctx = E.ctx;
   for (const o of E.doc.all('plot')) {
     const r = E.plot.report(o.id);
-    if (r && r.lostRing.length >= 6) poly(E, r.lostRing, true, DPRED, 1.5, 0.3);
+    if (r) for (const L of r.lostRings) poly(E, L, true, DPRED, 1.5, 0.3);
     ctx.setLineDash([7, 5]);
     poly(E, o.ring, true, PLOT, 2, 0.06);
     ctx.setLineDash([]);

@@ -9,6 +9,7 @@ import { buildRail } from '../build/rail';
 import { buildTerrainPatch, buildTerrainSkirt, buildWater } from '../build/terrain';
 import { shiftInto } from '../geo/heightfield';
 import { placeTrees, treeGeometry, type TreeInstance } from '../build/vegetation';
+import { buildPlotModel } from '../build/plotmesh';
 import { landuseRect, landuseUV, type Materials } from '../render/materials';
 import type { Building, TileData } from '../data/tile';
 import type { Heightfield } from '../geo/heightfield';
@@ -18,7 +19,7 @@ import type { Compiler } from '../doc/compile';
 import type { CityDoc, Change } from '../doc/doc';
 import type { BuildingObj, Id, LineObj, PlotObj } from '../doc/types';
 import type { PlotReport } from '../doc/plot';
-import { UNIT_COLOR, type SiteReport } from '../doc/site';
+import { buildingQuads, driveQuads, UNIT_COLOR, type SiteReport } from '../doc/site';
 import { hex, prismTris, type Box } from '../build/prism';
 import { LINE_COLOR } from '../doc/base';
 import { ChunkSet, type ChunkItem } from './chunks';
@@ -90,7 +91,7 @@ export class World {
   ponds = new THREE.Group();
   /** sandbox plots: the land lost to the DP road, the buildable footprint and the envelope (3D only) */
   plots = new THREE.Group();
-  private plotM?: { lost: THREE.Material; net: THREE.Material; mass: THREE.Material; edge: THREE.LineBasicNodeMaterial; build: THREE.Material; floor: THREE.LineBasicNodeMaterial; clash: THREE.LineBasicNodeMaterial };
+  private plotM?: { lost: THREE.Material; net: THREE.Material; mass: THREE.Material; edge: THREE.LineBasicNodeMaterial; build: THREE.Material; floor: THREE.LineBasicNodeMaterial; clash: THREE.LineBasicNodeMaterial; solid: THREE.Material; glass: THREE.Material };
   private utilityLayers = new Map<Id, THREE.Mesh>();
   /** catalogue assets that aren't streets / tracks / pipes (canals, power lines, structures, areas), per layer */
   readonly assets = new THREE.Group();
@@ -298,6 +299,12 @@ export class World {
   private buildingMesh(id: Id): Packed | undefined {
     const b = this.doc.get<'building'>(id);
     if (!b) return undefined;
+    // (cleared off the studio's plot: the scheme stands there instead)
+    if (this.cleared && b.outer.length >= 6) {
+      let cx = 0, cz = 0;
+      for (let i = 0; i < b.outer.length; i += 2) { cx += b.outer[i]; cz += b.outer[i + 1]; }
+      if (inRing(cx / (b.outer.length / 2), cz / (b.outer.length / 2), this.cleared)) return undefined;
+    }
     const res = resolveConflicts([this.asBuilding(b)], this.raster);
     if (!res.kept.length) { this.bDropped.add(id); return undefined; }
     this.bDropped.delete(id);
@@ -384,7 +391,7 @@ export class World {
     const col = new THREE.Color();
     const GREENS = [0x4f7a32, 0x5d8a3a, 0x46702c, 0x6b9443, 0x3f6828, 0x789d48, 0x587f30, 0x6e8c3a];
     c.list.forEach((t, i) => {
-      const blocked = this.raster.onRoad(t.x, t.z);
+      const blocked = this.raster.onRoad(t.x, t.z) || (!!this.cleared && inRing(t.x, t.z, this.cleared));
       q.setFromAxisAngle(up, t.rot);
       s.set(blocked ? 0 : t.s, blocked ? 0 : t.h, blocked ? 0 : t.s);
       p.set(t.x, this.hf.sampleSurface(t.x, t.z) - 0.2, t.z);
@@ -535,8 +542,8 @@ export class World {
 
   /** Sandbox plots in 3D: the DP strip (red) and the rest (blue) on the ground, the envelope as a glass outline,
    *  and the building in it: flats coloured by type floor by floor, cores, and the stilt / podium levels. */
-  buildPlots(list: { o: PlotObj; r: PlotReport | null; d: SiteReport | null }[]) {
-    for (const c of [...this.plots.children]) { this.plots.remove(c); (c as THREE.Mesh).geometry.dispose(); }
+  buildPlots(list: { o: PlotObj; r: PlotReport | null; d: SiteReport | null }[], look: 'real' | 'flats' = 'flats', real?: Id | null) {
+    for (const c of [...this.plots.children]) { this.plots.remove(c); if (!(c instanceof THREE.InstancedMesh)) (c as THREE.Mesh).geometry.dispose(); else c.dispose(); }
     if (!this.plotM) {
       const flat = (color: number, opacity: number) => new THREE.MeshBasicNodeMaterial({ color, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4 });
       this.plotM = {
@@ -546,9 +553,12 @@ export class World {
         build: new THREE.MeshLambertNodeMaterial({ vertexColors: true }),
         floor: new THREE.LineBasicNodeMaterial({ color: 0x1c2333, transparent: true, opacity: 0.35 }),
         clash: new THREE.LineBasicNodeMaterial({ color: 0xe5484d }),
+        solid: new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 }),
+        glass: new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.25, metalness: 0.1 }),
       };
     }
     const M = this.plotM;
+    let cleared: number[] | null = null;
     const ground = (x: number, z: number) => this.hf.sample(x, z);
     // a ring laid on the ground, a little above it so it doesn't flicker
     const drape = (ring: number[], mat: THREE.Material) => {
@@ -565,8 +575,10 @@ export class World {
     };
     for (const { o, r, d } of list) {
       if (!r) { drape(o.ring, M.net); continue; }
+      // the studio's plot, as it would be built
+      if (look === 'real' && o.id === real && d) { this.plotModel(r, d, o.use); cleared = o.ring; continue; }
       drape(r.net, M.net);
-      if (r.lost > 0.5) drape(r.lostRing, M.lost);
+      if (r.lost > 0.5) for (const L of r.lostRings) drape(L, M.lost);
       const F = d?.envelope.length ? d.envelope : r.footprint, H = d?.buildings.length ? d.height : r.height;
       if (F.length < 6 || H <= 0) continue;
       let base = Infinity;
@@ -598,7 +610,15 @@ export class World {
       }
       // surface bays, marked out on the ground
       const bay = hex('#9aa0ab');
-      for (const q of d.parking.levels.find((l) => l.kind === 'surface')?.bays ?? []) boxes.push({ ring: insetQuad(q, 0.12), y0: base + 0.02, y1: base + 0.07, color: bay });
+      for (const q of d.parking.levels.filter((l) => l.kind === 'surface' || l.kind === 'lot').flatMap((l) => l.bays)) boxes.push({ ring: insetQuad(q, 0.12), y0: base + 0.02, y1: base + 0.07, color: bay });
+      // the ground: the drive, the open space, the compound wall and its gate posts
+      const G = d.ground, asphalt = hex('#5b6068'), lawn = hex('#86b46a'), wallC = hex('#ddd6c8'), post = hex('#8a8f99');
+      for (const q of driveQuads(G)) boxes.push({ ring: q, y0: base + 0.01, y1: base + 0.05, color: asphalt });
+      if (G.rg) boxes.push({ ring: G.rg, y0: base + 0.01, y1: base + 0.08, color: lawn });
+      for (const g of G.gardens) boxes.push({ ring: g, y0: base + 0.01, y1: base + 0.09, color: lawn });
+      for (const e of d.site.elements ?? []) if (e.kind === 'parking') for (const q of buildingQuads(e)) boxes.push({ ring: q, y0: base, y1: base + 3 * Math.max(1, e.levels ?? 3), color: grey });
+      for (const w of G.wall) { const q = band(w, 0.12); if (q) boxes.push({ ring: q, y0: base - 0.3, y1: base + 1.8, color: wallC }); }
+      for (const g of G.gates) for (const [x, z] of [[g[0], g[1]], [g[2], g[3]]]) boxes.push({ ring: [x - 0.25, z - 0.25, x + 0.25, z - 0.25, x + 0.25, z + 0.25, x - 0.25, z + 0.25], y0: base - 0.3, y1: base + 2.2, color: post });
       for (const b of d.buildings) {
         for (let f = 0; f < b.floors; f++) {
           const y0 = base + (d.under + f) * fh, y1 = y0 + fh - 0.25;
@@ -625,8 +645,52 @@ export class World {
       segs(fl, M.floor);
       segs(red, M.clash);
     }
+    this.setCleared(cleared);
     this.plots.visible = !this.plan;
     this.needsRender = true;
+  }
+
+  /** the plot cleared of the city's buildings and trees (the one shown realistic in the studio) */
+  private cleared: number[] | null = null;
+  private setCleared(ring: number[] | null) {
+    const was = this.cleared;
+    if (was === ring || (was && ring && was.length === ring.length && was.every((v, i) => v === ring[i]))) return;
+    this.cleared = ring;
+    for (const R of [was, ring]) {
+      if (!R) continue;
+      let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+      for (let i = 0; i < R.length; i += 2) { x0 = Math.min(x0, R[i]); x1 = Math.max(x1, R[i]); z0 = Math.min(z0, R[i + 1]); z1 = Math.max(z1, R[i + 1]); }
+      const ids: Id[] = [];
+      for (const [id, it] of this.bItems) if (it.x1 >= x0 && it.x0 <= x1 && it.z1 >= z0 && it.z0 <= z1) ids.push(id);
+      this.buildings.touch(ids);
+      for (const c of this.treeChunks.values()) if (c.x0 < x1 && c.x0 + CHUNK > x0 && c.z0 < z1 && c.z0 + CHUNK > z0) { this.placeTreeInstances(c); c.hi.instanceMatrix.needsUpdate = true; c.lo.instanceMatrix.needsUpdate = true; }
+    }
+    this.buildings.flush();
+  }
+
+  /** The realistic model of a plot's scheme: styled buildings on the ground as it lies, the site works, trees. */
+  private plotModel(r: PlotReport, d: SiteReport, use: PlotObj['use']) {
+    const M = this.plotM!;
+    const { solid, glass, trees } = buildPlotModel(r, d, use, (x, z) => this.hf.sampleSurface(x, z));
+    for (const [gb, mat] of [[solid, M.solid], [glass, M.glass]] as const) {
+      if (!gb.vertexCount) continue;
+      const m = new THREE.Mesh(gb.build(), mat);
+      m.castShadow = true; m.receiveShadow = true;
+      this.plots.add(m);
+    }
+    if (trees.length) {
+      const im = new THREE.InstancedMesh(treeGeometry('high'), this.M.trees, trees.length);
+      const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), p = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), col = new THREE.Color();
+      const GREENS = [0x4f7a32, 0x5d8a3a, 0x46702c, 0x6b9443, 0x3f6828, 0x789d48];
+      trees.forEach((t, i) => {
+        q.setFromAxisAngle(up, t.rot); sc.set(t.s, t.h, t.s); p.set(t.x, t.y, t.z);
+        im.setMatrixAt(i, m.compose(p, q, sc));
+        im.setColorAt(i, col.setHex(GREENS[Math.floor(t.tint * GREENS.length)]));
+      });
+      im.castShadow = true; im.receiveShadow = true;
+      im.computeBoundingSphere();
+      this.plots.add(im);
+    }
   }
 
   /** Show only a square of the city (x0, z0, x1, z1), cut clean at its edges; null shows it all. */
@@ -910,4 +974,12 @@ function insetQuad(q: number[], k: number): number[] {
   for (let i = 0; i < q.length; i += 2) { cx += q[i]; cz += q[i + 1]; }
   cx /= q.length / 2; cz /= q.length / 2;
   return q.map((v, i) => { const c = i % 2 ? cz : cx, dx = v - c; return c + dx * Math.max(0, 1 - k / (Math.abs(dx) || 1)); });
+}
+
+/** A straight run (x0,z0,x1,z1) as a quad `h` either side of it. */
+function band(s: number[], h: number): number[] | null {
+  const [ax, az, bx, bz] = s, L = Math.hypot(bx - ax, bz - az);
+  if (L < 0.05) return null;
+  const nx = (-(bz - az) / L) * h, nz = ((bx - ax) / L) * h;
+  return [ax + nx, az + nz, bx + nx, bz + nz, bx - nx, bz - nz, ax - nx, az - nz];
 }

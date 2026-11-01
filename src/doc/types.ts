@@ -221,9 +221,11 @@ export interface PlotObj {
   name: string;
   /** outline x,z,… in tile metres */
   ring: number[];
-  use: 'residential' | 'commercial';
-  /** the section it fronts (undefined = the nearest road) */
+  use: import('./plot').PlotUse;
+  /** the section it's entered from (undefined = the widest road along it) */
   front?: Id;
+  /** what-if road widths (today's, the DP's) by section, tried in Site Studio; written to the map when it closes */
+  roadEdits?: Record<Id, { width?: number; reserve?: number }>;
   /** the rules follow the road's DP width or today's (undefined = DP when the road has one) */
   basis?: 'today' | 'dp';
   /** UDCPR: in a congested area (gaothan, old core: Table 6-A) */

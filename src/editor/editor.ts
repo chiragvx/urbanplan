@@ -13,7 +13,7 @@ import { DP_WIDTHS, setSideWidth, setTotalWidth, totalWidth } from '../doc/xsect
 import { HitIndex, type Pick } from './hit';
 import { PlanView } from './view2d';
 import {
-  anchorSel, buildAsset, cursor, pointer, docVersion, dpRegionsOn, terrainView, hover, lineLayer, mode, penClass, penLift, readOnly, saveSettings, select, selection, settings, stale3d, status, studio, studioLevel, studioSel, studioTool, toast, tool, xray, zoomScale,
+  anchorSel, buildAsset, cursor, pointer, docVersion, dpRegionsOn, terrainView, hover, lineLayer, mode, penClass, penLift, readOnly, saveSettings, select, selection, settings, stale3d, status, studio, studioLevel, studioLook, studioSel, studioTool, toast, tool, xray, zoomScale,
   type Sel, type Tool,
 } from './state';
 import { RoadTool, type SnapResult } from './roadtool';
@@ -334,6 +334,7 @@ export class Editor {
     select([{ kind: 'plot', id }]);
     studioSel.value = null; studioTool.value = 'select'; studioLevel.value = -1;
     studio.value = id;
+    this.rebuildPlots();
     this.setMode('3d');
     // the map's chrome goes; the 3D view fills the stage, its centre moved right of the studio's panel
     document.body.classList.add('studio-on');
@@ -343,14 +344,27 @@ export class Editor {
     for (let i = 0; i < o.ring.length; i += 2) { x0 = Math.min(x0, o.ring[i]); x1 = Math.max(x1, o.ring[i]); z0 = Math.min(z0, o.ring[i + 1]); z1 = Math.max(z1, o.ring[i + 1]); }
     const c = this.controls, mx = (x0 + x1) / 2, mz = (z0 + z1) / 2;
     c.target.set(mx, this.hf.sampleSurface(mx, mz), mz);
-    c.dist = Math.max(140, Math.hypot(x1 - x0, z1 - z0) * 2.4);
+    c.dist = this.studioDist = Math.max(140, Math.hypot(x1 - x0, z1 - z0) * 2.4);
     c.pitch = 0.62;
     // the 3D view is the site model: a square kilometre round the plot, the camera kept over it
     const H = STUDIO_SITE / 2;
     this.studioCam ??= { bounds: c.bounds, maxDist: c.maxDist };
+    this.studioRect = [mx - H, mz - H, mx + H, mz + H];
     this.world.setClip([mx - H, mz - H, mx + H, mz + H]);
     c.bounds = [mx - H * 0.8, mz - H * 0.8, mx + H * 0.8, mz + H * 0.8];
     c.maxDist = STUDIO_SITE * 1.4;
+    this.world.needsRender = true;
+  }
+  /** the square of city the studio shows */
+  studioRect: [number, number, number, number] | null = null;
+  /** the studio camera's distance for its plot */
+  private studioDist = 300;
+  /** The studio's camera: over the plot at an angle, at eye level from the street, or straight down. */
+  studioView(k: 'aerial' | 'street' | 'top') {
+    const c = this.controls, D = this.studioDist;
+    if (k === 'aerial') { c.dist = D; c.pitch = 0.62; }
+    else if (k === 'street') { c.dist = Math.max(60, D * 0.45); c.pitch = 0.13; }
+    else { c.dist = D * 1.1; c.pitch = 1.5; }
     this.world.needsRender = true;
   }
   /** the camera's limits before the studio opened */
@@ -358,13 +372,39 @@ export class Editor {
 
   closeStudio() {
     if (!studio.value) return;
+    this.applyRoadEdits(studio.value);
     studio.value = null;
+    this.rebuildPlots();
     document.body.classList.remove('studio-on');
     this.world.setClip(null);
     if (this.studioCam) { this.controls.bounds = this.studioCam.bounds; this.controls.maxDist = this.studioCam.maxDist; this.studioCam = null; }
     this.engine.shiftX = 0;
     window.dispatchEvent(new Event('resize'));
     this.world.needsRender = true;
+  }
+
+  /** The road widths tried in the studio, written to the map (one undoable step). */
+  private applyRoadEdits(id: Id) {
+    const o = this.doc.get<'plot'>(id);
+    if (!o?.roadEdits || readOnly.value) return;
+    const edits = o.roadEdits, said: string[] = [];
+    this.edit('Road widths from Site Studio', () => {
+      for (const [sid, e] of Object.entries(edits)) {
+        const s = this.doc.get<'section'>(sid);
+        if (s?.kind !== 'section') continue;
+        const was = totalWidth(s.parts);
+        if (e.width !== undefined && Math.abs(e.width - was) > 0.01) {
+          this.doc.set(sid, 'parts', setTotalWidth(s.parts, e.width));
+          said.push(`${s.name || 'road'} ${+was.toFixed(1)} → ${e.width} m`);
+        }
+        if (e.reserve !== undefined && e.reserve !== s.reserve) {
+          this.doc.set(sid, 'reserve', e.reserve || undefined);
+          said.push(`${s.name || 'road'} DP ${s.reserve ?? '–'} → ${e.reserve || '–'} m`);
+        }
+      }
+      this.doc.set(id, 'roadEdits', undefined);
+    });
+    if (said.length) toast(`Applied to the map: ${said.join(' · ')}`, 'ok');
   }
 
   zoomToSelection() {
@@ -1035,7 +1075,11 @@ export class Editor {
   private syncPlots(ids: Iterable<Id>) {
     if (!this.doc.ids('plot').size && ![...ids].some((id) => id.startsWith('plot'))) return;
     this.plot.invalidate();
-    this.world.buildPlots(this.doc.all('plot').map((o) => ({ o, r: this.plot.report(o.id), d: this.plot.layout(o.id) })));
+    this.rebuildPlots();
+  }
+  /** the plots in 3D: the one open in the studio realistic (unless its flats are asked for) */
+  rebuildPlots() {
+    this.world.buildPlots(this.doc.all('plot').map((o) => ({ o, r: this.plot.report(o.id), d: this.plot.layout(o.id) })), studioLook.value, studio.value);
   }
 
   /** the terrain view was switched on by the terrain tool (and goes off with it) */

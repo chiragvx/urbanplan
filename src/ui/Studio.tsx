@@ -3,16 +3,17 @@
 // plan. Nothing here touches the city map: it all lives on the plot.
 import { Fragment } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { docVersion, readOnly, studio, studioLevel, studioSel, studioTool, toast } from '../editor/state';
+import { docVersion, readOnly, studio, studioGround, studioLevel, studioLook, studioSel, studioTool, toast } from '../editor/state';
 import { isTyping } from '../editor/editor';
 import { StudioCanvas } from '../editor/studiocanvas';
 import { exportPlot } from '../editor/plotexport';
 import { ui } from './ctx';
 import { Icon, NumberField, Seg, Toggle } from './components';
 import type { PlotObj } from '../doc/types';
-import type { PlotReport } from '../doc/plot';
-import { basementsToFit, buildingQuads, CARPET, roadFrame, FIRE_H, FIRE_W, PRESETS, presetBuildings, RG_FROM, RG_SHARE, SQFT, TRAVEL, UNIT_COLOR, UNIT_LABEL, type Costs, type PlotSite, type SiteReport } from '../doc/site';
-import { generate, GOALS, type Goal, type Scheme } from '../doc/generate';
+import { USE_NOTE, type PlotReport, type PlotUse } from '../doc/plot';
+import { basementsToFit, buildingQuads, CARPET, ELEMENTS, elementRings, GATES_FROM, roadFrame, FIRE_H, FIRE_W, PRESETS, presetBuildings, RG_FROM, RG_SHARE, SQFT, TRAVEL, UNIT_COLOR, UNIT_LABEL, type Costs, type PlotSite, type SiteElement, type SiteReport } from '../doc/site';
+import { ACCESS, DEFAULT_DESIGN, schemes, siteDefaults, type Access, TYPOLOGIES, type Design, type Typology } from '../doc/optimise';
+import { totalWidth } from '../doc/xsection';
 import { areaStatement, printReport, unitSchedule } from '../editor/plotreport';
 
 const m2 = (v: number) => `${Math.round(v).toLocaleString('en-IN')} m²`;
@@ -34,8 +35,8 @@ const RATES: { k: keyof Costs; label: string; unit: string; step: number; title:
   { k: 'presold', label: 'Booked by possession', unit: '%', step: 5, title: 'Flats sold while it goes up; the rest sell over the year after' },
 ];
 
-type Tab = 'generate' | 'flats' | 'parking' | 'site' | 'money' | 'options' | 'export';
-const TABS: Record<Tab, string> = { generate: 'Generate', flats: 'Flats', parking: 'Parking', site: 'Site', money: 'Costs and returns', options: 'Options', export: 'Export' };
+type Tab = 'roads' | 'design' | 'flats' | 'parking' | 'site' | 'money' | 'options' | 'export';
+const TABS: Record<Tab, string> = { roads: 'Roads', design: 'Design', flats: 'Flats', parking: 'Parking', site: 'Site', money: 'Costs and returns', options: 'Options', export: 'Export' };
 
 export function Studio() {
   const id = studio.value;
@@ -49,7 +50,7 @@ export function Studio() {
 function StudioView({ o, r, d, site }: { o: PlotObj; r: PlotReport; d: SiteReport; site: PlotSite }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const cv = useRef<StudioCanvas | null>(null);
-  const [tab, setTab] = useState<Tab>('flats');
+  const [tab, setTab] = useState<Tab>('design');
   const ro = readOnly.value;
   useEffect(() => {
     const c = new StudioCanvas(ref.current!, ui.E, o.id);
@@ -65,6 +66,14 @@ function StudioView({ o, r, d, site }: { o: PlotObj; r: PlotReport; d: SiteRepor
     return () => { c.dispose(); window.removeEventListener('keydown', onKey, true); };
   }, [o.id]);
 
+  // the ground under the 3D: imagery or the DP sheets over the studio's square, taken away on the way out
+  const ground = studioGround.value;
+  useEffect(() => {
+    ui.app.ref.drape(ground === 'plain' ? null : ground, ui.E.studioRect, (x, z) => ui.E.hf.sampleSurface(x, z), ground === 'dp' ? 0.85 : 1, o.ring);
+    ui.E.world.needsRender = true;
+  }, [ground, o.id, o.ring]);
+  useEffect(() => () => { ui.app.ref.drape(null, null, () => 0); }, []);
+
   const setSite = (patch: Partial<PlotSite>, merge?: string) => {
     if (ro) return;
     ui.E.edit('Site', () => ui.doc.update(o.id, { site: { ...site, ...patch } }), merge);
@@ -72,12 +81,13 @@ function StudioView({ o, r, d, site }: { o: PlotObj; r: PlotReport; d: SiteRepor
   const preset = (p: (typeof PRESETS)[number]['value']) => {
     const buildings = presetBuildings(r, p);
     if (!buildings.length) { toast('That shape doesn’t fit this envelope', 'warn'); return; }
-    setSite({ buildings });
+    setSite({ buildings, manual: true, rg: undefined });
     studioSel.value = buildings[0].id;
   };
   const sel = d.buildings.find((b) => b.b.id === studioSel.value) ?? null;
+  const selEl = site.elements?.find((e) => e.id === studioSel.value) ?? null;
   const levels = d.parking.levels;
-  const lvName = (i: number) => { const l = levels[i], n = levels.slice(0, i + 1).filter((x) => x.kind === l.kind).length; return l.kind === 'stilt' ? 'Stilt' : l.kind === 'surface' ? 'Surface' : l.kind === 'podium' ? `P${n}` : `B${n}`; };
+  const lvName = (i: number) => { const l = levels[i], n = levels.slice(0, i + 1).filter((x) => x.kind === l.kind).length; return l.kind === 'stilt' ? 'Stilt' : l.kind === 'surface' ? 'Surface' : l.kind === 'lot' ? `Lot ${n}` : l.kind === 'structure' ? `C${n}` : l.kind === 'podium' ? `P${n}` : `B${n}`; };
   const checks = [
     { ok: !d.over.margins, label: 'Margins', bad: 'A building is past the margins for its height' },
     { ok: !d.over.overlap, label: 'Spacing', bad: 'Buildings run into each other' },
@@ -94,7 +104,7 @@ function StudioView({ o, r, d, site }: { o: PlotObj; r: PlotReport; d: SiteRepor
         <button class="studio-back" onClick={() => ui.E.closeStudio()} title="Back to the map (Esc)"><Icon.back size={15} /> Map</button>
         <div class="studio-name"><b>{o.name}</b><small>{m2(r.area)} · {fx(r.roadW)} m road</small></div>
         <dl class="studio-metrics">
-          <div><dt>Flats</dt><dd>{d.flats.toLocaleString('en-IN')}</dd><small>{d.count.slice(0, 3).map((n, t) => n > 0 && <span key={t}><i style={`background:${UNIT_COLOR[t]}`} />{n}</span>)}{d.count[3] > 0 && <span><i style={`background:${UNIT_COLOR[3]}`} />{d.count[3]}</span>}</small></div>
+          <div><dt>{o.use === 'residential' ? 'Flats' : o.use === 'industrial' ? 'Shed floors' : 'Offices'}</dt><dd>{d.flats.toLocaleString('en-IN')}</dd><small>{d.count.slice(0, 3).map((n, t) => n > 0 && <span key={t}><i style={`background:${UNIT_COLOR[t]}`} />{n}</span>)}{d.count[3] > 0 && <span><i style={`background:${UNIT_COLOR[3]}`} />{d.count[3]}</span>}</small></div>
           <div class={d.over.fsi ? 'bad' : ''} title="Built-up area over plot area, ancillary included"><dt>FSI</dt><dd>{fx(d.fsi)}</dd><small>of {fx(r.bua / r.area)}</small></div>
           <div><dt>Coverage</dt><dd>{pc(d.coverage)}</dd><small>{m2(d.bua)} built</small></div>
           <div class={d.over.height ? 'bad' : ''}><dt>Height</dt><dd>{fx(d.height)} m</dd><small>{d.buildings.length ? Math.max(...d.buildings.map((b) => b.floors)) + d.under : 0} floors</small></div>
@@ -107,11 +117,31 @@ function StudioView({ o, r, d, site }: { o: PlotObj; r: PlotReport; d: SiteRepor
         </div>
       </header>
 
+      <div class="studio-3d-bar">
+        <Seg small value={studioLook.value} onChange={(v) => { studioLook.value = v as 'real' | 'flats'; ui.E.rebuildPlots(); }} options={[
+          { value: 'real', label: 'Realistic', title: 'The scheme as it would be built, on the ground as it lies' },
+          { value: 'flats', label: 'Flats', title: 'Floor by floor, flats coloured by type, inside the envelope' },
+        ]} />
+        <Seg small value={studioGround.value} onChange={(v) => { studioGround.value = v as 'plain' | 'satellite' | 'dp'; }} options={[
+          { value: 'plain', label: 'Plain', title: 'The ground as modelled' },
+          { value: 'satellite', label: 'Satellite', title: 'Satellite imagery laid over the ground' },
+          { value: 'dp', label: 'DP', title: 'The Development Plan sheets laid over the ground (where they’re registered)' },
+        ]} />
+        <div class="seg small">
+          <button title="Over the plot" onClick={() => ui.E.studioView('aerial')}>Aerial</button>
+          <button title="At eye level from the street" onClick={() => ui.E.studioView('street')}>Street</button>
+          <button title="Straight down" onClick={() => ui.E.studioView('top')}>Top</button>
+        </div>
+      </div>
+
       <section class="studio-left">
         <div class="studio-tools">
           <div class="seg small">
             <button class={studioTool.value === 'select' ? 'on' : ''} title="Select, move and shape (V)" onClick={() => { studioTool.value = 'select'; }}><Icon.select size={14} /></button>
             <button class={studioTool.value === 'draw' ? 'on' : ''} title="Draw a building: click its spine, Enter to finish (B)" disabled={ro} onClick={() => { studioTool.value = 'draw'; studioSel.value = null; }}><Icon.spine size={14} /> Building</button>
+          </div>
+          <div class="seg small" title="Add to the site: click to place (a road: click its line, Enter to finish)">
+            {ELEMENTS.map((x) => <button key={x.value} class={studioTool.value === x.value ? 'on' : ''} title={x.title} disabled={ro} onClick={() => { studioTool.value = x.value; studioSel.value = null; }}>{x.label}</button>)}
           </div>
           <div class="seg small" title="Start from a shape (replaces the buildings)">
             {PRESETS.map((p) => <button key={p.value} title={p.title} disabled={ro} onClick={() => preset(p.value)}>{p.label}</button>)}
@@ -122,7 +152,9 @@ function StudioView({ o, r, d, site }: { o: PlotObj; r: PlotReport; d: SiteRepor
         </div>
         <div class="studio-plan">
           <canvas ref={ref} />
-          {studioTool.value === 'draw' && <p class="studio-hint">Click the building's spine, node by node · Enter or double-click finishes · Backspace drops the last · Shift: no snapping</p>}
+          <Impact o={o} r={r} d={d} ro={ro} />
+          {(studioTool.value === 'draw' || studioTool.value === 'road') && <p class="studio-hint">Click the {studioTool.value === 'road' ? 'road' : 'building'}'s line, node by node · Enter or double-click finishes · Backspace drops the last · Shift: no snapping</p>}
+          {studioTool.value !== 'select' && studioTool.value !== 'draw' && studioTool.value !== 'road' && <p class="studio-hint">Click where it goes · then drag, turn and size it like a building</p>}
           {sel && studioTool.value === 'select' && (
             <div class="studio-card">
               <div class="studio-card-head"><b>Building</b>{sel.clash && <span class="bad">{sel.clash === 'margins' ? 'past the margins' : 'runs into another'}</span>}</div>
@@ -141,14 +173,41 @@ function StudioView({ o, r, d, site }: { o: PlotObj; r: PlotReport; d: SiteRepor
               </div>
             </div>
           )}
+          {selEl && studioTool.value === 'select' && (() => {
+            const m = ELEMENTS.find((x) => x.value === selEl.kind)!;
+            const len = Math.hypot(selEl.spine[2] - selEl.spine[0], selEl.spine[3] - selEl.spine[1]);
+            const setEl = (patch: Partial<SiteElement>, mg?: string) => setSite({ elements: (site.elements ?? []).map((e) => (e.id === selEl.id ? { ...e, ...patch, auto: undefined } : e)), manual: true }, mg);
+            // a new length: the first wing stretched about its middle
+            const setLen = (L: number, mg?: string) => {
+              const [ax, az, bx, bz] = selEl.spine, mx = (ax + bx) / 2, mz = (az + bz) / 2, ux = (bx - ax) / (len || 1), uz = (bz - az) / (len || 1);
+              setEl({ spine: [mx - (ux * L) / 2, mz - (uz * L) / 2, mx + (ux * L) / 2, mz + (uz * L) / 2, ...selEl.spine.slice(4)].map((v) => Math.round(v * 100) / 100) }, mg);
+            };
+            const bays = selEl.kind === 'parking' ? d.parking.levels.filter((l) => l.kind === 'structure').reduce((a, l) => a + l.bays.length, 0) : selEl.kind === 'lot' ? d.parking.levels.filter((l) => l.kind === 'lot').reduce((a, l) => a + l.bays.length, 0) : 0;
+            return (
+              <div class="studio-card">
+                <div class="studio-card-head"><b>{m.label}</b>{selEl.auto && <span class="muted small">laid by the optimiser</span>}</div>
+                <div class="grid3">
+                  {selEl.kind !== 'road' && selEl.kind !== 'roundabout' && <NumberField label="Length" unit="m" step={1} min={6} max={400} value={Math.round(len)} disabled={ro} onChange={(v, mg) => setLen(v, mg)} />}
+                  <NumberField label={selEl.kind === 'roundabout' ? 'Across' : selEl.kind === 'road' ? 'Width' : 'Depth'} unit="m" step={0.5} min={3} max={200} value={selEl.depth} disabled={ro} onChange={(v, mg) => setEl({ depth: v }, mg)} />
+                  {selEl.kind === 'parking' && <NumberField label="Levels" digits={0} step={1} min={1} max={12} value={selEl.levels ?? 3} disabled={ro} onChange={(v, mg) => setEl({ levels: Math.max(1, Math.round(v)) }, mg)} />}
+                </div>
+                <p class="small muted">{m.title}{bays ? ` · ${bays} bays in all` : ''}</p>
+                <div class="btns">
+                  <button disabled={ro} onClick={() => cv.current?.duplicate(selEl)} title="Ctrl+D"><Icon.copy size={13} /> Duplicate</button>
+                  <button class="danger" disabled={ro} onClick={() => cv.current?.remove(selEl.id)} title="Delete"><Icon.trash size={13} /> Remove</button>
+                </div>
+              </div>
+            );
+          })()}
           {!d.buildings.length && studioTool.value === 'select' && <p class="studio-hint">No buildings: draw one, or start from a shape above.</p>}
         </div>
         <nav class="studio-tabs">
           {(Object.keys(TABS) as Tab[]).map((t) => <button key={t} class={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{TABS[t]}</button>)}
         </nav>
         <div class="studio-drawer">
-          {tab === 'generate' && <GenerateTab o={o} r={r} d={d} site={site} setSite={setSite} ro={ro} />}
-          {tab === 'flats' && <FlatsTab o={o} d={d} site={site} setSite={setSite} ro={ro} />}
+          {tab === 'roads' && <RoadsTab o={o} r={r} ro={ro} />}
+          {tab === 'design' && <DesignTab o={o} r={r} d={d} site={site} setSite={setSite} ro={ro} />}
+          {tab === 'flats' && <FlatsTab o={o} r={r} d={d} site={site} setSite={setSite} ro={ro} />}
           {tab === 'parking' && <ParkingTab o={o} r={r} d={d} site={site} setSite={setSite} ro={ro} />}
           {tab === 'site' && <SiteTab o={o} r={r} d={d} site={site} setSite={setSite} ro={ro} />}
           {tab === 'money' && <MoneyTab d={d} site={site} setSite={setSite} ro={ro} />}
@@ -165,7 +224,7 @@ function StudioView({ o, r, d, site }: { o: PlotObj; r: PlotReport; d: SiteRepor
               <div class="btns">
                 <button onClick={() => areaStatement(o, r, d)} title="Plot, DP road, FSI by source, built-up area by building, parking, open space (CSV, opens in Excel)">Area statement</button>
                 <button onClick={() => unitSchedule(o, d)} title="Every flat: building, floor, type, carpet (CSV)">Unit schedule</button>
-                <button onClick={() => printReport(o, r, d, ref.current)} title="The plan, the numbers and the checks on a page: print, or save as PDF">Report</button>
+                <button onClick={() => printReport(o, r, d, ref.current, ui.E.engine.snapshot())} title="The plan, the numbers and the checks on a page: print, or save as PDF">Report</button>
               </div>
             </div>
           )}
@@ -177,8 +236,23 @@ function StudioView({ o, r, d, site }: { o: PlotObj; r: PlotReport; d: SiteRepor
 
 type TabProps = { o: PlotObj; d: SiteReport; site: PlotSite; setSite: (p: Partial<PlotSite>, merge?: string) => void; ro: boolean };
 
-function FlatsTab({ o, d, site, setSite, ro }: TabProps) {
-  if (o.use === 'commercial') return <p class="small muted">Commercial floors: an office between each pair of cores, {Math.round(CARPET * 100)} % of it carpet. Switch the plot to residential (in its panel on the map) for flats.</p>;
+function FlatsTab({ o, r, d, site, setSite, ro }: TabProps & { r: PlotReport }) {
+  if (o.use !== 'residential') {
+    const units = d.count[3];
+    return (
+      <div>
+        <dl class="kv plot-calc">
+          <dt>{o.use === 'industrial' ? 'Shed floors' : 'Office units'} · all buildings, all floors</dt><dd>{units.toLocaleString('en-IN')}</dd>
+          <dt>Built-up area · {d.buildings.length} building{d.buildings.length === 1 ? '' : 's'}</dt><dd>{m2(d.bua)}</dd>
+          <dt>Carpet · {d.bua ? pc(d.carpet / d.bua) : '–'} of built-up</dt><dd>{m2(d.carpet)}</dd>
+          <dt><b>Saleable</b></dt><dd><b>{Math.round(d.carpet * SQFT).toLocaleString('en-IN')} ft²</b></dd>
+        </dl>
+        <p class="small muted">{o.use === 'industrial'
+          ? `Sheds: one open floor per wing, ${fx(r.rules.floorH)} m clear, no cores or corridor; 92 % of it usable.`
+          : `Offices: an open floor plate between each pair of cores, ${Math.round(CARPET * 100)} % of it carpet, on ${fx(r.rules.floorH)} m floors.`} Switch the use on the Design tab.</p>
+      </div>
+    );
+  }
   const shares = site.mix[0] + site.mix[1] + site.mix[2] || 1;
   return (
     <div>
@@ -220,14 +294,15 @@ function ParkingTab({ o, r, d, site, setSite, ro }: TabProps & { r: PlotReport }
     <div>
       <div class="grid2">
         <Toggle checked={site.stilt} disabled={ro} onChange={(v) => setSite({ stilt: v })} label="Stilt floor" title="Parking on the ground floor under the buildings" />
-        <Toggle checked={!!site.surface} disabled={ro} onChange={(v) => setSite({ surface: v || undefined })} label="Surface bays" title={`Bays on the open ground, clear of the buildings and the fire tender's ${FIRE_W} m way round the tall ones`} />
+        <Toggle checked={!!site.surface} disabled={ro} onChange={(v) => setSite({ surface: v, surfacePick: v })} label="Surface bays" title={`Bays on the open ground, clear of the buildings and the fire tender's ${FIRE_W} m way round the tall ones`} />
         <NumberField label="Podium levels" digits={0} step={1} min={0} max={8} value={site.podium} disabled={ro} onChange={(v, m) => setSite({ podium: Math.round(v) }, m)} title="Parking floors over the whole envelope under the flats (they add to the height)" />
-        <NumberField label="Basements" digits={0} step={1} min={0} max={6} value={site.basements} disabled={ro} onChange={(v, m) => setSite({ basements: Math.round(v) }, m)} title="Under the plot, 1.5 m in from its edges" />
+        <NumberField label="Basements" digits={0} step={1} min={0} max={6} value={site.basements} disabled={ro || !site.manual} state={site.manual ? 'own' : 'base'} onChange={(v, m) => setSite({ basements: Math.round(v) }, m)} title={site.manual ? 'Under the plot, 1.5 m in from its edges' : 'As many as the parking needs: worked out'} />
       </div>
       <dl class="kv plot-calc">
-        <dt>Cars · {o.use === 'commercial' ? '1 per 100 m² carpet' : 'by flat size'}, + 5 % visitors</dt><dd>{P.cars}</dd>
+        <dt>Cars · {o.use === 'industrial' ? '1 per 300 m² carpet' : o.use === 'commercial' ? '1 per 100 m² carpet' : 'by flat size'}, + 5 % visitors</dt><dd>{P.cars}</dd>
+        {P.trucks > 0 && <><dt>Loading bays · 1 per 1,000 m², each the room of three cars</dt><dd>{P.trucks}</dd></>}
         <dt>Two-wheelers · four to a bay</dt><dd>{P.scooters}</dd>
-        {P.levels.map((l, i) => <Fragment key={i}><dt><button class="link" onClick={() => { studioLevel.value = i; }}>{{ stilt: 'Stilt', surface: 'Surface', podium: 'Podium', basement: 'Basement' }[l.kind]}</button></dt><dd>{l.bays.length} bays</dd></Fragment>)}
+        {P.levels.map((l, i) => <Fragment key={i}><dt><button class="link" onClick={() => { studioLevel.value = i; }}>{{ stilt: 'Stilt', surface: 'Surface', podium: 'Podium', basement: 'Basement', structure: 'Car park level', lot: 'Lot' }[l.kind]}</button></dt><dd>{l.bays.length} bays</dd></Fragment>)}
         <dt><b>Bays laid out / needed</b></dt><dd><b>{P.have} / {P.need}</b></dd>
       </dl>
       {P.have < P.need && <button disabled={ro} onClick={fit}>Add basements to fit</button>}
@@ -326,8 +401,8 @@ function CashChart({ cum, months }: { cum: number[]; months: number }) {
   );
 }
 
-/** A scheme's plan, small: the plot and its buildings, the road along the bottom. */
-function Thumb({ r, s }: { r: PlotReport; s: Scheme }) {
+/** A scheme's plan, small: the plot, its open space and its buildings, the road along the bottom. */
+function Thumb({ r, buildings, rg, roads }: { r: PlotReport; buildings: PlotSite['buildings']; rg?: number[] | null; roads?: SiteElement[] }) {
   const F = roadFrame(r), R = F.toL(r.net.length >= 6 ? r.net : r.footprint);
   let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
   for (let i = 0; i < R.length; i += 2) { x0 = Math.min(x0, R[i]); x1 = Math.max(x1, R[i]); z0 = Math.min(z0, -R[i + 1]); z1 = Math.max(z1, -R[i + 1]); }
@@ -336,57 +411,59 @@ function Thumb({ r, s }: { r: PlotReport; s: Scheme }) {
   return (
     <svg viewBox={`-2 -2 ${x1 - x0 + 4} ${z1 - z0 + 4}`} class="scheme-thumb" aria-hidden="true">
       <polygon points={pts(R)} class="t-plot" />
-      {s.d.parking.levels.find((l) => l.kind === 'surface')?.bays.map((q, i) => <polygon key={`p${i}`} points={pts(q)} class="t-bay" />)}
-      {s.site.buildings.flatMap((b) => buildingQuads(b)).map((q, i) => <polygon key={i} points={pts(q)} class="t-bldg" />)}
+      {rg && rg.length >= 6 && <polygon points={pts(rg)} class="t-rg" />}
+      {(roads ?? []).flatMap(elementRings).map((q, i) => <polygon key={`r${i}`} points={pts(q)} class="t-road" />)}
+      {buildings.flatMap((b) => buildingQuads(b)).map((q, i) => <polygon key={i} points={pts(q)} class="t-bldg" />)}
     </svg>
   );
 }
 
-// the last run, kept while the studio's open on the plot
-let lastRun: { id: string; goal: Goal; strict: boolean; list: Scheme[] } | null = null;
-const schemeKey = (s: PlotSite) => JSON.stringify(s.buildings.map((b) => [b.spine, b.depth])) + s.basements + !!s.surface;
-
-function GenerateTab({ o, r, site, setSite, ro }: TabProps & { r: PlotReport }) {
-  const prev = lastRun?.id === o.id ? lastRun : null;
-  const [goal, setGoal] = useState<Goal>(prev?.goal ?? 'profit');
-  const [strict, setStrict] = useState(prev?.strict ?? true);
-  const [list, setList] = useState<Scheme[] | null>(prev?.list ?? null);
-  const [busy, setBusy] = useState<number | null>(null);
-  const run = async () => {
-    setBusy(0);
-    const out = await generate(r, site, o.use, goal, strict, (a, b) => setBusy(a / b));
-    lastRun = { id: o.id, goal, strict, list: out };
-    setList(out); setBusy(null);
-  };
-  const cur = schemeKey(site), opts = o.options ?? [];
-  const keep = (s: Scheme): PlotSite => ({ ...s.site, mix: site.mix, sizes: site.sizes, cost: site.cost });
-  const pass = list?.filter((s) => !s.fails.length).length ?? 0;
+function DesignTab({ o, r, site, setSite, ro }: TabProps & { r: PlotReport }) {
+  const design = site.design ?? DEFAULT_DESIGN;
+  const setDesign = (patch: Partial<Design>, merge?: string) => setSite({ design: { ...design, ...patch }, manual: undefined }, merge);
+  const list = schemes(r, design.type === 'auto' ? design : { ...design, type: 'auto' }, o.use, (site.stilt ? 1 : 0) + site.podium, site);
+  const shed = o.use === 'industrial', noun = (t: string) => (shed ? 'shed' : t === 'tower' ? 'tower' : o.use === 'commercial' ? 'block' : 'slab');
+  const name = (s: (typeof list)[number]) => `${s.buildings.length} ${noun(s.type)}${s.buildings.length === 1 ? '' : 's'} · ${s.floors} floor${s.floors === 1 ? '' : 's'}`;
+  const setUse = (v: PlotUse) => ui.E.edit('Plot use', () => ui.doc.update(o.id, { use: v, site: site.manual ? site : { ...siteDefaults(v), design, cost: site.cost } }));
+  const cur = site.manual ? null : (design.type === 'auto' ? list[0]?.type : design.type);
   return (
     <div>
-      <div class="gen-bar">
-        <Seg small value={goal} onChange={(v) => setGoal(v as Goal)} options={GOALS} />
-        <Toggle checked={strict} onChange={setStrict} label="Fire access and open space" title={`Count the fire tender's ${FIRE_W} m way round buildings over ${FIRE_H} m, and the ${pc(RG_SHARE)} open space on plots of ${m2(RG_FROM)} and more`} />
-        <span class="spacer" />
-        <button class="primary" disabled={ro || busy !== null} onClick={run}>{busy !== null ? `Working ${Math.round(busy * 100)} %` : list ? 'Generate again' : 'Generate'}</button>
+      <div class={`design-state${site.manual ? ' manual' : ''}`}>
+        {site.manual
+          ? <><span><b>Shaped by hand.</b> The optimiser leaves it alone until you ask it again.</span><button class="primary" disabled={ro} onClick={() => { setSite({ manual: undefined }); studioSel.value = null; }}>Re-optimise</button></>
+          : <span><b>Optimised for the most built-up area</b> within the rules: {m2(r.bua)} allowed. Change a setting and it plans again; drag a building to take over.</span>}
       </div>
-      {!list && <p class="small muted">Every shape (bar, L, U, courtyard, towers) at a range of depths, each parked on stilts and basements, then with surface bays as well, with as many basements as the parking needs. Ranked by your goal; schemes that break a rule go last. Your flat mix, sizes and rates carry over.</p>}
-      {list && <p class="small muted">{list.length} schemes, {pass} within every rule. Click one to use it.</p>}
-      {list && (
-        <div class="schemes">
-          {list.slice(0, 24).map((s, i) => (
-            <div key={i} class={`scheme${schemeKey(s.site) === cur ? ' on' : ''}${s.fails.length ? ' fails' : ''}`}>
-              <button class="scheme-pick" disabled={ro} title="Use this scheme" onClick={() => { setSite(keep(s)); studioSel.value = null; studioLevel.value = -1; }}>
-                <Thumb r={r} s={s} />
-                <span class="scheme-name">{s.name}</span>
-                <b>{goal === 'flats' ? `${s.d.flats} flats` : goal === 'carpet' ? `${Math.round(s.d.carpet * SQFT).toLocaleString('en-IN')} ft²` : goal === 'irr' ? (s.d.money.irr === null ? 'IRR –' : `IRR ${pc(s.d.money.irr)}`) : cr(s.d.money.profit)}</b>
-                <small>{s.d.flats} flats · FSI {fx(s.d.fsi)} · {fx(s.d.height)} m · {s.site.basements} bsmt</small>
-                {s.fails.length > 0 && <small class="bad">{s.fails.join(', ')}</small>}
+      <label class="field-label">Use<Seg small value={o.use} onChange={(v) => !ro && setUse(v as PlotUse)} options={[
+        { value: 'residential', label: 'Residential', title: USE_NOTE.residential }, { value: 'commercial', label: 'Commercial', title: USE_NOTE.commercial },
+        { value: 'industrial', label: 'Industrial', title: USE_NOTE.industrial },
+      ]} /></label>
+      {o.use !== 'residential' && <p class="small muted">{USE_NOTE[o.use]}</p>}
+      <div class="grid3">
+        <label class="field-label">Buildings<Seg small value={shed ? 'auto' : design.type} onChange={(v) => setDesign({ type: v as Typology })} options={shed ? [{ value: 'auto', label: 'Sheds', title: 'Sheds as deep as the zone allows' }] : TYPOLOGIES} /></label>
+        <NumberField label="Most floors" digits={0} step={1} min={0} max={80} value={design.maxFloors} disabled={ro} title="Floors at most (over the stilt); 0: as the height limit allows" onChange={(v, m) => setDesign({ maxFloors: Math.max(0, Math.round(v)) }, m)} />
+        <NumberField label="Most buildings" digits={0} step={1} min={0} max={20} value={design.maxBuildings} disabled={ro} title="0: as many as fit" onChange={(v, m) => setDesign({ maxBuildings: Math.max(0, Math.round(v)) }, m)} />
+      </div>
+      <label class="field-label">Internal roads<Seg small value={design.access ?? 'perimeter'} onChange={(v) => setDesign({ access: v as Access })} options={ACCESS} /></label>
+      <div class="grid3">
+        <NumberField label="Extra spacing" unit="m" digits={0} step={1} min={0} max={60} value={design.spacing ?? 0} disabled={ro} title="More room between buildings than the rules ask" onChange={(v, m) => setDesign({ spacing: Math.max(0, Math.round(v)) }, m)} />
+        <NumberField label="Green" unit="%" digits={0} step={1} min={0} max={60} value={design.green ?? 0} disabled={ro} title="Share of the plot kept as garden at least (the open space the rules ask is kept anyway)" onChange={(v, m) => setDesign({ green: Math.max(0, Math.round(v)) }, m)} />
+        <Toggle checked={!!design.roundabouts} disabled={ro || !design.access || design.access === 'perimeter' || design.access === 'none'} onChange={(v) => setDesign({ roundabouts: v || undefined })} label="Roundabouts" title="A turning circle at each road's end and a roundabout where roads cross" />
+      </div>
+      {list.length > 0 && (
+        <div class="schemes two">
+          {list.map((s) => (
+            <div key={s.type} class={`scheme${cur === s.type ? ' on' : ''}`}>
+              <button class="scheme-pick" disabled={ro} title={`Use ${noun(s.type)}s`} onClick={() => { setDesign({ type: s.type }); studioSel.value = null; studioLevel.value = -1; }}>
+                <Thumb r={r} buildings={s.buildings} rg={s.rg} roads={s.roads} />
+                <span class="scheme-name">{noun(s.type)[0].toUpperCase() + noun(s.type).slice(1)}s{s === list[0] ? ' · most built-up' : ''}</span>
+                <b>{m2(s.bua)} <small>{pc(s.bua / r.bua)} of allowed</small></b>
+                <small>{name(s)} · {fx((s.floors + (site.stilt ? 1 : 0) + site.podium) * r.rules.floorH)} m · FSI {fx(s.bua / r.area)}</small>
               </button>
-              <button class="link small" disabled={ro} title="Keep it with the plot's options" onClick={() => ui.E.edit('Plot options', () => ui.doc.update(o.id, { options: [...opts, { name: s.name, site: keep(s) }] }))}>Save</button>
             </div>
           ))}
         </div>
       )}
+      <p class="small muted">Buildings keep the margins for their height and, above {FIRE_H} m, {FIRE_W} m from the plot's other sides for the fire tender's drive; the gap between them is the taller one's side margin (at least {FIRE_W} m). Plots of {m2(RG_FROM)} and more keep {pc(RG_SHARE)} as open space at the back. Mid-rise slabs come first in Pune, towers in Mumbai; either way it's the one that builds the most.</p>
     </div>
   );
 }
@@ -404,7 +481,103 @@ function SiteTab({ o, r, d }: TabProps & { r: PlotReport }) {
         <dt>Fire tender's way round</dt><dd class={d.over.fire ? 'bad' : ''}>{tall.length ? `${tall.filter((b) => b.fireOk).length} of ${tall.length} clear` : `no building over ${FIRE_H} m`}</dd>
         <dt>Margins at {fx(d.height)} m</dt><dd>front {fx(r.rules.front)} m · sides {fx(side)} m</dd>
       </dl>
-      <p class="small muted">Buildings over {FIRE_H} m need a clear {FIRE_W} m motorable way round them for a fire tender (NBC 2016 Part 4), on the plot or out over the road it fronts: dashed on the plan, red where it's blocked. Plots of {m2(RG_FROM)} and more keep {pc(RG_SHARE)} as recreational open space (UDCPR 3.5.1).{o.use === 'commercial' ? ' Not asked of commercial plots here.' : ''}</p>
+      <p class="small muted">Buildings over {FIRE_H} m need a clear {FIRE_W} m motorable way round them for a fire tender (NBC 2016 Part 4), on the plot or out over the road it fronts: dashed on the plan, red where it's blocked. Plots of {m2(RG_FROM)} and more keep {pc(RG_SHARE)} as recreational open space (UDCPR 3.5.1).{o.use !== 'residential' ? ` Not asked of ${o.use} plots here.` : ''}</p>
+    </div>
+  );
+}
+
+// ---------------- roads: what-if widths ----------------
+
+type RoadEdits = NonNullable<PlotObj['roadEdits']>;
+
+/** The map's own width and DP reserve of a section. */
+function mapRoad(id: string) {
+  const s = ui.doc.get<'section'>(id);
+  return s?.kind === 'section' ? { width: Math.round(totalWidth(s.parts) * 100) / 100, reserve: s.reserve } : null;
+}
+
+/** Set a road's what-if, dropping what matches the map again. */
+function setRoadEdit(o: PlotObj, id: string, patch: { width?: number; reserve?: number }, merge?: string) {
+  const next: RoadEdits = { ...o.roadEdits, [id]: { ...o.roadEdits?.[id], ...patch } };
+  for (const [k, e] of Object.entries(next)) {
+    const m = mapRoad(k);
+    if (!m) { delete next[k]; continue; }
+    if (e.width !== undefined && Math.abs(e.width - m.width) < 0.01) delete e.width;
+    if (e.reserve !== undefined && e.reserve === (m.reserve ?? 0)) delete e.reserve;
+    if (e.width === undefined && e.reserve === undefined) delete next[k];
+  }
+  ui.E.edit('Road what-if', () => ui.doc.update(o.id, { roadEdits: Object.keys(next).length ? next : undefined }), merge);
+}
+
+function RoadsTab({ o, r, ro }: { o: PlotObj; r: PlotReport; ro: boolean }) {
+  if (!r.roads.length) return <p class="small muted">No road near this plot.</p>;
+  const basis = o.basis ?? (r.road?.dp ? 'dp' : 'today');
+  const site = ui.E.plot.site(o.id);
+  const gates = site?.gateRoads ?? (r.area >= GATES_FROM ? r.roads.map((x) => x.id) : r.road ? [r.road.id] : []);
+  const setGates = (g: string[]) => site && ui.E.edit('Gates', () => ui.doc.update(o.id, { site: { ...site, gateRoads: g } }));
+  return (
+    <div>
+      <table class="road-table">
+        <thead><tr><th>Road</th><th title="The plot is entered from it: its width sets the FSI">Entry</th><th title="A gate (and, with internal roads, a road in) from it">Gate</th><th>Width today</th><th>DP width</th><th /></tr></thead>
+        <tbody>
+          {r.roads.map((x) => {
+            const m = mapRoad(x.id);
+            return (
+              <tr key={x.id} class={x.edited ? 'edited' : ''}>
+                <td><b>{x.name}</b>{m && x.edited && <small>map: {m.width} m{m.reserve ? ` · DP ${m.reserve} m` : ''}</small>}</td>
+                <td><input type="radio" name="entry" checked={x.entry} disabled={ro || r.roads.length < 2} onChange={() => ui.E.edit('Entry road', () => ui.doc.update(o.id, { front: x.id }))} aria-label={`Enter from ${x.name}`} /></td>
+                <td><input type="checkbox" checked={gates.includes(x.id)} disabled={ro} onChange={() => setGates(gates.includes(x.id) ? gates.filter((g) => g !== x.id) : [...gates, x.id])} aria-label={`A gate on ${x.name}`} /></td>
+                <td><NumberField unit="m" step={0.5} min={3} max={90} value={x.today} disabled={ro} state={o.roadEdits?.[x.id]?.width !== undefined ? 'own' : 'base'} onChange={(v, mg) => setRoadEdit(o, x.id, { width: v }, mg)} /></td>
+                <td><NumberField unit="m" step={1} min={0} max={90} value={x.dp ?? 0} disabled={ro} state={o.roadEdits?.[x.id]?.reserve !== undefined ? 'own' : 'base'} title="0: no DP width" onChange={(v, mg) => setRoadEdit(o, x.id, { reserve: Math.round(v) }, mg)} /></td>
+                <td>{x.edited && <button class="link small" disabled={ro} onClick={() => setRoadEdit(o, x.id, { width: m?.width, reserve: m?.reserve ?? 0 })}>Reset</button>}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <div class="road-basis">
+        <span class="small muted">Rules by</span>
+        <Seg small value={basis} onChange={(v) => !ro && ui.E.edit('Plot basis', () => ui.doc.update(o.id, { basis: v as 'today' | 'dp' }))} options={[
+          { value: 'today', label: 'Today’s width', title: 'FSI and margins by the road as built' },
+          { value: 'dp', label: 'DP width', title: 'FSI and margins by the road the Development Plan widens it to' },
+        ]} />
+      </div>
+      <p class="small muted">The FSI and front margin follow the entry road ({fx(r.roadW)} m); every road side keeps the front margin, and each road's DP width cuts the plot. Widths you change here are what-ifs: the plot and its buildings follow at once, and the map takes them when you close the studio.</p>
+    </div>
+  );
+}
+
+/** What the road what-ifs change, against the map as it is. */
+function Impact({ o, r, d, ro }: { o: PlotObj; r: PlotReport; d: SiteReport; ro: boolean }) {
+  const b = ui.E.plot.baseline(o.id);
+  if (!b) return null;
+  const floors = (x: SiteReport) => (x.buildings.length ? Math.max(...x.buildings.map((y) => y.floors)) + x.under : 0);
+  const rows: { k: string; a: number; z: number; f: (v: number) => string }[] = [
+    { k: 'FSI', a: b.r.bua / b.r.area, z: r.bua / r.area, f: fx },
+    { k: 'Permissible', a: b.r.bua, z: r.bua, f: m2 },
+    { k: 'Built', a: b.d.bua, z: d.bua, f: m2 },
+    { k: 'Floors', a: floors(b.d), z: floors(d), f: (v) => String(v) },
+    { k: 'Flats', a: b.d.flats, z: d.flats, f: (v) => String(v) },
+    { k: 'Profit', a: b.d.money.profit, z: d.money.profit, f: cr },
+  ];
+  const what = r.roads.filter((x) => x.edited).map((x) => {
+    const m = mapRoad(x.id);
+    const parts: string[] = [];
+    if (m && Math.abs(m.width - x.today) > 0.01) parts.push(`${m.width} → ${+x.today.toFixed(2)} m`);
+    if (m && (m.reserve ?? 0) !== (x.dp ?? 0)) parts.push(`DP ${m.reserve ?? '–'} → ${x.dp || '–'} m`);
+    return `${x.name} ${parts.join(', ')}`;
+  });
+  return (
+    <div class="studio-impact" role="status">
+      <div class="impact-head"><b>What-if</b><span>{what.join(' · ')}</span>
+        <button class="link small" disabled={ro} onClick={() => ui.E.edit('Road what-if', () => ui.doc.update(o.id, { roadEdits: undefined }))}>Reset</button></div>
+      <dl>
+        {rows.map((x) => {
+          const up = x.z > x.a + 1e-6, down = x.z < x.a - 1e-6;
+          return <div key={x.k} class={up ? 'up' : down ? 'down' : ''}><dt>{x.k}</dt><dd>{x.f(x.a)} → <b>{x.f(x.z)}</b></dd></div>;
+        })}
+      </dl>
+      <small>The map takes these widths when you close the studio.</small>
     </div>
   );
 }

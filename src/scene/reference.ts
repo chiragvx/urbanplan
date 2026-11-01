@@ -3,6 +3,7 @@
 // GPU memory is bounded: DP tiles are decoded at the resolution the zoom needs (1000 px down to 125 px a tile),
 // without mipmaps; the least recently seen tiles go once the budget is reached, and everything is released when
 // the 3D view opens (the plan view's imagery isn't drawn there).
+import { pointIn } from '../doc/site';
 import * as THREE from 'three/webgpu';
 import type { CityDoc } from '../doc/doc';
 import type { LayerObj } from '../doc/types';
@@ -184,6 +185,106 @@ export class Reference {
       const url = tmpl.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y)).replace('{s}', 'abc'[(x + y) % 3]);
       const c = [toXZ(lat2(y), lon2(x)), toXZ(lat2(y), lon2(x + 1)), toXZ(lat2(y + 1), lon2(x + 1)), toXZ(lat2(y + 1), lon2(x))];
       this.quad(`${L.id}/${L.preset ?? ''}/${ox},${oz}/${z}/${x}/${y}`, L.id, c, url, L.opacity, order + 1, 0, ground);
+    }
+  }
+
+  // ---------------- draped over the 3D ground ----------------
+
+  /** imagery laid over the terrain in 3D (the studio's square): satellite tiles or the DP sheets, one texture */
+  readonly drapeGroup = new THREE.Group();
+  private drapeKey = '';
+  private drapeGen = 0;
+
+  /** Lay `kind` over the ground in `rect` (x0, z0, x1, z1, local metres) in 3D, leaving out the `hole` (the plot,
+   *  which has its own ground); null takes it away. */
+  drape(kind: 'satellite' | 'dp' | null, rect: [number, number, number, number] | null, ground: (x: number, z: number) => number, opacity = 1, hole?: number[]) {
+    const key = kind && rect ? `${kind}/${rect.map((v) => v.toFixed(0)).join(',')}/${hole?.length ? hole.slice(0, 4).map((v) => v.toFixed(0)).join(',') : ''}` : '';
+    if (key === this.drapeKey) { for (const m of this.drapeGroup.children) ((m as THREE.Mesh).material as THREE.MeshBasicNodeMaterial).opacity = opacity; return; }
+    this.drapeKey = key;
+    const gen = ++this.drapeGen;
+    for (const c of [...this.drapeGroup.children]) {
+      const m = c as THREE.Mesh, mat = m.material as THREE.MeshBasicNodeMaterial;
+      mat.map?.dispose(); mat.dispose(); m.geometry.dispose(); this.drapeGroup.remove(m);
+    }
+    if (!kind || !rect) { this.onLoad(); return; }
+    const [x0, z0, x1, z1] = rect, W = x1 - x0, H = z1 - z0;
+    const SIZE = 2048;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = SIZE;
+    const g2 = cv.getContext('2d')!;
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 8;
+    // a grid over the ground, a hair above it (the plot's own paving sits higher)
+    const N = 128, pos = new Float32Array((N + 1) * (N + 1) * 3), uv = new Float32Array((N + 1) * (N + 1) * 2), idx: number[] = [];
+    for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) {
+      const x = x0 + (W * i) / N, z = z0 + (H * j) / N, k = j * (N + 1) + i;
+      pos[k * 3] = x; pos[k * 3 + 1] = ground(x, z) + 0.05; pos[k * 3 + 2] = z;
+      uv[k * 2] = i / N; uv[k * 2 + 1] = 1 - j / N;
+    }
+    const inHole = (k: number) => !!hole && hole.length >= 6 && pointIn(hole, pos[k * 3], pos[k * 3 + 2]);
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const a = j * (N + 1) + i, b = a + 1, c = a + N + 1, d = c + 1;
+      if (inHole(a) || inHole(b) || inHole(c) || inHole(d)) continue;
+      idx.push(a, c, b, b, c, d);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const mat = new THREE.MeshBasicNodeMaterial({ map: tex, transparent: true, opacity, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, toneMapped: false });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = 1;
+    this.drapeGroup.add(mesh);
+    // local metres → canvas pixels
+    const px = (x: number, z: number): [number, number] => [((x - x0) / W) * SIZE, ((z - z0) / H) * SIZE];
+    const paint = (url: string, corners: [number, number][]) => {
+      fetch(url, { mode: 'cors' }).then((r) => (r.ok ? r.blob() : Promise.reject(r.status))).then((b) => createImageBitmap(b)).then((bmp) => {
+        if (gen !== this.drapeGen) { bmp.close(); return; }
+        const [a, c] = [px(...corners[0]), px(...corners[2])];
+        g2.drawImage(bmp, a[0], a[1], c[0] - a[0], c[1] - a[1]);
+        bmp.close();
+        tex.needsUpdate = true;
+        this.onLoad();
+      }).catch(() => {});
+    };
+    if (kind === 'dp') {
+      const go = (ix: DpIndex | null | undefined) => {
+        if (!ix) return;
+        for (const t of ix.tiles) {
+          if (t.x0 + t.size < x0 || t.x0 > x1 || t.z0 + t.size < z0 || t.z0 > z1) continue;
+          paint(`${this.base}dp/${t.file}`, [[t.x0, t.z0], [t.x0 + t.size, t.z0], [t.x0 + t.size, t.z0 + t.size], [t.x0, t.z0 + t.size]]);
+        }
+      };
+      if (this.dpIndex !== undefined) go(this.dpIndex);
+      else fetch(`${this.base}dp/index.json`).then((x) => (x.ok ? x.json() : null)).then((j) => { this.dpIndex = j; if (gen === this.drapeGen) go(j); }).catch(() => {});
+      return;
+    }
+    // satellite: the imagery layer's source (Esri unless a keyed one is set up), at about a metre to two pixels
+    const o = this.origin, L = this.doc.get<'layer'>('satellite');
+    const keys = this.keys();
+    let tmpl = L?.url ?? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+    if (tmpl.includes('{token}')) {
+      const k = keys[L?.preset ?? ''];
+      tmpl = k ? tmpl.replace('{token}', encodeURIComponent(k)) : 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+    }
+    const [ox, oz] = L?.offset ?? [0, 0];
+    const toLL = (x: number, z: number) => ({ lon: o.lon + (x - ox) / o.kx, lat: o.lat - (z - oz) / o.kz });
+    const toXZ = (lat: number, lon: number): [number, number] => [(lon - o.lon) * o.kx + ox, -(lat - o.lat) * o.kz + oz];
+    const mpp = W / SIZE;
+    const z = Math.max(12, Math.min(19, Math.round(Math.log2((156543.03 * Math.cos((o.lat * Math.PI) / 180)) / mpp))));
+    const n = 2 ** z;
+    const tx = (lon: number) => Math.floor(((lon + 180) / 360) * n);
+    const ty = (lat: number) => { const r = (lat * Math.PI) / 180; return Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n); };
+    const lon2 = (x: number) => (x / n) * 360 - 180;
+    const lat2 = (y: number) => (Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / n))) * 180) / Math.PI;
+    const a = toLL(x0, z0), b = toLL(x1, z1);
+    const X0 = tx(a.lon), X1 = tx(b.lon), Y0 = ty(a.lat), Y1 = ty(b.lat);
+    if ((X1 - X0 + 1) * (Y1 - Y0 + 1) > 400) return;
+    for (let x = X0; x <= X1; x++) for (let y = Y0; y <= Y1; y++) {
+      const url = tmpl.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y)).replace('{s}', 'abc'[(x + y) % 3]);
+      paint(url, [toXZ(lat2(y), lon2(x)), toXZ(lat2(y), lon2(x + 1)), toXZ(lat2(y + 1), lon2(x + 1)), toXZ(lat2(y + 1), lon2(x))]);
     }
   }
 }

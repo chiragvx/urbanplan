@@ -5,7 +5,8 @@ import type { Editor } from './editor';
 import { newId } from '../doc/ids';
 import type { Id, PlotObj } from '../doc/types';
 import { analysePlot, centroid, polyArea, type PlotCode, type PlotReport } from '../doc/plot';
-import { siteOf, solveSite, type PlotSite, type SiteReport } from '../doc/site';
+import { solveSite, type PlotSite, type SiteReport } from '../doc/site';
+import { siteFor } from '../doc/optimise';
 import { readOnly, select, status, toast } from './state';
 
 export class PlotTool {
@@ -15,6 +16,7 @@ export class PlotTool {
   snap: [number, number] | null = null;
   private reports = new Map<Id, PlotReport>();
   private layouts = new Map<Id, SiteReport>();
+  private bases = new Map<Id, { r: PlotReport; d: SiteReport }>();
 
   constructor(readonly E: Editor) {}
 
@@ -88,9 +90,23 @@ export class PlotTool {
     if (hit) return hit;
     const o = this.E.doc.get<'plot'>(id), r = this.report(id);
     if (!o || !r) return null;
-    const d = solveSite(r, siteOf(o.site, r), o.use);
+    const d = solveSite(r, siteFor(o.site, r, o.use), o.use);
     this.layouts.set(id, d);
     return d;
+  }
+
+  /** The plot against the map as it is, without its what-if road widths: what the what-ifs are measured against.
+   *  Null when it has none. */
+  baseline(id: Id): { r: PlotReport; d: SiteReport } | null {
+    const o = this.E.doc.get<'plot'>(id);
+    if (!o?.roadEdits || o.ring.length < 6) return null;
+    const hit = this.bases.get(id);
+    if (hit) return hit;
+    const p = { ...o, roadEdits: undefined };
+    const r = analysePlot(this.E.doc, this.E.C, (x0, z0, x1, z1) => this.E.hit.query(x0, z0, x1, z1), p, this.code(o));
+    const b = { r, d: solveSite(r, siteFor(o.site, r, o.use), o.use) };
+    this.bases.set(id, b);
+    return b;
   }
 
   /** Another site on the same plot (a saved option), not cached. */
@@ -102,7 +118,7 @@ export class PlotTool {
   /** The site on a plot as it stands (the default one until it's edited). */
   site(id: Id): PlotSite | null {
     const o = this.E.doc.get<'plot'>(id), r = this.report(id);
-    return o && r ? siteOf(o.site, r) : null;
+    return o && r ? siteFor(o.site, r, o.use) : null;
   }
 
   /** The regulations a plot falls under: Mumbai's DCPR 2034 (island city south of Mahim and Sion creeks, else the
@@ -115,5 +131,5 @@ export class PlotTool {
   }
 
   /** The map changed: reports are worked out again when next asked for. */
-  invalidate() { this.reports.clear(); this.layouts.clear(); }
+  invalidate() { this.reports.clear(); this.layouts.clear(); this.bases.clear(); }
 }

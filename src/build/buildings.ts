@@ -52,7 +52,7 @@ function hash01(n: number) {
   return (h >>> 0) / 4294967296;
 }
 
-const PALETTES: Record<FacadeStyle, number[]> = {
+export const PALETTES: Record<FacadeStyle, number[]> = {
   apartment: [0xf1e9da, 0xe8dcc5, 0xefe4d0, 0xdcd3c3, 0xe9d8bd, 0xd9dfe2, 0xf0dccb, 0xe1e5d6, 0xf3efe6, 0xe7d1c1],
   glass: [0xc9d6df, 0xbfcbd4, 0xd3dbe0, 0xb6c4ce],
   house: [0xf2dcb6, 0xeccda2, 0xe2c09f, 0xf4e6cc, 0xd5e0cf, 0xecd0cf, 0xdfe6ea, 0xf6eee0],

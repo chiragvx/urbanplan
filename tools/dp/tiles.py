@@ -7,6 +7,8 @@ column 0 = west edge (smallest x). RGBA; alpha 0 where no registered sheet cover
 Transform per pixel is exactly measure.py's to_px():  Q -= correction(cps, Q);  [u, v] = Ainv[:2] @ [x, z, 1] * DPI/300
 
 Usage: python tools/dp/tiles.py [sheet ...] [--res 0.5]
+       DP_CITY=pune python tools/dp/tiles.py --out public/regions/pune/dp --res 1 --dpi 150
+         (a whole city: sheet by sheet, only the blocks each covers, so one sheet is in memory at a time)
 """
 import json, sys, os, glob, time, argparse
 import numpy as np, cv2
@@ -124,5 +126,70 @@ def main():
     print(f'{len(tiles)} blocks, {total / 1e6:.1f} MB, {time.time() - t0:.1f}s -> {OUT}')
 
 
+def sheet_box(name):
+    """The world box (x0, z0, x1, z1) a sheet's map frame covers, from its affine (px at 300 dpi -> metres)."""
+    _, _, r = load_reg(name)
+    A = np.array(r['affine'])
+    img = align.sheet_image(align.sheet_pdf(name), 20)  # a thumbnail, for the page size
+    H, W = img.shape[0] * 15, img.shape[1] * 15
+    pts = [A @ np.array([u, v, 1.0]) for u in (0, FRAME * W) for v in (0, H)]
+    xs, zs = [p[0] for p in pts], [p[1] for p in pts]
+    return min(xs) - 200, min(zs) - 200, max(xs) + 200, max(zs) + 200
+
+
+def city_main(a, names):
+    """Sheet-major: blocks are filled one sheet at a time (the deepest-inside sheet wins where they overlap)."""
+    t0 = time.time()
+    out_dir = os.path.join(align.ROOT, a.out)
+    os.makedirs(out_dir, exist_ok=True)
+    for f in glob.glob(os.path.join(out_dir, 't_*.webp')): os.remove(f)
+    px = int(round(BLOCK / a.res))
+    c = (np.arange(px) + 0.5) * a.res
+    blocks = {}  # (i, j) -> [rgba, best]
+    for n in names:
+        x0, z0, x1, z1 = sheet_box(n)
+        s = Sheet(n, a.dpi)
+        i0, i1 = int(np.floor(x0 / BLOCK)), int(np.floor(x1 / BLOCK))
+        j0, j1 = int(np.floor(z0 / BLOCK)), int(np.floor(z1 / BLOCK))
+        k = 0
+        for j in range(j0, j1 + 1):
+            for i in range(i0, i1 + 1):
+                X, Z = np.meshgrid(i * BLOCK + c, j * BLOCK + c)
+                rgb, dist = s.render(X, Z)
+                if rgb is None: continue
+                b = blocks.get((i, j))
+                if b is None:
+                    b = blocks[(i, j)] = [np.zeros((px, px, 4), np.uint8), np.full((px, px), -1.0, np.float32)]
+                take = (dist >= 0) & (dist > b[1])
+                if not take.any(): continue
+                b[0][take, :3] = rgb[take]; b[0][take, 3] = 255; b[1][take] = dist[take]
+                k += 1
+        print(f'  {n}: {k} blocks  ({time.time() - t0:.0f}s)', flush=True)
+        del s
+    tiles, total = [], 0
+    for (i, j), (rgba, _) in sorted(blocks.items()):
+        # paper white (the page margins, unzoned land) shows the map through
+        rgba[(rgba[:, :, :3].min(axis=2) > 235), 3] = 0
+        if not rgba[:, :, 3].any(): continue
+        f = f't_{i}_{j}.webp'
+        p = os.path.join(out_dir, f)
+        cv2.imwrite(p, cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGRA), [cv2.IMWRITE_WEBP_QUALITY, QUALITY])
+        total += os.path.getsize(p)
+        tiles.append({'file': f, 'x0': num(i * BLOCK), 'z0': num(j * BLOCK), 'size': BLOCK})
+    idx = {'res': a.res, 'size': BLOCK, 'sheets': names, 'tiles': tiles, 'attribution': ATTRIBUTION}
+    with open(os.path.join(out_dir, 'index.json'), 'w', encoding='utf-8') as fh:
+        json.dump(idx, fh, ensure_ascii=False, separators=(',', ':'))
+    print(f'{len(tiles)} blocks, {total / 1e6:.1f} MB, {time.time() - t0:.0f}s -> {out_dir}')
+
+
 if __name__ == '__main__':
-    main()
+    if '--out' in sys.argv:
+        ap = argparse.ArgumentParser()
+        ap.add_argument('sheets', nargs='*')
+        ap.add_argument('--out', required=True)
+        ap.add_argument('--res', type=float, default=1.0)
+        ap.add_argument('--dpi', type=int, default=150)
+        a = ap.parse_args()
+        city_main(a, a.sheets or sorted(os.path.basename(p)[:-9] for p in glob.glob(os.path.join(DP, '*.reg.json'))))
+    else:
+        main()

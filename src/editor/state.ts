@@ -22,9 +22,13 @@ export const docVersion = signal(0);
 export const readOnly = signal(false);
 /** Site Studio: the plot open in it, its tool, the building and node selected, the level shown (-1 = flats) */
 export const studio = signal<Id | null>(null);
-export const studioTool = signal<'select' | 'draw'>('select');
+export const studioTool = signal<'select' | 'draw' | import('../doc/site').ElementKind>('select');
 export const studioSel = signal<string | null>(null);
 export const studioLevel = signal(-1);
+/** the studio's 3D: the scheme as it would be built, or its flats floor by floor */
+export const studioLook = signal<'real' | 'flats'>('real');
+/** the studio's 3D ground: as modelled, satellite imagery or the DP sheets laid over it */
+export const studioGround = signal<'plain' | 'satellite' | 'dp'>('plain');
 export const xray = signal(false);
 export const accuracyView = signal(false);
 /** terrain view: heights, hill shade and contours (or cut / fill) over the plan */

@@ -3,7 +3,7 @@
 // from the plot's centre and the ground there; DXF has Y north.
 import type { Editor } from './editor';
 import type { Id } from '../doc/types';
-import { UNIT_COLOR, UNIT_LABEL, type SiteReport } from '../doc/site';
+import { driveQuads, UNIT_COLOR, UNIT_LABEL, type SiteReport } from '../doc/site';
 import type { PlotReport } from '../doc/plot';
 import { hex, prismTris, type Box } from '../build/prism';
 
@@ -84,7 +84,7 @@ function gather(E: Editor, plot: number[], r: PlotReport, d: SiteReport | null) 
 
   // the plot
   outlines.push({ layer: 'PLOT', ring: loc(plot), closed: true });
-  if (r.lostRing.length >= 6) outlines.push({ layer: 'DP-ROAD-STRIP', ring: loc(r.lostRing), closed: true });
+  for (const L of r.lostRings) outlines.push({ layer: 'DP-ROAD-STRIP', ring: loc(L), closed: true });
   const env = d?.envelope.length ? d.envelope : r.footprint;
   if (env.length >= 6) outlines.push({ layer: 'ENVELOPE', ring: loc(env), closed: true });
   if (!d?.buildings.length) return { parts, outlines, origin: [cx, cz, y0] as [number, number, number] };
@@ -116,6 +116,21 @@ function gather(E: Editor, plot: number[], r: PlotReport, d: SiteReport | null) 
     for (const b of l.bays) outlines.push({ layer, ring: loc(b), closed: true });
     if (l.ramp) outlines.push({ layer, ring: loc(l.ramp), closed: true });
   }
+  // the ground: the compound wall, gates, the drive, the open space
+  const G = d.ground;
+  const wallBoxes: Box[] = [];
+  for (const w of G.wall) {
+    outlines.push({ layer: 'WALL', ring: loc(w), closed: false });
+    const L = Math.hypot(w[2] - w[0], w[3] - w[1]);
+    if (L < 0.05) continue;
+    const nx = (-(w[3] - w[1]) / L) * 0.12, nz = ((w[2] - w[0]) / L) * 0.12;
+    wallBoxes.push({ ring: [w[0] + nx, w[1] + nz, w[2] + nx, w[3] + nz, w[2] - nx, w[3] - nz, w[0] - nx, w[1] - nz], y0: base, y1: base + 1.8, color: hex('#ddd6c8') });
+  }
+  add('wall', wallBoxes);
+  for (const g2 of G.gates) outlines.push({ layer: 'GATES', ring: loc(g2), closed: false });
+  for (const line of G.drive) outlines.push({ layer: 'DRIVE', ring: loc(line), closed: false });
+  add('drive', driveQuads(G).map((q) => ({ ring: q, y0: base, y1: base + 0.05, color: hex('#5b6068') })));
+  if (G.rg) { outlines.push({ layer: 'OPEN-SPACE', ring: loc(G.rg), closed: true }); add('open-space', [{ ring: G.rg, y0: base, y1: base + 0.08, color: hex('#86b46a') }]); }
   return { parts, outlines, origin: [cx, cz, y0] as [number, number, number] };
 }
 

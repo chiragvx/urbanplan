@@ -5,7 +5,7 @@ import type { Compiler } from '../../src/doc/compile';
 import type { PlotObj } from '../../src/doc/types';
 import { basementsToFit, buildingQuads, pointIn, newBuildingId, presetBuildings, siteOf, solveSite, SQFT, TRAVEL, type PlotSite } from '../../src/doc/site';
 import { polyArea as area } from '../../src/doc/plot';
-import { generate } from '../../src/doc/generate';
+import { schemes as optSchemes, siteFor } from '../../src/doc/optimise';
 let ok = true;
 const check = (c: boolean, m: string) => { console.log(`${c ? 'ok  ' : 'FAIL'} ${m}`); if (!c) ok = false; };
 const near = (a: number, b: number) => Math.abs(a - b) < 0.5;
@@ -37,6 +37,21 @@ check(near(r.parts.basic, 759) && near(r.parts.premium, 420) && near(r.parts.tdr
   `basic on the net plot, premium and TDR on the whole plot: ${r.parts.basic} + ${r.parts.premium} + ${r.parts.tdr} + ancillary ${r.parts.ancillary.toFixed(0)} = ${r.bua.toFixed(0)} m²`);
 // margins grow with the height (H/5 above 10 m): 9 floors at 5.4 m sides builds the most (19.2 × 13.1 m × 9)
 check(r.floors === 9 && near(r.side, 5.4) && near(r.buildable, 2263.7) && r.limit === 'margins', `best envelope: ${r.floors} floors, sides ${r.side} m, ${r.buildable.toFixed(1)} m², limited by ${r.limit}`);
+// a corner plot: the 12 m road along x and an 8 m lane along z at x = 0; and a plot 50 m off any road
+const lane = { kind: 'section', id: 's2', name: 'Lane', parts: [{ kind: 'lane', width: 8 }], cls: 'residential', elevated: false };
+const doc2 = { get: (id: string) => (id === 's1' ? section : id === 's2' ? lane : undefined) } as unknown as CityDoc;
+const C2 = { geo: (id: string) => (id === 's1' ? { pts: [-200, 0, 200, 0] } : id === 's2' ? { pts: [0, -200, 0, 200] } : undefined) } as unknown as Compiler;
+const a2 = (p: PlotObj) => analysePlot(doc2, C2, () => ['s1', 's2'], p);
+const corner = a2({ ...plot, ring: [5, 7, 35, 7, 35, 35, 5, 35] });
+check(corner.roads.length === 2 && corner.road?.id === 's1' && corner.edges.filter(Boolean).length === 2 && near(corner.lost, 150),
+  `corner plot: on ${corner.roads.map((x) => `${x.name}${x.entry ? ' (entry)' : ''}`).join(' and ')}, ${corner.edges.filter(Boolean).length} front edges, ${corner.lost.toFixed(0)} m² to the DP`);
+const back = a2({ ...plot, ring: [50, 60, 80, 60, 80, 90, 50, 90] });
+check(back.roads.length === 1, `a plot off the roads goes by the nearest: ${back.road?.name}`);
+// what-ifs: widen the lane to 30 m and it becomes the entry, FSI by the 30 m row; a DP width on it cuts the plot too
+const wide = a2({ ...plot, ring: [5, 7, 35, 7, 35, 35, 5, 35], roadEdits: { s2: { width: 30 } } });
+check(wide.road?.id === 's2' && wide.roads.find((x) => x.id === 's2')?.edited === true && near(wide.fsi, 3), `what-if: the lane at 30 m is the entry, FSI ${wide.fsi}`);
+const dp2 = a2({ ...plot, ring: [5, 7, 35, 7, 35, 35, 5, 35], roadEdits: { s2: { reserve: 20 } } });
+check(near(dp2.lost, 150 + 5 * 23), `what-if: a 20 m DP width on the lane takes 5 m more along it (${dp2.lost.toFixed(0)} m²)`);
 const low = a({ ...plot, rules: { maxH: 9 } });
 check(low.floors === 3 && near(low.buildable, 1287) && low.limit === 'height', `9 m limit: ${low.floors} floors, ${low.buildable.toFixed(0)} m², limited by ${low.limit}`);
 const credit = a({ ...plot, credit: true });
@@ -126,9 +141,78 @@ check(rich.irr !== null && rich.irr > 0 && rich.payback !== null, `a profitable 
 const bigR = { ...big, footprint: [-20, -20, 70, -20, 70, 50, -20, 50] };
 const twin = presetBuildings(bigR, 'twin');
 check(twin.length === 2 && !solveSite(big, { ...site, buildings: twin }).over.overlap, 'twin towers: two, apart');
-const schemes = await generate(bigR, site, 'residential', 'profit', true);
-check(schemes.length >= 10 && schemes.every((s, i) => i === 0 || s.fails.length > 0 || schemes[i - 1].fails.length > 0 || s.d.money.profit <= schemes[i - 1].d.money.profit + 1)
-  && schemes.every((s) => s.fails.length || s.d.parking.have >= s.d.parking.need), `generate: ${schemes.length} schemes, best ${schemes[0].name} ₹${(schemes[0].d.money.profit / 1e7).toFixed(1)} Cr (${schemes.filter((s) => !s.fails.length).length} pass)`);
+
+// the optimiser: the most built-up area within every rule, on plots small to large, Pune and Mumbai
+const opt = (ring: number[], code: Parameters<typeof analysePlot>[4] = 'udcpr', design?: PlotSite['design'], use: PlotObj['use'] = 'residential') => {
+  const R = analysePlot({ get: (id: string) => (id === 's1' ? { ...section, ...{} } : undefined) } as unknown as CityDoc, { geo: (id: string) => (id === 's1' ? { pts: [-400, 0, 400, 0] } : undefined) } as unknown as Compiler, () => ['s1'], { ...plot, ring, use }, code);
+  const st = siteFor(design ? { ...site, buildings: [], design } : undefined, R, use);
+  return { R, st, D: solveSite(R, st, use) };
+};
+const legal = (D: ReturnType<typeof solveSite>) => !D.over.fsi && !D.over.height && !D.over.margins && !D.over.overlap && !D.over.fire && !D.over.open && D.parking.have >= D.parking.need;
+for (const [name, ring, code, least] of [
+  ['600 m²', [-10, 7, 10, 7, 10, 37, -10, 37], 'udcpr', 0.35],
+  ['1,350 m²', [-15, 7, 15, 7, 15, 52, -15, 52], 'udcpr', 0.8],
+  ['4,200 m²', [-30, 7, 30, 7, 30, 77, -30, 77], 'udcpr', 0.95],
+  ['9,000 m²', [-50, 7, 50, 7, 50, 97, -50, 97], 'udcpr', 0.95],
+  ['9,000 m² Mumbai', [-50, 7, 50, 7, 50, 97, -50, 97], 'dcpr-island', 0.95],
+] as [string, number[], Parameters<typeof analysePlot>[4], number][]) {
+  const { R, st, D } = opt(ring, code);
+  check(legal(D) && D.bua >= R.bua * least && D.bua <= R.bua + 0.5,
+    `optimised ${name}: ${st.buildings.length} building(s) × ${Math.max(...D.buildings.map((b) => b.floors))} floors, ${(D.bua / R.bua * 100).toFixed(0)} % of ${R.bua.toFixed(0)} m², ${D.flats} flats, ${st.basements} basement(s), every rule met`);
+}
+const pune = opt([-50, 7, 50, 7, 50, 97, -50, 97]), mumO = opt([-50, 7, 50, 7, 50, 97, -50, 97], 'dcpr-island');
+const first = (x: typeof pune) => optSchemes(x.R, { type: 'auto', maxFloors: 0, maxBuildings: 0 }, 'residential')[0].type;
+check(first(pune) === 'slab' && first(mumO) === 'tower' && mumO.D.height > pune.D.height, `Pune gets slabs (${pune.D.height} m), Mumbai towers (${mumO.D.height} m)`);
+const capped = opt([-50, 7, 50, 7, 50, 97, -50, 97], 'udcpr', { type: 'slab', maxFloors: 8, maxBuildings: 0 });
+check(capped.D.buildings.every((b) => b.floors <= 8) && legal(capped.D), `8 floors at most: ${capped.st.buildings.length} slabs, ${(capped.D.bua / capped.R.bua * 100).toFixed(0)} % built`);
+const both = optSchemes(pune.R, { type: 'auto', maxFloors: 0, maxBuildings: 0 }, 'residential');
+check(both.length === 2 && both[0].type !== both[1].type, `both kinds offered: ${both.map((s) => `${s.type} ${s.bua.toFixed(0)} m²`).join(', ')}`);
+// the ground: a wall with gates, the drive round the tall buildings, the open space
+const G = pune.D.ground;
+check(G.gates.length === 2 && G.drive.length === 1 && G.wall.length >= 4 && !!G.rg && area(G.rg) >= 900 - 1, `the ground: ${G.wall.length} runs of wall, ${G.gates.length} gates, a ${G.driveW} m drive, ${area(G.rg ?? []).toFixed(0)} m² of open space`);
+const lowG = opt([-10, 7, 10, 7, 10, 37, -10, 37]).D.ground;
+check(lowG.drive.length === 0 && lowG.gates.length === 1, 'a low building: one gate, no drive');
+
+// offices and sheds
+const off = opt([-50, 7, 50, 7, 50, 97, -50, 97], 'udcpr', undefined, 'commercial');
+check(legal(off.D) && off.D.bua >= off.R.bua * 0.9 && off.D.buildings.every((b) => b.b.depth >= 16) && !off.st.stilt && off.D.count[3] > 0,
+  `commercial: ${off.st.buildings.length} block(s) ${off.D.buildings.map((b) => b.b.depth).join('/')} m deep, ${off.D.count[3]} office floors, ${(off.D.bua / off.R.bua * 100).toFixed(0)} % built, no stilt`);
+const ind = opt([-60, 7, 60, 7, 60, 107, -60, 107], 'udcpr', undefined, 'industrial');
+check(legal(ind.D) && ind.R.rules.basic === 1 && ind.D.height <= 24 && ind.D.buildings.every((b) => b.b.depth >= 24 && !b.cores.length) && ind.D.parking.trucks > 0 && ind.st.basements === 0,
+  `industrial: ${ind.st.buildings.length} shed(s) ${ind.D.buildings.map((b) => `${b.b.depth} m deep × ${b.floors}`).join(', ')}, ${(ind.D.bua / ind.R.bua * 100).toFixed(0)} % of FSI 1, ${ind.D.parking.trucks} loading bays, ${ind.D.parking.have}/${ind.D.parking.need} bays, ₹${(ind.D.money.profit / 1e7).toFixed(1)} Cr`);
+// the flat mix holds across the buildings (within 20 points of 20 / 50 / 30), each flat near its size
+const mixOf = pune.D.count.slice(0, 3).map((c) => c / pune.D.flats);
+const sizesOk = pune.D.buildings.every((b) => b.units.every((u) => u.carpet >= site.sizes[u.t as 0 | 1 | 2] * 0.8 && u.carpet <= site.sizes[u.t as 0 | 1 | 2] * 1.3));
+check(mixOf.every((m, t) => Math.abs(m - site.mix[t]) <= 0.2) && sizesOk, `mix on the optimised 9,000 m²: ${mixOf.map((m) => (m * 100).toFixed(0)).join(' / ')} %, every flat within its size`);
 
 
+
+
+
+// internal roads, spacing, green, elements, the podium under the buildings only
+{
+  const big = [-80, 7, 80, 7, 80, 167, -80, 167];
+  const sp = opt(big, 'udcpr', { type: 'auto', maxFloors: 0, maxBuildings: 0, access: 'spine', roundabouts: true });
+  const roads = (sp.st.elements ?? []).filter((e) => e.kind === 'road'), rbs = (sp.st.elements ?? []).filter((e) => e.kind === 'roundabout');
+  const clear = sp.D.buildings.every((b) => !b.clash);
+  check(roads.length >= 1 && rbs.length >= 1 && clear && legal(sp.D) && sp.D.ground.gates.length >= 1 && sp.D.ground.drive.length === 0,
+    `spine road: ${roads.length} road(s), ${rbs.length} roundabout(s), ${sp.st.buildings.length} buildings clear of them, ${(sp.D.bua / sp.R.bua * 100).toFixed(0)} % built, ${sp.D.ground.gates.length} gate(s)`);
+  const gr = opt(big, 'udcpr', { type: 'auto', maxFloors: 0, maxBuildings: 0, access: 'grid', roundabouts: true, spacing: 8, green: 20 });
+  const gRoads = (gr.st.elements ?? []).filter((e) => e.kind === 'road').length;
+  check(gRoads >= 2 && gr.D.buildings.every((b) => !b.clash) && gr.D.open.green >= gr.R.area * 0.2 - 1,
+    `grid: ${gRoads} roads, 8 m more spacing, ${(gr.D.open.green / gr.R.area * 100).toFixed(0)} % green, ${(gr.D.bua / gr.R.bua * 100).toFixed(0)} % built`);
+  // a car park, a lot and a garden placed by hand: the optimiser builds round the car park; the lot gives way
+  const base = { ...site, buildings: [], elements: [
+    { id: 'cp', kind: 'parking' as const, spine: [-60, 30, -20, 30], depth: 30, floors: 0, levels: 4 },
+    { id: 'lot', kind: 'lot' as const, spine: [0, 60, 60, 60], depth: 30, floors: 0 },
+  ] };
+  const R2 = opt(big).R, st2 = siteFor(base, R2, 'residential'), D2 = solveSite(R2, st2, 'residential');
+  const cpBays = D2.parking.levels.filter((l) => l.kind === 'structure').reduce((a, l) => a + l.bays.length, 0);
+  check(D2.buildings.every((b) => !b.clash) && cpBays > 100 && D2.parking.levels.filter((l) => l.kind === 'structure').length === 4,
+    `a 4-level car park placed by hand: ${cpBays} bays, the buildings kept off it`);
+  // the podium sits under the buildings, not the whole plot
+  const pod = solveSite(R2, { ...sp.st, podium: 1 }, 'residential');
+  const podA = pod.parking.levels.find((l) => l.kind === 'podium')!.area, plates = pod.buildings.reduce((a, b) => a + b.plate, 0);
+  check(Math.abs(podA - plates) < 1, `a podium the buildings' size: ${podA.toFixed(0)} m² (not the ${polyArea(R2.net).toFixed(0)} m² plot)`);
+}
 console.log(ok ? 'ALL OK' : 'FAILURES'); process.exit(ok ? 0 : 1);

@@ -4,7 +4,8 @@ import { mode, readOnly, select, docVersion } from '../editor/state';
 import { ui } from './ctx';
 import { Icon, NumberField, Section, Seg, Toggle } from './components';
 import type { PlotObj } from '../doc/types';
-import { CODE_LABEL, CODE_NOTE, type PlotReport, type PlotRules } from '../doc/plot';
+import { CODE_LABEL, CODE_NOTE, USE_NOTE, type PlotReport, type PlotRules } from '../doc/plot';
+import { siteDefaults } from '../doc/optimise';
 import { UNIT_COLOR, UNIT_LABEL, type SiteReport } from '../doc/site';
 import { exportPlot } from '../editor/plotexport';
 
@@ -61,10 +62,12 @@ export function PlotPanel(p: { id: string }) {
             { value: 'today', label: 'Today’s width', title: 'Rules by the road as built' },
             { value: 'dp', label: 'DP width', title: 'Rules by the Development Plan width (when the DP strip is handed over)' },
           ]} />
-          <Seg small value={o.use} onChange={(v) => !ro && set({ use: v })} options={[
-            { value: 'residential', label: 'Residential' }, { value: 'commercial', label: 'Commercial' },
-          ]} />
         </div>
+        <Seg small value={o.use} onChange={(v) => !ro && set({ use: v, site: o.site?.manual ? o.site : { ...siteDefaults(v), design: o.site?.design } })} options={[
+          { value: 'residential', label: 'Residential', title: USE_NOTE.residential }, { value: 'commercial', label: 'Commercial', title: USE_NOTE.commercial },
+          { value: 'industrial', label: 'Industrial', title: USE_NOTE.industrial },
+        ]} />
+        {o.use !== 'residential' && <p class="small muted">{USE_NOTE[o.use]}</p>}
         {r?.road?.dp && r.road.dp > r.road.today && (
           <Toggle checked={!!o.credit} disabled={ro} onChange={(v) => set({ credit: v || undefined })} label="Count FSI for the DP strip handed over"
             title="The authority may allow the basic FSI of the land given up for the DP road on the rest of the plot (or give TDR for it instead)" />
@@ -137,7 +140,7 @@ function PlotDiagram({ o, r, d }: { o: PlotObj; r: PlotReport; d: SiteReport | n
     <>
       <svg class="plot-diagram clickable" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Plot outline: ${Math.round(r.lost)} m² in the DP road, ${d?.flats ?? 0} flats. Opens Site Studio.`} onClick={() => ui.E.openStudio(o.id)}>
         <path d={p(R)} fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="5 4" />
-        {r.lostRing.length >= 6 && <path d={p(r.lostRing)} fill="color-mix(in srgb, var(--danger) 28%, transparent)" stroke="var(--danger)" stroke-width="1.5" />}
+        {r.lostRings.map((L, i) => <path key={`dp${i}`} d={p(L)} fill="color-mix(in srgb, var(--danger) 28%, transparent)" stroke="var(--danger)" stroke-width="1.5" />)}
         {env.length >= 6 && <path d={p(env)} fill={B.length ? 'none' : 'color-mix(in srgb, var(--accent) 35%, transparent)'} stroke="var(--accent)" stroke-width="1" stroke-dasharray="3 3" />}
         {B.map((b) => b.units.map((u, i) => <path key={`${b.b.id}u${i}`} d={p(u.ring)} fill={UNIT_COLOR[u.t]} stroke="#fff" stroke-width="0.5" />))}
         {B.map((b) => b.corridors.map((c, i) => <path key={`${b.b.id}h${i}`} d={p(c)} fill="#d9dce3" />))}
