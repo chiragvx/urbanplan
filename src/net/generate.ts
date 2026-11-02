@@ -506,7 +506,17 @@ export interface Stamp {
   /** ring stamps: metres below the ground (sunken junctions) */ dz?: number;
   /** ring stamps: the ground junction's surface (instead of the terrain) */ plane?: (x: number, z: number) => number;
   /** an open cut between retaining walls: the terrain keeps its height and isn't drawn inside (TerrainHoles) */ hole?: boolean;
+  /**
+   * a surface drawn on the ground hides the terrain under it (TerrainHoles), so the coarse terrain grid can never poke
+   * through: line stamps, the half width it covers on its narrower side; ring stamps, how far in from the ring
+   */
+  cover?: number;
 }
+
+/** how far in from a ground surface's edge the terrain under it is hidden (its edge stays on the terrain) */
+export const COVER_IN = 0.15;
+/** the half width a ground road's surface covers on its narrower side, less the edge */
+const coverOf = (t: Pick<RoadType, 'hwL' | 'hwR'>) => Math.max(0, Math.min(t.hwL, t.hwR) - COVER_IN);
 
 /** Below this depth a sunken road is covered (a tunnel); above it, an open trench with retaining walls. */
 export const COVER = 6.5;
@@ -1038,10 +1048,10 @@ export class RoadMesher {
       key, layers: { asphalt: pack(asphalt), paving: pack(paving), markings: pack(markings), concrete: pack(concrete) },
       x0: x0 - hw, z0: z0 - hw, x1: x1 + hw, z1: z1 + hw,
       stamps: g.s.grade
-        ? gradedStamps(S, z, hw, g.s.code, this.T)
-        : g.s.sunk && !g.s.elevated ? trenchStamps(S, z, hw, g.s.code, this.T)
+        ? gradedStamps(S, z, hw, g.s.code, this.T, coverOf(t))
+        : g.s.sunk && !g.s.elevated ? trenchStamps(S, z, hw, g.s.code, this.T, coverOf(t))
         : g.s.elevated ? [{ line: new Float32Array(S.pts), hw, carve: false, code: g.s.code }]
-        : [{ line: new Float32Array(S.pts), hw, carve: true, code: g.s.code, z: Float32Array.from({ length: S.pts.length / 2 }, (_, i) => z(i, S.pts[i * 2], S.pts[i * 2 + 1]) - LIFT) }],
+        : [{ line: new Float32Array(S.pts), hw, carve: true, cover: coverOf(t), code: g.s.code, z: Float32Array.from({ length: S.pts.length / 2 }, (_, i) => z(i, S.pts[i * 2], S.pts[i * 2 + 1]) - LIFT) }],
     });
   }
 
@@ -1134,7 +1144,8 @@ export class RoadMesher {
     const dz = this.nodeSunk(node) ? node.lift : undefined;
     // a junction in a covered tunnel leaves the ground (and what stands on it) alone
     const P = this.nodeOff(node) ? undefined : this.groundPlane(node);
-    const stamps: Stamp[] = covered ? [] : [{ ring: new Float32Array(ring.flat()), carve, code, dz, plane: P }];
+    // (a junction on the ground hides the terrain under its surface, as its roads do)
+    const stamps: Stamp[] = covered ? [] : [{ ring: new Float32Array(ring.flat()), carve, code, dz, plane: P, cover: carve && dz === undefined ? COVER_IN : undefined }];
     if (island && !covered) stamps.push({ ring: island, carve, code, dz, plane: P });
     for (const o of extra) stamps.push({ ring: new Float32Array(o.flat()), carve, code, plane: P });
     this.items.set(key, { key, layers: { asphalt: pack(asphalt), paving: pack(paving), markings: pack(markings), concrete: pack(concrete) }, x0, z0, x1, z1, stamps });
@@ -2374,7 +2385,7 @@ function underground(gb: GeomBuilder, S: Sub, z: (i: number, x: number, zz: numb
  * Terrain stamps of a sunken piece: the open stretches are holes in the ground between their retaining walls (the
  * ground keeps its height right up to the walls); the covered tunnel leaves the ground alone.
  */
-function trenchStamps(S: Sub, z: (i: number, x: number, zz: number) => number, hw: number, code: number, T: (x: number, z: number) => number): Stamp[] {
+function trenchStamps(S: Sub, z: (i: number, x: number, zz: number) => number, hw: number, code: number, T: (x: number, z: number) => number, cover?: number): Stamp[] {
   const n = S.s.length;
   const zc = (i: number) => z(i, S.pts[i * 2], S.pts[i * 2 + 1]);
   const depth = (i: number) => T(S.pts[i * 2], S.pts[i * 2 + 1]) - zc(i);
@@ -2389,7 +2400,7 @@ function trenchStamps(S: Sub, z: (i: number, x: number, zz: number) => number, h
     else if (st === 0) {
       const zs = new Float32Array(e - a + 1);
       for (let i = a; i <= e; i++) zs[i - a] = zc(i) - LIFT;
-      out.push({ line: new Float32Array(S.pts.slice(a * 2, e * 2 + 2)), hw: hw + 0.3, carve: true, code, z: zs });
+      out.push({ line: new Float32Array(S.pts.slice(a * 2, e * 2 + 2)), hw: hw + 0.3, carve: true, cover, code, z: zs });
     }
     a = b + 1;
   }
@@ -2422,7 +2433,7 @@ function deepCutWalls(gb: GeomBuilder, S: Sub, z: (i: number, x: number, zz: num
 }
 
 /** Terrain stamps of a graded piece: cut / filled to the road, except where it's cut deep (a hole between its walls). */
-function gradedStamps(S: Sub, z: (i: number, x: number, zz: number) => number, hw: number, code: number, T: (x: number, z: number) => number): Stamp[] {
+function gradedStamps(S: Sub, z: (i: number, x: number, zz: number) => number, hw: number, code: number, T: (x: number, z: number) => number, cover?: number): Stamp[] {
   const n = S.s.length;
   const zc = (i: number) => z(i, S.pts[i * 2], S.pts[i * 2 + 1]);
   const deep = (i: number) => T(S.pts[i * 2], S.pts[i * 2 + 1]) - zc(i) > DEEP_CUT;
@@ -2433,7 +2444,7 @@ function gradedStamps(S: Sub, z: (i: number, x: number, zz: number) => number, h
     else {
       const zs = new Float32Array(b - a + 1);
       for (let i = a; i <= b; i++) zs[i - a] = zc(i) - LIFT;
-      out.push({ line: new Float32Array(S.pts.slice(a * 2, b * 2 + 2)), hw, carve: true, code, z: zs });
+      out.push({ line: new Float32Array(S.pts.slice(a * 2, b * 2 + 2)), hw, carve: true, cover, code, z: zs });
     }
   }
   return out;

@@ -89,8 +89,18 @@ function Metric({ label, value, sub, need, flag, bad, title }: { label: string; 
 function UsePicker({ value, inherit, onChange, ro, small }: { value: PlotUse | undefined; inherit?: PlotUse; onChange: (u: PlotUse | undefined) => void; ro: boolean; small?: boolean }) {
   const [open, setOpen] = useState(false);
   const cur = value ?? inherit ?? 'none', C = useIcon(cur), info = useInfo(cur);
+  const box = useRef<HTMLDivElement>(null);
+  // stays open while the pointer travels to it; a click elsewhere or Esc closes it
+  useEffect(() => {
+    if (!open) return;
+    const down = (e: PointerEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } };
+    document.addEventListener('pointerdown', down, true);
+    window.addEventListener('keydown', key, true);
+    return () => { document.removeEventListener('pointerdown', down, true); window.removeEventListener('keydown', key, true); };
+  }, [open]);
   return (
-    <div class="use-pick" onMouseLeave={() => setOpen(false)}>
+    <div class="use-pick" ref={box}>
       <button class={`icon use-btn${small ? ' small' : ''}${value === undefined && inherit ? ' inherit' : ''}`} disabled={ro} aria-label={`Use: ${info.label}`} aria-expanded={open}
         title={`Use: ${info.label}${value === undefined && inherit ? ' (as the plot)' : ''} — ${info.note}`} data-tip-art={`use:${cur}`} onClick={() => setOpen(!open)}>
         <C size={small ? 15 : 17} />{!small && <span>{info.label}</span>}
@@ -118,6 +128,7 @@ function StudioView({ o, r, d, site }: { o: PlotObj; r: PlotReport; d: SiteRepor
     const onKey = (e: KeyboardEvent) => {
       if (isTyping(e)) return;
       if (c.key(e)) { e.preventDefault(); e.stopImmediatePropagation(); return; }
+      if (e.key === 'Escape' && document.querySelector('.use-grid')) return; // an open use menu closes first
       if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); ui.E.closeStudio(); return; }
       if (!e.ctrlKey && !e.metaKey) e.stopImmediatePropagation();
     };

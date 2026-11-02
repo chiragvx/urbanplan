@@ -174,7 +174,8 @@ export function analysePlot(doc: CityDoc, C: Compiler, near: Near, p: PlotObj, c
     const L = Math.hypot(dx, dz) || 1;
     let nx = -dz / L, nz = dx / L;
     if ((cx - ax) * nx + (cz - az) * nz < 0) { nx = -nx; nz = -nz; }
-    if (x.dp && x.dp > 0) {
+    // (a DP no wider than the road today takes nothing past its edge: no line, which on a bend would shave a sliver)
+    if (x.dp && x.dp > 0 && x.dp > x.today + 0.05) {
       net = clipHalf(net, ax, az, nx, nz, x.dp / 2);
       const lr = clipHalf(ring, ax, az, -nx, -nz, -x.dp / 2);
       if (lr.length >= 6 && polyArea(lr) > 0.5) lostRings.push(lr);
@@ -302,13 +303,17 @@ function plotRoads(doc: CityDoc, C: Compiler, near: Near, p: PlotObj, ring: numb
     const today = e?.width ?? totalWidth(s.parts), dp = e?.reserve ?? s.reserve, hw = today / 2;
     // beside an edge: running the same way (within 25°), the edge's middle alongside it, within reach
     const reach = Math.max(0, (dp ?? 0) / 2 - hw) + 4;
-    let best: FoundRoad | null = null, along = false;
+    // (a corner past the road's end, on a junction's rounded kerb, isn't beside it: measured only when none is)
+    let best: FoundRoad | null = null, past: FoundRoad | null = null, along = false;
     for (let k = 0; k + 3 < g.pts.length; k += 2) {
       const ax = g.pts[k], az = g.pts[k + 1], dx = g.pts[k + 2] - ax, dz = g.pts[k + 3] - az, Ls = Math.hypot(dx, dz);
       if (Ls < 0.01) continue;
       for (let i = 0; i < ring.length; i += 2) {
         const d = segDist(ring[i], ring[i + 1], ax, az, dx, dz) - hw;
-        if (!best || d < best.d) best = { s, d, seg: { ax, az, dx, dz }, today, dp, edited: !!e };
+        const u = ((ring[i] - ax) * dx + (ring[i + 1] - az) * dz) / (Ls * Ls);
+        const beyond = (k === 0 && u < 0) || (k + 4 >= g.pts.length && u > 1);
+        if (beyond) { if (!past || d < past.d) past = { s, d, seg: { ax, az, dx, dz }, today, dp, edited: !!e }; }
+        else if (!best || d < best.d) best = { s, d, seg: { ax, az, dx, dz }, today, dp, edited: !!e };
         const j = (i + 2) % ring.length, ex = ring[j] - ring[i], ez = ring[j + 1] - ring[i + 1], Le = Math.hypot(ex, ez);
         if (Le < 2 || Math.abs(ex * dz - ez * dx) / (Le * Ls) > 0.42) continue;
         const mx = (ring[i] + ring[j]) / 2, mz = (ring[i + 1] + ring[j + 1]) / 2;
@@ -316,6 +321,7 @@ function plotRoads(doc: CityDoc, C: Compiler, near: Near, p: PlotObj, ring: numb
         if (t > -0.15 && t < 1.15 && segDist(mx, mz, ax, az, dx, dz) - hw < reach) along = true;
       }
     }
+    best ??= past;
     if (!best) continue;
     if (along || id === p.front) out.push(best);
     if (!nearest || best.d < nearest.d) nearest = best;

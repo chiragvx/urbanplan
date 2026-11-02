@@ -92,7 +92,7 @@ export function inter(a: MP, b: MP): MP {
   return run(CL.ClipType.ctIntersection, [a], [b]);
 }
 /** grown (d > 0) or shrunk (d < 0) by d, round at the corners */
-function offset(m: MP, d: number): MP {
+export function offset(m: MP, d: number): MP {
   if (!m.length || !d) return m;
   const o = new CL.ClipperOffset(2, 0.05 * S);
   o.AddPaths(toPaths(m), CL.JoinType.jtRound, CL.EndType.etClosedPolygon);

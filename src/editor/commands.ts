@@ -192,7 +192,7 @@ export const COMMANDS: Command[] = [
   {
     id: 'edit.delete', label: 'Delete', group: 'Edit', keys: 'Delete', enabled: () => selection.value.length > 0 || !!anchorSel.value,
     run: (E) => {
-      if (anchorSel.value && tool.value === 'direct' && E.deleteAnchor()) return;
+      if (anchorSel.value && (tool.value === 'direct' || E.doc.get(anchorSel.value.owner)?.kind === 'plot') && E.deleteAnchor()) return; // (a plot's corner: in either tool)
       const sel = selection.value;
       bulk.change(E, 'Delete', () => {
         for (const s of sel) {

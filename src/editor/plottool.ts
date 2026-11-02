@@ -8,6 +8,7 @@ import { analysePlot, centroid, polyArea, type PlotCode, type PlotReport } from 
 import { solveSite, type PlotSite, type SiteReport } from '../doc/site';
 import { siteFor } from '../doc/optimise';
 import { readOnly, select, status, toast } from './state';
+import { fitPlot } from './plotfit';
 
 export class PlotTool {
   pts: number[] = [];
@@ -66,10 +67,14 @@ export class PlotTool {
     status.value = this.hint();
     // (only a plot of no area is refused: a 1,000 sq ft shop plot plans like a township)
     if (P.length < 6 || polyArea(P) < 0.5) { if (P.length) toast('A plot needs at least three corners', 'warn'); return; }
+    // trimmed back to the road edges and the plots beside it, so it never runs over them
+    const fit = fitPlot(this.E, P);
+    if (!fit) { toast('That plot lies on a road or another plot — draw it beside them', 'warn'); return; }
     const n = this.E.doc.ids('plot').size + 1;
-    const o: PlotObj = { kind: 'plot', id: newId('plot'), name: `Plot ${n}`, ring: P, use: 'none' };
+    const o: PlotObj = { kind: 'plot', id: newId('plot'), name: `Plot ${n}`, ring: fit.ring, use: 'none' };
     this.E.edit('Draw a plot', () => this.E.doc.create(o));
     if (this.E.doc.get(o.id)) { this.E.setTool('select'); select([{ kind: 'plot', id: o.id }]); }
+    if (fit.trimmed) toast(`Trimmed to the road edge · ${Math.round(fit.trimmed).toLocaleString('en-IN')} m² left out`, 'info');
   }
 
   cancel() { this.pts = []; this.snap = null; }

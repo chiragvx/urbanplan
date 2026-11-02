@@ -16,7 +16,7 @@ import { landuseRect, landuseUV, type Materials } from '../render/materials';
 import type { Building, TileData } from '../data/tile';
 import type { Heightfield } from '../geo/heightfield';
 import { RoadRaster } from '../geo/roadraster';
-import { MESH_LAYERS, stampTargetsOf, type MeshLayer, type Packed, type Stamp } from '../net/generate';
+import { COVER_IN, MESH_LAYERS, stampTargetsOf, type MeshLayer, type Packed, type Stamp } from '../net/generate';
 import type { Compiler } from '../doc/compile';
 import type { CityDoc, Change } from '../doc/doc';
 import type { BuildingObj, Id, LineObj, PlotObj } from '../doc/types';
@@ -172,7 +172,7 @@ export class World {
     stampTargetsOf(hf, this.targets, this.trackStamps(), (x, z) => hf.sample(x, z));
     this.stampChannels();
     hf.conform(this.targets);
-    this.holes.update(this.gridRect(), [...[...C.mesher.items.values()].flatMap((it) => it.stamps), ...this.trackStamps()]);
+    this.holes.update(this.gridRect(), this.holeStamps());
     C.mesher.stampRaster(this.raster);
     this.ensureTerrain(this.gridRect());
     this.skirt = new THREE.Mesh(buildTerrainSkirt(hf), M.skirt);
@@ -355,6 +355,14 @@ export class World {
 
   /** Terrain stamps of the auto-height tracks (cut / filled to them, holes where cut deep); null: to work out again. */
   private railCut: Stamp[] | null = null;
+  /** Everything that cuts or covers the terrain (TerrainHoles), in a region (all if omitted). */
+  private holeStamps(box?: Region): Stamp[] {
+    const items = box ? this.C.mesher.itemsIn(...box) : [...this.C.mesher.items.values()];
+    return [...items.flatMap((it) => it.stamps), ...this.trackStamps(), ...this.plotCover];
+  }
+  /** the realistic plot's site works hide the terrain under them (its ground is draped on the terrain's surface) */
+  private plotCover: Stamp[] = [];
+
   private trackStamps(): Stamp[] {
     return (this.railCut ??= railStamps([...this.railsFromDoc('rail'), ...this.railsFromDoc('metro')], (x, z) => this.hf.sample(x, z)));
   }
@@ -527,7 +535,7 @@ export class World {
     C.mesher.stampTargets(this.targets, box);
     stampTargetsOf(hf, this.targets, this.trackStamps(), (x, z) => hf.sample(x, z), box);
     this.stampChannels(box);
-    this.holes.update(box, [...C.mesher.itemsIn(...box).flatMap((it) => it.stamps), ...this.trackStamps()]);
+    this.holes.update(box, this.holeStamps(box));
     hf.conformRegion(this.targets, Math.max(0, g.i0 - pad), Math.max(0, g.j0 - pad), Math.min(hf.n - 1, g.i1 + pad), Math.min(hf.n - 1, g.j1 + pad));
     for (const t of this.terrain) {
       const c = this.chunkRange(t);
@@ -592,7 +600,7 @@ export class World {
       };
     }
     const M = this.plotM;
-    let cleared: number[] | null = null;
+    let cleared: number[] | null = null, cover: number[] | null = null;
     const ground = (x: number, z: number) => this.hf.sample(x, z);
     // a ring laid on the ground, a little above it so it doesn't flicker
     const drape = (ring: number[], mat: THREE.Material) => {
@@ -610,7 +618,7 @@ export class World {
     for (const { o, r, d } of list) {
       if (!r) { drape(o.ring, M.net); continue; }
       // the studio's plot, as it would be built
-      if (look === 'real' && o.id === real && d) { this.plotModel(r, d, o.use); cleared = o.ring; continue; }
+      if (look === 'real' && o.id === real && d) { this.plotModel(r, d, o.use); cleared = o.ring; cover = r.net.length >= 6 ? r.net : r.footprint; continue; }
       drape(r.net, M.net);
       if (r.lost > 0.5) for (const L of r.lostRings) drape(L, M.lost);
       const F = d?.envelope.length ? d.envelope : r.footprint, H = d?.buildings.length ? d.height : r.height;
@@ -688,7 +696,23 @@ export class World {
       segs(amber, M.flag);
     }
     this.setCleared(cleared);
+    this.setPlotCover(cover);
     this.plots.visible = !this.plan;
+    this.needsRender = true;
+  }
+
+  private setPlotCover(ring: number[] | null) {
+    const was = this.plotCover[0]?.ring;
+    if (!was && !ring) return;
+    if (was && ring && was.length === ring.length && was.every((v, i) => v === ring[i])) return;
+    this.plotCover = ring ? [{ ring: new Float32Array(ring), carve: false, code: 0, cover: COVER_IN }] : [];
+    for (const R of [was, ring]) {
+      if (!R) continue;
+      let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+      for (let i = 0; i < R.length; i += 2) { x0 = Math.min(x0, R[i]); x1 = Math.max(x1, R[i]); z0 = Math.min(z0, R[i + 1]); z1 = Math.max(z1, R[i + 1]); }
+      const box: Region = [x0 - 8, z0 - 8, x1 + 8, z1 + 8];
+      this.holes.update(box, this.holeStamps(box));
+    }
     this.needsRender = true;
   }
 

@@ -1,7 +1,7 @@
 // Canvas overlay: everything interactive drawn crisply on top of the rendered city — hover / selection outlines,
 // width handles, Bézier anchors, pen and line previews, vector utility lines (2D), measure, snaps, issue markers.
 import type { Editor } from './editor';
-import { accuracyView, anchorSel, cursor, dpRegionsOn, hover, mode, terrainShow, terrainView, penClass, penLift, readOnly, selection, settings, tool, osmCompare } from './state';
+import { accuracyView, anchorSel, cursor, dpRegionsOn, hover, mode, terrainShow, terrainView, penClass, penLift, readOnly, selection, settings, studio, tool, osmCompare } from './state';
 import { anchorsOf, FLYOVER_DECK } from '../doc/ops';
 import { LINE_COLOR } from '../doc/base';
 import { template, totalWidth } from '../doc/xsection';
@@ -17,7 +17,7 @@ import { pending } from './bulk';
 import { routePick } from './smartsel';
 
 export interface Handle {
-  kind: 'width' | 'anchor' | 'in' | 'out';
+  kind: 'width' | 'anchor' | 'in' | 'out' | 'mid';
   sx: number; sy: number;
   owner?: Id; k?: number;
   section?: Id; road?: Id; side?: 'L' | 'R';
@@ -63,6 +63,7 @@ export function drawOverlay(E: Editor) {
   if (!readOnly.value) {
     if (tool.value === 'select') widthHandles(E);
     if (tool.value === 'direct') anchors(E);
+    if (tool.value === 'select' || tool.value === 'direct') plotCorners(E);
   }
   if (tool.value === 'pen' && settings.value.roadMode !== 'freeform' && settings.value.roadMode !== 'replace') roadTool(E);
   // replace mode: the road a click would change, the whole of it (the section under the cursor stronger: Alt takes
@@ -785,6 +786,31 @@ function anchors(E: Editor) {
       else square(ctx, p, on ? ACCENT : '#fff', ACCENT);
       E.handles.push({ kind: 'anchor', sx: p[0], sy: p[1], owner: id, k });
     });
+  }
+}
+
+/** A selected plot stays open to reshaping: its corners to drag, a + on each side to add one, the sides' lengths. */
+function plotCorners(E: Editor) {
+  const sel = selection.value;
+  if (sel.length !== 1 || sel[0].kind !== 'plot' || studio.value) return;
+  const o = E.doc.get<'plot'>(sel[0].id);
+  if (!o || o.ring.length < 6) return;
+  const ctx = E.ctx, R = o.ring, n = R.length / 2, as = anchorSel.value;
+  for (let k = 0; k < n; k++) {
+    const j = (k + 1) % n, ax = R[k * 2], az = R[k * 2 + 1], bx = R[j * 2], bz = R[j * 2 + 1];
+    const a = at(E, ax, az), b = at(E, bx, bz), m: [number, number] = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    const L = Math.hypot(bx - ax, bz - az);
+    // the side's length, and (long enough on screen) a + to add a corner there
+    if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 70) {
+      label(ctx, m, `${L < 100 ? L.toFixed(1) : Math.round(L)} m`, 11, -14);
+      dot(ctx, m, 3.5, '#fff', ACCENT);
+      E.handles.push({ kind: 'mid', sx: m[0], sy: m[1], owner: o.id, k });
+    }
+  }
+  for (let k = 0; k < n; k++) {
+    const p = at(E, R[k * 2], R[k * 2 + 1]);
+    square(ctx, p, as?.owner === o.id && as.k === k ? ACCENT : '#fff', ACCENT);
+    E.handles.push({ kind: 'anchor', sx: p[0], sy: p[1], owner: o.id, k });
   }
 }
 

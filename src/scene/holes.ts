@@ -1,6 +1,8 @@
 // Holes in the terrain where a road runs below it in an open cut (an underpass's trench between retaining walls).
-// The ground keeps its natural height right up to the walls — the terrain grid (8 m) is far too coarse to carve a
-// vertical edge, so instead the terrain material skips its pixels inside the cut. The cut is kept as a signed distance
+// The ground keeps its natural height right up to the walls — the terrain grid is far too coarse to carve a
+// vertical edge, so instead the terrain material skips its pixels inside the cut. The same goes under every surface
+// drawn on the ground (roads, junctions, a plot's site works: `Stamp.cover`): the grid is cut / filled to sit just
+// under them, but a 32 m cell can't follow a 10 m road, so its pixels there are skipped and the surface always shows. The cut is kept as a signed distance
 // field on a 2 m grid (linearly filtered, so a straight wall line stays straight to a few cm).
 import * as THREE from 'three/webgpu';
 import { texture, positionWorld, vec2, float, uniform } from 'three/tsl';
@@ -52,8 +54,8 @@ export class TerrainHoles {
 
   /** Re-make the field in a region from the hole stamps of the mesh items there. Returns whether anything changed. */
   update(region: [number, number, number, number], stamps: Iterable<Stamp>): boolean {
-    const holes = [...stamps].filter((s) => s.hole);
-    if (!holes.length && !this.data) return false;
+    const all = [...stamps], holes = all.filter((s) => s.hole), covers = all.filter((s) => !s.hole && s.cover !== undefined);
+    if (!holes.length && !covers.length && !this.data) return false;
     this.ensure();
     const D = this.data!, n = this.n, gx = this.org.value.x, gz = this.org.value.y;
     const gi = (x: number) => Math.round((x - gx) / RES), gj = (z: number) => Math.round((z - gz) / RES);
@@ -102,21 +104,41 @@ export class TerrainHoles {
             put(i, j, Math.hypot(x - ax - dx * t, z - az - dz * t) - hw);
           }
         }
-      } else if (st.ring) {
-        const r = st.ring, m = r.length / 2;
-        let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
-        for (let k = 0; k < m; k++) { x0 = Math.min(x0, r[k * 2]); x1 = Math.max(x1, r[k * 2]); z0 = Math.min(z0, r[k * 2 + 1]); z1 = Math.max(z1, r[k * 2 + 1]); }
-        for (let j = gj(z0 - RANGE); j <= gj(z1 + RANGE); j++) for (let i = gi(x0 - RANGE); i <= gi(x1 + RANGE); i++) {
+      } else if (st.ring) ring(st.ring, 0);
+    }
+    for (const st of covers) {
+      const c = st.cover!;
+      if (st.ring) { ring(st.ring, c); continue; }
+      if (!st.line || c <= 0) continue;
+      // along the line, square at its two ends (where it meets a junction, the junction's own cover takes over)
+      const p = st.line, last = p.length - 4;
+      for (let s = 0; s <= last; s += 2) {
+        const ax = p[s], az = p[s + 1], bx = p[s + 2], bz = p[s + 3];
+        const dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1e-9, pad = c + RANGE;
+        for (let j = gj(Math.min(az, bz) - pad); j <= gj(Math.max(az, bz) + pad); j++) for (let i = gi(Math.min(ax, bx) - pad); i <= gi(Math.max(ax, bx) + pad); i++) {
           const x = gx + i * RES, z = gz + j * RES;
-          let best = Infinity, inside = false;
-          for (let a = 0, b = m - 1; a < m; b = a++) {
-            const ax = r[a * 2], az = r[a * 2 + 1], bx = r[b * 2], bz = r[b * 2 + 1];
-            if ((az > z) !== (bz > z) && x < ((bx - ax) * (z - az)) / (bz - az) + ax) inside = !inside;
-            const dx = bx - ax, dz = bz - az, t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1e-9)));
-            best = Math.min(best, Math.hypot(x - ax - dx * t, z - az - dz * t));
-          }
-          put(i, j, inside ? -best : best);
+          const t = ((x - ax) * dx + (z - az) * dz) / L2;
+          if ((s === 0 && t < 0) || (s === last && t > 1)) continue;
+          const u = Math.max(0, Math.min(1, t));
+          put(i, j, Math.hypot(x - ax - dx * u, z - az - dz * u) - c);
         }
+      }
+    }
+    /** a ring: signed distance to its edge, `inset` in from it */
+    function ring(r: Float32Array, inset: number) {
+      const m = r.length / 2;
+      let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+      for (let k = 0; k < m; k++) { x0 = Math.min(x0, r[k * 2]); x1 = Math.max(x1, r[k * 2]); z0 = Math.min(z0, r[k * 2 + 1]); z1 = Math.max(z1, r[k * 2 + 1]); }
+      for (let j = gj(z0 - RANGE); j <= gj(z1 + RANGE); j++) for (let i = gi(x0 - RANGE); i <= gi(x1 + RANGE); i++) {
+        const x = gx + i * RES, z = gz + j * RES;
+        let best = Infinity, inside = false;
+        for (let a = 0, b = m - 1; a < m; b = a++) {
+          const ax = r[a * 2], az = r[a * 2 + 1], bx = r[b * 2], bz = r[b * 2 + 1];
+          if ((az > z) !== (bz > z) && x < ((bx - ax) * (z - az)) / (bz - az) + ax) inside = !inside;
+          const dx = bx - ax, dz = bz - az, t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1e-9)));
+          best = Math.min(best, Math.hypot(x - ax - dx * t, z - az - dz * t));
+        }
+        put(i, j, (inside ? -best : best) + inset);
       }
     }
     if (changed) this.tex.needsUpdate = true;

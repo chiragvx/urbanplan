@@ -26,6 +26,7 @@ import { traceAt } from './wand';
 import { TerrainCompiler, type Region } from '../doc/terrain';
 import { TerrainTool } from './terraintool';
 import { PlotTool } from './plottool';
+import { fitPlot } from './plotfit';
 import { TerrainView } from './terrainview';
 import { newId } from '../doc/ids';
 import { drawOverlay, type Handle } from './overlay';
@@ -526,9 +527,21 @@ export class Editor {
     const h = this.handleAt(s);
     if (h && !readOnly.value) {
       if (h.kind === 'width') { this.drag = { kind: 'width', h, moved: false, n: ++dragSeq }; return; }
+      if (h.kind === 'mid') {
+        // a + on a plot's side: a new corner there, dragged from where it was grabbed
+        const o = this.doc.get<'plot'>(h.owner!);
+        if (o?.kind === 'plot') {
+          const base = [...o.ring]; base.splice((h.k! + 1) * 2, 0, Math.round(w[0] * 100) / 100, Math.round(w[1] * 100) / 100);
+          const n = ++dragSeq;
+          this.edit('Reshape plot', () => this.doc.set(o.id, 'ring', base), 'drag' + n);
+          anchorSel.value = { owner: o.id, k: h.k! + 1 };
+          this.drag = { kind: 'anchor', owner: o.id, k: h.k! + 1, start: w, base, moved: true, n, alt: e.altKey };
+          return;
+        }
+      }
       if (h.kind === 'anchor' || h.kind === 'in' || h.kind === 'out') {
         const o = this.doc.get(h.owner!);
-        const base = o?.kind === 'section' ? ops.anchorsOf(this.doc, o) : o?.kind === 'line' ? [...o.pts] : null;
+        const base = o?.kind === 'section' ? ops.anchorsOf(this.doc, o) : o?.kind === 'line' ? [...o.pts] : o?.kind === 'plot' ? [...o.ring] : null;
         if (base) {
           anchorSel.value = { owner: h.owner!, k: h.k!, handle: h.kind === 'anchor' ? undefined : h.kind };
           this.drag = { kind: 'anchor', owner: h.owner!, k: h.k!, handle: h.kind === 'anchor' ? undefined : h.kind, start: w, base, moved: false, n: ++dragSeq, alt: e.altKey };
@@ -642,6 +655,16 @@ export class Editor {
       select(out, d.add);
       status.value = `${out.length} selected`;
       return;
+    }
+    if (d.kind === 'anchor' && d.moved && this.doc.get(d.owner)?.kind === 'plot') {
+      // a corner dragged over a road or another plot: trimmed back to them (the same undo step)
+      const o = this.doc.get<'plot'>(d.owner)!, f = fitPlot(this, o.ring, o.id);
+      if (f?.trimmed) { this.edit('Reshape plot', () => this.doc.set(o.id, 'ring', f.ring), 'drag' + d.n); anchorSel.value = null; toast('Trimmed to the road edge', 'info'); }
+    }
+    if (d.kind === 'move' && d.moved) {
+      // a plot dropped over a road or another plot: trimmed back to them (the same undo step as the move)
+      const fits = d.ids.flatMap((id) => { const o = this.doc.get<'plot'>(id); if (o?.kind !== 'plot') return []; const f = fitPlot(this, o.ring, id); return f?.trimmed ? [{ id, ring: f.ring }] : []; });
+      if (fits.length) { this.edit('Move', () => { for (const f of fits) this.doc.set(f.id, 'ring', f.ring); }, 'drag' + d.n); toast('Trimmed to the road edge', 'info'); }
     }
     if (d.kind === 'junction' && d.moved) {
       // dropped on another junction / a road → connect
@@ -803,6 +826,21 @@ export class Editor {
       this.edit('Move point', () => this.doc.set(o.id, 'pts', pts), 'drag' + d.n);
       return;
     }
+    if (o.kind === 'plot') {
+      // a corner: free, or square to its neighbours' sides when it comes within a couple of degrees (Alt: free)
+      const R = [...(d.base as number[])], n = R.length / 2;
+      let x = R[d.k * 2] + dx, z = R[d.k * 2 + 1] + dz;
+      if (!alt) {
+        const pk = (d.k + n - 1) % n, nk = (d.k + 1) % n;
+        const px = R[pk * 2], pz = R[pk * 2 + 1], qx = R[nk * 2], qz = R[nk * 2 + 1];
+        // the point seeing the neighbours at a right angle (Thales circle) nearest the cursor
+        const cx = (px + qx) / 2, cz = (pz + qz) / 2, r = Math.hypot(qx - px, qz - pz) / 2, dd = Math.hypot(x - cx, z - cz);
+        if (r > 0.5 && dd > 0.01 && Math.abs(dd - r) * this.ppm < 6) { x = cx + ((x - cx) / dd) * r; z = cz + ((z - cz) / dd) * r; status.value = 'Square corner (Alt: free)'; }
+      }
+      R[d.k * 2] = Math.round(x * 100) / 100; R[d.k * 2 + 1] = Math.round(z * 100) / 100;
+      this.edit('Reshape plot', () => this.doc.set(o.id, 'ring', R), 'drag' + d.n);
+      return;
+    }
     if (o.kind !== 'section') return;
     const P = (d.base as Anchor[]).map((a) => ({ ...a }));
     const a = P[d.k];
@@ -870,6 +908,13 @@ export class Editor {
     const a = anchorSel.value;
     if (!a) return false;
     const o = this.doc.get(a.owner);
+    if (o?.kind === 'plot') {
+      if (o.ring.length <= 6) { toast('A plot keeps at least three corners', 'info'); return true; }
+      const ring = [...o.ring]; ring.splice(a.k * 2, 2);
+      this.edit('Remove corner', () => this.doc.set(o.id, 'ring', ring));
+      anchorSel.value = null;
+      return true;
+    }
     if (o?.kind === 'line') {
       if (o.pts.length <= 4) return false;
       const pts = [...o.pts]; pts.splice(a.k * 2, 2);
