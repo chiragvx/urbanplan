@@ -27,7 +27,7 @@ const STUDIO = [
 ];
 
 /** Site Studio at work, recorded from the app: plays while it's on screen, muted, round and round. */
-function StudioVideo() {
+function StudioVideo({ hero }: { hero?: boolean }) {
   const ref = useRef<HTMLVideoElement>(null);
   const [still, setStill] = useState(false);
   useEffect(() => {
@@ -39,7 +39,7 @@ function StudioVideo() {
     return () => io.disconnect();
   }, []);
   return (
-    <video ref={ref} class="studio-video" muted loop playsInline preload="metadata" controls={still} poster={img('studio-video.webp')} width="1600" height="900"
+    <video ref={ref} class="studio-video" muted loop playsInline preload={hero ? 'auto' : 'metadata'} controls={still} poster={img('studio-video.webp')} width="1600" height="900"
       aria-label="Site Studio at work: a garden drawn in, then a car park, then a building moved and the garden reshaped; the parking bays, paths, trees and paving lay themselves out again each time, in the plan and in 3D.">
       <source src={img('studio-procedural.mp4')} type="video/mp4" />
     </video>
@@ -77,10 +77,10 @@ export function Landing() {
             {authReady && !signedIn && <a class="btn btn-lg" href={href('signup/')}>Create an account</a>}
           </div>
           <div class="frame">
-            <img src={img('city-3d.webp')} alt="Pune in the editor's 3D view: the river, the elevated metro along its bank, and the city's buildings." width="1600" height="900" fetchpriority="high" />
-            <span class="float" style="left:-18px;top:18%"><span class="dot" style="background:var(--up-blue)" /><span><b>6.5 m</b><small>Deck height</small></span></span>
-            <span class="float" style="right:-18px;top:42%"><span class="dot" style="background:var(--up-verge)" /><span><b>24 m</b><small>DP road width</small></span></span>
-            <span class="float" style="left:12%;bottom:-18px"><span class="dot" style="background:var(--up-reserve)" /><span><b>816</b><small>DP zones traced</small></span></span>
+            <StudioVideo hero />
+            <span class="float" style="left:-18px;top:18%"><span class="dot" style="background:var(--up-blue)" /><span><b>₹17.8 Cr</b><small>profit, as you draw</small></span></span>
+            <span class="float" style="right:-18px;top:42%"><span class="dot" style="background:var(--up-ok)" /><span><b>All checks met</b><small>FSI, margins, fire, parking</small></span></span>
+            <span class="float" style="left:12%;bottom:-18px"><span class="dot" style="background:var(--up-reserve)" /><span><b>332 bays</b><small>laid out for you</small></span></span>
           </div>
         </div>
       </section>
