@@ -1445,12 +1445,7 @@ export class RoadMesher {
   stampTargets(targets: Float32Array, region?: [number, number, number, number]) {
     const hf = this.hf;
     const items = region ? this.itemsIn(...region) : [...this.items.values()];
-    const T = this.T;
-    for (const it of items) for (const st of it.stamps) {
-      if (!st.carve) continue;
-      if (st.line) stampLine(hf, targets, st.line, st.hw!, T, region, st.z);
-      else if (st.ring) { const P = st.plane ?? T; stampPolygon(hf, targets, st.ring, (x, z) => P(x, z) + (st.dz ?? 0) - 0.3, region); }
-    }
+    stampTargetsOf(hf, targets, items.flatMap((it) => it.stamps), this.T, region);
   }
 
   /** Road footprint raster (for building conflicts and trees) in a region (all if omitted). */
@@ -2282,6 +2277,15 @@ function stampLine(hf: Heightfield, targets: Float32Array, line: Float32Array, h
   }
 }
 
+/** Terrain targets from carving stamps (roads', and tracks' cut / filled to their level). */
+export function stampTargetsOf(hf: Heightfield, targets: Float32Array, stamps: Iterable<Stamp>, T: (x: number, z: number) => number, region?: [number, number, number, number]) {
+  for (const st of stamps) {
+    if (!st.carve) continue;
+    if (st.line) stampLine(hf, targets, st.line, st.hw!, T, region, st.z);
+    else if (st.ring) { const P = st.plane ?? T; stampPolygon(hf, targets, st.ring, (x, z) => P(x, z) + (st.dz ?? 0) - 0.3, region); }
+  }
+}
+
 function stampPolygon(hf: Heightfield, targets: Float32Array, ring: Float32Array, zf: (x: number, z: number) => number, region?: [number, number, number, number]) {
   const cell = hf.cell, gx = hf.x0, gz = hf.z0, gn = hf.n, m = ring.length / 2;
   let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
@@ -2325,7 +2329,7 @@ function runs(n: number, f: (i: number) => boolean): [number, number, boolean][]
  * Below ground: retaining walls up to the ground (with a parapet) where it's an open trench; where it's deeper than
  * COVER, a tunnel box (walls, ceiling) under untouched ground, and a portal wall where the trench goes under.
  */
-function underground(gb: GeomBuilder, S: Sub, z: (i: number, x: number, zz: number) => number, t: RoadType, T: (x: number, z: number) => number, ends: [boolean, boolean] = [false, false]) {
+function underground(gb: GeomBuilder, S: Sub, z: (i: number, x: number, zz: number) => number, t: Pick<RoadType, 'hwL' | 'hwR'>, T: (x: number, z: number) => number, ends: [boolean, boolean] = [false, false], ceil = CEIL) {
   const n = S.s.length;
   if (n < 2) return;
   const L = t.hwL + 0.3, R = -(t.hwR + 0.3), W = 0.45; // inner faces of the walls; wall thickness
@@ -2333,7 +2337,7 @@ function underground(gb: GeomBuilder, S: Sub, z: (i: number, x: number, zz: numb
   const covered = (i: number) => T(S.pts[i * 2], S.pts[i * 2 + 1]) - zc(i) >= COVER;
   const bottom = (i: number, x: number, zz: number) => z(i, x, zz) - 0.4;
   // open cut: the wall stands a parapet's height above the ground beside it (the ground isn't cut back)
-  const top = (i: number, x: number, zz: number) => (covered(i) ? z(i, x, zz) + CEIL : Math.max(T(x, zz), z(i, x, zz)) + 0.6);
+  const top = (i: number, x: number, zz: number) => (covered(i) ? z(i, x, zz) + ceil : Math.max(T(x, zz), z(i, x, zz)) + 0.6);
   wallAlong(gb, S, L, bottom, top, false, COL.concrete);
   wallAlong(gb, S, R, bottom, top, true, COL.concrete);
   // the trench floor beyond the road edges (the terrain isn't drawn inside the cut)
@@ -2353,15 +2357,15 @@ function underground(gb: GeomBuilder, S: Sub, z: (i: number, x: number, zz: numb
   for (const [a, b, cov] of runs(n, covered)) {
     if (!cov || b <= a) continue;
     const sub = slice(S, a, b);
-    sweep(gb, sub, R, L, (k, x, zz) => z(k + a, x, zz) + CEIL, COL.concreteDark); // ceiling (faces down)
-    sweep(gb, sub, L, R, (k, x, zz) => Math.min(z(k + a, x, zz) + CEIL + 0.6, T(x, zz) - 0.8), COL.concrete); // roof slab (kept under the ground)
+    sweep(gb, sub, R, L, (k, x, zz) => z(k + a, x, zz) + ceil, COL.concreteDark); // ceiling (faces down)
+    sweep(gb, sub, L, R, (k, x, zz) => Math.min(z(k + a, x, zz) + ceil + 0.6, T(x, zz) - 0.8), COL.concrete); // roof slab (kept under the ground)
     // portals: where the open trench meets the covered part, a face wall up to the ground
     for (const i of [a, b]) {
       // the piece's own ends: only where the road carries on out of the ground there (a cutting, a ground road)
       if ((i === a && i === 0 && !ends[0]) || (i === b && i === n - 1 && !ends[1])) continue;
       const x = S.pts[i * 2], zz = S.pts[i * 2 + 1];
       const yaw = Math.atan2(-S.nrm[i * 2], S.nrm[i * 2 + 1]);
-      gb.box(x, zz, zc(i) + CEIL - 0.2, T(x, zz) + 0.4, 0.8, L - R + 0.6, yaw, COL.concrete);
+      gb.box(x, zz, zc(i) + ceil - 0.2, T(x, zz) + 0.4, 0.8, L - R + 0.6, yaw, COL.concrete);
     }
   }
 }
@@ -2398,7 +2402,7 @@ function trenchStamps(S: Sub, z: (i: number, x: number, zz: number) => number, h
 const DEEP_CUT = 9;
 
 /** Retaining walls (with a coping a parapet's height above the ground) along the stretches of a graded piece cut deep. */
-function deepCutWalls(gb: GeomBuilder, S: Sub, z: (i: number, x: number, zz: number) => number, t: RoadType, T: (x: number, z: number) => number) {
+function deepCutWalls(gb: GeomBuilder, S: Sub, z: (i: number, x: number, zz: number) => number, t: Pick<RoadType, 'hwL' | 'hwR'>, T: (x: number, z: number) => number) {
   const n = S.s.length;
   if (n < 2) return;
   const deep = (i: number) => T(S.pts[i * 2], S.pts[i * 2 + 1]) - z(i, S.pts[i * 2], S.pts[i * 2 + 1]) > DEEP_CUT;
@@ -2413,6 +2417,7 @@ function deepCutWalls(gb: GeomBuilder, S: Sub, z: (i: number, x: number, zz: num
     wallAlong(gb, sub, R, bottom, top, true, COL.concrete);
     sweep(gb, sub, L + W, L, top, COL.concrete);
     sweep(gb, sub, R, R - W, top, COL.concrete);
+    sweep(gb, sub, L, R, (k, x, zz) => zs(k, x, zz) - 0.12, COL.concreteDark); // the cut's floor (the terrain isn't drawn inside)
   }
 }
 
@@ -2432,6 +2437,35 @@ function gradedStamps(S: Sub, z: (i: number, x: number, zz: number) => number, h
     }
   }
   return out;
+}
+
+// ---------------- tracks below the ground ----------------
+
+/** Track headroom: rail level to a tunnel's ceiling (overhead wires). */
+const TRACK_CEIL = 6.5;
+
+/** A plain polyline as a sub-range (tracks share the road's cutting / tunnel builders). */
+function lineSub(pts: ArrayLike<number>): Sub {
+  const p = Float32Array.from(pts), s = [0];
+  for (let i = 1; i < p.length / 2; i++) s.push(s[i - 1] + Math.hypot(p[i * 2] - p[i * 2 - 2], p[i * 2 + 1] - p[i * 2 - 1]));
+  return { pts: [...p], nrm: [...leftNormals(p)], s };
+}
+
+/**
+ * A track piece below the ground (src/build/rail.ts), as a road's: a cutting gets retaining walls where it's cut
+ * deeper than DEEP_CUT (shallower, its 1:2 slopes are the terrain's, see trackStamps); a tunnel a box under the
+ * ground with portals at its ends. `zs` = track level per point, `hw` = half the formation.
+ */
+export function trackBelow(gb: GeomBuilder, pts: ArrayLike<number>, zs: ArrayLike<number>, hw: number, tunnel: boolean, T: (x: number, z: number) => number) {
+  const S = lineSub(pts), z = (i: number) => zs[i], t = { hwL: hw, hwR: hw };
+  if (tunnel) underground(gb, S, z, t, T, [true, true], TRACK_CEIL);
+  else deepCutWalls(gb, S, z, t, T);
+}
+
+/** Terrain stamps of a track piece at grade or in a cutting (cut / filled to it, a hole where cut deep) or a tunnel. */
+export function trackStamps(pts: ArrayLike<number>, zs: ArrayLike<number>, hw: number, tunnel: boolean, T: (x: number, z: number) => number): Stamp[] {
+  const S = lineSub(pts), z = (i: number) => zs[i];
+  return tunnel ? trenchStamps(S, z, hw, 0, T) : gradedStamps(S, z, hw, 0, T);
 }
 
 // ---------------- elevated structure ----------------

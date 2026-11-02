@@ -6,7 +6,7 @@ import { ui } from './ctx';
 import { NumberField, Row, Section, Select, Toggle, Icon, Seg, Tabs } from './components';
 import { CrossSection } from './CrossSection';
 import { RoadPicker } from './RoadPicker';
-import { RoadLongSection } from './LongSection';
+import { RoadLongSection, TrackLongSection } from './LongSection';
 import * as xs from '../doc/xsection';
 import * as ops from '../doc/ops';
 import { CLASS_LABEL, type Id, type SectionObj } from '../doc/types';
@@ -527,6 +527,7 @@ function LinePanel(p: { id: Id }) {
       <input class="title-input" value={l.name} placeholder="Unnamed line" disabled={ro} onChange={(e) => set('name', (e.currentTarget as HTMLInputElement).value.trim())} />
       <p class="muted">{lineShape(l) === 'point' ? 'Placed structure' : lineShape(l) === 'area' ? `Area · ${l.pts.length / 2} corners` : `${fmtLen(length)} · ${l.pts.length / 2} points`}</p>
       {assetOf(l) && <LineAsset id={p.id} />}
+      {(l.layer === 'rail' || l.layer === 'metro') && lineShape(l) === 'route' && <TrackLongSection id={p.id} />}
       <Row label="Layer"><Select value={l.layer} options={layers.map((x) => ({ value: x.id, label: x.name }))} disabled={ro} onChange={(v) => set('layer', v)} /></Row>
       {lineShape(l) === 'route' && <><div class="grid2">
         <NumberField label={l.depth < 0 ? 'Height' : 'Depth'} unit="m" value={Math.abs(l.depth)} step={0.1} min={0} max={60} disabled={ro} onChange={(v, m) => set('depth', l.depth < 0 ? -v : v, m)} title="Below ground (pipes) / above ground (viaducts)" />

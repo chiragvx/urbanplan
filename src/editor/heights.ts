@@ -7,6 +7,8 @@ import { classify, gradeGuide, kindOfSection, STRUCT_RULES, type Pin, type Profi
 import type { Id, SectionObj } from '../doc/types';
 import type { V2 } from '../net/model';
 import { settings } from './state';
+import { assetOf, lineShape } from '../assets';
+import { railProfile } from '../build/railauto';
 
 /** A long-section to draw: samples along the line, its stretches and (a built road) the section of each stretch. */
 export interface LongSectionData {
@@ -231,4 +233,40 @@ export function pinSection(E: Editor, id: Id, kind: StructKind | undefined) {
     auto = classify(P, s.cls, R).sort((a, b) => b.s1 - b.s0 - (a.s1 - a.s0))[0]?.kind;
   }
   E.edit(kind ? 'Pin structure' : 'Unpin structure', () => ops.pinStructure(E.doc, id, kind, G, auto));
+}
+
+/**
+ * A rail / metro line's long-section (for the line inspector): a track drawn at grade gets its auto height (as the
+ * scene builds it, src/build/railauto.ts); one set as a viaduct or a tunnel is that all along, at its set depth.
+ */
+export function trackLevels(E: Editor, id: Id): LongSectionData | null {
+  const l = E.doc.get<'line'>(id);
+  if (!l || lineShape(l) !== 'route' || l.pts.length < 4) return null;
+  const hf = E.hf, base = hf.base, metro = l.layer === 'metro', cls = metro ? 'metro' : 'rail';
+  const p = assetOf(l)?.profile, prof = p?.type === 'track' ? p : undefined;
+  const auto = prof?.structure === 'grade' && l.props.bridge !== 1 && Math.abs(l.depth) <= 0.5;
+  const wet = (x: number, z: number) => { const w = waterAt(E, x, z); return w === null ? null : w - base; };
+  const pr = auto ? railProfile(l.pts, metro, (x, z) => hf.sample(x, z), wet, -l.depth) : null;
+  if (pr) {
+    const samples = pr.samples.map((q) => ({ ...q, road: q.road + base, ground: q.ground + base, water: q.water == null ? null : q.water + base }));
+    return { samples, stretches: pr.stretches, cls, len: pr.len };
+  }
+  // set by hand (or too short to work out): one kind all along, the depth below (above) the ground
+  const kind: StructKind = l.props.bridge === 1 || l.depth < -0.5 ? 'bridge' : l.depth > 3 || prof?.structure === 'tunnel' ? 'tunnel' : 'ground';
+  const pts: V2[] = [];
+  for (let i = 0; i < l.pts.length; i += 2) pts.push([l.pts[i], l.pts[i + 1]]);
+  const r = resample(pts, 8);
+  if (r.len < 1) return null;
+  const lift = kind === 'bridge' ? Math.max(-l.depth, 7.5) : kind === 'tunnel' ? -(l.depth > 3 ? l.depth : 15) : -l.depth;
+  // a viaduct runs straight between its ends, rising over humps but never dipping into valleys (as src/build/rail.ts draws it)
+  const g0 = hf.sample(r.p[0][0], r.p[0][1]) + lift, g1 = hf.sample(r.p[r.p.length - 1][0], r.p[r.p.length - 1][1]) + lift;
+  const samples: ProfileSample[] = r.p.map((q, i) => {
+    const g = hf.sample(q[0], q[1]);
+    const road = kind === 'bridge' ? Math.max(g0 + (g1 - g0) * (r.s[i] / r.len), g + lift * 0.8) : g + lift;
+    return { s: r.s[i], road: road + base, ground: g + base, water: waterAt(E, q[0], q[1]) };
+  });
+  let grade = 0, depth = 0;
+  for (let i = 1; i < samples.length; i++) { const ds = samples[i].s - samples[i - 1].s; if (ds > 0.5) { const g = (samples[i].road - samples[i - 1].road) / ds; if (Math.abs(g) > Math.abs(grade)) grade = g; } }
+  for (const q of samples) if (Math.abs(q.road - q.ground) > Math.abs(depth)) depth = q.road - q.ground;
+  return { samples, stretches: [{ s0: 0, s1: r.len, kind, auto: kind, grade, steep: Math.abs(grade) > gradeGuide(cls) + 1e-4, depth }], cls, len: r.len };
 }

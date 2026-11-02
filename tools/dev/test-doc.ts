@@ -12,6 +12,9 @@ import * as OPS from '../../src/doc/ops';
 import { TerrainCompiler } from '../../src/doc/terrain';
 import { classify, kindAt } from '../../src/doc/structure';
 import { clearWater, drawPlanned, planStretch } from '../../src/editor/heights';
+import { autoRail, railStamps } from '../../src/build/railauto';
+import { trackBelow } from '../../src/net/generate';
+import { GeomBuilder } from '../../src/build/geom';
 
 const dir = 'public/tiles/kp/';
 const hdr = JSON.parse(fs.readFileSync(dir + 'tile.json', 'utf8'));
@@ -511,6 +514,22 @@ check(!!doc.get(s0.id) && C.mesher.segs.has(`${s0.id}~0`), 'undo delete restores
     const deck = Math.max(...secsW.filter((q) => q.elevated && q.bridge !== 'none').map((q) => q.deck), 0);
     const lv = secsW.filter((q) => q.elevated).flatMap((q) => OPS.sectionLevels(DW, q, G).z);
     check(deck > 0 && Math.max(...lv) > Math.max(...wetIn.map((q) => q.water!)) + 3.9, `built: a bridge section with a deck (${deck} m) clear of the water`);
+  }
+  // auto height on a track through a hill (35 m over 1.2 km): a cutting into it, a tunnel under the top, walls and portals
+  {
+    const hill = { sample: (x: number) => 35 * Math.max(0, 1 - Math.abs(x - 1500) / 600) };
+    const rail = { pts: new Float32Array([0, 0, 3000, 0]), bridge: false, tunnel: false, layer: 0, service: false, metro: false, tracks: 2, tc: 4.5, gauge: 1.676, formation: 12 };
+    const pcs = autoRail(rail, hill, () => null);
+    const kinds = pcs.map((r) => r.kind).join(' ');
+    const under = (r: (typeof pcs)[number]) => [...r.zs!].every((z, k) => z < hill.sample(r.pts[k * 2]) + 1e-6);
+    check(/cutting tunnel cutting/.test(kinds) && pcs.filter((r) => r.kind === 'tunnel' || r.kind === 'cutting').every(under), `rail through a hill: cutting, tunnel, cutting below the ground (${kinds})`);
+    const st = railStamps(pcs, (x) => hill.sample(x));
+    check(st.some((x) => x.hole) && st.some((x) => x.carve && !!x.z), `rail stamps: cut to the track, a hole where cut deep (${st.length})`);
+    const gb = new GeomBuilder(), tn = pcs.find((r) => r.kind === 'tunnel')!;
+    trackBelow(gb, tn.pts, tn.zs!, 6, true, (x) => hill.sample(x));
+    const n0 = gb.vertexCount, cu = pcs.find((r) => r.kind === 'cutting')!;
+    trackBelow(gb, cu.pts, cu.zs!, 6, false, (x) => hill.sample(x));
+    check(n0 > 0 && gb.vertexCount > n0, 'rail: a tunnel box with portals, retaining walls in a cutting');
   }
   const cut = OPS.cutPieces(pieces, 150, 450);
   check(Math.abs(OPS.piecesLength(cut) - 300) < 0.5 && Math.abs(cut[0][0] - (x0 + 150)) < 0.5, 'cutPieces: the part between two arc lengths');

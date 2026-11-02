@@ -6,7 +6,7 @@ import { texture, vertexColor, vec3, mix, float, uniform } from 'three/tsl';
 import { GeomBuilder, appendInto, rgbHex } from '../build/geom';
 import { buildBuildings, resolveConflicts } from '../build/buildings';
 import { buildRail } from '../build/rail';
-import { autoRail } from '../build/railauto';
+import { autoRail, railStamps } from '../build/railauto';
 import { buildTerrainPatch, buildTerrainSkirt, buildWater } from '../build/terrain';
 import { shiftInto } from '../geo/heightfield';
 import { placeTrees, treeGeometry, type TreeInstance } from '../build/vegetation';
@@ -16,7 +16,7 @@ import { landuseRect, landuseUV, type Materials } from '../render/materials';
 import type { Building, TileData } from '../data/tile';
 import type { Heightfield } from '../geo/heightfield';
 import { RoadRaster } from '../geo/roadraster';
-import { MESH_LAYERS, type MeshLayer, type Packed } from '../net/generate';
+import { MESH_LAYERS, stampTargetsOf, type MeshLayer, type Packed, type Stamp } from '../net/generate';
 import type { Compiler } from '../doc/compile';
 import type { CityDoc, Change } from '../doc/doc';
 import type { BuildingObj, Id, LineObj, PlotObj } from '../doc/types';
@@ -169,9 +169,10 @@ export class World {
 
     progress(0.6, 'Fitting the ground to the roads…');
     C.mesher.stampTargets(this.targets);
+    stampTargetsOf(hf, this.targets, this.trackStamps(), (x, z) => hf.sample(x, z));
     this.stampChannels();
     hf.conform(this.targets);
-    this.holes.update(this.gridRect(), [...C.mesher.items.values()].flatMap((it) => it.stamps));
+    this.holes.update(this.gridRect(), [...[...C.mesher.items.values()].flatMap((it) => it.stamps), ...this.trackStamps()]);
     C.mesher.stampRaster(this.raster);
     this.ensureTerrain(this.gridRect());
     this.skirt = new THREE.Mesh(buildTerrainSkirt(hf), M.skirt);
@@ -255,6 +256,7 @@ export class World {
     this.tile = tile;
     this.raster = this.raster.movedTo(tile.ox ?? 0, tile.oz ?? 0);
     this.holes.moveTo(tile.ox ?? 0, tile.oz ?? 0);
+    this.railCut = null;
     this.dropOutside(this.gridRect());
     this.terrainRev++;
   }
@@ -349,6 +351,12 @@ export class World {
     if (i < 0 || j < 0 || i >= hf.n || j >= hf.n) return null;
     const k = j * hf.n + i;
     return T.waterMask[k] ? T.waterLevel[k] - hf.base : null;
+  }
+
+  /** Terrain stamps of the auto-height tracks (cut / filled to them, holes where cut deep); null: to work out again. */
+  private railCut: Stamp[] | null = null;
+  private trackStamps(): Stamp[] {
+    return (this.railCut ??= railStamps([...this.railsFromDoc('rail'), ...this.railsFromDoc('metro')], (x, z) => this.hf.sample(x, z)));
   }
 
   private buildRail() {
@@ -487,12 +495,13 @@ export class World {
         // canals wide enough to cut the terrain: refresh where the line was and where it is
         const was = this.lineExtent.get(id);
         if (was) { grow({ x0: was[0], z0: was[1], x1: was[2], z1: was[3] }); this.lineExtent.delete(id); }
-        if (o?.kind === 'line') { const a = assetOf(o); if (a && carves(a)) { const e = lineBox(o.pts, o.size / 2 + 12); this.lineExtent.set(id, e); grow({ x0: e[0], z0: e[1], x1: e[2], z1: e[3] }); } }
+        if (o?.kind === 'line') { const a = assetOf(o); if (a && (carves(a) || layer === 'rail' || layer === 'metro')) { const e = lineBox(o.pts, o.size / 2 + 12); this.lineExtent.set(id, e); grow({ x0: e[0], z0: e[1], x1: e[2], z1: e[3] }); } }
         if (layer === 'rail' || layer === 'metro') this.railDirty = true;
         else if (layer && layer !== 'paths') this.utilDirty.add(layer);
         else if (!o) { this.railDirty = true; for (const l of this.utilityLayers.keys()) this.utilDirty.add(l); }
       } else if (o?.kind === 'section' && o.viaduct) this.railDirty = true;
     }
+    if (this.railDirty) this.railCut = null;
     // paging (a region's window moving): arriving buildings are made when their piece settles; nothing to re-sync
     const page = c.origin === 'page';
     if (bTouched.length) { this.buildings.touch(page ? bTouched.filter((id) => !this.bItems.has(id)) : bTouched); this.buildings.flush(); }
@@ -516,8 +525,9 @@ export class World {
     for (let j = t0; j <= t1; j++) this.targets.fill(NaN, j * hf.n + s0, j * hf.n + s1 + 1);
     const box: Region = [hf.x0 + s0 * hf.cell - 0.01, hf.z0 + t0 * hf.cell - 0.01, hf.x0 + s1 * hf.cell + 0.01, hf.z0 + t1 * hf.cell + 0.01];
     C.mesher.stampTargets(this.targets, box);
+    stampTargetsOf(hf, this.targets, this.trackStamps(), (x, z) => hf.sample(x, z), box);
     this.stampChannels(box);
-    this.holes.update(box, C.mesher.itemsIn(...box).flatMap((it) => it.stamps));
+    this.holes.update(box, [...C.mesher.itemsIn(...box).flatMap((it) => it.stamps), ...this.trackStamps()]);
     hf.conformRegion(this.targets, Math.max(0, g.i0 - pad), Math.max(0, g.j0 - pad), Math.min(hf.n - 1, g.i1 + pad), Math.min(hf.n - 1, g.j1 + pad));
     for (const t of this.terrain) {
       const c = this.chunkRange(t);

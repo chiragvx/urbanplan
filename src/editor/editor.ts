@@ -107,6 +107,8 @@ export class Editor {
   mouse: [number, number] = [0, 0];
   spaceDown = false;
   overlayDirty = true;
+  /** Site Studio's marks over the 3D view, drawn last (set while the studio is open) */
+  studioDraw: (() => void) | null = null;
   /** issue markers to draw (set by the issues panel) */
   markers: { x: number; z: number; sev: 'error' | 'warn' }[] = [];
   private lastClick = { t: 0, x: 0, y: 0 };

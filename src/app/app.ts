@@ -26,6 +26,7 @@ import { toGeoJSON, toNetwork } from '../doc/export';
 import { CityApi } from '../doc/api';
 import type { Id, LayerObj, MapFile, MapMeta, Obj } from '../doc/types';
 import { CLASS_RANK } from '../doc/types';
+import { isStandard } from '../assets/roadmodel';
 import * as xs from '../doc/xsection';
 import { World } from '../scene/world';
 import { OsmCompare } from '../editor/osmcompare';
@@ -336,12 +337,12 @@ export class App implements AppApi {
     await repo.probe();
     if (url) { await this.openUrl(url, true); return; }
     // from the start menu: one of this browser's maps, a project in the account, a new map, or a file picked there
-    const lid = q.get('local'), pid = q.get('project'), fresh = q.has('new'), picked = q.get('open') === 'file';
-    for (const k of ['local', 'project', 'new', 'open']) q.delete(k);
-    if (lid || pid || fresh || picked) history.replaceState(null, '', `${location.pathname}?${q}`);
+    const lid = q.get('local'), pid = q.get('project'), fresh = q.has('new'), picked = q.get('open') === 'file', std = q.get('std');
+    for (const k of ['local', 'project', 'new', 'open', 'std']) q.delete(k);
+    if (lid || pid || fresh || picked || std) history.replaceState(null, '', `${location.pathname}?${q}`);
     if (pid) { await this.openProject(pid); return; }
     if (lid && (await local.get(lid))) { await this.openLocal(lid); return; }
-    if (fresh) { this.newMap(false); return; }
+    if (fresh) { this.newMap(false); if (isStandard(std)) this.setMeta({ standard: std }); return; }
     if (picked) {
       let text: string | null = null;
       try { text = sessionStorage.getItem('urbanplan:open'); sessionStorage.removeItem('urbanplan:open'); } catch { /* storage off */ }

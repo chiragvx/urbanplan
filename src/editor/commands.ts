@@ -140,7 +140,7 @@ function levelBy(E: Editor, dir: 1 | -1) {
   }
   const ids = E.selectedSections().map((s) => s.id);
   if (!ids.length) { toast('Select a road (or pick the road tool) to change its height', 'info'); return; }
-  setDeck(E, r2(ops.deckOf(E.doc, ids) + dir * step), 'lift');
+  setDeck(E, r2(bulk.peek(E, () => ops.deckOf(E.doc, ids)) + dir * step), 'lift');
 }
 
 function setRoadMode(E: Editor, m: RoadMode) {

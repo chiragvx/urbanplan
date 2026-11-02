@@ -10,7 +10,9 @@
 // The shelf's buildings (slab, tower, L) drop where clicked, sized to the envelope; a single-wing building sizes by
 // its corners and its floors drag on the pill above it. A gate drops on the plot's edge, a tank where clicked, a wall
 // is laid node by node. Rules flag, never block: the part of a building past its margins is hatched amber, a building
-// over the height limit gets an amber outline and dot; red is kept for buildings running into each other.
+// over the height limit gets an amber outline and dot; red is kept for buildings running into each other. In the 3D
+// view the selected building's floors drag on a handle on its roof (studioheight); either drag is one undo step, and
+// Esc during it puts the floors back.
 import { effect } from '@preact/signals';
 import type { Editor } from './editor';
 import type { Id } from '../doc/types';
@@ -18,6 +20,7 @@ import { docVersion, readOnly, studioLevel, studioSel, studioTool, toast } from 
 import { BUILDING_SHAPES, buildingQuads, circleRing, ELEMENTS, elementCentre, elementRings, isArea, isLine, isPoint, newBuildingId, pointIn, ringOf, UNIT_COLOR, type BuildingReport, type ElementKind, type PlotSite, type SiteBuilding, type SiteElement } from '../doc/site';
 import { inset, sideMargin } from '../doc/plot';
 import { area, diff, flat, fromFlat, grow, inside, inter, nearest, shrink, simplify, union, type MP } from '../doc/ground';
+import { beginFloors, cancelFloors, dragFloors, endFloors, StudioHeight, type FloorsDrag } from './studioheight';
 
 const ACCENT = '#2f5bff', RED = '#e5484d', INK = '#1c2333', AMBER = '#c98300';
 
@@ -28,7 +31,7 @@ type Drag =
   | { kind: 'turn'; b: string; c: [number, number]; a0: number; spine: number[]; n: number }
   | { kind: 'depth'; b: string; n: number }
   | { kind: 'corner'; b: string; i: number; q: number[]; n: number }
-  | { kind: 'floors'; b: string; y: number; f0: number; n: number }
+  | { kind: 'floors'; y: number; fd: FloorsDrag }
   | { kind: 'rect'; el: ElementKind; a: [number, number]; moved: boolean }
   | { kind: 'vertex'; b: string; i: number; ring: number[]; n: number; moved: boolean }
   | { kind: 'ring'; b: string; start: [number, number]; ring: number[]; n: number; moved: boolean }
@@ -53,9 +56,13 @@ export class StudioCanvas {
   private dirty = true;
   private raf = 0;
   private off: (() => void)[] = [];
+  /** the height handle in the 3D view */
+  private height: StudioHeight;
 
   constructor(readonly el: HTMLCanvasElement, readonly E: Editor, readonly id: Id) {
     this.ctx = el.getContext('2d')!;
+    this.height = new StudioHeight(E, id);
+    this.off.push(() => this.height.dispose());
     const ro = new ResizeObserver(() => this.resize());
     ro.observe(el);
     this.off.push(() => ro.disconnect());
@@ -74,7 +81,7 @@ export class StudioCanvas {
     this.raf = requestAnimationFrame(loop);
   }
 
-  dispose() { cancelAnimationFrame(this.raf); for (const f of this.off) f(); }
+  dispose() { cancelAnimationFrame(this.raf); if (this.drag?.kind === 'floors') endFloors(this.E, this.drag.fd); for (const f of this.off) f(); }
 
   private resize() {
     const r = this.el.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
@@ -210,7 +217,7 @@ export class StudioCanvas {
       }
       if (h.floors && Math.hypot(s[0] - h.floors[0], s[1] - h.floors[1]) < 11) {
         const f0 = this.E.plot.layout(this.id)?.buildings.find((x) => x.b.id === sel.id)?.floors ?? sel.floors;
-        this.drag = { kind: 'floors', b: sel.id, y: s[1], f0, n: ++dragSeq };
+        this.drag = { kind: 'floors', y: s[1], fd: beginFloors(this.E, this.id, sel.id, f0) };
         return;
       }
       if (h.depth && Math.hypot(s[0] - h.depth[0], s[1] - h.depth[1]) < 8 && !('kind' in sel && isPoint(sel.kind))) { this.drag = { kind: 'depth', b: sel.id, n: ++dragSeq }; return; }
@@ -363,9 +370,7 @@ export class StudioCanvas {
       }
       case 'floors': {
         // up adds floors, 8 px a floor; as many as asked, at least one
-        const f = Math.max(1, d.f0 + Math.round((d.y - s[1]) / 8));
-        const b = this.building(d.b);
-        if (b && f !== b.floors) this.setSpine(d.b, b.spine, 'Floors', 'studio' + d.n, { floors: f });
+        dragFloors(this.E, d.fd, d.fd.f0 + Math.round((d.y - s[1]) / 8));
         break;
       }
     }
@@ -375,6 +380,7 @@ export class StudioCanvas {
     if (this.queued) { const q = this.queued; this.queued = null; this.moveNow(q); }
     const d = this.drag;
     this.hitSnap = null;
+    if (d?.kind === 'floors') endFloors(this.E, d.fd);
     if (d?.kind === 'rect') {
       // dragged: the rectangle; clicked: the first corner of a shape
       const R = this.rect;
@@ -430,6 +436,9 @@ export class StudioCanvas {
     const b = this.building(studioSel.value);
     switch (e.key) {
       case 'Escape':
+        // a floors drag (on the plan's pill or the 3D handle): the floors as they were
+        if (this.height.cancel()) return true;
+        if (this.drag?.kind === 'floors') { cancelFloors(this.E, this.drag.fd); this.drag = null; this.dirty = true; return true; }
         if (this.draft.length) { this.draft = []; this.dirty = true; return true; }
         if (this.shape) { this.shape = null; this.dirty = true; return true; }
         if (studioTool.value !== 'select') { studioTool.value = 'select'; return true; }
@@ -692,7 +701,7 @@ export class StudioCanvas {
     const el = 'kind' in b;
     // a single wing sizes by its corners; a building's floors drag on the pill beside the turn handle
     const corners: [number, number][] = !el && q.length === 1 ? [0, 1, 2, 3].map((i) => this.toS(q[0][i * 2], q[0][i * 2 + 1])) : [];
-    const floors: [number, number] | null = el ? null : [turn[0] + 26, turn[1]];
+    const floors: [number, number] | null = el || readOnly.value ? null : [turn[0] + 26, turn[1]];
     return { turn, depth, corners, floors };
   }
 
@@ -927,7 +936,8 @@ export class StudioCanvas {
       if (h.floors) {
         // the floors pill: drag it up or down
         const [fx, fy] = h.floors, fl = d?.buildings.find((x) => x.b.id === sel.id);
-        const t = `${fl?.floors ?? sel.floors} fl`;
+        // (the height too while it's dragged)
+        const t = `${fl?.floors ?? sel.floors} fl${this.drag?.kind === 'floors' && fl ? ` · ${Math.round(fl.height * 10) / 10} m` : ''}`;
         ctx.font = '600 10px Inter, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         const tw = Math.max(30, ctx.measureText(t).width + 16);
         ctx.beginPath(); ctx.roundRect(fx - tw / 2 + 8, fy - 9, tw, 18, 9); ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = fl?.overHeight ? AMBER : ACCENT; ctx.lineWidth = 1.5; ctx.stroke();

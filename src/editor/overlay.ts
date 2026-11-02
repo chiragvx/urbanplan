@@ -145,6 +145,8 @@ export function drawOverlay(E: Editor) {
     if (!p) continue;
     dot(ctx, p, 6, m.sev === 'error' ? WARN : '#f5a524', '#fff');
   }
+  // Site Studio's own marks in 3D (the selected building's height handle)
+  if (!is2d) E.studioDraw?.();
   if (is2d) scaleBar(E);
 }
 

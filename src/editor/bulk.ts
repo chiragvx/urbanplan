@@ -214,6 +214,15 @@ export function change(E: Editor, label: string, run: () => void, extra: Id[] = 
   ensureBar();
 }
 
+/** Read the map as the open preview would leave it (rolled back after): so a step taken during a preview stacks. */
+export function peek<T>(E: Editor, read: () => T): T {
+  const p = pending.value;
+  if (!p) return read();
+  let out!: T;
+  try { E.doc.transact('Preview', () => { p.run(); out = read(); throw DRY; }); } catch (e) { if (e !== DRY) throw e; }
+  return out;
+}
+
 /** Write the previewed change: one undo step. */
 export function apply(E: Editor) {
   const p = pending.value;

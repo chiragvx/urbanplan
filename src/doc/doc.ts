@@ -38,6 +38,8 @@ export class CityDoc {
   get savedVersion() { return this.saved; }
   set savedVersion(v: number) { this.saved = v; this.savedTop = this.undoStack[this.undoStack.length - 1]; }
   private saved = 0;
+  /** a drag's merge key, held from press to release: its steps collapse into one however long it pauses */
+  holdMerge: string | null = null;
   /** the undo step on top when saved (null: a step changed since, so no undo / redo reaches the saved state) */
   private savedTop: Txn | undefined | null = undefined;
   /** Changed since the last save: undo / redo back to the saved step counts as saved. */
@@ -181,7 +183,7 @@ export class CityDoc {
     if (!t.before.size) return r;
     t.after = new Map([...t.before.keys()].map((id) => [id, clone(this.patch.get(id))]));
     const last = this.undoStack[this.undoStack.length - 1];
-    if (merge && last?.merge === merge && t.time - last.time < 1500 && [...t.before.keys()].every((id) => last.before.has(id))) {
+    if (merge && last?.merge === merge && (t.time - last.time < 1500 || merge === this.holdMerge) && [...t.before.keys()].every((id) => last.before.has(id))) {
       if (last === this.savedTop) this.savedTop = null; // the saved step itself changed
       last.after = t.after; last.time = t.time; last.structural ||= t.structural;
     } else {
@@ -353,11 +355,12 @@ export class CityDoc {
   get undoLabel() { return this.undoStack[this.undoStack.length - 1]?.label; }
   get redoLabel() { return this.redoStack[this.redoStack.length - 1]?.label; }
 
-  undo() {
+  /** `forget`: the step goes for good, not onto the redo stack (a drag cancelled with Esc) */
+  undo(forget = false) {
     const t = this.undoStack.pop();
     if (!t) return;
     for (const [id, e] of t.before) this.writeEntry(id, clone(e));
-    this.redoStack.push(t);
+    if (!forget) this.redoStack.push(t);
     this.flush('undo', t.label, t.structural);
   }
 

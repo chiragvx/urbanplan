@@ -3,6 +3,8 @@
 import { GeomBuilder, rgbHex } from './geom';
 import type { TileData } from '../data/tile';
 import type { Heightfield } from '../geo/heightfield';
+import { trackBelow } from '../net/generate';
+import { railHalfWidth, type RailPiece } from './railauto';
 
 const DECK = 7.5;
 const GRADE = 0.035;
@@ -288,7 +290,7 @@ function levelAlong(r: { pts: Float32Array; zs?: Float32Array }): ((t: number) =
 
 export function buildRail(tile: TileData, hf: Heightfield, roadCenters: { pts: Float32Array; oneway: boolean }[] = []) {
   const ballast = new GeomBuilder(), steel = new GeomBuilder(), structure = new GeomBuilder();
-  const T = (x: number, z: number) => hf.sampleSurface(x, z);
+  const T = (x: number, z: number) => hf.sampleSurface(x, z), Tg = (x: number, z: number) => hf.sample(x, z);
   const key = (x: number, z: number) => `${Math.round(x * 2)},${Math.round(z * 2)}`;
 
   // Endpoint lifts: elevated pieces lift their ends, relaxed along ground pieces so approaches stay gentle.
@@ -318,8 +320,11 @@ export function buildRail(tile: TileData, hf: Heightfield, roadCenters: { pts: F
     if (!changed) break;
   }
 
-  tile.rails.forEach((r, i) => {
-    if (r.tunnel || dropped[i] || R[i].pts.length < 4) return;
+  tile.rails.forEach((r0, i) => {
+    const r = r0 as RailPiece;
+    // auto height below the ground (src/build/railauto.ts): a cutting's retaining walls, a tunnel's box and portals
+    if (r.zs && !dropped[i] && (r.kind === 'cutting' || r.kind === 'ground' || r.kind === 'tunnel')) trackBelow(structure, r.pts, r.zs, railHalfWidth(r, paired[i]), r.kind === 'tunnel', Tg);
+    if ((r.tunnel && !r.zs) || dropped[i] || R[i].pts.length < 4) return; // (an auto tunnel's track runs in to its portals)
     const RS = R[i], m = RS.pts.length / 2;
     const oa = off.get(ends[i][0]) ?? 0, ob = off.get(ends[i][1]) ?? 0;
     const lifted = r.bridge || r.layer > 0;
@@ -330,16 +335,17 @@ export function buildRail(tile: TileData, hf: Heightfield, roadCenters: { pts: F
     for (let k = 0; k < m; k++) {
       const x = RS.pts[k * 2], z = RS.pts[k * 2 + 1], t = RS.len ? RS.s[k] / RS.len : 0;
       gs[k] = T(x, z);
-      ys[k] = own ? Math.max(own(t), r.bridge ? -Infinity : gs[k]) + 0.3 : lifted ? Math.max(za + (zb - za) * t, gs[k] + (r.deck ?? DECK) * 0.8) : gs[k] + oa + (ob - oa) * t + 0.3;
+      // its own level: the ground is cut / filled to it (or isn't drawn, cut deep), so no clamping to it
+      ys[k] = own ? own(t) + 0.3 : lifted ? Math.max(za + (zb - za) * t, gs[k] + (r.deck ?? DECK) * 0.8) : gs[k] + oa + (ob - oa) * t + 0.3;
     }
     const elevated = (k: number) => ys[k] - gs[k] > 2.5;
     const anyElevated = Array.from(ys).some((y, k) => y - gs[k] > 2.5);
     // half width: from the asset's formation, else a double-track viaduct when the twin was merged in
-    const w = r.formation ? r.formation / 2 : paired[i] ? 4.7 : r.metro ? 2.6 : 1.9;
+    const w = railHalfWidth(r, paired[i]);
     const bedCol = rgbHex(anyElevated || r.metro ? 0x9a958c : 0x7a6a58);
     const wallCol = rgbHex(anyElevated ? 0xa8a49b : 0x6f6253);
     strip(ballast, RS, -w, w, (k) => ys[k], bedCol);
-    const bottom = (k: number) => (elevated(k) ? ys[k] - 1.6 : gs[k] - 0.3);
+    const bottom = (k: number) => (elevated(k) ? ys[k] - 1.6 : Math.min(gs[k], ys[k] - 0.3) - 0.3);
     sideWall(structure, RS, w, bottom, (k) => ys[k], wallCol);
     sideWall(structure, RS, -w, bottom, (k) => ys[k], wallCol);
     if (anyElevated) {

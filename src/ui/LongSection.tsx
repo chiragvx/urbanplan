@@ -1,10 +1,10 @@
 // The long-section: terrain against the road's level along it, coloured by what each stretch is (ground, bridge,
 // cutting, tunnel), steep stretches flagged amber with their grade. While the road tool draws it floats above the
 // drawing strip (LiveLongSection); for a built road the inspector can show it (RoadLongSection), and each stretch's
-// icon pins it to a kind.
+// icon pins it to a kind; a rail / metro line's too, read-only (TrackLongSection).
 import { useState } from 'preact/hooks';
 import { buildOpen, docVersion, tool } from '../editor/state';
-import { liveSection, pinSection, roadLevels, type LongSectionData } from '../editor/heights';
+import { liveSection, pinSection, roadLevels, trackLevels, type LongSectionData } from '../editor/heights';
 import { gradeGuide, STRUCT_HINT, STRUCT_KINDS, STRUCT_LABEL, type StructKind } from '../doc/structure';
 import type { Id } from '../doc/types';
 import { ui } from './ctx';
@@ -107,7 +107,7 @@ export function LongSection({ data, onPin, width = 380, height = 104 }: { data: 
       </svg>
       <div class="ls-foot">
         {hv
-          ? <span>{fmtLen(hv.s)} · road {hv.road.toFixed(1)} m · ground {hv.ground.toFixed(1)} m · {hv.road >= hv.ground ? '+' : '−'}{Math.abs(hv.road - hv.ground).toFixed(1)} m{hv.water != null ? ` · water ${hv.water.toFixed(1)} m` : ''}</span>
+          ? <span>{fmtLen(hv.s)} · {data.cls === 'rail' || data.cls === 'metro' ? 'track' : 'road'} {hv.road.toFixed(1)} m · ground {hv.ground.toFixed(1)} m · {hv.road >= hv.ground ? '+' : '−'}{Math.abs(hv.road - hv.ground).toFixed(1)} m{hv.water != null ? ` · water ${hv.water.toFixed(1)} m` : ''}</span>
           : <span>A {z0.toFixed(0)} m → B {z1.toFixed(0)} m · {pct((z1 - z0) / L)} · {fmtLen(L)}</span>}
       </div>
     </div>
@@ -131,4 +131,11 @@ export function RoadLongSection({ ids }: { ids: Id[] }) {
   const d = ids.length ? roadLevels(ui.E, ids) : null;
   if (!d) return null;
   return <LongSection data={d} width={340} onPin={(i, k) => { const id = d.ids?.[i]; if (id) pinSection(ui.E, id, k); }} />;
+}
+
+/** A rail / metro line's long-section (for the line inspector): read-only, its stretches are worked out from the ground. */
+export function TrackLongSection({ id }: { id: Id }) {
+  void docVersion.value;
+  const d = trackLevels(ui.E, id);
+  return d ? <LongSection data={d} width={340} /> : null;
 }

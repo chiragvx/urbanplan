@@ -6,6 +6,7 @@ import { gallery, local, pickFile, type LocalMap, type Published } from '../app/
 import { parse } from '../doc/format';
 import { saveSettings, settings } from '../editor/state';
 import { Icon } from './components';
+import { STANDARDS, standardFor, type StandardId } from '../assets/roadmodel';
 import { AccountButton } from './account';
 import { session } from '../auth/auth';
 import './hovercard';
@@ -50,6 +51,8 @@ export function Home() {
   const [err, setErr] = useState('');
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [moving, setMoving] = useState('');
+  /** the street standard a new map of each city starts with (its own by default) */
+  const [std, setStd] = useState<Record<string, StandardId>>({});
   const user = session.value?.user;
   useEffect(() => {
     void cities().then(setList);
@@ -149,7 +152,11 @@ export function Home() {
                       </dl>
                       <div class="city-btns">
                         <button class="primary" title={n ? `Open: carry on with your last map of ${c.name}` : `Open: ${c.name} as it is today, ready to edit`} onClick={() => go({ region: c.id })}>Open</button>
-                        <button title={`New map: a clean copy of ${c.name}, with none of your edits${n ? ' (your other maps stay saved)' : ''}`} onClick={() => go({ region: c.id, new: '1' })}>New map</button>
+                        <button title={`New map: a clean copy of ${c.name}, with none of your edits${n ? ' (your other maps stay saved)' : ''}`} onClick={() => go({ region: c.id, new: '1', ...(std[c.id] ? { std: std[c.id] } : {}) })}>New map</button>
+                        <select class="city-std" aria-label="Street standard for a new map" title="Street standard a new map starts with: how a road's width and features become its cross-section (change it later in Settings)"
+                          value={std[c.id] ?? standardFor(c.city)} onChange={(e) => setStd({ ...std, [c.id]: (e.currentTarget as HTMLSelectElement).value as StandardId })}>
+                          {STANDARDS.map((x) => <option key={x.id} value={x.id}>{x.short}</option>)}
+                        </select>
                       </div>
                     </div>
                   </article>
