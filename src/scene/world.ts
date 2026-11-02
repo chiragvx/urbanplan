@@ -6,6 +6,7 @@ import { texture, vertexColor, vec3, mix, float, uniform } from 'three/tsl';
 import { GeomBuilder, appendInto, rgbHex } from '../build/geom';
 import { buildBuildings, resolveConflicts } from '../build/buildings';
 import { buildRail } from '../build/rail';
+import { autoRail } from '../build/railauto';
 import { buildTerrainPatch, buildTerrainSkirt, buildWater } from '../build/terrain';
 import { shiftInto } from '../geo/heightfield';
 import { placeTrees, treeGeometry, type TreeInstance } from '../build/vegetation';
@@ -97,7 +98,7 @@ export class World {
   /** the planting's instanced meshes, kept from one rebuild to the next: three's WebGPU renderer builds an
    *  instanced mesh's shaders afresh for every new one (it keys them by the object), a long stall on every edit */
   private plantIMs: (THREE.InstancedMesh | undefined)[] = [];
-  private plotM?: { lost: THREE.Material; net: THREE.Material; mass: THREE.Material; edge: THREE.LineBasicNodeMaterial; build: THREE.Material; floor: THREE.LineBasicNodeMaterial; clash: THREE.LineBasicNodeMaterial; solid: THREE.Material; glass: THREE.Material };
+  private plotM?: { lost: THREE.Material; net: THREE.Material; mass: THREE.Material; edge: THREE.LineBasicNodeMaterial; build: THREE.Material; floor: THREE.LineBasicNodeMaterial; clash: THREE.LineBasicNodeMaterial; flag: THREE.LineBasicNodeMaterial; solid: THREE.Material; glass: THREE.Material };
   private utilityLayers = new Map<Id, THREE.Mesh>();
   /** catalogue assets that aren't streets / tracks / pipes (canals, power lines, structures, areas), per layer */
   readonly assets = new THREE.Group();
@@ -327,15 +328,27 @@ export class World {
     const lines = this.doc.linesOf(layer).filter((l) => lineShape(l) === 'route' && l.pts.length >= 4);
     // a region: city-wide lines, cut to the window (the heightfield only covers that)
     const parts: [LineObj, number[]][] = this.region ? lines.flatMap((l) => clipPolyline(l.pts, this.gridRect(), 2).map((p) => [l, p] as [LineObj, number[]])) : lines.map((l) => [l, l.pts]);
-    return parts.filter(([, pts]) => pts.length >= 4).map(([l, pts]) => {
+    return parts.filter(([, pts]) => pts.length >= 4).flatMap(([l, pts]) => {
       const a = assetOf(l), p = a?.profile.type === 'track' ? a.profile : undefined;
-      return {
+      const r: TileData['rails'][number] = {
         pts: new Float32Array(pts),
         bridge: l.props.bridge === 1 || l.depth < -0.5, tunnel: l.depth > 3 || p?.structure === 'tunnel', layer: l.depth < -0.5 ? Math.max(1, Math.round(-l.depth / 7.5)) : 0,
         service: l.props.service === 1, metro: layer === 'metro',
         ...(p ? { tracks: p.tracks, tc: p.tc, gauge: p.gauge, formation: p.formation, deck: l.depth < -0.5 ? -l.depth : undefined } : {}),
       };
+      // a track drawn at grade: viaduct / at grade / tunnel worked out per stretch, as roads do (auto height)
+      return p && p.structure === 'grade' && !r.bridge && !r.tunnel && Math.abs(l.depth) <= 0.5 ? autoRail(r, this.hf, (x, z) => this.waterAt(x, z), -l.depth) : [r];
     });
+  }
+
+  /** Water surface (scene metres) at a point over water, else null. */
+  private waterAt(x: number, z: number): number | null {
+    const T = this.tile.terrain, hf = this.hf;
+    if (!T?.waterMask || T.n !== hf.n) return null;
+    const i = Math.round((x - hf.x0) / hf.cell), j = Math.round((z - hf.z0) / hf.cell);
+    if (i < 0 || j < 0 || i >= hf.n || j >= hf.n) return null;
+    const k = j * hf.n + i;
+    return T.waterMask[k] ? T.waterLevel[k] - hf.base : null;
   }
 
   private buildRail() {
@@ -563,6 +576,7 @@ export class World {
         build: new THREE.MeshLambertNodeMaterial({ vertexColors: true }),
         floor: new THREE.LineBasicNodeMaterial({ color: 0x1c2333, transparent: true, opacity: 0.35 }),
         clash: new THREE.LineBasicNodeMaterial({ color: 0xe5484d }),
+        flag: new THREE.LineBasicNodeMaterial({ color: 0xe0a020 }),
         solid: new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 }),
         glass: new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.25, metalness: 0.1 }),
       };
@@ -613,7 +627,7 @@ export class World {
       // the buildings: stilt and podium levels, then the flats floor by floor, the cores the whole height
       const fh = r.rules.floorH, boxes: Box[] = [], fl: number[] = [], red: number[] = [];
       const grey = hex('#b9bec9'), core = hex('#6b7280'), hall = hex('#d9dce3');
-      const colors = UNIT_COLOR.map(hex);
+      const colors = UNIT_COLOR.map(hex), amberA = hex('#e0a020'), amberB = hex('#f3cf7a'), amber: number[] = [];
       for (let k = 0; k < d.under; k++) {
         const stilt = d.site.stilt && k === 0;
         for (const w of stilt ? d.buildings.flatMap((b) => b.quads) : [d.envelope]) boxes.push({ ring: w, y0: base + k * fh + (stilt ? fh - 0.4 : 0), y1: base + (k + 1) * fh - (stilt ? 0 : 0.3), color: grey });
@@ -634,7 +648,9 @@ export class World {
       for (const b of d.buildings) {
         for (let f = 0; f < b.floors; f++) {
           const y0 = base + (d.under + f) * fh, y1 = y0 + fh - 0.25;
-          for (const u of b.units) boxes.push({ ring: u.ring, y0, y1, color: colors[u.t] });
+          // (floors above the height limit: amber, banded floor by floor, a departure flagged not refused)
+          const over = b.overHeight && f >= b.allowedFloors;
+          for (const u of b.units) boxes.push({ ring: u.ring, y0, y1, color: over ? (f % 2 ? amberA : amberB) : colors[u.t] });
           for (const c of b.corridors) boxes.push({ ring: c, y0, y1, color: hall });
         }
         for (const c of b.cores) boxes.push({ ring: c, y0: base, y1: base + b.height + 2.5, color: core });
@@ -642,7 +658,10 @@ export class World {
         for (const q of b.quads) for (let i = 0; i < q.length; i += 2) {
           const j = (i + 2) % q.length;
           for (let f = 1; f <= b.floors; f++) { const y = base + (d.under + f) * fh - 0.13; fl.push(q[i], y, q[i + 1], q[j], y, q[j + 1]); }
-          if (b.clash) red.push(q[i], base, q[i + 1], q[i], base + b.height, q[i + 1], q[i], base + b.height + 0.05, q[i + 1], q[j], base + b.height + 0.05, q[j + 1]);
+          // red where it runs into another building; amber where it's past the margins (a departure)
+          if (b.clash) (b.clash === 'overlap' ? red : amber).push(q[i], base, q[i + 1], q[i], base + b.height, q[i + 1], q[i], base + b.height + 0.05, q[i + 1], q[j], base + b.height + 0.05, q[j + 1]);
+          // and diagonal amber strokes on the faces past the margins
+          if (b.clash === 'margins') for (let t = 0; t < b.height; t += 3) amber.push(q[i], base + t, q[i + 1], q[j], base + Math.min(b.height, t + 3), q[j + 1]);
         }
       }
       const bm = new THREE.Mesh(prism(boxes, true), M.build);
@@ -656,6 +675,7 @@ export class World {
       };
       segs(fl, M.floor);
       segs(red, M.clash);
+      segs(amber, M.flag);
     }
     this.setCleared(cleared);
     this.plots.visible = !this.plan;

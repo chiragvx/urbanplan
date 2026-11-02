@@ -34,8 +34,14 @@ export class CityDoc {
   private pendingIds = new Set<Id>();
   /** increments on every change (cheap "dirty" check for the UI) */
   version = 0;
-  /** last saved version (for the "unsaved changes" dot) */
-  savedVersion = 0;
+  /** last saved version (for the "unsaved changes" dot); setting it marks the history step the save holds */
+  get savedVersion() { return this.saved; }
+  set savedVersion(v: number) { this.saved = v; this.savedTop = this.undoStack[this.undoStack.length - 1]; }
+  private saved = 0;
+  /** the undo step on top when saved (null: a step changed since, so no undo / redo reaches the saved state) */
+  private savedTop: Txn | undefined | null = undefined;
+  /** Changed since the last save: undo / redo back to the saved step counts as saved. */
+  get dirty() { return this.version !== this.saved && this.savedTop !== this.undoStack[this.undoStack.length - 1]; }
 
   constructor(base: Map<Id, Obj>, meta: MapMeta) {
     this.base = base;
@@ -107,7 +113,33 @@ export class CityDoc {
   sectionsOf(road: Id): SectionObj[] { return [...(this.roadSecs.get(road) ?? [])].map((id) => this.get<'section'>(id)!).filter(Boolean); }
   sectionsAt(junction: Id): SectionObj[] { return [...(this.juncSecs.get(junction) ?? [])].map((id) => this.get<'section'>(id)!).filter(Boolean); }
   linesOf(layer: Id) { return [...(this.layerLines.get(layer) ?? [])].map((id) => this.get<'line'>(id)!).filter(Boolean); }
-  get editCount() { return this.patch.size; }
+  /** Things the user changed, as a planner counts them: a road (however many sections and junctions it wrote), a
+   *  building, a plot… Junctions count on their own only when moved without their roads; layers (views) never. */
+  editTally(): Map<string, number> {
+    if (this.tally?.v === this.version) return this.tally.m;
+    const roads = new Set<Id>(), m = new Map<string, number>();
+    for (const [id, e] of this.patch) {
+      const o = e.add ?? this.base.get(id);
+      if (!o) continue;
+      if (o.kind === 'road') roads.add(id);
+      else if (o.kind === 'section') roads.add(o.road);
+      else if (o.kind === 'junction') { if (!e.add && !this.sectionsAt(id).some((q) => this.patch.has(q.id))) m.set('junction', (m.get('junction') ?? 0) + 1); }
+      else if (o.kind !== 'layer') { const k = o.kind === 'line' ? 'item' : o.kind; m.set(k, (m.get(k) ?? 0) + 1); }
+    }
+    if (roads.size) m.set('road', roads.size);
+    this.tally = { v: this.version, m };
+    return m;
+  }
+  private tally: { v: number; m: Map<string, number> } | null = null;
+  /** How many things the user changed (see editTally). */
+  get editCount() { let n = 0; for (const k of this.editTally().values()) n += k; return n; }
+  /** "2 roads · 1 building", or "no edits". */
+  get editSummary() {
+    const m = [...this.editTally()].sort((a, b) => b[1] - a[1]);
+    if (!m.length) return 'no edits';
+    const s = m.slice(0, 2).map(([k, n]) => `${n} ${k}${n === 1 ? '' : 's'}`).join(' · ');
+    return m.length > 2 ? `${s} +${m.slice(2).reduce((t, x) => t + x[1], 0)}` : s;
+  }
 
   // ---------------- indexes ----------------
 
@@ -150,6 +182,7 @@ export class CityDoc {
     t.after = new Map([...t.before.keys()].map((id) => [id, clone(this.patch.get(id))]));
     const last = this.undoStack[this.undoStack.length - 1];
     if (merge && last?.merge === merge && t.time - last.time < 1500 && [...t.before.keys()].every((id) => last.before.has(id))) {
+      if (last === this.savedTop) this.savedTop = null; // the saved step itself changed
       last.after = t.after; last.time = t.time; last.structural ||= t.structural;
     } else {
       this.undoStack.push(t);
@@ -308,7 +341,7 @@ export class CityDoc {
       this.collect(o.id, this.get(o.id));
     }
     if (!this.pendingIds.size) return;
-    const saved = this.version === this.savedVersion;
+    const saved = !this.dirty;
     this.flush('page', 'Load area', true);
     if (saved) this.savedVersion = this.version;
   }

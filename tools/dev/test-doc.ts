@@ -10,6 +10,8 @@ import { newMeta, serialize, parse, openMap } from '../../src/doc/format';
 import { setTotalWidth, totalWidth, describe } from '../../src/doc/xsection';
 import * as OPS from '../../src/doc/ops';
 import { TerrainCompiler } from '../../src/doc/terrain';
+import { classify, kindAt } from '../../src/doc/structure';
+import { clearWater, drawPlanned, planStretch } from '../../src/editor/heights';
 
 const dir = 'public/tiles/kp/';
 const hdr = JSON.parse(fs.readFileSync(dir + 'tile.json', 'utf8'));
@@ -455,6 +457,63 @@ check(!!doc.get(s0.id) && C.mesher.segs.has(`${s0.id}~0`), 'undo delete restores
   const gdp = dpSecs.filter((s) => s.name === 'GDP Road');
   const lanes = new Set(gdp.map((s) => parts(s).filter((p) => p.kind === 'lane').length));
   check(gdp.length > 10 && lanes.size === 1 && lanes.has(4), `GDP Road keeps 2 + 2 lanes along its length (${[...lanes].join(', ')})`);
+}
+// ---- auto height: stretches by structure (Cities: Skylines style) ----
+{
+  // 1 km from 100 m to 120 m: a valley (ground 70 m) at 250–400 m, a 10 m dip at 500 m, a hill (150 m) at 650–800 m, a river at 900 m
+  const ground = (s: number) => (s >= 250 && s <= 400 ? 70 : s >= 495 && s <= 505 ? 92 : s >= 650 && s <= 800 ? 150 : s >= 600 && s < 650 ? 100 + 0.02 * s + 9 : 100 + 0.02 * s);
+  const P = Array.from({ length: 251 }, (_, i) => { const s = i * 4; return { s, road: 100 + 0.02 * s, ground: ground(s), water: s >= 890 && s <= 910 ? 115 : null }; });
+  const S = classify(P, 'tertiary');
+  const kinds = S.map((x) => x.kind).join(' ');
+  check(kinds === 'ground bridge ground cutting tunnel ground bridge ground', `classify: valley → bridge, hill → cutting + tunnel, river → bridge, short dip merged (${kinds})`);
+  check(S.every((x) => !x.steep) && Math.abs(S[0].grade - 0.02) < 1e-6, 'classify: 2 % is not steep for a collector');
+  const steep = classify(P.map((q) => ({ ...q, road: 100 + 0.09 * q.s, ground: 100 + 0.09 * q.s, water: null })), 'tertiary');
+  check(steep.length === 1 && steep[0].steep && steep[0].kind === 'ground', 'classify: 9 % on a collector is flagged steep, still built');
+  const pinned = classify(P, 'tertiary', undefined, [{ s0: 650, s1: 800, kind: 'cutting' }]);
+  const pk = pinned.find((x) => x.pinned);
+  check(!!pk && pk.kind === 'cutting' && pk.auto === 'tunnel' && !pinned.some((x) => x.kind === 'tunnel'), 'classify: a pin overrides the rules (cutting where it would tunnel)');
+  check(kindAt(7) === 'bridge' && kindAt(-7) === 'cutting' && kindAt(-13) === 'tunnel' && kindAt(5) === 'ground', 'kindAt thresholds 6 / 6 / 12 m');
+  // drawn into the document: one section per stretch, each built as its kind, compiled
+  const D = new CityDoc(buildBase(net, tile, util), newMeta('kp', '', ''));
+  const G = (x: number, z: number) => hf.sample(x, z) + hf.base;
+  const x0 = -300, z0 = 1200;
+  const pieces = [OPS.line([x0, z0], [x0 + 600, z0])];
+  const za = G(x0, z0), zb = G(x0 + 600, z0);
+  const r = D.transact('Draw auto', () => OPS.drawAuto(D, { x: x0, z: z0 }, { x: x0 + 600, z: z0, lift: zb - G(x0 + 600, z0) }, pieces, 'tertiary',
+    [{ s0: 0, s1: 200, kind: 'ground' }, { s0: 200, s1: 400, kind: 'bridge', pinned: true }, { s0: 400, s1: 600, kind: 'tunnel' }], (s) => za + 20 * Math.sin((Math.PI * s) / 600) + ((zb - za) * s) / 600, G))!;
+  const secs = r.sections.map((id) => D.get<'section'>(id)!);
+  check(secs.length === 3 && !!secs[0].grade && !OPS.offGrade(secs[0]) && secs[1].elevated && secs[1].pin === 'bridge' && !!secs[2].tunnel && !secs[2].grade, 'drawAuto: ground (graded), bridge (pinned), tunnel sections');
+  const Jm = D.get<'junction'>(secs[0].b)!;
+  check(Math.abs(G(Jm.x, Jm.z) + Jm.lift - (za + 20 * Math.sin(Math.PI / 3) + (zb - za) / 3)) < 0.2, 'drawAuto: the junction between stretches sits on the profile');
+  const CA = new Compiler(D, hf);
+  CA.full();
+  const seg0 = [...CA.mesher.segs.values()].find((g) => (g as { owner?: string }).owner === secs[0].id) as { grade?: number[]; elevated?: boolean } | undefined;
+  check(!!seg0?.grade && !seg0.elevated, 'compile: a graded stretch next to a bridge stays graded (not a ramp)');
+  const sp = D.transact('Split graded', () => OPS.splitSection(D, secs[0].id, [x0 + 100, z0]))!;
+  const h0 = D.get<'section'>(sp.parts[0])!.grade!, h1 = D.get<'section'>(sp.parts[1])!.grade!;
+  check(Math.abs(h0.z[h0.z.length - 1] - h1.z[0]) < 0.05 && Math.abs(h1.z[h1.z.length - 1] - secs[0].grade!.z[secs[0].grade!.z.length - 1]) < 0.05, 'splitting a graded section splits its profile');
+  // a 100 m river: the deck is raised to clear it (4 m), easing off at 3 %, the ends where they were drawn
+  const W = Array.from({ length: 101 }, (_, i) => ({ s: i * 4, road: 10, ground: i >= 45 && i <= 70 ? 2 : 10, water: i >= 45 && i <= 70 ? 8 : null }));
+  clearWater(W, 400);
+  check(W[55].road >= 12 - 1e-6 && Math.abs(W[0].road - 10) < 1e-6 && Math.abs(W[100].road - 10) < 1e-6, `water: deck raised over the river (${W[55].road.toFixed(1)} m), ends kept`);
+  // the road tool's commit path across the river (Koregaon Park): planned, then built — a bridge with a deck
+  {
+    const DW = new CityDoc(buildBase(net, tile, util), newMeta('kp', '', ''));
+    const EW = { hf, doc: DW, C: new Compiler(DW, hf), world: { tile }, hit: { query: () => DW.all('section').map((s) => s.id) } } as unknown as Parameters<typeof planStretch>[0];
+    const A = { x: -1516, z: -344, lift: 0 }, B = { x: -1516, z: 256, lift: 0 };
+    const pc = [OPS.line([A.x, A.z], [B.x, B.z])];
+    const pts = Array.from({ length: 17 }, (_, k) => OPS.bezAt(pc[0], k / 16));
+    const plan = planStretch(EW, pts, G(A.x, A.z), G(B.x, B.z), 'secondary');
+    const wetIn = plan.samples.filter((q) => q.water != null);
+    check(wetIn.length > 0 && wetIn.every((q) => plan.stretches.some((x) => x.kind === 'bridge' && q.s >= x.s0 && q.s <= x.s1)), `river crossing planned as a bridge (${plan.stretches.map((x) => x.kind).join(' ')})`);
+    const built = DW.transact('Draw road', () => drawPlanned(EW, A, 0, B, pc, 'secondary', plan))!;
+    const secsW = DW.sectionsOf(built.road);
+    const deck = Math.max(...secsW.filter((q) => q.elevated && q.bridge !== 'none').map((q) => q.deck), 0);
+    const lv = secsW.filter((q) => q.elevated).flatMap((q) => OPS.sectionLevels(DW, q, G).z);
+    check(deck > 0 && Math.max(...lv) > Math.max(...wetIn.map((q) => q.water!)) + 3.9, `built: a bridge section with a deck (${deck} m) clear of the water`);
+  }
+  const cut = OPS.cutPieces(pieces, 150, 450);
+  check(Math.abs(OPS.piecesLength(cut) - 300) < 0.5 && Math.abs(cut[0][0] - (x0 + 150)) < 0.5, 'cutPieces: the part between two arc lengths');
 }
 console.log(ok ? '\nALL OK' : '\nFAILURES');
 process.exit(ok ? 0 : 1);

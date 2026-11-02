@@ -1,6 +1,7 @@
 // Plan drawing of catalogue assets (2D): routes at their real width (track beds, canals with banks, corridors,
 // pipes), placed structures as footprints, areas filled, things placed along lines (manholes, hydrants, towers, piers),
-// TOD rings around stations, and the build tool's preview with its limits.
+// TOD rings around stations, and the build tool's preview: green when it keeps the rules, amber with the reason at
+// the cursor when it departs (it is built either way).
 import type { Editor } from './editor';
 import type { Id, LineObj } from '../doc/types';
 import { buildAsset, hover, mode, penLift, placeRot, selection, tool } from './state';
@@ -238,33 +239,36 @@ export function drawAssetTool(E: Editor) {
     const pv = T.preview;
     if (pv && pv.pts.length > 1) {
       const flat = pv.pts.flat();
-      if (is2d) { ctx.save(); ctx.globalAlpha = 0.7; route(ctx, flat, a, P, s, pv.bad ? '#e5484d' : color, lift); ctx.restore(); }
+      const flagged = pv.flags.length > 0;
+      if (is2d) { ctx.save(); ctx.globalAlpha = 0.7; route(ctx, flat, a, P, s, color, lift); ctx.restore(); }
       strokePts(ctx, flat, P);
-      ctx.strokeStyle = pv.bad ? '#e5484d' : '#ff6a2b'; ctx.lineWidth = 2; ctx.setLineDash(pv.bad ? [6, 4] : []); ctx.stroke(); ctx.setLineDash([]);
+      ctx.strokeStyle = flagged ? AMBER : OK; ctx.lineWidth = 2.5; ctx.setLineDash(flagged ? [6, 4] : []); ctx.stroke(); ctx.setLineDash([]);
       for (const q of T.ctrl) { const p = P(q[0], q[1]); ctx.beginPath(); ctx.arc(p[0], p[1], 4, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = '#ff6a2b'; ctx.stroke(); }
       const end = pv.pts[pv.pts.length - 1], prev = pv.pts[pv.pts.length - 2];
       const d = [end[0] - prev[0], end[1] - prev[1]], L = Math.hypot(d[0], d[1]) || 1;
       const lines = [`${pv.len.toFixed(1)} m · ${bearing([d[0] / L, d[1] / L])}°`];
       if (Number.isFinite(pv.R) && pv.R < 5000) lines.push(`radius ${pv.R.toFixed(0)} m`);
       if (Math.abs(lift) > 0.2) lines.push(lift > 0 ? `${lift} m up` : `${-lift} m deep`);
-      if (pv.bad) lines.push(`✕ ${pv.bad}`);
       const q = P(end[0], end[1]);
       label(ctx, [q[0], q[1]], lines.join(' · '), 11.5, 22);
+      flagNote(ctx, q, pv.flags);
     }
   }
   if (tool.value === 'area' && T.ring.length) {
     const flat = [...T.ring.flat(), ...(c ? c.p : [])];
     strokePts(ctx, flat, P, T.ring.length >= 2);
     ctx.fillStyle = a.profile.type === 'area' ? a.profile.fill : color; ctx.globalAlpha = 0.18; ctx.fill(); ctx.globalAlpha = 1;
-    ctx.strokeStyle = '#ff6a2b'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.strokeStyle = T.flags.length ? AMBER : OK; ctx.lineWidth = 2; ctx.stroke();
+    if (c) flagNote(ctx, P(c.p[0], c.p[1]), T.flags);
     for (const q of T.ring) { const p = P(q[0], q[1]); ctx.beginPath(); ctx.arc(p[0], p[1], 3.5, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = '#ff6a2b'; ctx.stroke(); }
   }
   if (tool.value === 'place' && c && is2d) {
     const rot = c.dir ? (Math.atan2(c.dir[1], c.dir[0]) * 180) / Math.PI : placeRot.value;
-    ctx.save(); ctx.globalAlpha = 0.65; footprint(ctx, c.p[0], c.p[1], rot, a, P, s, color, false); ctx.restore();
+    ctx.save(); ctx.globalAlpha = 0.65; footprint(ctx, c.p[0], c.p[1], rot, a, P, s, T.flags.length ? AMBER : OK, false); ctx.restore();
     const ring = a.rules?.find((r) => r.kind === 'ring');
     if (ring?.kind === 'ring') { const q = P(c.p[0], c.p[1]); ctx.beginPath(); ctx.arc(q[0], q[1], ring.dist * s, 0, Math.PI * 2); ctx.setLineDash([8, 6]); ctx.strokeStyle = 'rgba(139,92,246,0.8)'; ctx.stroke(); ctx.setLineDash([]); }
   }
+  if (tool.value === 'place' && c) { const q = P(c.p[0], c.p[1]); okRing(ctx, q, T.flags.length > 0); flagNote(ctx, q, T.flags); }
   // snap marker and guide
   if (c) {
     const p = P(c.p[0], c.p[1]);
@@ -276,4 +280,29 @@ export function drawAssetTool(E: Editor) {
     ctx.strokeStyle = '#ff6a2b'; ctx.lineWidth = 2; ctx.stroke();
     if (c.label) label(ctx, p, c.label, 11, -14);
   }
+}
+
+const OK = '#16a34a', AMBER = '#f5a524';
+
+/** A small ring at the cursor: green when the ghost keeps the rules, amber when it departs. */
+function okRing(ctx: CanvasRenderingContext2D, p: V2, flagged: boolean) {
+  if (Number.isNaN(p[0])) return;
+  ctx.beginPath(); ctx.arc(p[0], p[1], 11, 0, Math.PI * 2);
+  ctx.strokeStyle = flagged ? AMBER : OK; ctx.lineWidth = 2.5; ctx.stroke();
+}
+
+/** The reasons the ghost departs from the rules, amber, under the cursor (the first two; it builds anyway). */
+function flagNote(ctx: CanvasRenderingContext2D, p: V2, flags: string[]) {
+  if (!flags.length || Number.isNaN(p[0])) return;
+  ctx.font = '600 11.5px Geist, Inter, system-ui, sans-serif';
+  const L = flags.slice(0, 2).map((f) => (f.length > 90 ? f.slice(0, 88) + '…' : f));
+  if (flags.length > 2) L.push(`+${flags.length - 2} more`);
+  const w = Math.max(...L.map((t) => ctx.measureText(t).width)) + 16, h = L.length * 16 + 8;
+  const x = p[0] + 16, y = p[1] + 34;
+  ctx.fillStyle = 'rgba(64,40,0,0.9)';
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, 6); ctx.fill();
+  ctx.fillStyle = AMBER; ctx.fillRect(x, y + 4, 3, h - 8);
+  ctx.fillStyle = '#ffe2a8'; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+  L.forEach((t, i) => ctx.fillText(t, x + 9, y + 5 + i * 16));
+  ctx.textBaseline = 'alphabetic';
 }

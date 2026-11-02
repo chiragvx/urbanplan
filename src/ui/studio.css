@@ -1,0 +1,79 @@
+/* Site Studio: the shelf, the use picker, numbers waiting on detail, departures in amber (src/ui/Studio.tsx) */
+.studio { --flag: #c98300; --flag-soft: #fff4e0; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .studio { --flag: #f5a524; --flag-soft: #2c2210; } }
+:root[data-theme="dark"] .studio { --flag: #f5a524; --flag-soft: #2c2210; }
+
+/* the shelf: icon tiles, names in the hover cards */
+.studio-tools { gap: 6px; }
+.shelf { display: flex; flex-wrap: wrap; gap: 2px; padding: 2px; border-radius: 10px; background: var(--panel-2); }
+.shelf-gap { width: 1px; margin: 4px 3px; background: var(--line-2); }
+.shelf-tile { width: 30px; height: 30px; padding: 0; justify-content: center; border: 1px solid transparent; background: transparent; border-radius: 8px; color: var(--text); }
+.shelf-tile:hover:not(:disabled) { background: var(--panel); border-color: var(--line); }
+.shelf-tile.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.shelf-tile.spark { color: var(--brand, #ff6a2b); background: var(--panel); border-color: var(--line-2); }
+.shelf-tile.spark:hover:not(:disabled) { border-color: var(--brand, #ff6a2b); }
+.tip-art-icon { display: flex; padding: 6px 18px; color: var(--text); }
+
+/* the use: an icon, a grid of them */
+.use-pick { position: relative; display: inline-flex; }
+.use-btn { gap: 5px; padding: 4px 8px; font-size: 12px; }
+.use-btn.small { width: 26px; height: 26px; padding: 0; justify-content: center; }
+.use-btn.inherit { color: var(--muted); border-style: dashed; }
+.use-grid { position: absolute; top: calc(100% + 4px); right: 0; z-index: 5; display: grid; grid-template-columns: repeat(4, 32px); gap: 3px; padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); }
+.studio-card .use-grid { left: 0; right: auto; }
+.use-grid button { width: 32px; height: 32px; padding: 0; justify-content: center; border-color: transparent; }
+.use-grid button:hover { border-color: var(--line-2); }
+.use-grid button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+/* numbers waiting on detail: a quiet placeholder */
+.studio-metrics div.need dd { color: var(--muted); opacity: 0.45; }
+.studio-metrics div.need small { color: var(--muted); opacity: 0.8; font-style: italic; }
+.studio-metrics dt { display: inline-flex; align-items: center; gap: 4px; }
+.flag-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--flag); flex: none; vertical-align: middle; }
+
+/* checks: amber for a departure, red only for what's broken */
+.studio-checks span { cursor: default; }
+.studio-checks .flag { background: var(--flag-soft); color: var(--flag); cursor: pointer; }
+.studio-checks .broken { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); cursor: pointer; }
+
+/* the building card */
+.studio-card-head { gap: 8px; justify-content: flex-start; }
+.studio-card-head b { flex: 1; }
+.studio-card-head .flag { display: inline-flex; align-items: center; gap: 4px; color: var(--flag); font-size: 11px; font-weight: 600; }
+.card-icon { display: inline-flex; color: var(--muted); }
+.floors-step { display: flex; align-items: center; gap: 4px; margin: 4px 0 6px; }
+.floors-step .icon { width: 26px; height: 26px; padding: 0; justify-content: center; }
+.floors-step .fl { display: inline-flex; align-items: baseline; gap: 3px; min-width: 54px; justify-content: center; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.floors-step .fl b, .floors-step .fl-in { font-size: 17px; font-weight: 600; color: var(--text); letter-spacing: -0.02em; }
+.floors-step .fl-in { font-family: inherit; font-variant-numeric: tabular-nums; text-align: right; background: none; border: 0; border-bottom: 1px dashed var(--line-2); padding: 0; min-width: 3ch; -moz-appearance: textfield; }
+.floors-step .fl-in::-webkit-inner-spin-button, .floors-step .fl-in::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.floors-step .fl-in:focus { outline: none; border-bottom-color: var(--accent); }
+.floors-step .fl.over b, .floors-step .fl.over .fl-in { color: var(--flag); }
+.floors-step .fl small { font-size: 10px; padding: 0 4px; border-radius: 4px; background: var(--panel-2); }
+.floors-step .nf { margin-left: auto; }
+.studio-card .btns .icon { width: 30px; height: 28px; padding: 0; justify-content: center; }
+
+/* an empty plot */
+.studio-empty { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); max-width: 360px; padding: 8px 12px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); font-size: 12px; color: var(--muted); }
+.studio-empty p { margin: 0; }
+.studio-empty .link { display: inline-flex; align-items: center; gap: 3px; }
+.need-note { padding: 6px 0; font-style: italic; }
+
+/* the Rules tab: departures and their notes */
+.tab-count { display: inline-block; margin-left: 5px; min-width: 15px; padding: 0 4px; border-radius: 99px; background: var(--flag-soft); color: var(--flag); font: 700 10px/15px inherit; font-style: normal; text-align: center; }
+.departures { width: 100%; border-collapse: collapse; font-size: 11.5px; margin: 2px 0 8px; }
+.departures th { text-align: left; font-weight: 500; color: var(--muted); padding: 3px 4px; border-bottom: 1px solid var(--line); }
+.departures td { padding: 5px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.departures td small { display: block; color: var(--muted); font-size: 10.5px; margin-left: 11px; }
+.departures textarea { width: 100%; min-width: 140px; font: inherit; font-size: 11.5px; padding: 3px 6px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--panel); color: var(--text); resize: vertical; }
+.plot-calc dd.flag { color: var(--flag); }
+.design-state svg { vertical-align: -2px; color: var(--brand, #ff6a2b); }
+
+/* the plot inspector: uses as tiles, numbers waiting on detail */
+.use-tiles { display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; margin: 6px 0 4px; }
+.use-tiles button { height: 30px; padding: 0; justify-content: center; border-color: transparent; background: var(--panel-2); }
+.use-tiles button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.plot-stats .need dd { color: var(--muted); opacity: 0.5; }
+.plot-stats .need small { font-style: italic; }
+.plot-stats .flag dd, .plot-stats .flag small { color: #c98300; }
+.note .flag-dot { background: #c98300; }

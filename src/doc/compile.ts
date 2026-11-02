@@ -98,9 +98,12 @@ export class Compiler {
     if (!A || !B || s.path.length < 2) return null;
     const P = this.anchors(s, A, B);
     const t = this.typeOf(s);
-    const elevated = s.elevated || P.some((p) => p.lift > 0.25);
+    // a graded section that isn't itself a bridge or tunnel stays on the (cut / filled) ground even where an end
+    // junction is raised or sunk (where it meets a bridge or tunnel, or a graded run: auto height, even slope)
+    const onGrade = !!s.grade && !s.elevated && s.bridge === 'none' && !s.tunnel;
+    const elevated = s.elevated || (!onGrade && P.some((p) => p.lift > 0.25));
     // graded (fixed profile, ground cut / filled to it) unless it's a bridge or tunnel
-    const grade = !elevated && !P.some((p) => p.lift < -0.25) ? this.gradePieces(s, P) : null;
+    const grade = onGrade || (!elevated && !P.some((p) => p.lift < -0.25)) ? this.gradePieces(s, P) : null;
     const code = this.code(s.id);
     const segs: MSeg[] = [], shapes: MNode[] = [];
     for (let k = 1; k < P.length - 1; k++) shapes.push({ id: `${s.id}^${k}`, x: P[k].x, z: P[k].z, lift: P[k].lift });
@@ -110,7 +113,7 @@ export class Compiler {
       segs.push({
         id: `${s.id}~${k}`, a: k === 0 ? s.a : `${s.id}^${k}`, b: k === P.length - 2 ? s.b : `${s.id}^${k + 1}`,
         p: [a.x, a.z, a.x + a.ox, a.z + a.oz, b.x + b.ix, b.z + b.iz, b.x, b.z],
-        t, cls: s.cls, bridge: s.bridge, elevated, viaduct: s.viaduct, code, owner: s.id, sunk: Math.min(a.lift, b.lift) < -0.25,
+        t, cls: s.cls, bridge: s.bridge, elevated, viaduct: s.viaduct, code, owner: s.id, sunk: !onGrade && Math.min(a.lift, b.lift) < -0.25,
         ...(grade ? { grade: grade[k] } : {}),
       });
     }

@@ -1,8 +1,9 @@
 // The build tool for catalogue assets that aren't streets: routes (rail, metro, canals, pipes, power lines, paths),
 // placed structures (stations, platforms, substations, tanks) and areas (depots, parks, flood zones). Routes use the
 // road tool's modes (straight / curve / complex / continuous), carry on from where the last stretch ended, snap to
-// their own layer's lines, pipes and cables slip into a road's footpath, and stations snap onto their line. Hard
-// limits (a metro's 120 m curve radius) refuse the stretch; soft ones are checked in the Issues panel.
+// their own layer's lines, pipes and cables slip into a road's footpath, and stations snap onto their line. Rules
+// flag, never block: the ghost shows green when it keeps the catalogue's rules and amber with the reason when it
+// departs (a metro curve under 120 m, a BRT station on a 18 m road, a substation next to a nalla) — it builds anyway.
 import type { Editor } from './editor';
 import * as ops from '../doc/ops';
 import type { Id, LineObj } from '../doc/types';
@@ -10,9 +11,10 @@ import type { V2 } from '../net/model';
 import { buildAsset, penLift, placeRot, readOnly, select, settings, status, toast } from './state';
 import { getAsset, createAssetLine, lineShape, assetOf, minRadiusOf, type AssetDef } from '../assets';
 import { MODE_LABEL, bearing } from './roadtool';
+import { liveFlags } from '../doc/rules';
 
 export interface AssetSnap { p: V2; kind?: 'end' | 'line' | 'verge' | 'road' | 'guide' | 'angle'; label?: string; dir?: V2 | null; line?: Id; guide?: { o: V2; d: V2 } }
-export interface AssetPreview { pts: V2[]; len: number; R: number; bad?: string }
+export interface AssetPreview { pts: V2[]; len: number; R: number; flags: string[] }
 
 const norm = (x: number, z: number): V2 | null => { const l = Math.hypot(x, z); return l > 1e-6 ? [x / l, z / l] : null; };
 const rot = (d: V2, deg: number): V2 => { const a = (deg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a); return [d[0] * c - d[1] * s, d[0] * s + d[1] * c]; };
@@ -25,6 +27,8 @@ export class AssetTool {
   ring: V2[] = [];
   cursor: AssetSnap | null = null;
   preview: AssetPreview | null = null;
+  /** where the cursor is now, the rules it departs from (placed structures and areas; routes use the preview's) */
+  flags: string[] = [];
 
   constructor(readonly E: Editor) {}
 
@@ -204,29 +208,33 @@ export class AssetTool {
   refresh() {
     const a = this.asset;
     this.preview = null;
+    this.flags = [];
     if (a && this.start && this.cursor) {
       const { pieces, R } = this.pieces(this.cursor.p);
       const pts = this.polyline(pieces);
       let len = 0;
       for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
-      this.preview = { pts, len, R, bad: this.check(a, pts) };
-    }
+      this.preview = { pts, len, R, flags: this.check(a, pts) };
+    } else if (a && this.cursor && a.drawer === 'place') this.flags = this.check(a, [this.cursor.p]);
+    else if (a && a.drawer === 'area' && this.ring.length >= 2 && this.cursor) this.flags = this.check(a, [...this.ring, this.cursor.p]);
     this.E.overlayDirty = true;
   }
 
-  /** Hard limits: the reason a stretch can't be built, if any. */
-  private check(a: AssetDef, pts: V2[]): string | undefined {
+  /** The rules the ghost departs from (amber at the cursor). Never a reason not to build. */
+  private check(a: AssetDef, pts: V2[]): string[] {
+    const out: string[] = [];
     const rule = a.rules?.find((r) => r.kind === 'minRadius');
-    if (!rule || rule.kind !== 'minRadius' || !rule.hard || pts.length < 2) return undefined;
-    const S = this.start!;
-    const d0 = norm(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]);
-    if (S.dir && d0) {
-      const ang = (Math.acos(Math.max(-1, Math.min(1, S.dir[0] * d0[0] + S.dir[1] * d0[1]))) * 180) / Math.PI;
-      if (ang > 4) return `${Math.round(ang)}° kink — use Continuous or a curve mode (radius ≥ ${rule.r} m)`;
+    if (rule?.kind === 'minRadius' && this.start && pts.length >= 2) {
+      // a kink where the stretch leaves the last one (curves are checked by liveFlags)
+      const S = this.start, d0 = norm(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]);
+      if (S.dir && d0) {
+        const ang = (Math.acos(Math.max(-1, Math.min(1, S.dir[0] * d0[0] + S.dir[1] * d0[1]))) * 180) / Math.PI;
+        if (ang > 4) out.push(`${Math.round(ang)}° kink · radius ≥ ${rule.r} m wanted (Continuous or a curve mode keeps it)`);
+      }
     }
-    const R = minRadiusOf(pts);
-    if (R < rule.r) return `Radius ${Math.round(R)} m is tighter than ${rule.r} m`;
-    return undefined;
+    const size = a.profile.type === 'point' ? Math.max(a.profile.w, a.profile.l) : 0;
+    try { out.push(...liveFlags(this.E.doc, (x0, z0, x1, z1) => this.E.hit.query(x0, z0, x1, z1), a, pts, size)); } catch (e) { console.warn(e); }
+    return out;
   }
 
   click(w: V2, raw: boolean, shift: boolean, alt: boolean) {
@@ -265,8 +273,8 @@ export class AssetTool {
     const { pieces } = this.pieces(sp.p);
     const pts = this.polyline(pieces);
     if (Math.hypot(sp.p[0] - S.p[0], sp.p[1] - S.p[1]) < 1) return;
-    const bad = this.check(a, pts);
-    if (bad) { toast(`Can't build: ${bad}`, 'warn'); return; }
+    // departures are flagged (amber, and in Issues), never refused
+    const flags = this.check(a, pts);
     const lift = penLift.value;
     const res = E.edit(`Build ${a.name}`, () => {
       const cur = S.line ? E.doc.get<'line'>(S.line) : undefined;
@@ -286,6 +294,7 @@ export class AssetTool {
       this.start = { p: end, dir: norm(end[0] - prev[0], end[1] - prev[1]), line: res };
       status.value = `Built ${L.toFixed(0)} m · keep clicking to carry on, right-click to stop`;
     }
+    if (flags.length) status.value += ` · flagged: ${flags[0]}`;
     this.ctrl = [];
     this.cursor = sp; this.refresh();
   }
@@ -293,8 +302,9 @@ export class AssetTool {
   private place(a: AssetDef, sp: AssetSnap) {
     const E = this.E;
     const rotDeg = sp.dir ? (Math.atan2(sp.dir[1], sp.dir[0]) * 180) / Math.PI : placeRot.value;
+    const flags = this.check(a, [sp.p]);
     const id = E.edit(`Place ${a.name}`, () => createAssetLine(E.doc, a, [sp.p[0], sp.p[1]], a.lift ?? 0, { rot: Math.round(rotDeg * 10) / 10 }));
-    if (id) status.value = `Placed ${a.name}${sp.label ? ` ${sp.label}` : ''} · click to place another, Esc when done`;
+    if (id) status.value = `Placed ${a.name}${sp.label ? ` ${sp.label}` : ''}${flags.length ? ` · flagged: ${flags[0]}` : ''} · click to place another, Esc when done`;
   }
 
   /** Enter / double-click: close an area, or stop the route. */

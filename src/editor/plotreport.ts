@@ -2,9 +2,11 @@
 // building and floor), both as CSV for Excel, and the feasibility report to print or save as PDF: a cover with the
 // 3D view, the site and its roads, the rules applied (with their clauses), the FSI worked out, the plans (site,
 // typical floors, parking levels) drawn to scale, the buildings, the flats, the parking, the checks, the money with
-// its cash flow and how it moves with the sale price and the cost, the other scheme, and what was assumed.
+// its cash flow and how it moves with the sale price and the cost, the other scheme, and what was assumed. Where
+// the project departs from the rules, a quiet section lists each departure (rule, value, clause) with the note typed
+// against it in the studio, so the report can go to a meeting as it is.
 import type { PlotObj } from '../doc/types';
-import { CODE_LABEL, CODE_NOTE, polyArea, USE_NOTE, sideMargin, type PlotReport } from '../doc/plot';
+import { CODE_LABEL, CODE_NOTE, polyArea, USE_NOTE, sideMargin, useInfo, type PlotReport } from '../doc/plot';
 import { CARPET, ELEMENTS, elementCentre, isArea, ringOf, FIRE_H, FIRE_W, RG_FROM, RG_SHARE, roadFrame, solveSite, SQFT, TRAVEL, UNIT_COLOR, UNIT_LABEL, type SiteReport } from '../doc/site';
 import { schemes, DEFAULT_DESIGN, ACCESS } from '../doc/optimise';
 import { save } from './plotexport';
@@ -40,6 +42,10 @@ function statement(r: PlotReport, d: SiteReport): [string, string, string][] {
     ['Parking: car bays required / provided', `${d.parking.need} / ${d.parking.have}`, `${d.parking.cars} cars, ${d.parking.scooters} two-wheelers (four to a bay)${d.parking.trucks ? `, ${d.parking.trucks} loading bays` : ''}`],
   );
   for (const l of d.parking.levels) rows.push([`  ${level(l.kind)}`, String(l.bays.length), 'bays']);
+  if (d.departures.length) {
+    rows.push(['Departures from the rules', '', '']);
+    for (const x of d.departures) rows.push([`  ${x.rule}: ${x.value} (allowed ${x.allowed})`, '', `${x.clause}${d.site.notes?.[x.key] ? ` · Note: ${d.site.notes[x.key]}` : ''}`]);
+  }
   return rows;
 }
 
@@ -155,14 +161,16 @@ export function printReport(o: PlotObj, r: PlotReport, d: SiteReport, plan: HTML
   const w = window.open('', '_blank');
   if (!w) return;
   const M = d.money, R = r.rules, use = o.use;
-  const res = use === 'residential', unitWord = res ? 'flats' : use === 'industrial' ? 'shed floors' : 'offices';
-  const passes = (x: boolean) => `<span class="${x ? 'ok' : 'bad'}">${x ? '✓ Meets' : '! Fails'}</span>`;
+  const res = d.buildings.length ? d.buildings.some((b) => b.use === 'residential') : use === 'residential';
+  const unitWord = res ? 'flats' : use === 'industrial' ? 'shed floors' : useInfo(use).unit ?? 'units';
+  // (a rule departed from is flagged, not failed: the tool never refuses a plan)
+  const passes = (x: boolean) => `<span class="${x ? 'ok' : 'flag'}">${x ? '✓ Meets' : '• Departs'}</span>`;
   const tallest = Math.max(0, ...d.buildings.map((b) => b.height));
   const side = sideMargin(R, tallest);
   const tiles: [string, string, string][] = [
     ['Built-up area', m2(d.bua), `${pc(d.bua / (r.bua || 1))} of the ${m2(r.bua)} allowed`],
     ['FSI', n2(d.fsi), `of ${n2(r.bua / r.area)} permissible`],
-    [res ? 'Flats' : use === 'industrial' ? 'Shed floors' : 'Offices', num(d.flats), `${num(d.carpet * SQFT)} ft² saleable`],
+    [unitWord[0].toUpperCase() + unitWord.slice(1), num(d.flats), `${num(d.carpet * SQFT)} ft² saleable`],
     ['Height', `${n2(d.height)} m`, `${Math.max(0, ...d.buildings.map((b) => b.floors)) + d.under} floors · limit ${n2(R.maxH)} m`],
     ['Parking', `${d.parking.have} / ${d.parking.need}`, 'bays provided / required'],
     ['Profit', cr(M.profit), `${pc(M.margin)} of sales`],
@@ -179,7 +187,7 @@ export function printReport(o: PlotObj, r: PlotReport, d: SiteReport, plan: HTML
     ['Escape distance (NBC 2016 Part 4)', `≤ ${TRAVEL} m to a stair`, `cores ≤ ${2 * TRAVEL} m apart`, true],
     ['Recreational open space (UDCPR 3.5.1)', d.open.need ? m2(d.open.need) : `none under ${m2(RG_FROM)}`, m2(d.open.have), !d.over.open],
     ['Parking (UDCPR Table 8-B)', `${d.parking.need} bays`, `${d.parking.have} bays`, d.parking.have >= d.parking.need],
-  ];
+  ].filter(([k]: (string | boolean)[]) => typeof k === 'string' && (k !== 'Parking (UDCPR Table 8-B)' || d.known.use) && (!k.startsWith('Recreational') || d.open.need > 0) && (!k.startsWith('Fire') || d.buildings.some((b) => b.height > FIRE_H))) as [string, string, string, boolean][];
   const mixRows = res ? [0, 1, 2].map((t) => {
     const units = d.buildings.flatMap((b) => b.units.filter((u) => u.t === t).map((u) => ({ c: u.carpet, n: b.floors })));
     const count = d.count[t], carpet = units.reduce((a, u) => a + u.c * u.n, 0);
@@ -199,7 +207,7 @@ export function printReport(o: PlotObj, r: PlotReport, d: SiteReport, plan: HTML
   const design = d.site.design ?? DEFAULT_DESIGN;
   const access = ACCESS.find((a) => a.value === (design.access ?? 'perimeter'))!;
   const els = (d.site.elements ?? []).filter((e) => !e.auto);
-  const summary = `On this ${m2(r.area)} plot${r.road ? ` entered from ${esc(r.road.name)} (${n2(r.road.today)} m today${r.road.dp ? `, ${n2(r.road.dp)} m in the DP` : ''})` : ''}, ${esc(CODE_LABEL[r.code])} allows an FSI of ${n2(r.bua / r.area)}: ${m2(r.bua)} of built-up area${r.limit ? `, of which the ${r.limit === 'height' ? 'height limit' : 'side margins'} hold back some` : ''}. The scheme lays out ${d.buildings.length} building${d.buildings.length === 1 ? '' : 's'} of up to ${Math.max(0, ...d.buildings.map((b) => b.floors)) + d.under} floors (${n2(d.height)} m) with ${num(d.flats)} ${unitWord}, building ${pc(d.bua / (r.bua || 1))} of what is allowed, with ${d.parking.have} parking bays for the ${d.parking.need} required. At the rates assumed it sells for ${cr(M.revenue)} against ${cr(M.cost)} of cost, ${cr(M.profit)} of profit (${pc(M.margin)})${M.irr !== null ? `, an IRR of ${pc(M.irr)} a year` : ''}. ${checks.every((c) => c[3]) ? 'Every check below is met.' : `It fails: ${checks.filter((c) => !c[3]).map((c) => c[0].toLowerCase()).join(', ')}.`}`;
+  const summary = `On this ${m2(r.area)} plot${r.road ? ` entered from ${esc(r.road.name)} (${n2(r.road.today)} m today${r.road.dp ? `, ${n2(r.road.dp)} m in the DP` : ''})` : ''}, ${esc(CODE_LABEL[r.code])} allows an FSI of ${n2(r.bua / r.area)}: ${m2(r.bua)} of built-up area${r.limit ? `, of which the ${r.limit === 'height' ? 'height limit' : 'side margins'} hold back some` : ''}. The scheme lays out ${d.buildings.length} building${d.buildings.length === 1 ? '' : 's'} of up to ${Math.max(0, ...d.buildings.map((b) => b.floors)) + d.under} floors (${n2(d.height)} m) with ${num(d.flats)} ${unitWord}, building ${pc(d.bua / (r.bua || 1))} of what is allowed, with ${d.parking.have} parking bays for the ${d.parking.need} required. At the rates assumed it sells for ${cr(M.revenue)} against ${cr(M.cost)} of cost, ${cr(M.profit)} of profit (${pc(M.margin)})${M.irr !== null ? `, an IRR of ${pc(M.irr)} a year` : ''}. ${checks.every((c) => c[3]) ? 'Every check below is met.' : `It departs from the rules on ${checks.filter((c) => !c[3]).map((c) => c[0].toLowerCase()).join(', ')}: see Departures from the rules.`}`;
 
   const cost = [
     ['Land', M.land, `${num(r.area * SQFT)} ft² at ₹${num(M.costs.land)}/ft²`],
@@ -248,6 +256,8 @@ tbody tr:hover td,table tr:hover td{background:var(--surface-2)}
 small.note,.muted{color:var(--muted)}small.note{display:block;font-size:11.5px;margin-top:10px;line-height:1.6}
 .ok,.bad{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:500;padding:3px 10px;border-radius:999px;white-space:nowrap}
 .ok{color:var(--ok);background:var(--ok-soft)}.bad{color:var(--bad);background:var(--bad-soft)}
+.flag{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:500;padding:3px 10px;border-radius:999px;white-space:nowrap;color:#a36a00;background:#fff4e0}
+.departures td.note{font-style:italic;color:var(--muted, #666)}
 .cols{display:grid;grid-template-columns:1fr 1fr;gap:28px}figure{margin:0 0 18px}
 figcaption{font-weight:500;color:var(--ink);margin-bottom:10px;font-size:12.5px}
 svg.plan{display:block;width:100%;background:var(--p-bg);border:1px solid var(--line);border-radius:12px}
@@ -343,6 +353,10 @@ ${d.parking.trucks ? `<tr><td>Loading bays (each the room of three cars)</td><td
 <header class="sec"><span>05</span><h2>Compliance</h2></header>
 <table><tr><th>Check</th><th>Required</th><th>Provided</th><th>Status</th></tr>
 ${checks.map(([k, a, b, ok]) => `<tr><td>${esc(k)}</td><td>${esc(a)}</td><td>${esc(b)}</td><td>${passes(ok)}</td></tr>`).join('')}</table>
+${d.departures.length ? `<h3>Departures from the rules</h3>
+<table class="departures"><tr><th>Departure</th><th>Value</th><th>Allowed</th><th>Clause</th><th>Note</th></tr>
+${d.departures.map((x) => `<tr><td>${esc(x.rule)}</td><td>${esc(x.value)}</td><td>${esc(x.allowed)}</td><td>${esc(x.clause)}</td><td class="note">${esc(d.site.notes?.[x.key] ?? '')}</td></tr>`).join('')}</table>
+<small class="note">Rules flag, never block: the scheme is drawn as asked, and each departure from the rules is listed here with the reason given for it.</small>` : ''}
 <h3>Schemes compared</h3>
 <table><tr><th>Scheme</th><th class="n">Buildings</th><th class="n">Floors</th><th class="n">Built-up</th><th class="n">FSI</th><th class="n">Of allowed</th></tr>${alt || '<tr><td colspan="6" class="muted">–</td></tr>'}</table>
 <small class="note">The optimiser's best layouts on this plot with the same settings (internal roads: ${esc(access.label.toLowerCase())}${design.spacing ? `, ${design.spacing} m extra spacing` : ''}${design.green ? `, ${design.green} % green` : ''}). ${d.site.manual ? 'The scheme in this report was shaped by hand.' : 'The scheme in this report is the most built-up one.'}</small>

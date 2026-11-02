@@ -1,9 +1,12 @@
 // Standards checks for catalogue assets (the Issues panel): curve radius, buffers buildings must keep (canals, nallas,
 // railway land, power-line corridors), buildings inside flood zones, clearance where roads cross a railway, BRT
 // stations on streets too narrow for BRT, ramps steeper than IRC:SP:90 allows, and buildings close to rivers.
+// Rules flag, never block: a departure is amber ('warn' / 'info'), never red — red is kept for things physically
+// broken (src/doc/issues.ts). The same checks run live on the build tool's ghost (liveFlags).
 import type { CityDoc } from './doc';
 import type { Issue, Near } from './issues';
 import type { Id, LineObj } from './types';
+import type { AssetDef } from '../assets';
 import { anchorsOf, crossingsOf, samplePath, SAME_LEVEL } from './ops';
 import { totalWidth } from './xsection';
 import { assetOf, lineShape, minRadiusOf } from '../assets';
@@ -53,6 +56,70 @@ function buildingsNear(doc: CityDoc, near: Near, pts: number[], d: number): Id[]
   return out;
 }
 
+/** A rule's severity on the map: departures are amber at most (a catalogue 'error' = a strong 'warn'). */
+const amber = (sev: 'error' | 'warn' | 'info'): Issue['sev'] => (sev === 'info' ? 'info' : 'warn');
+
+/** The street nearest a point (within 25 m) and its width. */
+function streetAt(doc: CityDoc, near: Near, x: number, z: number): { id: Id; w: number } | null {
+  let best: { id: Id; d: number } | null = null;
+  for (const id of near(x - 25, z - 25, x + 25, z + 25)) {
+    const s = doc.get(id);
+    if (s?.kind !== 'section') continue;
+    const S = samplePath(anchorsOf(doc, s), 8);
+    const d = polyDist(S.pts.flat(), x, z);
+    if (d < 25 && (!best || d < best.d)) best = { id, d };
+  }
+  return best ? { id: best.id, w: totalWidth(doc.get<'section'>(best.id)!.parts) } : null;
+}
+
+/**
+ * Live checks for the build tool's ghost (route stretch, placed structure or area being drawn): the reasons it departs
+ * from the rules, shown amber at the cursor. Never a refusal — the thing is built either way.
+ */
+export function liveFlags(doc: CityDoc, near: Near, a: AssetDef, pts: V2[], size = 0): string[] {
+  const out: string[] = [];
+  if (!pts.length) return out;
+  const flat = pts.flat();
+  const shape = a.drawer === 'place' ? 'point' : a.drawer === 'area' ? 'area' : 'route';
+  for (const r of a.rules ?? []) {
+    if (r.kind === 'minRadius' && shape === 'route' && pts.length >= 3) {
+      const R = minRadiusOf(pts);
+      if (R < r.r) out.push(`Radius ${Math.round(R)} m · ${r.r} m wanted (${r.note})`);
+    }
+    if (r.kind === 'onStreet' && shape === 'point') {
+      const st = streetAt(doc, near, pts[0][0], pts[0][1]);
+      if (!st) out.push(`Not on a street · ${r.note}`);
+      else if (st.w < r.minWidth) out.push(`${st.w.toFixed(0)} m street · ${r.minWidth} m wanted (${r.note})`);
+    }
+    if (r.kind === 'buffer' && shape === 'route' && pts.length >= 2) {
+      const n = buildingsNear(doc, near, flat, size / 2 + r.dist).length;
+      if (n) out.push(`${n} building${n > 1 ? 's' : ''} within ${r.dist} m · ${r.note}`);
+    }
+    if (r.kind === 'inside' && shape === 'area' && pts.length >= 3) {
+      let n = 0;
+      for (const id of near(...box(flat, 0))) { const b = doc.get(id); if (b?.kind === 'building' && inRing(flat, b.outer[0], b.outer[1])) n++; }
+      if (n) out.push(`${n} building${n > 1 ? 's' : ''} inside · ${r.note}`);
+    }
+  }
+  // what it is built near: the buffers of canals, nallas, railway land and power lines already on the map
+  const [x0, z0, x1, z1] = box(flat, 60);
+  const seen = new Set<string>();
+  for (const id of near(x0, z0, x1, z1)) {
+    const l = doc.get(id);
+    if (l?.kind !== 'line' || lineShape(l) !== 'route') continue;
+    const la = assetOf(l);
+    if (!la || la.id === a.id) continue;
+    for (const r of la.rules ?? []) {
+      if (r.kind !== 'buffer' || seen.has(la.id)) continue;
+      const reach = l.size / 2 + r.dist + size / 2;
+      let d = Infinity;
+      for (const [x, z] of pts) d = Math.min(d, polyDist(l.pts, x, z));
+      if (d < reach) { seen.add(la.id); out.push(`${Math.max(0, d - l.size / 2).toFixed(0)} m from ${l.name || la.name} · ${r.note}`); }
+    }
+  }
+  return out;
+}
+
 export function ruleIssues(doc: CityDoc, near: Near): Issue[] {
   const out: Issue[] = [];
   for (const l of doc.all('line')) {
@@ -66,11 +133,11 @@ export function ruleIssues(doc: CityDoc, near: Near): Issue[] {
         const pts: V2[] = [];
         for (let k = 0; k < l.pts.length; k += 2) pts.push([l.pts[k], l.pts[k + 1]]);
         const R = minRadiusOf(pts);
-        if (R < r.r) out.push({ key, sev: r.hard ? 'error' : 'warn', title: 'Curve too tight', detail: `${name}: radius ${Math.round(R)} m — ${r.note}`, x: mx, z: mz, ids: [l.id] });
+        if (R < r.r) out.push({ key, sev: 'warn', title: 'Curve too tight', detail: `${name}: radius ${Math.round(R)} m — ${r.note}`, x: mx, z: mz, ids: [l.id] });
       }
       if (r.kind === 'buffer' && shape === 'route') {
         const hits = buildingsNear(doc, near, l.pts, l.size / 2 + r.dist);
-        if (hits.length) out.push({ key, sev: r.sev, title: r.sev === 'info' ? 'Needs a permission' : 'Building too close', detail: `${name}: ${hits.length} building${hits.length > 1 ? 's' : ''} — ${r.note}`, x: mx, z: mz, ids: [l.id, ...hits] });
+        if (hits.length) out.push({ key, sev: amber(r.sev), title: r.sev === 'info' ? 'Needs a permission' : 'Building too close', detail: `${name}: ${hits.length} building${hits.length > 1 ? 's' : ''} — ${r.note}`, x: mx, z: mz, ids: [l.id, ...hits] });
       }
       if (r.kind === 'inside' && shape === 'area') {
         const hits: Id[] = [];
@@ -79,7 +146,7 @@ export function ruleIssues(doc: CityDoc, near: Near): Issue[] {
           if (b?.kind !== 'building') continue;
           for (let k = 0; k < b.outer.length; k += 2) if (inRing(l.pts, b.outer[k], b.outer[k + 1])) { hits.push(id); break; }
         }
-        if (hits.length) out.push({ key, sev: r.sev, title: r.sev === 'error' ? 'Building in a no-construction zone' : 'Building in a restricted zone', detail: `${name}: ${hits.length} building${hits.length > 1 ? 's' : ''} — ${r.note}`, x: mx, z: mz, ids: [l.id, ...hits] });
+        if (hits.length) out.push({ key, sev: amber(r.sev), title: r.sev === 'error' ? 'Building in a no-construction zone' : 'Building in a restricted zone', detail: `${name}: ${hits.length} building${hits.length > 1 ? 's' : ''} — ${r.note}`, x: mx, z: mz, ids: [l.id, ...hits] });
       }
       if (r.kind === 'clearance' && shape === 'route' && l.pts.length >= 4) {
         // roads crossing the line: level crossings, and bridges without the clearance

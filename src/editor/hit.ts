@@ -97,6 +97,9 @@ export class HitIndex {
     const cand = this.query(x - tol - 30, z - tol - 30, x + tol + 30, z + tol + 30);
     let best: Pick | null = null;
     const offer = (p: Pick) => { if (!best || p.d < best.d) best = p; };
+    // a click inside a plot that isn't on a road's surface picks the plot (junction handles, dead ends and roads'
+    // pick slack inside it don't steal it); the smallest plot when they nest
+    let onRoad = false, plot: { id: Id; a: number } | null = null;
     for (const id of cand) {
       const o = this.doc.get(id);
       if (!o) continue;
@@ -109,6 +112,7 @@ export class HitIndex {
       } else if (o.kind === 'section' && can('section', undefined, id)) {
         const sd = this.sectionDist(id, x, z);
         if (sd && sd.d <= sd.hw + tol) offer({ kind: 'section', id, d: sd.d - sd.hw, p: sd.p });
+        if (sd && sd.d <= sd.hw) onRoad = true;
       } else if (o.kind === 'line' && can('line', o.layer)) {
         if (o.props.shape === 'point') {
           // a placed structure: inside its (rotated) footprint
@@ -125,7 +129,12 @@ export class HitIndex {
         }
       } else if (o.kind === 'plot' && can('plot')) {
         // a sandbox plot sits over the buildings on it
-        if (inRing(o.ring, x, z)) offer({ kind: 'plot', id, d: 4 });
+        if (inRing(o.ring, x, z)) {
+          offer({ kind: 'plot', id, d: 4 });
+          let a = 0;
+          for (let i = 0; i < o.ring.length; i += 2) { const j = (i + 2) % o.ring.length; a += o.ring[i] * o.ring[j + 1] - o.ring[j] * o.ring[i + 1]; }
+          if (!plot || Math.abs(a) < plot.a) plot = { id, a: Math.abs(a) };
+        }
         else { const d = polyDist([...o.ring, o.ring[0], o.ring[1]], x, z); if (d <= tol) offer({ kind: 'plot', id, d: d + 0.5 }); }
       } else if (o.kind === 'building' && can('building')) {
         if (inRing(o.outer, x, z)) offer({ kind: 'building', id, d: 5 });
@@ -137,6 +146,9 @@ export class HitIndex {
         if (inRing(o.ring, x, z) && !o.holes?.some((h) => inRing(h, x, z))) offer({ kind: 'region', id, d: 50 + Math.sqrt(o.area) / 1000 });
       }
     }
+    // placed structures (stations, substations) still sit over the plot
+    const b = best as Pick | null;
+    if (plot && !onRoad && b && b.kind !== 'line' && b.kind !== 'plot') return { kind: 'plot', id: (plot as { id: Id }).id, d: 4 };
     return best;
   }
 
@@ -174,8 +186,12 @@ export class HitIndex {
       const inside = (x: number, z: number) => x >= x0 && x <= x1 && z >= z0 && z <= z1;
       if (o.kind === 'junction') { if (inside(o.x, o.z)) out.push(id); continue; }
       if (o.kind === 'section') { const P = anchorsOf(this.doc, o); const g = this.C.geo(id); const pts = g ? g.pts : P.flatMap((p) => [p.x, p.z]); for (let i = 0; i < pts.length; i += 2) if (inside(pts[i], pts[i + 1])) { out.push(id); break; } continue; }
-      const pts = o.kind === 'line' ? o.pts : o.kind === 'building' ? o.outer : [];
-      for (let i = 0; i < pts.length; i += 2) if (inside(pts[i], pts[i + 1])) { out.push(id); break; }
+      const pts = o.kind === 'line' ? o.pts : o.kind === 'building' ? o.outer : o.kind === 'plot' || o.kind === 'region' ? o.ring : [];
+      let hit = false;
+      for (let i = 0; i < pts.length; i += 2) if (inside(pts[i], pts[i + 1])) { hit = true; break; }
+      // a box drawn inside a plot / area still catches it
+      if (!hit && (o.kind === 'plot' || (o.kind === 'line' && o.props.shape === 'area')) && inRing(pts, (x0 + x1) / 2, (z0 + z1) / 2)) hit = true;
+      if (hit) out.push(id);
     }
     return out;
   }

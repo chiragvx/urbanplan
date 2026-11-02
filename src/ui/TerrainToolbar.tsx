@@ -76,7 +76,6 @@ export function TerrainToolbar() {
         )}
       </TpRow>
       <TpRow label="Moved" title="Earthworks against the original ground (roads' own cut / fill not included)"><span class="tp-value">cut {fmtVol(T.cut)} · fill {fmtVol(T.fill)}</span></TpRow>
-      <p class="tp-hint">{cur?.hint}</p>
     </div>
   );
 }

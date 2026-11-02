@@ -26,6 +26,8 @@ export interface SectionObj {
   elevated: boolean;
   /** below the ground somewhere (an underpass, trench or tunnel; heights are negative) */
   tunnel?: boolean;
+  /** the structure kind pinned by the user (auto height, src/doc/structure.ts); undefined = worked out */
+  pin?: import('./structure').StructKind;
   /**
    * Graded road (Cities: Skylines style): a fixed height profile instead of following the terrain — straight grades
    * between stations at most `step` m apart (96 m = 12 terrain cells of 8 m), heights in metres above sea level. The
@@ -272,6 +274,8 @@ export interface MapMeta {
   base?: string;
   /** the project in the signed-in user's account this map saves to, and the revision this copy is at */
   cloud?: { id: string; rev: number } | null;
+  /** the street design standard roads are matched against (irc, pune, mumbai); unset = from the city */
+  standard?: string;
 }
 
 export interface MapFile {

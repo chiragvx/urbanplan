@@ -1,5 +1,8 @@
 // Map checks: roads that overlap or cross without a junction, dead ends that almost touch a road, lanes too narrow
 // to drive, curves tighter than the road is wide, widths far from the Development Plan reserve.
+// Red ('error') only for what is physically broken — roads crossing or overlapping without a junction, road ends left
+// hanging next to a road; departures from the rules and standards are amber ('warn') or a note ('info'), and never
+// stop an edit.
 import type { CityDoc } from './doc';
 import type { Compiler } from './compile';
 import type { Id, SectionObj, SurveyStatus } from './types';
@@ -136,7 +139,7 @@ function sectionChecks(doc: CityDoc, C: Compiler, s: SectionObj, near: Near, out
         if (s.id < oid) out.push({ key: `cross:${s.id}:${oid}`, sev: 'error', title: 'Roads cross without a junction', detail: `${name} × ${o.name || 'unnamed road'} — split one and connect them, or make one a bridge`, x, z, ids: [s.id, oid] });
       } else if (best < hwA + hwB - 0.5) {
         reported.add(oid);
-        if (s.id < oid) out.push({ key: `overlap:${s.id}:${oid}`, sev: 'warn', title: 'Roads overlap', detail: `${name} and ${o.name || 'an unnamed road'} are ${best.toFixed(1)} m apart but ${(hwA + hwB).toFixed(1)} m wide together`, x, z, ids: [s.id, oid] });
+        if (s.id < oid) out.push({ key: `overlap:${s.id}:${oid}`, sev: 'error', title: 'Roads overlap', detail: `${name} and ${o.name || 'an unnamed road'} are ${best.toFixed(1)} m apart but ${(hwA + hwB).toFixed(1)} m wide together`, x, z, ids: [s.id, oid] });
       }
     }
   }
@@ -213,7 +216,7 @@ function junctionChecks(doc: CityDoc, C: Compiler, id: Id, near: Near, out: Issu
     }
     const hw = Math.max(g.t.hwL, g.t.hwR);
     if (best < hw + 4 && best > 0.3) {
-      out.push({ key: `gap:${id}`, sev: 'warn', title: 'Dead end almost touches a road', detail: `${arms[0].name || 'A road'} stops ${Math.max(0, best - hw).toFixed(1)} m from ${o.name || 'a road'} — drag its end onto the road to connect`, x: j.x, z: j.z, ids: [id, arms[0].id] });
+      out.push({ key: `gap:${id}`, sev: 'error', title: 'Road end not connected', detail: `${arms[0].name || 'A road'} stops ${Math.max(0, best - hw).toFixed(1)} m from ${o.name || 'a road'} — drag its end onto the road to connect`, x: j.x, z: j.z, ids: [id, arms[0].id] });
       return;
     }
   }

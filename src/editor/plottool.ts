@@ -1,5 +1,5 @@
 // Plot sandbox tool: click the corners of a plot (they snap to building corners and other plots), Enter or
-// double-click to finish. The plot is a map object; its report (DP loss, FSI, envelope) is worked out from the map
+// double-click to finish. A new plot has no use yet and opens empty in Site Studio. The plot is a map object; its report (DP loss, FSI, envelope) is worked out from the map
 // and kept until the map changes.
 import type { Editor } from './editor';
 import { newId } from '../doc/ids';
@@ -64,9 +64,10 @@ export class PlotTool {
     const P = this.pts;
     this.pts = [];
     status.value = this.hint();
-    if (P.length < 6 || polyArea(P) < 10) { if (P.length) toast('A plot needs at least three corners and 10 m²', 'warn'); return; }
+    // (only a plot of no area is refused: a 1,000 sq ft shop plot plans like a township)
+    if (P.length < 6 || polyArea(P) < 0.5) { if (P.length) toast('A plot needs at least three corners', 'warn'); return; }
     const n = this.E.doc.ids('plot').size + 1;
-    const o: PlotObj = { kind: 'plot', id: newId('plot'), name: `Plot ${n}`, ring: P, use: 'residential' };
+    const o: PlotObj = { kind: 'plot', id: newId('plot'), name: `Plot ${n}`, ring: P, use: 'none' };
     this.E.edit('Draw a plot', () => this.E.doc.create(o));
     if (this.E.doc.get(o.id)) { this.E.setTool('select'); select([{ kind: 'plot', id: o.id }]); }
   }

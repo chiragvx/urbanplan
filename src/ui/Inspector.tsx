@@ -5,13 +5,16 @@ import { useEffect, useRef } from 'preact/hooks';
 import { ui } from './ctx';
 import { NumberField, Row, Section, Select, Toggle, Icon, Seg, Tabs } from './components';
 import { CrossSection } from './CrossSection';
+import { RoadPicker } from './RoadPicker';
+import { RoadLongSection } from './LongSection';
 import * as xs from '../doc/xsection';
 import * as ops from '../doc/ops';
-import { CLASS_LABEL, ROAD_CLASSES, type Id, type SectionObj } from '../doc/types';
+import { CLASS_LABEL, type Id, type SectionObj } from '../doc/types';
 import { COVER } from '../net/generate';
 import { RegionPanel } from './RegionPanel';
 import { EarthworkPanel } from './EarthworkPanel';
 import { PlotPanel } from './PlotPanel';
+import { MultiPanel } from './MultiPanel';
 import { LINE_LABEL } from '../doc/base';
 import { COMMANDS, setDeck } from '../editor/commands';
 import type { Part } from '../net/model';
@@ -20,7 +23,6 @@ import { thumb } from '../assets/thumb';
 import { revealAsset } from './BuildPalette';
 import { buildOpen } from '../editor/state';
 
-const classOptions = ROAD_CLASSES.map((c) => ({ value: c as string, label: CLASS_LABEL[c] }));
 const run = (id: string) => { const c = COMMANDS.find((x) => x.id === id)!; if (!c.enabled || c.enabled(ui.E)) c.run(ui.E); };
 const len = (id: Id) => ui.C.geo(id)?.len ?? 0;
 
@@ -49,7 +51,7 @@ export function Inspector() {
   const a = anchorSel.value;
   if (a && tool.value === 'direct') return <AnchorPanel owner={a.owner} k={a.k} />;
   if (!sel.length) return <Empty />;
-  if (sel.length > 1) return <Multi />;
+  if (sel.length > 1) return <MultiPanel />;
   const s = sel[0];
   if (s.kind === 'region') return <RegionPanel id={s.id} />;
   const o = ui.doc.get(s.id);
@@ -141,9 +143,9 @@ function RoadPanel(p: { id: Id }) {
       <div class="insp-kind"><Icon.road /> Road</div>
       <input class="title-input" value={r.name} placeholder="Unnamed road" disabled={ro} onChange={(e) => ui.E.edit('Rename road', () => d.set(p.id, 'name', (e.currentTarget as HTMLInputElement).value.trim()))} />
       <p class="muted">{secs.length} section{secs.length === 1 ? '' : 's'} · {fmtLen(total)} · {xs.describe(lead.parts)}{mixed && range[1] - range[0] >= 0.1 ? <> · <b class="varies-tag">{fmtW(range[0])}–{fmtW(range[1])} m along it</b></> : null}</p>
-      <Row label="Class"><Select value={secs.every((s) => s.cls === lead.cls) ? lead.cls : r.cls} options={classOptions} disabled={ro} onChange={(v) => ui.E.edit('Road class', () => d.set(p.id, 'cls', v))} /></Row>
       <Tabs id="road" tabs={[
-        { id: 'xs', label: 'Cross-section', body: () => (
+        { id: 'type', label: 'Road', body: () => <><RoadPicker mode="edit" ids={[p.id]} /><RoadLongSection ids={secs.map((x) => x.id)} /></> },
+        { id: 'xs', label: 'Edit cross-section', body: () => (
           <>
             {mixed && <Varies road={p.id} secs={secs} lead={lead} common={common} reserve={reserves.length === 1 ? reserves[0] : undefined} />}
             <WaysControls target={p.id} parts={lead.parts} reserve={reserves.length === 1 ? reserves[0] : undefined} state={d.editState(lead.id, 'parts')} mixed={mixed} range={range} ids={secs.map((x) => x.id)} />
@@ -169,7 +171,7 @@ function RoadPanel(p: { id: Id }) {
         ) },
       ]} />
       <div class="insp-foot">
-        <Actions items={['road.straighten', 'road.smooth', 'road.reverse', 'road.reset']} />
+        <Actions items={['road.straighten', 'road.smooth', 'road.reverse', ...(secs.some((s) => d.base.has(s.id)) ? ['road.reset'] : [])]} />
         <button class="icon-btn danger" title="Delete road (Del)" disabled={ro} onClick={() => run('edit.delete')}><Icon.trash size={15} /></button>
       </div>
     </div>
@@ -319,9 +321,9 @@ function SectionPanel(p: { id: Id }) {
       </div>
       <p class="muted">{fmtLen(g?.len ?? 0)} · {xs.describe(s.parts)}</p>
       <Row label="Name"><input class="text" value={s.name} disabled={ro} onChange={(e) => ui.E.edit('Rename', () => d.set(p.id, 'name', (e.currentTarget as HTMLInputElement).value.trim()))} /></Row>
-      <Row label="Class"><Select value={s.cls} options={classOptions} disabled={ro} onChange={(v) => ui.E.edit('Class', () => d.set(p.id, 'cls', v))} /></Row>
       <Tabs id="section" tabs={[
-        { id: 'xs', label: 'Cross-section', body: () => (
+        { id: 'type', label: 'Road', body: () => <><RoadPicker mode="edit" ids={[p.id]} /><RoadLongSection ids={[p.id]} /></> },
+        { id: 'xs', label: 'Edit cross-section', body: () => (
           <>
             <WaysControls target={p.id} parts={s.parts} reserve={s.reserve} state={d.editState(p.id, 'parts')} />
             {d.editState(p.id, 'parts') === 'own' && <button class="link" disabled={ro} onClick={() => ui.E.edit('Reset width', () => d.reset(p.id, 'parts'))}>Reset to the road's cross-section</button>}
@@ -339,7 +341,7 @@ function SectionPanel(p: { id: Id }) {
         { id: 'source', label: 'Source', body: () => <SectionSource id={p.id} /> },
       ]} />
       <div class="insp-foot">
-        <Actions items={['road.separate', 'road.reset']} />
+        <Actions items={['road.separate', ...(d.base.has(p.id) ? ['road.reset'] : [])]} />
         <button class="icon-btn danger" title="Delete section (Del)" disabled={ro} onClick={() => run('edit.delete')}><Icon.trash size={15} /></button>
       </div>
     </div>
@@ -361,32 +363,6 @@ function SectionSource(p: { id: Id }) {
     </>
   );
 }
-
-function Multi() {
-  void docVersion.value; // signals make components pure: re-render on every document change
-  const sel = selection.value;
-  const secs = ui.E.selectedSections();
-  const ro = readOnly.value;
-  const counts = new Map<string, number>();
-  for (const s of sel) counts.set(s.kind, (counts.get(s.kind) ?? 0) + 1);
-  const widths = [...new Set(secs.map((s) => xs.totalWidth(s.parts)))];
-  return (
-    <div class="insp">
-      <div class="insp-kind">{[...counts].map(([k, n]) => `${n} ${k}${n > 1 ? 's' : ''}`).join(' · ')}</div>
-      {secs.length > 0 && (
-        <Section title="All selected roads">
-          <NumberField label="Width" unit="m" value={widths.length === 1 ? widths[0] : null} step={0.5} min={2.5} max={80} disabled={ro}
-            onChange={(v, m) => ui.E.edit('Width', () => { for (const s of sel) if (s.kind === 'road' || s.kind === 'section') { const P = s.kind === 'road' ? leadParts(s.id) : ui.doc.get<'section'>(s.id)!.parts; ui.doc.set(s.id, 'parts', xs.setTotalWidth(P, v)); } }, m)} />
-          <Actions items={['road.widen', 'road.narrow', 'road.lane.add', 'road.lane.remove', 'road.footpaths', 'road.dp', 'road.verify', 'road.straighten', 'road.smooth']} />
-        </Section>
-      )}
-      {counts.get('junction') ? <Actions items={['junction.signals', 'junction.roundabout']} /> : null}
-      <div class="btns"><button onClick={() => ui.E.zoomToSelection()}>Zoom to selection</button><button class="danger" disabled={ro} onClick={() => run('edit.delete')}><Icon.trash size={14} /> Delete</button></div>
-    </div>
-  );
-}
-
-const leadParts = (road: Id) => { const secs = ui.doc.sectionsOf(road); return secs.reduce((a, b) => (len(a.id) >= len(b.id) ? a : b)).parts; };
 
 // ---------------- junctions ----------------
 

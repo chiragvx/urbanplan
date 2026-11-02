@@ -1,6 +1,7 @@
-// First-run walkthroughs: the editor the first time someone opens a city, Site Studio the first time it opens. A card
-// beside the part being shown, with the rest of the screen dimmed round it; Next / Back / Skip, arrow keys, Esc. Each
-// is shown once (settings.toursDone) and can be taken again from Help.
+// First-run walkthroughs: the editor the first time someone opens a city, Site Studio the first time it opens. The
+// part being shown is lit with the rest of the screen dimmed round it; the card stays in one place (the middle of the
+// screen, moved up or down only when it would cover that part); Next / Back / Skip, arrow keys, Esc. Each is shown
+// once (settings.toursDone) and can be taken again from Help.
 import { signal } from '@preact/signals';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { saveSettings, settings, studio } from '../editor/state';
@@ -23,9 +24,9 @@ const TOURS: Record<TourName, Step[]> = {
     { title: 'Welcome to UrbanPlan', body: 'This is the city as it stands: its roads, buildings, terrain and Development Plan, all editable. A one-minute look round?' },
     { target: '.bb-mode', title: 'Move around', body: 'Drag to pan and scroll to zoom. Tab switches between the 2D plan and the city in 3D.' },
     { target: '.corner-tl', title: 'Info views', body: 'Lay the DP sheets, DP zones, terrain, satellite imagery and more over the map. Shift-click to show several at once.' },
-    { target: '.bb-cats', title: 'Build', body: 'Roads, flyovers, junctions, buildings and parks: pick one, then click on the map to draw it. Terrain and the plot sandbox are here too.' },
+    { target: '.bb-cats', title: 'Build', body: 'Roads, flyovers, junctions, buildings and parks: pick one, then click on the map to draw it. Hover any button for its name and key. Terrain is here too.' },
     { target: '.bb-tools', title: 'Change what’s there', body: 'Select and bend a road, move its points, split or join it, or bulldoze it. Ctrl+Z undoes anything.' },
-    { target: '.bb-cat[aria-label="Plot sandbox"]', title: 'Plan a plot', body: 'Draw round any site to see what the rules let you build there: FSI by road width, today and once the DP widens it. Then open it in Site Studio for a full scheme, its costs and a report.' },
+    { target: '.bb-plot', title: 'Plan a plot', body: 'The orange button. Draw round any site to see what the rules let you build there: FSI by road width, today and once the DP widens it. Then open it in Site Studio for a full scheme, its costs and a report.' },
     { target: '.bb-btn[aria-label="Search and commands"]', title: 'Find anything', body: 'Search roads and places, things to build and every command. Ctrl+K, from anywhere.' },
     { target: '.mapcard', title: 'Your map', body: 'Your edits are saved as you work: in this browser, and in your account once you sign in. New, open, versions, export and publish are in this menu.' },
     { title: 'You’re set', body: 'A good first step: draw a plot round a site you know and see the most it can hold.', action: { label: 'Draw a plot', run: () => ui.E.setTool('plot') } },
@@ -104,24 +105,21 @@ export function Tour() {
   const steps = TOURS[t.name], last = t.i === steps.length - 1;
   const go = (i: number) => { tour.value = { ...t, i }; };
 
-  // the card: beside the target (above it for the bottom bar, below it for the top), kept on screen
-  let x = (size.w - W) / 2, y = (size.h - ch) / 2, arrow: 'up' | 'down' | null = null;
-  if (rect) {
-    const below = rect.top + rect.height / 2 < size.h / 2;
-    y = below ? rect.bottom + PAD + GAP : rect.top - PAD - GAP - ch;
-    x = rect.left + rect.width / 2 - W / 2;
-    arrow = below ? 'up' : 'down';
+  // the card: in one place, a little above the middle, so the eye doesn't chase it round the corners; it only
+  // steps clear (above or below) when it would cover what's being shown
+  const x = Math.max(12, (size.w - W) / 2);
+  let y = Math.max(12, size.h * 0.42 - ch / 2);
+  if (rect && rect.left - PAD < x + W && rect.right + PAD > x && rect.top - PAD < y + ch && rect.bottom + PAD > y) {
+    const up = rect.top - PAD - GAP - ch, down = rect.bottom + PAD + GAP;
+    y = up >= 12 ? up : Math.min(size.h - ch - 12, down);
   }
-  x = Math.max(12, Math.min(size.w - W - 12, x));
-  y = Math.max(12, Math.min(size.h - ch - 12, y));
-  const ax = rect ? Math.max(18, Math.min(W - 18, rect.left + rect.width / 2 - x)) : 0;
 
   return (
     <div class="tour" role="dialog" aria-modal="false" aria-labelledby="tour-title">
       {rect
         ? <div class="tour-hole" style={{ left: rect.left - PAD, top: rect.top - PAD, width: rect.width + 2 * PAD, height: rect.height + 2 * PAD }} />
         : <div class="tour-scrim" />}
-      <div ref={card} class={`tour-card ${arrow ? `arrow-${arrow}` : ''}`} style={{ left: x, top: y, width: W, '--ax': `${ax}px` }}>
+      <div ref={card} class="tour-card" style={{ left: x, top: y, width: W }}>
         <div class="tour-meta"><span>{t.name === 'studio' ? 'Site Studio' : 'Tour'}</span><span>{t.i + 1} / {steps.length}</span></div>
         <h3 id="tour-title">{step.title}</h3>
         <p>{step.body}</p>

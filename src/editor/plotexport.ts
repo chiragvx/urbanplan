@@ -3,7 +3,7 @@
 // from the plot's centre and the ground there; DXF has Y north.
 import type { Editor } from './editor';
 import type { Id } from '../doc/types';
-import { UNIT_COLOR, UNIT_LABEL, type SiteReport } from '../doc/site';
+import { elementRings, UNIT_COLOR, UNIT_LABEL, type SiteReport } from '../doc/site';
 import { disc, flat, triangles, union } from '../doc/ground';
 import type { PlotReport } from '../doc/plot';
 import { hex, prismTris, type Box } from '../build/prism';
@@ -109,6 +109,8 @@ function gather(E: Editor, plot: number[], r: PlotReport, d: SiteReport | null) 
   add('corridors', B.flatMap((b) => floors(b, b.corridors, hex('#d9dce3'))));
   for (const b of B) {
     for (const q of b.quads) outlines.push({ layer: 'BUILDING', ring: loc(q), closed: true });
+    // (a building that departs from the rules, on a layer of its own: the report lists why)
+    if (d.departures.some((x) => x.ids.includes(b.b.id))) for (const q of b.quads) outlines.push({ layer: 'DEPARTURES', ring: loc(q), closed: true });
     for (const c of b.cores) outlines.push({ layer: 'CORES', ring: loc(c), closed: true });
   }
   let nb = 0, np = 0;
@@ -129,6 +131,7 @@ function gather(E: Editor, plot: number[], r: PlotReport, d: SiteReport | null) 
   }
   add('wall', wallBoxes);
   for (const g2 of G.gates) outlines.push({ layer: 'GATES', ring: loc(g2), closed: false });
+  for (const e of d.site.elements ?? []) if (e.kind === 'tank' || e.kind === 'play') for (const q of elementRings(e)) outlines.push({ layer: e.kind === 'tank' ? 'WATER-TANK' : 'PLAY', ring: loc(q), closed: true });
   for (const line of G.drive) outlines.push({ layer: 'DRIVE', ring: loc(line), closed: false });
   // the ground's layers, each at its height (they never overlap), outlined on their own DXF layers
   const M = G.map;

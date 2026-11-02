@@ -7,10 +7,12 @@ import type { Editor } from './editor';
 import * as ops from '../doc/ops';
 import type { Id } from '../doc/types';
 import type { V2 } from '../net/model';
-import { buildAsset, penClass, penLift, readOnly, settings, status, toast, type RoadMode } from './state';
+import { buildAsset, penClass, penLift, readOnly, roadHeight, settings, status, toast, type RoadMode } from './state';
 import { getAsset } from '../assets';
 import type { Part } from '../net/model';
 import { template } from '../doc/xsection';
+import { allGround, type Pin, type StructKind } from '../doc/structure';
+import { drawPlanned, groundOf, levelAt, liveSection, planStretch, type LongSectionData } from './heights';
 
 export interface Guide { o: V2; d: V2; label: string; ray?: boolean }
 export interface SnapResult {
@@ -23,7 +25,10 @@ export interface SnapResult {
   /** over / under a road at another level (no connection) */ over?: boolean;
 }
 interface Start { pt: ops.PenPoint; lift: number; dir: V2 | null; roadDir: V2 | null }
-export interface Preview { pieces: number[][]; pts: V2[]; len: number; R: number; crossings: ops.Crossing[]; lift0: number; lift1: number }
+export interface Preview {
+  pieces: number[][]; pts: V2[]; len: number; R: number; crossings: ops.Crossing[]; lift0: number; lift1: number;
+  /** auto height: the stretches it will build (ground / bridge / cutting / tunnel) along a straight grade */ plan?: LongSectionData;
+}
 
 const norm = (x: number, z: number): V2 | null => { const l = Math.hypot(x, z); return l > 1e-6 ? [x / l, z / l] : null; };
 const rot = (d: V2, deg: number): V2 => { const a = (deg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a); return [d[0] * c - d[1] * s, d[0] * s + d[1] * c]; };
@@ -54,6 +59,8 @@ export class RoadTool {
   road: Id | null = null;
   cursor: SnapResult | null = null;
   preview: Preview | null = null;
+  /** auto height: stretches of the road being drawn pinned to a kind (arc lengths along it) */
+  pins: Pin[] = [];
 
   constructor(readonly E: Editor) {}
 
@@ -220,8 +227,23 @@ export class RoadTool {
     if (!this.cursor) return;
     if (this.cursor.kind !== 'junction' && this.cursor.kind !== 'section') this.cursor.lift = penLift.value;
     this.preview = this.start ? this.build(this.cursor.p, this.cursor.lift) : null;
+    liveSection.value = this.preview?.plan ?? null;
     this.E.overlayDirty = true;
   }
+
+  /** Auto height is on (the default): each stretch works out ground / bridge / cutting / tunnel. */
+  get auto() { return settings.value.roadAuto !== false || roadHeight.value !== 'auto'; }
+
+  /** Pin the stretch of the road being drawn around arc length `s` to a kind (undefined: unpin it). */
+  pinAt(s: number, kind: StructKind | undefined) {
+    const st = this.preview?.plan?.stretches.find((x) => s >= x.s0 && s <= x.s1);
+    if (!st) return;
+    this.pins = this.pins.filter((p) => p.s1 <= st.s0 + 0.5 || p.s0 >= st.s1 - 0.5);
+    if (kind) this.pins.push({ s0: st.s0, s1: st.s1, kind });
+    this.refresh();
+  }
+
+  private clearLive() { this.pins = []; liveSection.value = null; }
 
   private build(p: V2, lift1: number): Preview {
     const { pieces, R } = this.pieces(p);
@@ -231,11 +253,21 @@ export class RoadTool {
     const acc = [0];
     for (let i = 1; i < pts.length; i++) { len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); acc.push(len); }
     const lift0 = this.start!.lift;
-    const lifts = acc.map((a) => lift0 + ((lift1 - lift0) * a) / (len || 1));
+    let lifts = acc.map((a) => lift0 + ((lift1 - lift0) * a) / (len || 1));
+    let plan: LongSectionData | undefined;
+    if (this.auto && len > 1) {
+      // a straight grade from the start's level to the end's (Cities: Skylines), the stretches worked out along it
+      const G = groundOf(this.E), z0 = G(pts[0][0], pts[0][1]) + lift0, z1 = G(p[0], p[1]) + lift1;
+      // the picker's height: auto works it out per stretch; ground / bridge / tunnel pin the whole stretch to it
+      const whole = roadHeight.value;
+      plan = planStretch(this.E, pts, z0, z1, penClass.value, new Set(), whole === 'auto' ? this.pins : [{ s0: 0, s1: len + 1, kind: whole }]);
+      const k = plan.len / (len || 1), pl = plan;
+      lifts = acc.map((a, i) => levelAt(pl, a * k) - G(pts[i][0], pts[i][1]));
+    }
     const skip = new Set<Id>();
     const crossings = len > 1 ? ops.crossingsOf(this.E.doc, pts, lifts, skip, (x0, z0, x1, z1) => this.E.hit.query(x0, z0, x1, z1))
       .filter((c) => c.s > 1.5 && c.s < len - 1.5) : [];
-    return { pieces, pts, len, R, crossings, lift0, lift1 };
+    return { pieces, pts, len, R, crossings, lift0, lift1, plan };
   }
 
   click(w: V2, ctrlKey: boolean, shift: boolean, alt: boolean) {
@@ -270,22 +302,32 @@ export class RoadTool {
     const { pieces } = this.pieces(sp.p);
     const end: ops.PenPoint = { x: sp.p[0], z: sp.p[1], junction: sp.junction, section: sp.section, lift: sp.lift };
     if (Math.hypot(end.x - S.pt.x, end.z - S.pt.z) < 1) return;
+    // worked out again for the point actually clicked (the preview may be from a slightly different snap)
+    const plan = this.auto ? this.build(sp.p, sp.lift).plan : undefined;
+    const structures = this.auto && plan && !allGround(plan.stretches) ? plan : null;
     const res = E.edit('Draw road', () => {
       const st = penStreet();
+      if (structures) {
+        // auto height: a section per stretch, each built as what it needs, along the planned level
+        const r = drawPlanned(E, S.pt, S.lift, end, pieces, penClass.value, structures, { road: this.road ?? undefined, parts: st?.parts, asset: st?.id });
+        return { road: r.road, section: r.sections[0] ?? null, a: r.a, b: r.b, joined: r.joined, bridged: r.bridged, kinds: structures.stretches.map((x) => x.kind) };
+      }
       const r = ops.drawStretch(E.doc, S.pt, end, pieces, penClass.value, { road: this.road ?? undefined, parts: st?.parts, asset: st?.id });
       const c = r.section ? ops.autoConnect(E.doc, [r.section]) : { joined: 0, bridged: 0 };
       // Cities: Skylines style: a graded road (fixed profile, the ground cut / filled to it) on ground level
       if (settings.value.roadGraded && Math.abs(S.lift) < 0.25 && Math.abs(end.lift ?? 0) < 0.25)
         ops.gradeSections(E.doc, E.doc.sectionsOf(r.road).filter((q) => !q.grade && !ops.offGrade(q)).map((q) => q.id), (x, z) => E.hf.sample(x, z) + E.hf.base);
-      return { ...r, ...c };
+      return { ...r, ...c, kinds: [] as StructKind[] };
     });
     if (!res) return;
+    this.pins = [];
     const last = pieces[pieces.length - 1];
     const tan = norm(last[6] - last[4], last[7] - last[5]) ?? norm(last[6] - last[0], last[7] - last[1]);
     const L = this.preview?.len ?? 0;
     const bits = [`Built ${L.toFixed(0)} m`];
     if (res.joined) bits.push(`${res.joined} new junction${res.joined > 1 ? 's' : ''}`);
     if (res.bridged) bits.push(`passes over ${res.bridged} road${res.bridged > 1 ? 's' : ''}`);
+    for (const k of ['bridge', 'cutting', 'tunnel'] as StructKind[]) { const n = res.kinds.filter((x) => x === k).length; if (n) bits.push(`${n} ${k}${n > 1 ? 's' : ''}`); }
     const J = E.doc.get<'junction'>(res.b);
     if (sp.junction || sp.section || !J) {
       // joined the network: this road is done
@@ -303,11 +345,11 @@ export class RoadTool {
   /** Right-click: drop the last control point, or stop the road being drawn. */
   back(): boolean {
     if (this.ctrl.length) { this.ctrl.pop(); this.refresh(); return true; }
-    if (this.start) { this.start = null; this.road = null; this.preview = null; status.value = this.hint(); this.E.overlayDirty = true; return true; }
+    if (this.start) { this.start = null; this.road = null; this.preview = null; this.clearLive(); status.value = this.hint(); this.E.overlayDirty = true; return true; }
     return false;
   }
 
-  cancel() { this.start = null; this.road = null; this.ctrl = []; this.preview = null; this.E.overlayDirty = true; }
+  cancel() { this.start = null; this.road = null; this.ctrl = []; this.preview = null; this.clearLive(); this.E.overlayDirty = true; }
 
   /** Replace mode: the clicked road (Alt: section) gets the chosen class and its standard cross-section. */
   private replaceAt(w: V2, alt: boolean) {

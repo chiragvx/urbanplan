@@ -1,0 +1,12 @@
+/* the app-wide hover card (hovercard.tsx) */
+.hovercard { position: fixed; z-index: 100; max-width: 280px; min-width: 120px; padding: 8px 10px; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); pointer-events: none; font-size: 12px; line-height: 1.35; animation: hc-in .12s ease-out; }
+@keyframes hc-in { from { opacity: 0; } }
+.hc-art { margin: -2px -2px 6px; border-radius: 7px; overflow: hidden; background: var(--panel-2); display: flex; justify-content: center; align-items: center; min-height: 48px; color: var(--text); }
+.hc-art img { display: block; }
+.hc-art svg { display: block; }
+.hc-head { display: flex; align-items: center; gap: 6px; }
+.hc-head b { flex: 1; font-weight: 600; font-size: 12.5px; }
+.hc-head kbd { font: 600 10.5px/1 Geist Mono, ui-monospace, monospace; padding: 3px 5px; border-radius: 5px; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.hc-hint { margin: 3px 0 0; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.hc-thumbs { display: flex; gap: 4px; padding: 4px; }
+.hc-thumbs img { width: 76px; height: 49px; border-radius: 5px; }

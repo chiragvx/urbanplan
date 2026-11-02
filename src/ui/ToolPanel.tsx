@@ -1,5 +1,6 @@
 // The panel above the bottom-left of the bar (Cities: Skylines' tool options): while a tool is in use it holds that
-// tool's options; otherwise it is the inspector of what's selected.
+// tool's options; otherwise it is the inspector of what's selected. The draw tools have none here: their options
+// are the drawing strip above the bar, so the map stays clear.
 import { lineLayer, tool } from '../editor/state';
 import { RoadToolbar, TpHead, TpRow } from './RoadToolbar';
 import { MultiToolbar } from './MultiToolbar';
@@ -7,11 +8,12 @@ import { TerrainToolbar } from './TerrainToolbar';
 import { InspectorCard } from './Inspector';
 import { ui } from './ctx';
 
-const BUILD = ['pen', 'route', 'place', 'area', 'bulldoze'];
+const DRAW = ['pen', 'route', 'place', 'area'];
 
 export function ToolPanel() {
   const t = tool.value;
-  if (BUILD.includes(t)) return <RoadToolbar />;
+  if (DRAW.includes(t)) return null;
+  if (t === 'bulldoze') return <RoadToolbar />;
   if (t === 'multi') return <MultiToolbar />;
   if (t === 'terrain') return <TerrainToolbar />;
   if (t === 'line') return <LineOptions />;
@@ -28,7 +30,6 @@ function LineOptions() {
           {ui.doc.all('layer').filter((l) => l.type === 'lines').map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
         </select>
       </TpRow>
-      <p class="tp-hint">Click points · <kbd>Enter</kbd> or double-click to finish</p>
     </div>
   );
 }

@@ -14,6 +14,9 @@ import { tourHere } from '../ui/tour';
 import { TERRAIN_OPS } from './terraintool';
 import { SURVEY_LABEL, type Id, type SectionObj } from '../doc/types';
 import type { Part } from '../net/model';
+import * as bulk from './bulk';
+import { everythingInView, selectSimilar, startRoute, wholeStreet, cancelRoute, routePick } from './smartsel';
+import { boxKinds } from './state';
 
 export interface Command {
   id: string;
@@ -30,10 +33,13 @@ const regionSel = () => selection.value.filter((s) => s.kind === 'region').map((
 const hasRoads = (E: Editor) => E.selectedSections().length > 0;
 const editable = () => !readOnly.value;
 
-/** Apply a cross-section change to the selection: road-level for selected roads, section-level for sections. */
-export function editParts(E: Editor, label: string, f: (p: Part[], s: SectionObj) => Part[]) {
-  E.edit(label, () => {
-    for (const s of selection.value) {
+/**
+ * Apply a cross-section change to the selection: road-level for selected roads, section-level for sections. Each
+ * object is changed from its own value (] widens each and keeps their differences). Changes to 2+ roads preview first.
+ */
+export function editParts(E: Editor, label: string, f: (p: Part[], s: SectionObj) => Part[], sel = selection.value) {
+  bulk.change(E, label, () => {
+    for (const s of sel) {
       if (s.kind === 'road') {
         const secs = E.doc.sectionsOf(s.id);
         if (!secs.length) continue;
@@ -49,9 +55,10 @@ export function editParts(E: Editor, label: string, f: (p: Part[], s: SectionObj
 }
 
 function eachSection(E: Editor, label: string, f: (s: SectionObj) => void) {
-  const secs = E.selectedSections();
-  if (!secs.length) return;
-  E.edit(label, () => { for (const s of secs) f(s); });
+  const ids = E.selectedSections().map((s) => s.id);
+  if (!ids.length) return;
+  // the sections as they are when the change runs (a preview may have changed them first)
+  bulk.change(E, label, () => { for (const id of ids) { const s = E.doc.get<'section'>(id); if (s) f(s); } });
 }
 
 function junctionsSel(E: Editor): Id[] {
@@ -62,9 +69,8 @@ function junctionsSel(E: Editor): Id[] {
 
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const ELEV_STEPS = [10, 5, 2.5, 1.25, 0.5];
-/** heights the tools allow (m): deepest tunnel, highest deck */
-const MIN_LIFT = -40, MAX_LIFT = 60;
-const clampLift = (v: number) => Math.max(MIN_LIFT, Math.min(MAX_LIFT, r2(v)));
+/** Heights are taken as asked (rules flag, never block): a 60 m deep tunnel is built as drawn; only rounded. */
+const clampLift = (v: number) => r2(v);
 
 
 function penStatus(lift: number) {
@@ -85,6 +91,13 @@ function levelToast(r: ops.LevelResult) {
 export function setDeck(E: Editor, deck: number, merge?: string) {
   const ids = E.selectedSections().map((s) => s.id);
   if (!ids.length) return;
+  // several roads (or a preview already open): through the preview bar, one undo step on Apply
+  const roads = new Set(E.selectedSections().map((s) => s.road));
+  if (roads.size >= 2 || bulk.pending.value) {
+    if (Math.abs(deck) < 0.75) bulk.change(E, 'To ground', () => { ops.toGround(E.doc, ids); });
+    else { const g = settings.value.grade, d = clampLift(deck); bulk.change(E, deck > 0 ? 'Flyover' : 'Tunnel', () => { ops.elevate(E.doc, ids, d, g); }); }
+    return;
+  }
   if (Math.abs(deck) < 0.75) { E.edit('To ground', () => ops.toGround(E.doc, ids), merge); toast('Back on the ground', 'ok'); return; }
   const r = E.edit(deck > 0 ? 'Flyover' : 'Tunnel', () => ops.elevate(E.doc, ids, clampLift(deck), settings.value.grade), merge);
   if (r) levelToast(r);
@@ -120,7 +133,11 @@ function levelBy(E: Editor, dir: 1 | -1) {
     return;
   }
   const juncs = junctionsSel(E);
-  if (juncs.length) { E.edit('Height', () => { for (const id of juncs) E.doc.set(id, 'lift', clampLift(E.doc.get<'junction'>(id)!.lift + dir * step)); }, 'lift'); return; }
+  if (juncs.length) {
+    const f = () => { for (const id of juncs) E.doc.set(id, 'lift', clampLift(E.doc.get<'junction'>(id)!.lift + dir * step)); };
+    if (juncs.length >= 2 || bulk.pending.value) bulk.change(E, 'Height', f); else E.edit('Height', f, 'lift');
+    return;
+  }
   const ids = E.selectedSections().map((s) => s.id);
   if (!ids.length) { toast('Select a road (or pick the road tool) to change its height', 'info'); return; }
   setDeck(E, r2(ops.deckOf(E.doc, ids) + dir * step), 'lift');
@@ -177,28 +194,34 @@ export const COMMANDS: Command[] = [
     run: (E) => {
       if (anchorSel.value && tool.value === 'direct' && E.deleteAnchor()) return;
       const sel = selection.value;
-      E.edit('Delete', () => {
+      bulk.change(E, 'Delete', () => {
         for (const s of sel) {
+          if (!E.doc.get(s.id)) continue;
           if (s.kind === 'road') ops.deleteRoad(E.doc, s.id);
           else if (s.kind === 'section') ops.deleteSections(E.doc, [s.id]);
           else if (s.kind === 'junction') ops.deleteJunction(E.doc, s.id);
-          else if (s.kind === 'line' || s.kind === 'building' || s.kind === 'earthwork' || s.kind === 'plot' || (s.kind === 'region' && E.doc.get(s.id))) E.doc.remove(s.id);
+          else if (s.kind === 'line' || s.kind === 'building' || s.kind === 'earthwork' || s.kind === 'plot' || s.kind === 'region') E.doc.remove(s.id);
         }
       });
-      select([]);
+      if (!bulk.pending.value) select([]);
     },
   },
   { id: 'edit.delete2', label: 'Delete', group: 'Edit', keys: 'Backspace', enabled: (E) => selection.value.length > 0 || !!anchorSel.value || (tool.value === 'plot' && E.plot.pts.length > 0), run: (E) => { if (tool.value === 'plot' && E.plot.pts.length) { E.plot.back(); E.overlayDirty = true; return; } COMMANDS.find((c) => c.id === 'edit.delete')!.run(E); } },
-  {
-    id: 'edit.selectview', label: 'Select all roads in view', group: 'Edit', keys: 'Ctrl+A',
-    run: (E) => {
-      const ids = E.hit.inRect(...E.view.rect, ['section'], E.canPick);
-      select([...new Set(ids.map((id) => E.doc.get<'section'>(id)!.road))].map((id) => ({ kind: 'road' as const, id })));
-    },
-  },
+  { id: 'edit.selectview', label: 'Select everything in view (what box select picks up)', group: 'Edit', keys: 'Ctrl+A', run: (E) => everythingInView(E) },
+  { id: 'select.similar', label: 'Select similar (same type and width)', group: 'Edit', keys: 'Shift+S', enabled: () => selection.value.length > 0, run: (E) => selectSimilar(E) },
+  { id: 'select.street', label: 'Select the whole street (by name, across junctions)', group: 'Edit', keys: 'Shift+W', enabled: (E) => E.selectedSections().length > 0, run: (E) => wholeStreet(E) },
+  { id: 'select.route', label: 'Select along a route (shortest path between two clicks)', group: 'Edit', keys: 'Shift+R', run: (E) => { if (tool.value !== 'select' && tool.value !== 'direct') E.setTool('select'); startRoute(E); } },
+  ...(['roads', 'junctions', 'assets', 'plots'] as const).map((k) => ({
+    id: `select.box.${k}`, label: `Box select picks up ${k} (on / off)`, group: 'Edit' as const,
+    run: () => { boxKinds.value = { ...boxKinds.value, [k]: !boxKinds.value[k] }; toast(`Box select ${boxKinds.value[k] ? 'picks up' : 'skips'} ${k}`, 'info', undefined, 1500); },
+  })),
+  { id: 'edit.apply', label: 'Apply the previewed change', group: 'Edit', enabled: () => !!bulk.pending.value, run: (E) => bulk.apply(E) },
+  { id: 'edit.cancelPreview', label: 'Cancel the previewed change', group: 'Edit', enabled: () => !!bulk.pending.value, run: (E) => bulk.cancel(E) },
   {
     id: 'edit.escape', label: 'Deselect / step out', group: 'Edit', keys: 'Escape',
     run: (E) => {
+      if (bulk.pending.value) { bulk.cancel(E); return; }
+      if (routePick.on) { cancelRoute(); status.value = ''; E.overlayDirty = true; return; }
       if (E.pen.pts.length || E.linePts.length) { if (tool.value === 'pen' && E.pen.pts.length >= 2) E.finishPen(); else E.cancelPen(); return; }
       if (E.road.active) { E.road.cancel(); status.value = E.road.hint(); return; }
       if (E.at.active) { E.at.cancel(); status.value = E.at.hint(); return; }
@@ -215,6 +238,7 @@ export const COMMANDS: Command[] = [
   {
     id: 'edit.enter', label: 'Finish drawing / step into road', group: 'Edit', keys: 'Enter',
     run: (E) => {
+      if (bulk.pending.value) { bulk.apply(E); return; }
       if (tool.value === 'pen') { if (E.road.active) { E.road.cancel(); status.value = E.road.hint(); } else E.finishPen(); return; }
       if (tool.value === 'terrain') { E.terra.finish(); return; }
       if (tool.value === 'plot') { E.plot.finish(); E.overlayDirty = true; return; }
@@ -249,11 +273,11 @@ export const COMMANDS: Command[] = [
     id: 'road.arc', label: 'Make a circular arc…', group: 'Road', enabled: hasRoads,
     run: (E) => { const r = Number(prompt('Arc radius (m)', '60')); if (r > 0) eachSection(E, 'Arc', (s) => ops.arcSection(E.doc, s.id, r)); },
   },
-  { id: 'road.reverse', label: 'Reverse direction', group: 'Road', keys: 'Shift+R', enabled: hasRoads, run: (E) => eachSection(E, 'Reverse', (s) => ops.reverseSection(E.doc, s.id)) },
+  { id: 'road.reverse', label: 'Reverse direction', group: 'Road', keys: 'Alt+R', enabled: hasRoads, run: (E) => eachSection(E, 'Reverse', (s) => ops.reverseSection(E.doc, s.id)) },
   {
     id: 'road.verify', label: 'Mark as verified (a region: matches the plan)', group: 'Review', keys: 'Y', enabled: (E) => hasRoads(E) || regionSel().length > 0,
     run: (E) => {
-      if (regionSel().length) { E.app.setSurvey(regionSel(), 'matches'); E.app.surveyNext(); return; } const secs = E.selectedSections(); const on = !secs.every((s) => s.verified); E.edit(on ? 'Verified' : 'Unverified', () => { for (const s of secs) E.doc.set(s.id, 'verified', on); }); toast(on ? `${secs.length} section(s) verified` : 'Verification removed', 'ok'); },
+      if (regionSel().length) { E.app.setSurvey(regionSel(), 'matches'); E.app.surveyNext(); return; } const secs = E.selectedSections(); const on = !secs.every((s) => s.verified); bulk.change(E, on ? 'Verified' : 'Unverified', () => { for (const s of secs) E.doc.set(s.id, 'verified', on); }); },
   },
   {
     id: 'road.separate', label: 'Make selected sections a separate road', group: 'Road', enabled: (E) => selection.value.some((s) => s.kind === 'section'),
@@ -261,7 +285,7 @@ export const COMMANDS: Command[] = [
   },
   {
     id: 'road.reset', label: 'Reset to the imported road', group: 'Road', enabled: (E) => E.selectedSections().some((s) => E.doc.patch.has(s.id)) || selection.value.some((s) => s.kind === 'road' && E.doc.patch.get(s.id)?.set),
-    run: (E) => E.edit('Reset', () => { for (const s of selection.value) E.doc.reset(s.id); for (const s of E.selectedSections()) if (E.doc.base.has(s.id)) E.doc.reset(s.id); }),
+    run: (E) => { const sel = selection.value, secs = E.selectedSections(); bulk.change(E, 'Reset', () => { for (const s of sel) E.doc.reset(s.id); for (const s of secs) if (E.doc.base.has(s.id)) E.doc.reset(s.id); }); },
   },
 
   // ---- Level ----
@@ -285,10 +309,14 @@ export const COMMANDS: Command[] = [
   },
 
   // ---- Junction ----
-  { id: 'junction.signals', label: 'Toggle traffic signals', group: 'Junction', enabled: (E) => junctionsSel(E).length > 0, run: (E) => E.edit('Signals', () => { for (const id of junctionsSel(E)) E.doc.set(id, 'signals', !E.doc.get<'junction'>(id)!.signals); }) },
+  {
+    id: 'junction.signals', label: 'Toggle traffic signals', group: 'Junction', enabled: (E) => junctionsSel(E).length > 0,
+    // all on unless they all have them already (mixed → on)
+    run: (E) => { const js = junctionsSel(E); const on = !js.every((id) => E.doc.get<'junction'>(id)?.signals); bulk.change(E, on ? 'Signals on' : 'Signals off', () => { for (const id of js) E.doc.set(id, 'signals', on); }); },
+  },
   {
     id: 'junction.roundabout', label: 'Make / remove roundabout', group: 'Junction', enabled: (E) => junctionsSel(E).length > 0,
-    run: (E) => E.edit('Roundabout', () => { for (const id of junctionsSel(E)) { const j = E.doc.get<'junction'>(id)!; if (j.R) E.doc.update(id, { R: undefined, ringLanes: undefined }); else E.doc.update(id, { R: 14, ringLanes: 1 }); } }),
+    run: (E) => { const js = junctionsSel(E); const on = !js.every((id) => E.doc.get<'junction'>(id)?.R); bulk.change(E, on ? 'Roundabouts' : 'No roundabouts', () => { for (const id of js) { if (on && !E.doc.get<'junction'>(id)!.R) E.doc.update(id, { R: 14, ringLanes: 1 }); if (!on) E.doc.update(id, { R: undefined, ringLanes: undefined }); } }); },
   },
   {
     id: 'junction.dissolve', label: 'Dissolve junction (join its two sections)', group: 'Junction', enabled: (E) => junctionsSel(E).some((id) => E.doc.sectionsAt(id).length === 2),
@@ -310,6 +338,7 @@ export const COMMANDS: Command[] = [
     run: (E) => { E.setTool('terrain'); E.overlayDirty = true; },
   },
   { id: 'tool.plot', label: 'Plot sandbox: draw a plot, see the DP road and what you can build', group: 'Tools', keys: 'F', enabled: editable, run: (E) => { E.setTool('plot'); E.overlayDirty = true; } },
+  { id: 'tool.paint', label: "Paint a road type onto existing roads (drag; Alt takes a road's type)", group: 'Tools', keys: 'U', enabled: editable, run: (E) => { E.setTool('paint'); E.overlayDirty = true; } },
   { id: 'tool.wand', label: 'Fill tool: trace a plot on the DP sheet as a survey region', group: 'Tools', keys: 'W', enabled: editable, run: (E) => E.setTool('wand') },
   ...[7, 8].map((k) => ({
     id: `terrain.op.${k}`, label: `Terrain tool: ${TERRAIN_OPS[k - 1].label}`, group: 'Tools' as const, keys: String(k), enabled: terrainTool,
@@ -352,7 +381,7 @@ export const COMMANDS: Command[] = [
   { id: 'view.accuracy', label: 'Accuracy view (where widths come from)', group: 'View', keys: 'Shift+A', run: (E) => { accuracyView.value = !accuracyView.value; E.overlayDirty = true; } },
   { id: 'view.fit', label: 'Zoom to the whole map', group: 'View', keys: 'Shift+1', run: (E) => { const b = E.app.region?.bounds; const h = E.world.tile.half; E.zoomTo(b ?? [-h, -h, h, h]); } },
   { id: 'view.sel', label: 'Zoom to selection', group: 'View', keys: 'Shift+2', enabled: () => selection.value.length > 0, run: (E) => E.zoomToSelection() },
-  { id: 'view.focus', label: 'Focus the selection', group: 'View', keys: 'U', enabled: () => selection.value.length > 0, run: (E) => E.zoomToSelection() },
+  { id: 'view.focus', label: 'Focus the selection', group: 'View', enabled: () => selection.value.length > 0, run: (E) => E.zoomToSelection() },
   { id: 'view.zoomin', label: 'Zoom in', group: 'View', keys: '=', run: (E) => { E.view.zoomAt(E.view.w / 2, E.view.h / 2, 1.5); E.world.needsRender = true; } },
   { id: 'view.zoomout', label: 'Zoom out', group: 'View', keys: '-', run: (E) => { E.view.zoomAt(E.view.w / 2, E.view.h / 2, 1 / 1.5); E.world.needsRender = true; } },
   { id: 'view.profile', label: 'Height profile panel', group: 'View', keys: 'Shift+P', run: () => { profileOpen.value = !profileOpen.value; } },

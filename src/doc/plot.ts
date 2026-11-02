@@ -15,7 +15,9 @@ import type { Near } from './issues';
 import type { Id, PlotObj, SectionObj } from './types';
 import { totalWidth } from './xsection';
 
-export type PlotUse = 'residential' | 'commercial' | 'industrial';
+/** What a plot (or a building on it) is for. Homes, offices and industry have their own rules; the rest go by the
+ *  general ones for the road and the zone. `none`: not said yet (shape and massing checks only). */
+export type PlotUse = 'residential' | 'commercial' | 'shops' | 'industrial' | 'garden' | 'carpark' | 'government' | 'school' | 'hospital' | 'worship' | 'custom' | 'none';
 /** which development control regulations apply */
 export type PlotCode = 'udcpr' | 'dcpr-island' | 'dcpr-suburbs';
 
@@ -60,11 +62,33 @@ export const CODE_NOTE: Record<PlotCode, string> = {
   'dcpr-suburbs': 'DCPR 2034 Table 12 from published summaries; the margins are UDCPR’s as placeholders. Check both with your architect.',
 };
 
-export const USE_NOTE: Record<PlotUse, string> = {
-  residential: 'Flats to a mix, parking by UDCPR Table 8-B.',
-  commercial: 'Offices on 3.6 m floors, flats none; ancillary FSI 80 %, parking a car per 100 m² of carpet.',
-  industrial: 'Sheds in an industrial zone: FSI 1.0 with no premium or TDR, margins at least 6 m in front and 4.5 m round, a car per 300 m² and a loading bay per 1,000 m². Placeholders: check the zone and the MIDC / UDCPR rules that apply.',
-};
+export interface UseInfo {
+  value: PlotUse; label: string;
+  /** what its floors are counted in (null: nothing to count) */
+  unit: string | null;
+  /** sold or let: profit and IRR mean something */
+  sells: boolean;
+  /** no rules of its own here: the general FSI and margins for the road and the zone */
+  generic: boolean;
+  note: string;
+}
+const GENERIC = 'No rules of its own here: FSI and margins are the general ones for this road width and zone, parking a placeholder. Check them with your architect.';
+export const USES: UseInfo[] = [
+  { value: 'residential', label: 'Homes', unit: 'flats', sells: true, generic: false, note: 'Flats to a mix, parking by UDCPR Table 8-B.' },
+  { value: 'commercial', label: 'Offices', unit: 'offices', sells: true, generic: false, note: 'Offices on 3.6 m floors; ancillary FSI 80 %, parking a car per 100 m² of carpet.' },
+  { value: 'shops', label: 'Shops', unit: 'shops', sells: true, generic: true, note: `Shops on 4.2 m floors, a car per 100 m². ${GENERIC}` },
+  { value: 'industrial', label: 'Industry', unit: 'shed floors', sells: true, generic: false, note: 'Sheds in an industrial zone: FSI 1.0 with no premium or TDR, margins at least 6 m in front and 4.5 m round, a car per 300 m² and a loading bay per 1,000 m². Placeholders: check the zone and the MIDC / UDCPR rules that apply.' },
+  { value: 'garden', label: 'Garden', unit: null, sells: false, generic: true, note: `A public garden or park: open ground, a pavilion at most. ${GENERIC}` },
+  { value: 'carpark', label: 'Car park', unit: null, sells: false, generic: true, note: `A public car park: decks of bays. ${GENERIC}` },
+  { value: 'government', label: 'Government', unit: 'office floors', sells: false, generic: true, note: `A ward office or other public building, a car per 100 m². ${GENERIC}` },
+  { value: 'school', label: 'School', unit: 'floors', sells: false, generic: true, note: `Classrooms on 3.6 m floors, a car per 200 m². ${GENERIC}` },
+  { value: 'hospital', label: 'Hospital', unit: 'floors', sells: false, generic: true, note: `Wards on 4.2 m floors, a car per 100 m². ${GENERIC}` },
+  { value: 'worship', label: 'Place of worship', unit: null, sells: false, generic: true, note: `A hall on tall floors, a car per 100 m². ${GENERIC}` },
+  { value: 'custom', label: 'Your own', unit: 'floors', sells: true, generic: true, note: `Open floor plates, a car per 100 m². ${GENERIC}` },
+  { value: 'none', label: 'No use yet', unit: null, sells: false, generic: true, note: 'No use yet: shape, building and massing checks only. Parking, units and money wait for a use.' },
+];
+export const useInfo = (u: PlotUse | undefined): UseInfo => USES.find((x) => x.value === u) ?? USES[USES.length - 1];
+export const USE_NOTE = Object.fromEntries(USES.map((x) => [x.value, x.note])) as Record<PlotUse, string>;
 
 /** Default rules for a plot on a road this wide. */
 export function defaultRules(roadW: number, use: PlotUse, code: PlotCode = 'udcpr', congested = false): PlotRules {
@@ -72,11 +96,15 @@ export function defaultRules(roadW: number, use: PlotUse, code: PlotCode = 'udcp
   const [, front, side, sideTo] = row(MARGINS, roadW);
   // industrial: FSI 1.0 on the plot, no premium or TDR, wider margins for trucks and fire; sheds a tall storey each
   if (use === 'industrial') return { basic: 1, premium: 0, tdr: 0, ancillary: 0, front: Math.max(front, 6), side: Math.max(side, 4.5), sideTo: 15, floorH: 7.5, maxH: 24 };
+  // homes (and a plot with no use yet) take the residential ancillary share, everything else the 80 % of "other"
+  const home = use === 'residential' || use === 'none' || use === 'garden';
+  // offices a taller storey (shops, wards and halls taller still); no fixed height limit in either code: a
+  // placeholder for fire and airport limits
+  const floorH = home || use === 'carpark' ? 3 : use === 'shops' || use === 'hospital' ? 4.2 : use === 'worship' ? 6 : 3.6;
   return {
     basic, premium, tdr,
-    ancillary: code === 'udcpr' ? (use === 'commercial' ? 0.8 : 0.6) : 0.35,
-    // offices a taller storey; no fixed height limit in either code: a placeholder for fire and airport limits
-    front, side, sideTo, floorH: use === 'commercial' ? 3.6 : 3, maxH: code === 'udcpr' ? 70 : 120,
+    ancillary: code === 'udcpr' ? (home ? 0.6 : 0.8) : 0.35,
+    front, side, sideTo, floorH, maxH: code === 'udcpr' ? 70 : 120,
   };
 }
 

@@ -10,9 +10,12 @@ import { COMMANDS, type Command } from '../editor/commands';
 import { ui } from './ctx';
 import { Icon, Menu, prettyKeys } from './components';
 import { CLASS_LABEL } from '../doc/types';
-import { allAssets, CATEGORIES, sizeLabel, type Category } from '../assets';
+import { allAssets, CATEGORIES, sizeLabel, uiCategory, type Category } from '../assets';
 import { buildCat, buildOpen } from '../editor/state';
 import { paletteVisible, revealAsset } from './BuildPalette';
+import { DRAW_TOOLS, drawingCategory, howTo } from './DrawStrip';
+import './hovercard';
+import './chrome.css';
 import { dark, toggleTheme } from './theme';
 import { AccountButton } from './account';
 import { fmtVol } from '../editor/terraintool';
@@ -72,10 +75,10 @@ const TOOLS: { t: Tool; icon: IconFn; label: string; key: string }[] = [
   { t: 'direct', icon: Icon.direct, label: 'Edit points', key: 'A' },
   { t: 'knife', icon: Icon.knife, label: 'Split / join', key: 'K' },
   { t: 'multi', icon: Icon.multi, label: 'Road tools: junctions, intersect, arrange, slope, loop, parallel, curve, flyover', key: 'J' },
+  { t: 'paint', icon: (p) => <svg width={p.size ?? 16} height={p.size ?? 16} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4l6 6-8 8-6-6zM6 12l-3 7 7-3" /></svg>, label: "Paint a road type onto roads (Alt takes a road's type)", key: 'U' },
   { t: 'bulldoze', icon: Icon.bulldoze, label: 'Bulldozer', key: 'B' },
 ];
-const EDIT_TOOLS = ['pen', 'knife', 'line', 'direct', 'bulldoze', 'wand', 'terrain', 'multi', 'plot'];
-const DRAW_TOOLS = ['pen', 'route', 'place', 'area'];
+const EDIT_TOOLS = ['pen', 'knife', 'line', 'direct', 'bulldoze', 'wand', 'terrain', 'multi', 'plot', 'paint'];
 const SURVEY_TOOLS: Tool[] = ['measure', 'line', 'wand'];
 
 /** New roads (km), edited objects, earthworks: the running tally of the plan. */
@@ -94,7 +97,7 @@ export function Dock() {
   void docVersion.value;
   const ro = readOnly.value;
   const d = ui.doc;
-  const dirty = d.version !== d.savedVersion;
+  const dirty = d.dirty;
   const cs = cloudState.value;
   const c = cursor.value;
   const ll = c ? ui.app.toLatLon(c[0], c[1]) : null;
@@ -103,8 +106,11 @@ export function Dock() {
   const t = tool.value;
   const tally = useTally();
   const [name, setName] = useState<string | null>(null);
+  const drawing = DRAW_TOOLS.includes(t);
+  const catOn = (id: Category) => (buildOpen.value ? uiCategory(buildCat.value) === id : drawing && drawingCategory() === id);
+  // a category's palette opens (above the drawing strip while drawing); clicking the open one folds it away
   const openCat = (id: Category) => {
-    if (buildOn && buildCat.value === id) { buildOpen.value = false; if (DRAW_TOOLS.includes(t)) ui.E.setTool('select'); return; }
+    if (buildOpen.value && uiCategory(buildCat.value) === id) { buildOpen.value = false; return; }
     buildCat.value = id; buildOpen.value = true;
   };
   const toolBtn = (x: typeof TOOLS[number]) => (
@@ -115,7 +121,8 @@ export function Dock() {
   const survey = SURVEY_TOOLS.includes(t);
   return (
     <footer class="dock" onPointerDown={(e) => e.stopPropagation()}>
-      <div class="bar">
+      <div class="bar bar3">
+        <div class="bar-l">
         <div class="mapcard">
           <Menu class="logo-menu" title="Map: new, open, save, export, publish" label={<span class="logo-badge" aria-label="Map menu">UP</span>} items={[
             item('file.home'), 'sep', item('file.new'), item('file.open'), 'sep', item('file.save'), item('file.saveas'), item('file.download'), ...(cloudOn() ? [item('file.versions')] : []), 'sep', item('file.export'), item('file.publish'), 'sep', item('file.settings'), item('help.tour'), item('help.keys'), item('help.about'),
@@ -125,36 +132,37 @@ export function Dock() {
               onInput={(e) => setName((e.currentTarget as HTMLInputElement).value)}
               onBlur={() => { if (name !== null) { ui.app.rename(name.trim() || 'Untitled map'); setName(null); } }}
               onKeyDown={(e) => { if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur(); }} />
-            <span class="mapcard-sub">{tally.km >= 0.01 ? `${tally.km.toFixed(2)} km new road · ` : ''}{d.editCount} edit{d.editCount === 1 ? '' : 's'}</span>
+            <span class="mapcard-sub" title="What you’ve changed on this map">{tally.km >= 0.01 ? `${tally.km.toFixed(2)} km new road · ` : ''}{d.editSummary}</span>
           </div>
         </div>
         <button class="bb-btn" aria-label="Undo" title={`Undo ${d.undoLabel ?? ''} (${prettyKeys('Ctrl+Z')})`} disabled={!d.canUndo || ro} onClick={() => d.undo()}><Icon.undo size={18} /></button>
         <button class="bb-btn" aria-label="Redo" title={`Redo ${d.redoLabel ?? ''} (${prettyKeys('Ctrl+Shift+Z')})`} disabled={!d.canRedo || ro} onClick={() => d.redo()}><Icon.redo size={18} /></button>
-        <span class="spacer" />
-        <div class="bb-cats" title="Build (O)">
+        </div>
+        <div class="bb-cats">
           {CATEGORIES.map((k) => (
-            <button key={k.id} class={`bb-cat ${buildOn && buildCat.value === k.id ? 'on' : ''}`} aria-label={k.label} title={`${k.label} (O)`} disabled={ro} onClick={() => openCat(k.id)}>
+            <button key={k.id} class={`bb-cat ${buildOn && catOn(k.id) ? 'on' : ''}`} aria-label={k.label} title={`${k.label}: ${k.blurb} (O)`} data-tip-art={`cat:${k.id}`} disabled={ro} onClick={() => openCat(k.id)}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={k.icon} /></svg>
             </button>
           ))}
           <button class={`bb-cat ${t === 'terrain' ? 'on' : ''}`} aria-label="Terrain" title="Terrain: raise, level, soften, slope, pads, ponds (T)" disabled={ro} onClick={() => ui.E.setTool(t === 'terrain' ? 'select' : 'terrain')}><Icon.terrain size={21} /></button>
-          <button class={`bb-cat ${t === 'plot' ? 'on' : ''}`} aria-label="Plot sandbox" title="Plot sandbox: draw a plot, see what the DP takes and what you can build (F)" disabled={ro} onClick={() => ui.E.setTool(t === 'plot' ? 'select' : 'plot')}><Icon.plot size={21} /></button>
           <Menu class={`bb-menu ${survey ? 'on' : ''}`} title="Survey tools: measure, draw a line, trace a DP plot" label={<Icon.survey size={21} />} items={[
             { label: 'Measure', keys: 'M', run: () => ui.E.setTool('measure') },
             { label: 'Draw a line (utilities, rail)', keys: 'L', run: () => ui.E.setTool('line'), disabled: ro },
             { label: 'Trace a DP plot as a survey region', keys: 'W', run: () => ui.E.setTool('wand'), disabled: ro },
           ]} />
         </div>
-        <span class="spacer" />
+        <div class="bar-r">
         <div class="bb-tools">{TOOLS.map(toolBtn)}</div>
         <button class="bb-btn" aria-label="Search and commands" title="Search roads, places, things to build, commands (Ctrl+K)" onClick={() => { paletteOpen.value = true; }}><Icon.search size={18} /></button>
         <div class="seg bb-mode">
           <button class={mode.value === '2d' ? 'on' : ''} onClick={() => ui.E.setMode('2d')} title="2D plan (Tab)">2D</button>
-          <button class={mode.value === '3d' ? 'on' : ''} onClick={() => ui.E.setMode('3d')} title="3D view (Tab)">3D{stale3d.value && mode.value === '2d' ? <i class="dot own" title="3D refreshes when opened" /> : null}</button>
+          <button class={mode.value === '3d' ? 'on' : ''} onClick={() => ui.E.setMode('3d')} title={`3D view (Tab)${stale3d.value && mode.value === '2d' ? ': refreshes when opened' : ''}`}>3D{stale3d.value && mode.value === '2d' ? <i class="dot own" /> : null}</button>
         </div>
         {ro
           ? <button class="primary" onClick={() => ui.app.fork()}>Edit a copy</button>
-          : <button class="primary publish" onClick={() => { dialog.value = 'publish'; }}><Icon.share size={14} /> <span class="tb-label">Publish</span></button>}
+          : <button class="bb-btn" aria-label="Publish" title="Publish: share the map as a link or in the gallery" onClick={() => { dialog.value = 'publish'; }}><Icon.share size={18} /></button>}
+        <button class={`bb-plot ${t === 'plot' ? 'on' : ''}`} aria-label="Plot sandbox" title="Plot sandbox: draw a plot, see what the DP takes and what you can build, then open it in Site Studio (F)" disabled={ro} onClick={() => ui.E.setTool(t === 'plot' ? 'select' : 'plot')}><Icon.plot size={22} /></button>
+        </div>
       </div>
       <div class="status">
         {cs.s !== 'off' && !ro
@@ -176,15 +184,30 @@ export function Dock() {
 // ---------------- the hint at the cursor ----------------
 
 const HINT_TOOLS = ['pen', 'route', 'place', 'area', 'line', 'measure', 'multi', 'terrain', 'plot', 'knife', 'bulldoze', 'wand', 'direct'];
+const SEEN = 'urbanplan:hintsSeen';
+/** How many times each tool has been picked up (the how-to shows for the first few). */
+const seen: Record<string, number> = (() => { try { return JSON.parse(localStorage.getItem(SEEN) ?? '{}'); } catch { return {}; } })();
 
-/** While a tool is in use, its next step follows the cursor (the status strip keeps it too). */
+/**
+ * The one instructional hint, at the cursor. The how-to shows the first few times a tool is used (or with ? on the
+ * drawing strip); after that only the numbers (lengths, counts, heights). The status strip keeps the whole message.
+ */
 export function CursorHint() {
-  const p = pointer.value, msg = status.value;
-  if (!p || !msg || !HINT_TOOLS.includes(tool.value)) return null;
+  const p = pointer.value, msg = status.value, t = tool.value;
+  useEffect(() => {
+    if (!HINT_TOOLS.includes(t)) return;
+    seen[t] = (seen[t] ?? 0) + 1;
+    try { localStorage.setItem(SEEN, JSON.stringify(seen)); } catch { /* storage off */ }
+  }, [t]);
+  if (!p || !msg || !HINT_TOOLS.includes(t)) return null;
   const [x, y] = p;
-  // the next step only: the first part or two of the tool's hint (the status strip has all of it)
   const parts = msg.split(' · ');
-  const short = parts.slice(0, parts[0].length < 28 && parts.length > 1 ? 2 : 1).join(' · ');
+  const learn = howTo.value || (seen[t] ?? 0) <= 3;
+  // learning: the next step (the first part or two); after: only the parts with numbers in
+  const short = learn
+    ? parts.slice(0, parts[0].length < 28 && parts.length > 1 ? 2 : 1).join(' · ')
+    : parts.filter((q) => /\d/.test(q) && !/PgUp|PgDn/.test(q)).map((q) => q.replace(/\s*[—–-]\s.*$/, '')).join(' · ');
+  if (!short) return null;
   return <div class="cursor-hint" style={{ left: `${x + 18}px`, top: `${y + 20}px` }}>{short}</div>;
 }
 

@@ -5,6 +5,7 @@ import type { CityDoc } from './doc';
 import { newId } from './ids';
 import { INHERITED, type Anchor, type Id, type JunctionObj, type LineObj, type RegionObj, type RoadObj, type SectionObj } from './types';
 import { flip, template } from './xsection';
+import type { StructKind } from './structure';
 
 const r2 = (v: number) => Math.round(v * 100) / 100;
 
@@ -159,6 +160,13 @@ export function splitSection(doc: CityDoc, id: Id, at: V2): { junction: Id; part
   rest[0] = { ...rest[0], ix: r2(r[4] - r[6]), iz: r2(r[5] - r[7]) };
   second.push(...rest);
   const A = derive(doc, s, s.a, j.id, first), B = derive(doc, s, j.id, s.b, second);
+  if (s.grade && s.grade.z.length >= 2) {
+    // each half keeps its own part of the profile (the stations are spread evenly over a section's length)
+    const G = s.grade, m = G.z.length;
+    const zAt = (u: number) => { const x = Math.max(0, Math.min(m - 1, (u / (n.len || 1)) * (m - 1))), i = Math.min(m - 2, Math.floor(x)); return G.z[i] + (G.z[i + 1] - G.z[i]) * (x - i); };
+    const part = (u0: number, u1: number) => { const k = Math.max(2, Math.ceil((u1 - u0) / G.step) + 1); return { step: G.step, z: Array.from({ length: k }, (_, i) => r2(zAt(u0 + ((u1 - u0) * i) / (k - 1)))) }; };
+    A.grade = part(0, n.s); B.grade = part(n.s, n.len);
+  }
   doc.remove(id);
   doc.create(A); doc.create(B);
   return { junction: j.id, parts: [A.id, B.id] };
@@ -996,4 +1004,165 @@ export function flyoverOver(doc: CityDoc, a: { section: Id; p: V2 }, b: { sectio
   if (!r.section) return null;
   const level = elevate(doc, [r.section], deck, grade);
   return { section: r.section, level };
+}
+
+// ---------------- auto height: a structure per stretch (Cities: Skylines style, src/doc/structure.ts) ----------------
+
+/** Arc-length table of one cubic: cumulative length at t = i / n. */
+function arcTable(c: number[], n = 32): number[] {
+  const out = [0];
+  let p = bezAt(c, 0);
+  for (let i = 1; i <= n; i++) { const q = bezAt(c, i / n); out.push(out[i - 1] + Math.hypot(q[0] - p[0], q[1] - p[1])); p = q; }
+  return out;
+}
+function tAt(T: number[], s: number) {
+  const n = T.length - 1;
+  if (s <= 0) return 0;
+  if (s >= T[n]) return 1;
+  let i = 1;
+  while (i < n && T[i] < s) i++;
+  return (i - 1 + (s - T[i - 1]) / Math.max(1e-9, T[i] - T[i - 1])) / n;
+}
+
+/** Total arc length of a run of cubic pieces. */
+export function piecesLength(C: number[][]): number { return C.reduce((a, c) => a + arcTable(c)[32], 0); }
+
+/** The part of a run of cubic pieces between arc lengths s0 and s1 (exact: the cubics are split, not refitted). */
+export function cutPieces(C: number[][], s0: number, s1: number): number[][] {
+  const out: number[][] = [];
+  let base = 0;
+  for (const c of C) {
+    const T = arcTable(c), L = T[T.length - 1];
+    const a = Math.max(s0, base), b = Math.min(s1, base + L);
+    if (b - a > 1e-3) {
+      const t0 = tAt(T, a - base), t1 = tAt(T, b - base);
+      let piece = c;
+      if (t1 < 1 - 1e-6) piece = splitCubic(piece, t1)[0];
+      if (t0 > 1e-6) piece = splitCubic(piece, t0 / Math.max(1e-9, t1))[1];
+      out.push(piece);
+    }
+    base += L;
+  }
+  return out;
+}
+
+/**
+ * A section's road level along it: samples (about 4 m apart) of arc length, point and height in `ground`'s units —
+ * graded sections their profile, bridges and tunnels straight between their anchors, others the ground plus lift.
+ */
+export function sectionLevels(doc: CityDoc, s: SectionObj, ground: (x: number, z: number) => number) {
+  const P = anchorsOf(doc, s);
+  const S = samplePath(P, 24);
+  const len = S.len;
+  const n = Math.max(2, Math.ceil(len / 4) + 1);
+  const pts: V2[] = [], us: number[] = [], z: number[] = [];
+  const at = (u: number): { p: V2; i: number; f: number } => {
+    let i = 1;
+    while (i < S.s.length - 1 && S.s[i] < u) i++;
+    const f = Math.max(0, Math.min(1, (u - S.s[i - 1]) / (S.s[i] - S.s[i - 1] || 1)));
+    return { p: [S.pts[i - 1][0] + (S.pts[i][0] - S.pts[i - 1][0]) * f, S.pts[i - 1][1] + (S.pts[i][1] - S.pts[i - 1][1]) * f], i, f };
+  };
+  const G = s.grade && !offGrade(s) ? s.grade.z : null;
+  const ends = [ground(P[0].x, P[0].z) + P[0].lift, ground(P[P.length - 1].x, P[P.length - 1].z) + P[P.length - 1].lift];
+  const st = anchorStations(P), za = P.map((a) => ground(a.x, a.z) + a.lift);
+  for (let k = 0; k < n; k++) {
+    const u = (len * k) / (n - 1), q = at(u);
+    let h: number;
+    if (G && G.length >= 2) {
+      const m = G.length, x = (u / (len || 1)) * (m - 1), i = Math.min(m - 2, Math.floor(x)), f = x - i;
+      const g = G.map((v, j) => (j === 0 ? ends[0] : j === m - 1 ? ends[1] : v));
+      h = g[i] + (g[i + 1] - g[i]) * f;
+    } else if (offGrade(s)) {
+      let j = 1;
+      while (j < st.length - 1 && st[j] < u) j++;
+      const f = Math.max(0, Math.min(1, (u - st[j - 1]) / (st[j] - st[j - 1] || 1)));
+      h = za[j - 1] + (za[j] - za[j - 1]) * f;
+    } else h = ground(q.p[0], q.p[1]) + S.lift[q.i - 1] + (S.lift[q.i] - S.lift[q.i - 1]) * q.f;
+    pts.push(q.p); us.push(u); z.push(h);
+  }
+  return { pts, s: us, z, len };
+}
+
+/**
+ * Give a section a structure along an absolute height profile `z(u)` (u = arc length from its `a` end, in `ground`'s
+ * units): ground and cuttings are graded to it (the terrain cut / filled), bridges and tunnels carry it on their
+ * anchors as heights above / below the ground. The end junctions are left as they are.
+ */
+export function applyStructure(doc: CityDoc, id: Id, kind: StructKind, z: (u: number) => number, ground: (x: number, z: number) => number, step = GRADE_STEP) {
+  const s = doc.get<'section'>(id);
+  if (!s) return;
+  let P = pruneSplits(anchorsOf(doc, s));
+  const len = samplePath(P, 24).len;
+  if (kind === 'ground' || kind === 'cutting') {
+    const m = Math.max(2, Math.ceil(len / step) + 1);
+    const zs: number[] = [];
+    for (let i = 0; i < m; i++) zs.push(r2(z((len * i) / (m - 1))));
+    doc.update(id, { grade: { step, z: zs }, path: P.map((a) => ({ ...a, lift: 0 })), bridge: 'none', deck: 0, elevated: false, tunnel: false });
+    return;
+  }
+  // anchors where the profile bends away from a straight line between them (e.g. a pinned stretch of a graded road)
+  for (let guard = 0; guard < 24; guard++) {
+    const at = anchorStations(P);
+    let worst = -1, wu = 0;
+    for (let k = 0; k + 1 < P.length; k++) {
+      const u = (at[k] + at[k + 1]) / 2, e = Math.abs(z(u) - (z(at[k]) + z(at[k + 1])) / 2);
+      if (e > 0.5 && e > worst && at[k + 1] - at[k] > 16) { worst = e; wu = u; }
+    }
+    if (worst < 0) break;
+    P = insertAt(P, wu);
+  }
+  const at = anchorStations(P);
+  const path = P.map((a, k) => ({ ...a, lift: r2(z(at[k]) - ground(a.x, a.z)) }));
+  const lifts = path.map((a) => a.lift);
+  if (kind === 'bridge') doc.update(id, { path, bridge: 'valley', deck: r2(Math.max(...lifts)), elevated: true, tunnel: false });
+  else doc.update(id, { path, bridge: 'none', deck: r2(Math.min(...lifts)), elevated: false, tunnel: true });
+  if (s.grade) doc.set(id, 'grade', undefined);
+}
+
+/** Pin a section to a structure kind (its present level kept), or unpin it (`kind` undefined: built as `auto`). */
+export function pinStructure(doc: CityDoc, id: Id, kind: StructKind | undefined, ground: (x: number, z: number) => number, auto?: StructKind) {
+  const s = doc.get<'section'>(id);
+  if (!s) return;
+  const L = sectionLevels(doc, s, ground);
+  const z = (u: number) => {
+    let i = 1;
+    while (i < L.s.length - 1 && L.s[i] < u) i++;
+    const f = Math.max(0, Math.min(1, (u - L.s[i - 1]) / (L.s[i] - L.s[i - 1] || 1)));
+    return L.z[i - 1] + (L.z[i] - L.z[i - 1]) * f;
+  };
+  const k = kind ?? auto;
+  if (k) applyStructure(doc, id, k, z, ground);
+  doc.set(id, 'pin', kind);
+}
+
+/**
+ * Draw a stretch with its height worked out per piece: one section per stretch of one structure kind (split at new
+ * junctions where the kind changes), each built along the profile `z(s)` (s = arc length along the pieces; `z` and
+ * `ground` in metres above sea level). Returns the road, the new sections in order and the end junctions.
+ */
+export function drawAuto(doc: CityDoc, a: PenPoint, b: PenPoint, pieces: number[][], cls: string, stretches: { s0: number; s1: number; kind: StructKind; pinned?: boolean }[],
+  z: (s: number) => number, ground: (x: number, z: number) => number, opt: { road?: Id; name?: string; parts?: Part[]; asset?: string } = {}): { road: Id; sections: Id[]; a: Id; b: Id } {
+  const L = piecesLength(pieces);
+  const S = stretches.length ? stretches : [{ s0: 0, s1: L, kind: 'ground' as StructKind }];
+  let road = opt.road ?? '', from: PenPoint = a, ja = '', jb = '';
+  const sections: Id[] = [];
+  S.forEach((st, i) => {
+    const last = i === S.length - 1;
+    const s0 = i === 0 ? 0 : S[i - 1].s1, s1 = last ? L : st.s1;
+    const sub = cutPieces(pieces, s0, s1);
+    if (!sub.length) return;
+    const e = sub[sub.length - 1];
+    const to: PenPoint = last ? b : { x: e[6], z: e[7], lift: r2(z(s1) - ground(e[6], e[7])) };
+    const r = drawStretch(doc, from, to, sub, cls, { ...opt, road: road || undefined });
+    road = r.road;
+    if (!ja) ja = r.a;
+    jb = r.b;
+    from = { x: to.x, z: to.z, junction: r.b };
+    if (!r.section) return;
+    const sl = samplePath(anchorsOf(doc, doc.get<'section'>(r.section)!), 24).len || 1;
+    applyStructure(doc, r.section, st.kind, (u) => z(s0 + ((s1 - s0) * u) / sl), ground);
+    if (st.pinned) doc.set(r.section, 'pin', st.kind);
+    sections.push(r.section);
+  });
+  return { road, sections, a: ja, b: jb };
 }

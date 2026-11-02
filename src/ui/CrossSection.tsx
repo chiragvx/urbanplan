@@ -8,7 +8,7 @@ import { allAssets, assetWidth, sizeLabel, tabsOf, type AssetDef } from '../asse
 import { thumb } from '../assets/thumb';
 import { NumberField, Icon } from './components';
 
-const COLOR: Record<PartKind, string> = {
+export const PART_COLOR: Record<PartKind, string> = {
   lane: '#55595f', bus: '#8a4c45', cycle: '#4f7f57', parking: '#6a6e74', shoulder: '#62666b', median: '#a49c8c', sidewalk: '#cfc6b4', planter: '#7ea05a',
 };
 const KINDS: PartKind[] = ['lane', 'bus', 'cycle', 'parking', 'shoulder', 'median', 'sidewalk', 'planter'];
@@ -92,7 +92,7 @@ export function CrossSection(p: { parts: Part[]; onChange: (parts: Part[], merge
         <div class="xs-strip">
           {p.reserve ? <div class="xs-reserve" style={{ width: pct(p.reserve) }} title={`DP reserve ${p.reserve} m`} /> : null}
           {parts.map((q, i) => (
-            <div key={i} class={`xs-part k-${q.kind} ${sel === i ? 'sel' : ''}`} style={{ width: pct(q.width), background: COLOR[q.kind] }} onClick={() => setSel(sel === i ? null : i)} title={`${PART_LABEL[q.kind]} · ${q.width.toFixed(2)} m — click to edit`}>
+            <div key={i} class={`xs-part k-${q.kind} ${sel === i ? 'sel' : ''}`} style={{ width: pct(q.width), background: PART_COLOR[q.kind] }} onClick={() => setSel(sel === i ? null : i)} title={`${PART_LABEL[q.kind]} · ${q.width.toFixed(2)} m — click to edit`}>
               {(q.kind === 'lane' || q.kind === 'bus' || q.kind === 'cycle') && q.width / scaleW > 0.05 && (
                 <span class="xs-arrow">{q.dir === 1 ? <Icon.arrowUp size={12} /> : q.dir === -1 ? <Icon.arrowDown size={12} /> : <Icon.both size={12} />}</span>
               )}
@@ -131,7 +131,7 @@ export function CrossSection(p: { parts: Part[]; onChange: (parts: Part[], merge
           </div>
           {KINDS.map((k) => (
             <button key={k} class="xs-chip" title={`Add ${PART_LABEL[k].toLowerCase()} (${PART_DEFAULT_W[k]} m)`} onClick={() => add(k)}>
-              <i style={{ background: COLOR[k] }} />{PART_LABEL[k]}
+              <i style={{ background: PART_COLOR[k] }} />{PART_LABEL[k]}
             </button>
           ))}
         </div>

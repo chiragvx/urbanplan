@@ -27,7 +27,7 @@ export type Profile =
   | { type: 'area'; fill: string; h?: number; hatch?: boolean };
 
 export type Rule =
-  /** smallest curve radius on the route (hard: the tool refuses tighter curves) */
+  /** smallest curve radius on the route (hard: a strict limit, flagged louder; tighter curves are still drawn) */
   | { kind: 'minRadius'; r: number; hard?: boolean; note: string }
   /** buildings within `dist` of the asset's edge: no-build (error), restricted (warn) or needs a permission (info) */
   | { kind: 'buffer'; dist: number; sev: 'error' | 'warn' | 'info'; note: string }
@@ -70,16 +70,20 @@ export interface AssetDef {
   custom?: boolean;
 }
 
-export const CATEGORIES: { id: Category; label: string; icon: string }[] = [
-  { id: 'roads', label: 'Roads', icon: 'M3 21L9 3M21 21L15 3M12 5v3M12 11v3M12 17v3' },
-  { id: 'transit', label: 'Public transport', icon: 'M6 3h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM4 11h16M8 21l-1.5-4M16 21l1.5-4M8 14h.01M16 14h.01' },
-  { id: 'rail', label: 'Rail', icon: 'M8 3L5 21M16 3l3 18M6.5 8h11M6 13h12M5.5 18h13' },
-  { id: 'water', label: 'Water bodies & canals', icon: 'M2 12c2-2 4-2 6 0s4 2 6 0 4-2 6 0M2 17c2-2 4-2 6 0s4 2 6 0 4-2 6 0M12 3l-3 5h6z' },
-  { id: 'drainage', label: 'Drainage & sewers', icon: 'M4 4h16v6a8 8 0 0 1-16 0zM12 18v3M8 8h8' },
-  { id: 'utilities', label: 'Water supply & utilities', icon: 'M12 2C8 8 6 11 6 14a6 6 0 0 0 12 0c0-3-2-6-6-12z' },
-  { id: 'power', label: 'Power', icon: 'M13 2L4 14h7l-1 8 9-12h-7z' },
-  { id: 'landscape', label: 'Paths & places', icon: 'M12 2l5 8h-3l4 6h-5v6h-2v-6H6l4-6H7z' },
+/** The build categories on the bar (6): rail is shown with transit, drainage with water (the catalogue keeps them apart). */
+export const CATEGORIES: { id: Category; label: string; icon: string; blurb: string }[] = [
+  { id: 'roads', label: 'Roads', icon: 'M3 21L9 3M21 21L15 3M12 5v3M12 11v3M12 17v3', blurb: 'Streets, highways, flyovers, the city’s standard widths' },
+  { id: 'transit', label: 'Transit & rail', icon: 'M6 3h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM4 11h16M8 21l-1.5-4M16 21l1.5-4M8 14h.01M16 14h.01', blurb: 'BRT, bus stops, metro, railways and stations' },
+  { id: 'water', label: 'Water & drains', icon: 'M2 12c2-2 4-2 6 0s4 2 6 0 4-2 6 0M2 17c2-2 4-2 6 0s4 2 6 0 4-2 6 0M12 3l-3 5h6z', blurb: 'Canals, rivers, nallas, storm drains and sewers' },
+  { id: 'utilities', label: 'Water supply & utilities', icon: 'M12 2C8 8 6 11 6 14a6 6 0 0 0 12 0c0-3-2-6-6-12z', blurb: 'Mains, reservoirs, gas and telecom' },
+  { id: 'power', label: 'Power', icon: 'M13 2L4 14h7l-1 8 9-12h-7z', blurb: 'Overhead lines, cables and substations' },
+  { id: 'landscape', label: 'Paths & places', icon: 'M12 2l5 8h-3l4 6h-5v6h-2v-6H6l4-6H7z', blurb: 'Footpaths, cycle tracks, parks, plazas and car parks' },
 ];
+
+/** The bar category an asset's category is shown under. */
+export const uiCategory = (c: Category): Category => (c === 'rail' ? 'transit' : c === 'drainage' ? 'water' : c);
+/** The catalogue categories a bar category holds. */
+export const memberCategories = (c: Category): Category[] => (c === 'transit' ? ['transit', 'rail'] : c === 'water' ? ['water', 'drainage'] : [c]);
 
 /** Overall width of an asset (m): the cross-section, corridor or footprint across. */
 export function assetWidth(a: AssetDef): number {

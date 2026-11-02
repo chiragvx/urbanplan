@@ -7,14 +7,19 @@
 // open patch to fill it. Its corners drag (snapping to the plot's and the buildings' corners and the plot's edges),
 // the dot mid-edge adds a corner, Alt-click drops one. The roundabout drops where clicked; a road is laid node by
 // node. The plan shows the ground as solved: every square metre one layer, bays and planting laid out procedurally.
+// The shelf's buildings (slab, tower, L) drop where clicked, sized to the envelope; a single-wing building sizes by
+// its corners and its floors drag on the pill above it. A gate drops on the plot's edge, a tank where clicked, a wall
+// is laid node by node. Rules flag, never block: the part of a building past its margins is hatched amber, a building
+// over the height limit gets an amber outline and dot; red is kept for buildings running into each other.
 import { effect } from '@preact/signals';
 import type { Editor } from './editor';
 import type { Id } from '../doc/types';
 import { docVersion, readOnly, studioLevel, studioSel, studioTool, toast } from './state';
-import { buildingQuads, circleRing, ELEMENTS, elementCentre, elementRings, isArea, newBuildingId, pointIn, ringOf, UNIT_COLOR, type ElementKind, type PlotSite, type SiteBuilding, type SiteElement } from '../doc/site';
-import { area, flat, fromFlat, grow, inside, inter, nearest, shrink, simplify, union, type MP } from '../doc/ground';
+import { BUILDING_SHAPES, buildingQuads, circleRing, ELEMENTS, elementCentre, elementRings, isArea, isLine, isPoint, newBuildingId, pointIn, ringOf, UNIT_COLOR, type BuildingReport, type ElementKind, type PlotSite, type SiteBuilding, type SiteElement } from '../doc/site';
+import { inset, sideMargin } from '../doc/plot';
+import { area, diff, flat, fromFlat, grow, inside, inter, nearest, shrink, simplify, union, type MP } from '../doc/ground';
 
-const ACCENT = '#2f5bff', RED = '#e5484d', INK = '#1c2333';
+const ACCENT = '#2f5bff', RED = '#e5484d', INK = '#1c2333', AMBER = '#c98300';
 
 type Drag =
   | { kind: 'pan'; x: number; y: number }
@@ -22,6 +27,8 @@ type Drag =
   | { kind: 'node'; b: string; i: number; spine: number[]; n: number; moved: boolean }
   | { kind: 'turn'; b: string; c: [number, number]; a0: number; spine: number[]; n: number }
   | { kind: 'depth'; b: string; n: number }
+  | { kind: 'corner'; b: string; i: number; q: number[]; n: number }
+  | { kind: 'floors'; b: string; y: number; f0: number; n: number }
   | { kind: 'rect'; el: ElementKind; a: [number, number]; moved: boolean }
   | { kind: 'vertex'; b: string; i: number; ring: number[]; n: number; moved: boolean }
   | { kind: 'ring'; b: string; start: [number, number]; ring: number[]; n: number; moved: boolean }
@@ -103,7 +110,7 @@ export class StudioCanvas {
   private setSpine(bid: string, spine: number[], label: string, merge?: string, patch?: Partial<SiteBuilding>) {
     const s = this.site();
     if (!s) return;
-    const f = <T extends SiteBuilding>(b: T): T => (b.id === bid ? { ...b, ...patch, spine } : b);
+    const f = <T extends SiteBuilding>(b: T): T => (b.id === bid ? { ...b, ...patch, spine, auto: undefined } : b);
     this.commit({ ...s, buildings: s.buildings.map(f), elements: s.elements?.map(f) }, label, merge);
   }
   /** a building or an element (they're shaped the same way) */
@@ -112,7 +119,7 @@ export class StudioCanvas {
     const s = this.site();
     return s?.buildings.find((b) => b.id === bid) ?? s?.elements?.find((e) => e.id === bid) ?? null;
   }
-  private drawing() { return studioTool.value === 'draw' || studioTool.value === 'road'; }
+  private drawing() { return studioTool.value === 'draw' || isLine(studioTool.value); }
 
   /** the road's direction (snapping goes by it) */
   private axis(): [number, number] { return this.E.plot.report(this.id)?.axis ?? [1, 0]; }
@@ -139,8 +146,9 @@ export class StudioCanvas {
     if (e.button === 1 || e.button === 2) { this.drag = { kind: 'pan', x: s[0], y: s[1] }; return; }
     if (e.button !== 0) return;
     const tool = studioTool.value;
-    if (tool === 'roundabout') { this.place(tool, w); return; }
-    if (tool === 'parking' || tool === 'lot' || tool === 'garden') {
+    if (tool === 'slab' || tool === 'tower' || tool === 'lblock') { this.placeBuilding(tool, w); return; }
+    if (isPoint(tool)) { this.place(tool as ElementKind, w); return; }
+    if (tool !== 'select' && tool !== 'draw' && isArea({ kind: tool as ElementKind })) {
       if (this.shape) {
         // a corner; on the first one again, the shape closes
         const P = this.shape.pts, f = this.toS(P[0], P[1]);
@@ -150,7 +158,7 @@ export class StudioCanvas {
         this.dirty = true;
         return;
       }
-      this.drag = { kind: 'rect', el: tool, a: this.snapPt(w, e.shiftKey), moved: false };
+      this.drag = { kind: 'rect', el: tool as ElementKind, a: this.snapPt(w, e.shiftKey), moved: false };
       return;
     }
     if (this.drawing()) {
@@ -200,7 +208,16 @@ export class StudioCanvas {
         this.drag = { kind: 'turn', b: sel.id, c, a0: Math.atan2(w[1] - c[1], w[0] - c[0]), spine: [...sel.spine], n: ++dragSeq };
         return;
       }
-      if (h.depth && Math.hypot(s[0] - h.depth[0], s[1] - h.depth[1]) < 8 && !('kind' in sel && sel.kind === 'roundabout')) { this.drag = { kind: 'depth', b: sel.id, n: ++dragSeq }; return; }
+      if (h.floors && Math.hypot(s[0] - h.floors[0], s[1] - h.floors[1]) < 11) {
+        const f0 = this.E.plot.layout(this.id)?.buildings.find((x) => x.b.id === sel.id)?.floors ?? sel.floors;
+        this.drag = { kind: 'floors', b: sel.id, y: s[1], f0, n: ++dragSeq };
+        return;
+      }
+      if (h.depth && Math.hypot(s[0] - h.depth[0], s[1] - h.depth[1]) < 8 && !('kind' in sel && isPoint(sel.kind))) { this.drag = { kind: 'depth', b: sel.id, n: ++dragSeq }; return; }
+      for (let i = 0; i < h.corners.length; i++) {
+        const p = h.corners[i];
+        if (Math.hypot(s[0] - p[0], s[1] - p[1]) < 7) { this.drag = { kind: 'corner', b: sel.id, i, q: [...buildingQuads(sel)[0]], n: ++dragSeq }; return; }
+      }
       for (let i = 0; i < sel.spine.length; i += 2) {
         const p = this.toS(sel.spine[i], sel.spine[i + 1]);
         if (Math.hypot(s[0] - p[0], s[1] - p[1]) < 8) {
@@ -323,11 +340,32 @@ export class StudioCanvas {
       case 'depth': {
         const b = this.building(d.b);
         if (!b) break;
-        // twice the distance from the first wing's line, in half metres
+        // twice the distance from the first wing's line, in half metres (no cap: only a building of no depth is refused)
         const ax = b.spine[0], az = b.spine[1], tx = b.spine[2] - ax, tz = b.spine[3] - az, L = Math.hypot(tx, tz) || 1;
         const off = Math.abs(((w[0] - ax) * -tz + (w[1] - az) * tx) / L);
-        const depth = Math.max(4, Math.min('kind' in b ? 200 : 40, Math.round(off * 4) / 2));
+        const depth = Math.max(1, Math.round(off * 4) / 2);
         if (depth !== b.depth) this.setSpine(d.b, b.spine, 'Building depth', 'studio' + d.n, { depth });
+        break;
+      }
+      case 'corner': {
+        // the corner opposite stays put; the building is the rectangle between it and the cursor, square to its wing
+        const q = d.q, o = (d.i + 2) % 4, F: [number, number] = [q[o * 2], q[o * 2 + 1]];
+        const tx0 = q[2] - q[0], tz0 = q[3] - q[1], L = Math.hypot(tx0, tz0) || 1, tx = tx0 / L, tz = tz0 / L, nx = -tz, nz = tx;
+        let du = (w[0] - F[0]) * tx + (w[1] - F[1]) * tz, dv = (w[0] - F[0]) * nx + (w[1] - F[1]) * nz;
+        if (!e.shiftKey) { du = Math.round(du * 2) / 2; dv = Math.round(dv * 2) / 2; }
+        // (at least a metre each way: a building of no size is the only thing refused)
+        if (Math.abs(du) < 1) du = du < 0 ? -1 : 1;
+        if (Math.abs(dv) < 1) dv = dv < 0 ? -1 : 1;
+        const sx = F[0] + nx * dv / 2, sz = F[1] + nz * dv / 2;
+        const spine = [sx, sz, sx + tx * du, sz + tz * du].map((v) => Math.round(v * 100) / 100);
+        this.setSpine(d.b, spine, 'Size building', 'studio' + d.n, { depth: Math.abs(dv) });
+        break;
+      }
+      case 'floors': {
+        // up adds floors, 8 px a floor; as many as asked, at least one
+        const f = Math.max(1, d.f0 + Math.round((d.y - s[1]) / 8));
+        const b = this.building(d.b);
+        if (b && f !== b.floors) this.setSpine(d.b, b.spine, 'Floors', 'studio' + d.n, { floors: f });
         break;
       }
     }
@@ -426,6 +464,7 @@ export class StudioCanvas {
     if (!s) return;
     const id = newBuildingId();
     if (studioTool.value === 'road') this.commit({ ...s, elements: [...(s.elements ?? []), { id, kind: 'road', spine: P, depth: 7, floors: 0 }] }, 'Add a road');
+    else if (studioTool.value === 'wall') this.commit({ ...s, elements: [...(s.elements ?? []), { id, kind: 'wall', spine: P, depth: 0.23, floors: 0 }] }, 'Add a wall');
     else this.commit({ ...s, buildings: [...s.buildings, { id, spine: P, depth: 16, floors: 0 }] }, 'Add a building');
     studioSel.value = id;
     studioTool.value = 'select';
@@ -435,11 +474,47 @@ export class StudioCanvas {
   private place(kind: ElementKind, w: [number, number]) {
     const s = this.site(), m = ELEMENTS.find((x) => x.value === kind);
     if (!s || !m) return;
-    const [ax, az] = this.axis(), h = m.len / 2;
+    let [ax, az] = this.axis();
+    const h = m.len / 2;
+    if (kind === 'gate') {
+      // onto the plot's nearest edge, along it
+      const N = this.E.plot.report(this.id)?.net ?? [];
+      let bd = Infinity;
+      for (let i = 0; i < N.length; i += 2) {
+        const j = (i + 2) % N.length, dx = N[j] - N[i], dz = N[j + 1] - N[i + 1], L2 = dx * dx + dz * dz || 1;
+        const t = Math.max(0, Math.min(1, ((w[0] - N[i]) * dx + (w[1] - N[i + 1]) * dz) / L2)), px = N[i] + dx * t, pz = N[i + 1] + dz * t;
+        const dd = Math.hypot(px - w[0], pz - w[1]);
+        if (dd < bd) { bd = dd; w = [px, pz]; const L = Math.sqrt(L2); ax = dx / L; az = dz / L; }
+      }
+    }
     const spine = [w[0] - ax * h, w[1] - az * h, w[0] + ax * h, w[1] + az * h].map((v) => Math.round(v * 10) / 10);
     const id = newBuildingId();
     const e: SiteElement = { id, kind, spine, depth: m.depth, floors: 0, ...(kind === 'parking' ? { levels: 3 } : {}) };
     this.commit({ ...s, elements: [...(s.elements ?? []), e] }, `Add ${m.label.toLowerCase()}`);
+    studioSel.value = id;
+    studioTool.value = 'select';
+  }
+
+  /** A slab, tower or L-block dropped where clicked, square to the road, no bigger than the envelope there (it's
+   *  sized by its corners after). Its floors fill the FSI until they're set. */
+  private placeBuilding(kind: 'slab' | 'tower' | 'lblock', w: [number, number]) {
+    const s = this.site(), r = this.E.plot.report(this.id), m = BUILDING_SHAPES.find((x) => x.value === kind);
+    if (!s || !r || !m) return;
+    const [ax, az] = this.axis(), px = -az, pz = ax;
+    // the envelope's extent along and across the road
+    const env = r.footprint.length >= 6 ? r.footprint : r.net;
+    let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+    for (let i = 0; i < env.length; i += 2) { const u = env[i] * ax + env[i + 1] * az, v = env[i] * px + env[i + 1] * pz; u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v); }
+    const fitU = Number.isFinite(u0) ? Math.max(3, u1 - u0) : m.len, fitV = Number.isFinite(v0) ? Math.max(3, v1 - v0) : m.depth;
+    const D = Math.min(m.depth, fitV), Lu = Math.max(D, Math.min(m.len, fitU));
+    const at = (u: number, v: number) => [w[0] + ax * u + px * v, w[1] + az * u + pz * v];
+    let spine: number[];
+    if (kind === 'lblock' && fitV >= D * 2 && fitU >= D * 2) {
+      const Lv = Math.min(m.len * 0.75, fitV);
+      spine = [...at(Lu / 2, -Lv / 2 + D / 2), ...at(-Lu / 2 + D / 2, -Lv / 2 + D / 2), ...at(-Lu / 2 + D / 2, Lv / 2)];
+    } else spine = [...at(-Lu / 2, 0), ...at(Lu / 2, 0)];
+    const id = newBuildingId();
+    this.commit({ ...s, buildings: [...s.buildings, { id, spine: spine.map((v) => Math.round(v * 100) / 100), depth: D, floors: 0 }] }, `Add a ${m.label.toLowerCase()}`);
     studioSel.value = id;
     studioTool.value = 'select';
   }
@@ -464,7 +539,7 @@ export class StudioCanvas {
       if (!best.length) { toast('That’s outside the plot', 'warn'); return; }
       ring = Math.abs(ba - area(fromFlat(drawn))) < 0.01 ? drawn : simplify(best, 0.05).map((v) => Math.round(v * 100) / 100);
     }
-    if (area(fromFlat(ring)) < 4) { toast('Too small: drag out a bigger area', 'warn'); return; }
+    if (area(fromFlat(ring)) < 0.5) return;
     const id = newBuildingId();
     const e: SiteElement = { id, kind, ring, spine: ring.slice(0, 4), depth: 0, floors: 0, ...(kind === 'parking' ? { levels: 3 } : {}) };
     this.commit({ ...s, elements: [...(s.elements ?? []), e] }, `Add ${m.label.toLowerCase()}`);
@@ -606,7 +681,7 @@ export class StudioCanvas {
       const R = ringOf(b);
       let top = Infinity, cx = 0;
       for (let i = 0; i < R.length; i += 2) { const p = this.toS(R[i], R[i + 1]); top = Math.min(top, p[1]); cx += p[0]; }
-      return { turn: [cx / (R.length / 2 || 1), top - 22] as [number, number], depth: null };
+      return { turn: [cx / (R.length / 2 || 1), top - 22] as [number, number], depth: null, corners: [] as [number, number][], floors: null };
     }
     const q = buildingQuads(b);
     let top = Infinity, cx = 0, n = 0;
@@ -614,7 +689,11 @@ export class StudioCanvas {
     const turn: [number, number] = [cx / (n || 1), top - 22];
     let depth: [number, number] | null = null;
     if (q.length) { const r = q[0]; depth = this.toS((r[0] + r[2]) / 2, (r[1] + r[3]) / 2); }
-    return { turn, depth };
+    const el = 'kind' in b;
+    // a single wing sizes by its corners; a building's floors drag on the pill beside the turn handle
+    const corners: [number, number][] = !el && q.length === 1 ? [0, 1, 2, 3].map((i) => this.toS(q[0][i * 2], q[0][i * 2 + 1])) : [];
+    const floors: [number, number] | null = el ? null : [turn[0] + 26, turn[1]];
+    return { turn, depth, corners, floors };
   }
 
   // ---------------- drawing ----------------
@@ -634,6 +713,18 @@ export class StudioCanvas {
     };
     const fill = (ring: number[], color: string, alpha = 1) => { if (ring.length < 6) return; path(ring); ctx.globalAlpha = alpha; ctx.fillStyle = color; ctx.fill(); ctx.globalAlpha = 1; };
     const stroke = (ring: number[], color: string, width = 1, dash: number[] = [], close = true) => { if (ring.length < 4) return; path(ring, close); ctx.setLineDash(dash); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); ctx.setLineDash([]); };
+    /** diagonal amber lines over a ring: the part of the project that departs from a rule */
+    const hatch = (ring: number[], color = AMBER) => {
+      if (ring.length < 6) return;
+      let a = Infinity, b = Infinity, c = -Infinity, e = -Infinity;
+      for (let i = 0; i < ring.length; i += 2) { const p = this.toS(ring[i], ring[i + 1]); a = Math.min(a, p[0]); c = Math.max(c, p[0]); b = Math.min(b, p[1]); e = Math.max(e, p[1]); }
+      ctx.save(); path(ring); ctx.clip();
+      ctx.globalAlpha = 0.18; ctx.fillStyle = color; ctx.fill(); ctx.globalAlpha = 1;
+      ctx.beginPath();
+      for (let x = a - (e - b); x < c; x += 6) { ctx.moveTo(x, e); ctx.lineTo(x + (e - b), b); }
+      ctx.strokeStyle = color; ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.restore();
+    };
 
     // what's around: roads, buildings
     const [x0, z0] = this.toW(0, 0), [x1, z1] = this.toW(this.w, this.h);
@@ -713,14 +804,26 @@ export class StudioCanvas {
         for (const [x, z] of [[g[0], g[1]], [g[2], g[3]]]) { const p = this.toS(x, z); ctx.fillStyle = INK; ctx.fillRect(p[0] - 3, p[1] - 3, 6, 6); }
         stroke(g, '#e08a00', 1.5, [3, 2], false);
       }
-      // the fire tender's way round the tall buildings, only where it's blocked
-      for (const b of d.buildings) if (!b.fireOk) for (const q of b.fire) stroke(q, RED, 1.6, [2, 3]);
+      // the hand-placed play areas and water tanks
+      for (const e of d.site.elements ?? []) {
+        if (e.kind === 'play') { const q = ringOf(e); fill(q, '#e9cf9b', 0.9); stroke(q, '#b08a4a', 1.2, [3, 2]); }
+        if (e.kind === 'tank') for (const q of elementRings(e)) { fill(q, '#7fa7c9', 0.95); stroke(q, '#3b6a90', 1.4); }
+        if (e.kind === 'trees') stroke(ringOf(e), '#3f7a2c', 1, [2, 3]);
+      }
+      // the fire tender's way round the tall buildings, only where it's blocked (a departure: amber)
+      for (const b of d.buildings) if (!b.fireOk) for (const q of b.fire) stroke(q, AMBER, 1.6, [2, 3]);
       for (const b of d.buildings) {
         for (const q of b.quads) fill(q, '#ffffff');
         for (const u of b.units) { fill(u.ring, UNIT_COLOR[u.t], 0.85); if (this.k > 2.2) stroke(u.ring, '#ffffff', 0.8); }
         for (const c of b.corridors) fill(c, '#d9dce3');
         for (const c of b.cores) fill(c, '#6b7280');
-        for (const q of b.quads) stroke(q, b.clash ? RED : INK, b.clash ? 2.2 : 1.2);
+        // past the margins: only the part outside the envelope at its height, hatched; into another building: red
+        if (b.clash === 'margins' && r.net.length >= 6) {
+          const env = inset(r.net, r.edges, r.rules.front, sideMargin(r.rules, b.height));
+          const past = env.length >= 6 ? diff(union(...b.quads.map(fromFlat)), fromFlat(env)) : union(...b.quads.map(fromFlat));
+          for (const p of past) hatch(flat(p[0]));
+        }
+        for (const q of b.quads) stroke(q, b.clash === 'overlap' ? RED : b.overHeight || b.clash ? AMBER : INK, b.clash === 'overlap' ? 2.2 : b.overHeight || b.clash ? 1.8 : 1.2);
       }
     }
     // the plot's roads, named with their widths where they pass it
@@ -754,14 +857,28 @@ export class StudioCanvas {
         ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.beginPath(); ctx.roundRect(p[0] - tw / 2, p[1] - 10, tw, 20, 10); ctx.fill();
         ctx.fillStyle = INK; ctx.fillText(t, p[0], p[1] + 0.5);
       }
-      for (const b of d.buildings) {
-        const [cx, cz] = spineCentre(b.b.spine), p = this.toS(cx, cz);
+      // the buildings' labels: floors and what's in them; collapsed to the floors where they'd overlap (in full under
+      // the cursor); an amber dot on one that departs from a rule
+      const hov = this.cursor && studioTool.value === 'select' && !this.drag ? this.pick(this.cursor) : null;
+      const full = (b: BuildingReport) => {
         const flats = b.perFloor[0] + b.perFloor[1] + b.perFloor[2] + b.perFloor[3];
-        const t = `${b.floors} fl · ${!b.cores.length ? `${Math.round(b.plate * b.floors).toLocaleString('en-IN')} m² shed` : `${flats * b.floors} ${b.perFloor[3] === flats ? 'offices' : 'flats'}`}`;
-        const tw = ctx.measureText(t).width + 12;
-        ctx.fillStyle = b.clash ? RED : 'rgba(28,35,51,0.86)';
+        const what = b.use === 'none' ? `${Math.round(b.plate * b.floors).toLocaleString('en-IN')} m²`
+          : !b.cores.length && b.use === 'industrial' ? `${Math.round(b.plate * b.floors).toLocaleString('en-IN')} m² shed`
+          : b.use === 'residential' ? `${flats * b.floors} flats` : `${Math.round(b.plate * b.floors).toLocaleString('en-IN')} m²`;
+        return `${b.floors} fl · ${what}`;
+      };
+      const labs = d.buildings.map((b) => {
+        const [cx, cz] = spineCentre(b.b.spine), p = this.toS(cx, cz), t = full(b);
+        return { b, p, t, w: ctx.measureText(t).width + 12, short: false };
+      });
+      for (const a of labs) for (const c of labs) if (a !== c && Math.abs(a.p[0] - c.p[0]) < (a.w + c.w) / 2 + 2 && Math.abs(a.p[1] - c.p[1]) < 22) a.short = true;
+      const flagged = new Set(d.departures.flatMap((x) => x.ids));
+      for (const L of [...labs.filter((x) => x.b.b.id !== hov), ...labs.filter((x) => x.b.b.id === hov)]) {
+        const t = L.short && L.b.b.id !== hov ? `${L.b.floors} fl` : L.t, tw = ctx.measureText(t).width + 12, p = L.p;
+        ctx.fillStyle = L.b.clash === 'overlap' ? RED : 'rgba(28,35,51,0.86)';
         ctx.beginPath(); ctx.roundRect(p[0] - tw / 2, p[1] - 10, tw, 20, 10); ctx.fill();
         ctx.fillStyle = '#fff'; ctx.fillText(t, p[0], p[1] + 0.5);
+        if (flagged.has(L.b.b.id)) { ctx.beginPath(); ctx.arc(p[0] + tw / 2 - 1, p[1] - 8, 3.5, 0, Math.PI * 2); ctx.fillStyle = '#f5a524'; ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.stroke(); }
       }
     }
 
@@ -806,6 +923,18 @@ export class StudioCanvas {
       ctx.beginPath(); ctx.arc(h.turn[0], h.turn[1], 7, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = ACCENT; ctx.lineWidth = 2; ctx.stroke();
       ctx.beginPath(); ctx.arc(h.turn[0], h.turn[1], 3, -0.4, Math.PI * 1.3); ctx.lineWidth = 1.5; ctx.stroke();
       if (h.depth) { ctx.fillStyle = '#fff'; ctx.fillRect(h.depth[0] - 5, h.depth[1] - 5, 10, 10); ctx.strokeRect(h.depth[0] - 5, h.depth[1] - 5, 10, 10); }
+      for (const c of h.corners) { ctx.beginPath(); ctx.arc(c[0], c[1], 4.5, 0, Math.PI * 2); ctx.fillStyle = ACCENT; ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke(); }
+      if (h.floors) {
+        // the floors pill: drag it up or down
+        const [fx, fy] = h.floors, fl = d?.buildings.find((x) => x.b.id === sel.id);
+        const t = `${fl?.floors ?? sel.floors} fl`;
+        ctx.font = '600 10px Inter, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        const tw = Math.max(30, ctx.measureText(t).width + 16);
+        ctx.beginPath(); ctx.roundRect(fx - tw / 2 + 8, fy - 9, tw, 18, 9); ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = fl?.overHeight ? AMBER : ACCENT; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.fillStyle = INK; ctx.fillText(t, fx + 8 + 4, fy + 0.5);
+        ctx.beginPath(); ctx.moveTo(fx - tw / 2 + 13, fy - 2); ctx.lineTo(fx - tw / 2 + 16, fy - 6); ctx.lineTo(fx - tw / 2 + 19, fy - 2); ctx.moveTo(fx - tw / 2 + 13, fy + 2); ctx.lineTo(fx - tw / 2 + 16, fy + 6); ctx.lineTo(fx - tw / 2 + 19, fy + 2);
+        ctx.strokeStyle = ACCENT; ctx.lineWidth = 1.2; ctx.stroke();
+      }
     }
 
     // the spine being drawn, with its depth
@@ -814,7 +943,8 @@ export class StudioCanvas {
       let c = this.cursor ? this.snap(this.cursor, last, false) : null;
       if (c && this.cursor && studioTool.value === 'road') c = this.roadSnap(this.cursor, c, false);
       const pts = c ? [...this.draft, c[0], c[1]] : this.draft;
-      if (pts.length >= 4) for (const q of buildingQuads({ id: 'draft', spine: pts, depth: studioTool.value === 'road' ? 7 : 16, floors: 0 })) { fill(q, studioTool.value === 'road' ? '#6b707b' : ACCENT, 0.2); stroke(q, ACCENT, 1); }
+      const dd = studioTool.value === 'road' ? 7 : studioTool.value === 'wall' ? 0.23 : 16;
+      if (pts.length >= 4) for (const q of buildingQuads({ id: 'draft', spine: pts, depth: dd, floors: 0 })) { fill(q, studioTool.value === 'draw' ? ACCENT : '#6b707b', 0.2); stroke(q, ACCENT, 1); }
       stroke(pts, ACCENT, 2, [5, 3], false);
       for (let i = 0; i < pts.length; i += 2) { const p = this.toS(pts[i], pts[i + 1]); ctx.beginPath(); ctx.arc(p[0], p[1], 4, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = ACCENT; ctx.stroke(); }
       if (c && last) {

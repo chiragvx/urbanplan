@@ -1,11 +1,12 @@
 // The asset registry (built-in catalogue + the user's saved assets) and the document side of building one:
 // the layer it lives in, the line it becomes, and reading an object back to its asset.
 import { BUILTIN, LAYERS, TAB_ORDER } from './catalog';
-import { assetWidth, channelTop, type AssetDef, type Category, type LayerDef, type Profile } from './model';
+import { assetWidth, channelTop, memberCategories, type AssetDef, type Category, type LayerDef, type Profile } from './model';
 import { settings, saveSettings } from '../editor/state';
 import type { CityDoc } from '../doc/doc';
 import type { Id, LayerObj, LineObj, SectionObj } from '../doc/types';
 import { newId } from '../doc/ids';
+import { assetFor } from './roadmodel';
 
 export * from './model';
 export { LAYERS };
@@ -18,17 +19,20 @@ export function allAssets(): AssetDef[] { return [...BUILTIN, ...customAssets()]
 
 export function getAsset(id: string | undefined): AssetDef | undefined {
   if (!id) return undefined;
+  // roads picked as width + features (src/assets/roadmodel.ts) resolve from their id
+  if (id.startsWith('rm~')) return assetFor(id);
   return byId.get(id) ?? customAssets().find((a) => a.id === id);
 }
 
-/** Tabs of a category, in catalogue order. */
+/** Tabs of a bar category (rail's under transit, drainage's under water), in catalogue order. */
 export function tabsOf(cat: Category): string[] {
-  const have = new Set(allAssets().filter((a) => a.category === cat).map((a) => a.tab));
-  const order = TAB_ORDER[cat] ?? [];
+  const cats = memberCategories(cat);
+  const have = new Set(allAssets().filter((a) => cats.includes(a.category)).map((a) => a.tab));
+  const order = cats.flatMap((c) => TAB_ORDER[c] ?? []);
   return [...order.filter((t) => have.has(t)), ...[...have].filter((t) => !order.includes(t))];
 }
 
-export function assetsIn(cat: Category, tab: string): AssetDef[] { return allAssets().filter((a) => a.category === cat && a.tab === tab); }
+export function assetsIn(cat: Category, tab: string): AssetDef[] { const cats = memberCategories(cat); return allAssets().filter((a) => cats.includes(a.category) && a.tab === tab); }
 
 /** Save a road cross-section as the user's own asset (Settings, this browser). */
 export function saveCustom(a: Omit<AssetDef, 'id' | 'pack' | 'custom'>): AssetDef {

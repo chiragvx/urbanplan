@@ -1,10 +1,13 @@
 // Inspector for a sandbox plot: what the DP road takes, what the rules allow, a summary of the site on it, and the
-// way into Site Studio, where the buildings are designed. Every rule can be changed for this plot.
+// way into Site Studio, where the buildings are designed. Every rule can be changed for this plot; none caps what's
+// placed (a departure is flagged in amber, never refused). The use is optional and open: homes to a ward office.
 import { mode, readOnly, select, docVersion } from '../editor/state';
 import { ui } from './ctx';
 import { Icon, NumberField, Section, Seg, Toggle } from './components';
 import type { PlotObj } from '../doc/types';
-import { CODE_LABEL, CODE_NOTE, USE_NOTE, type PlotReport, type PlotRules } from '../doc/plot';
+import { CODE_LABEL, CODE_NOTE, useInfo, USES, type PlotReport, type PlotRules } from '../doc/plot';
+import { useIcon } from './studioicons';
+import './studio.css';
 import { siteDefaults } from '../doc/optimise';
 import { UNIT_COLOR, UNIT_LABEL, type SiteReport } from '../doc/site';
 import { exportPlot } from '../editor/plotexport';
@@ -14,16 +17,17 @@ const fx = (v: number) => (Math.round(v * 100) / 100).toString();
 const cr = (v: number) => `₹${(v / 1e7).toLocaleString('en-IN', { maximumFractionDigits: Math.abs(v) >= 1e9 ? 0 : 1 })} Cr`;
 const pc = (v: number) => `${Math.round(v * 100)} %`;
 
-const RULES: { k: keyof PlotRules; label: string; unit?: string; step: number; max: number; pct?: boolean; digits?: number; title: string }[] = [
-  { k: 'basic', digits: 2, label: 'Basic FSI', step: 0.05, max: 5, title: 'Floor space index allowed as of right' },
-  { k: 'premium', digits: 2, label: 'Premium FSI', step: 0.05, max: 5, title: 'Extra FSI bought from the authority' },
-  { k: 'tdr', digits: 2, label: 'TDR', step: 0.05, max: 5, title: 'Transferable development rights that can be loaded (depends on the road width)' },
-  { k: 'ancillary', digits: 0, label: 'Ancillary', unit: '%', step: 5, max: 100, pct: true, title: 'Ancillary (UDCPR) or fungible (DCPR) FSI as a share of the above: staircases, lifts, balconies' },
-  { k: 'front', label: 'Front margin', unit: 'm', step: 0.5, max: 30, title: 'From the road boundary (after DP widening)' },
-  { k: 'side', label: 'Side / rear', unit: 'm', step: 0.5, max: 30, title: 'Side and rear margins up to the height below; above it H/5, at most 12 m' },
-  { k: 'sideTo', digits: 0, label: 'Up to', unit: 'm', step: 1, max: 100, title: 'Height up to which the side / rear margin above applies' },
-  { k: 'floorH', label: 'Floor height', unit: 'm', step: 0.1, max: 6, title: 'Floor to floor' },
-  { k: 'maxH', digits: 0, label: 'Height limit', unit: 'm', step: 1, max: 300, title: 'The most the building may rise (fire access, airport, local rules)' },
+// (no caps: a rule is whatever's typed, a floor height at least a little above nothing)
+const RULES: { k: keyof PlotRules; label: string; unit?: string; step: number; min?: number; pct?: boolean; digits?: number; title: string }[] = [
+  { k: 'basic', digits: 2, label: 'Basic FSI', step: 0.05, title: 'Floor space index allowed as of right' },
+  { k: 'premium', digits: 2, label: 'Premium FSI', step: 0.05, title: 'Extra FSI bought from the authority' },
+  { k: 'tdr', digits: 2, label: 'TDR', step: 0.05, title: 'Transferable development rights that can be loaded (depends on the road width)' },
+  { k: 'ancillary', digits: 0, label: 'Ancillary', unit: '%', step: 5, pct: true, title: 'Ancillary (UDCPR) or fungible (DCPR) FSI as a share of the above: staircases, lifts, balconies' },
+  { k: 'front', label: 'Front margin', unit: 'm', step: 0.5, title: 'From the road boundary (after DP widening)' },
+  { k: 'side', label: 'Side / rear', unit: 'm', step: 0.5, title: 'Side and rear margins up to the height below; above it H/5, at most 12 m' },
+  { k: 'sideTo', digits: 0, label: 'Up to', unit: 'm', step: 1, title: 'Height up to which the side / rear margin above applies' },
+  { k: 'floorH', label: 'Floor height', unit: 'm', step: 0.1, min: 0.5, title: 'Floor to floor' },
+  { k: 'maxH', digits: 0, label: 'Height limit', unit: 'm', step: 1, title: 'The most the building may rise (fire access, airport, local rules): a building over it is flagged, not stopped' },
 ];
 
 export function PlotPanel(p: { id: string }) {
@@ -41,17 +45,21 @@ export function PlotPanel(p: { id: string }) {
       {r && <PlotDiagram o={o} r={r} d={d} />}
       {r && d && (
         <dl class="plot-stats">
-          <div><dt>Flats</dt><dd>{d.flats.toLocaleString('en-IN')}</dd><small>{d.buildings.length} building{d.buildings.length === 1 ? '' : 's'} · {fx(d.height)} m</small></div>
-          <div class={d.over.fsi ? 'bad' : ''} title="Built-up area over plot area, ancillary included"><dt>FSI used</dt><dd>{fx(d.fsi)}</dd><small>of {fx(r.bua / r.area)} · {m2(d.bua)}</small></div>
+          {d.known.building && d.known.use
+            ? <div><dt>{d.buildings.every((b) => b.use === 'residential') ? 'Flats' : 'Units'}</dt><dd>{d.flats.toLocaleString('en-IN')}</dd><small>{d.buildings.length} building{d.buildings.length === 1 ? '' : 's'} · {fx(d.height)} m</small></div>
+            : <div class="need" title={d.known.building ? 'Units need a use' : 'Place a building in Site Studio'}><dt>Built</dt><dd>{d.known.building ? m2(d.bua) : '–'}</dd><small>{d.known.building ? 'units need a use' : 'nothing placed yet'}</small></div>}
+          <div class={d.over.fsi ? 'flag' : ''} title={d.departures.find((x) => x.key === 'fsi')?.text ?? 'Built-up area over plot area, ancillary included'}><dt>FSI {d.known.building ? 'used' : 'allowed'}</dt><dd>{fx(d.known.building ? d.fsi : r.bua / r.area)}</dd><small>{d.known.building ? `of ${fx(r.bua / r.area)} · ${m2(d.bua)}` : m2(r.bua)}</small></div>
           <div class={r.lost > 0.5 ? 'bad' : ''}><dt>After DP road</dt><dd>{m2(r.netArea)}</dd><small>{r.lost > 0.5 ? `−${m2(r.lost)} of ${m2(r.area)}` : `of ${m2(r.area)}`}</small></div>
-          <div class={d.money.profit < 0 ? 'bad' : ''}><dt>Profit</dt><dd>{cr(d.money.profit)}</dd><small>{pc(d.money.margin)} margin</small></div>
+          {d.known.money
+            ? <div class={d.money.profit < 0 ? 'bad' : ''}><dt>Profit</dt><dd>{cr(d.money.profit)}</dd><small>{pc(d.money.margin)} margin</small></div>
+            : <div class="need"><dt>Profit</dt><dd>–</dd><small>{!d.known.building ? 'needs a building' : 'needs use or a sale rate'}</small></div>}
         </dl>
       )}
       {r?.onRoad && <p class="note">{r.road?.name} runs over this plot. Draw the plot from the edge of the road for the right numbers.</p>}
-      {r && r.floors === 0 && <p class="note">Nothing fits inside the margins. Check the margins, or draw a bigger plot.</p>}
-      {d && (d.over.margins || d.over.overlap || d.over.fsi || d.over.height) && <p class="note">The site breaks the rules here and there: open it in Site Studio to see where.</p>}
+      {r && r.floors === 0 && <p class="note">The margins leave no room inside them: a building can still be placed, flagged as past them.</p>}
+      {d && d.departures.length > 0 && <p class="note" title={d.departures.map((x) => x.text).join(' · ')}><i class="flag-dot" /> {d.departures.length} departure{d.departures.length === 1 ? '' : 's'} from the rules: open it in Site Studio to see where.</p>}
       {r && <button class="primary wide" onClick={() => ui.E.openStudio(o.id)}><Icon.cube size={14} /> Open in Site Studio</button>}
-      {!o.site && r && <p class="small muted">A bar along the road to start with: shape the buildings, the flat mix, parking and rates in the studio (or double-click the plot).</p>}
+      {!o.site && r && <p class="small muted">An empty plot with its margins: place buildings and the rest in the studio, or let Fill for me lay the most it can (or double-click the plot).</p>}
 
       <Section title="Road">
         {r?.road ? (
@@ -63,11 +71,13 @@ export function PlotPanel(p: { id: string }) {
             { value: 'dp', label: 'DP width', title: 'Rules by the Development Plan width (when the DP strip is handed over)' },
           ]} />
         </div>
-        <Seg small value={o.use} onChange={(v) => !ro && set({ use: v, site: o.site?.manual ? o.site : { ...siteDefaults(v), design: o.site?.design } })} options={[
-          { value: 'residential', label: 'Residential', title: USE_NOTE.residential }, { value: 'commercial', label: 'Commercial', title: USE_NOTE.commercial },
-          { value: 'industrial', label: 'Industrial', title: USE_NOTE.industrial },
-        ]} />
-        {o.use !== 'residential' && <p class="small muted">{USE_NOTE[o.use]}</p>}
+        <div class="use-tiles" role="radiogroup" aria-label="Use">
+          {USES.map((u) => { const U = useIcon(u.value); return (
+            <button key={u.value} role="radio" aria-checked={o.use === u.value} aria-label={u.label} class={`icon${o.use === u.value ? ' on' : ''}`} disabled={ro} title={`${u.label}: ${u.note}`} data-tip-art={`use:${u.value}`}
+              onClick={() => set({ use: u.value, site: !o.site || o.site.manual ? o.site : { ...siteDefaults(u.value), design: o.site.design, fill: o.site.fill, notes: o.site.notes, buildings: o.site.buildings.filter((b) => !b.auto) } })}><U size={16} /></button>
+          ); })}
+        </div>
+        <p class="small muted"><b>{useInfo(o.use).label}.</b> {useInfo(o.use).note}</p>
         {r?.road?.dp && r.road.dp > r.road.today && (
           <Toggle checked={!!o.credit} disabled={ro} onChange={(v) => set({ credit: v || undefined })} label="Count FSI for the DP strip handed over"
             title="The authority may allow the basic FSI of the land given up for the DP road on the rest of the plot (or give TDR for it instead)" />
@@ -84,7 +94,7 @@ export function PlotPanel(p: { id: string }) {
             {RULES.map((x) => {
               const v = r.rules[x.k], own = o.rules?.[x.k] !== undefined;
               return (
-                <NumberField key={x.k} label={x.label} unit={x.unit} digits={x.digits} title={x.title} step={x.step} min={0} max={x.max} disabled={ro}
+                <NumberField key={x.k} label={x.label} unit={x.unit} digits={x.digits} title={x.title} step={x.step} min={x.min ?? 0} disabled={ro}
                   value={x.pct ? Math.round(v * 100) : v} state={own ? 'own' : 'base'}
                   onChange={(n, m) => setRule(x.k, x.pct ? n / 100 : n, m)} />
               );
@@ -145,7 +155,7 @@ function PlotDiagram({ o, r, d }: { o: PlotObj; r: PlotReport; d: SiteReport | n
         {B.map((b) => b.units.map((u, i) => <path key={`${b.b.id}u${i}`} d={p(u.ring)} fill={UNIT_COLOR[u.t]} stroke="#fff" stroke-width="0.5" />))}
         {B.map((b) => b.corridors.map((c, i) => <path key={`${b.b.id}h${i}`} d={p(c)} fill="#d9dce3" />))}
         {B.map((b) => b.cores.map((c, i) => <path key={`${b.b.id}c${i}`} d={p(c)} fill="#6b7280" />))}
-        {B.map((b) => b.quads.map((q, i) => <path key={`${b.b.id}q${i}`} d={p(q)} fill="none" stroke={b.clash ? 'var(--danger)' : '#1c2333'} stroke-width={b.clash ? 1.5 : 0.8} />))}
+        {B.map((b) => b.quads.map((q, i) => <path key={`${b.b.id}q${i}`} d={p(q)} fill="none" stroke={b.clash === 'overlap' ? 'var(--danger)' : b.clash || b.overHeight ? '#c98300' : '#1c2333'} stroke-width={b.clash || b.overHeight ? 1.5 : 0.8} />))}
       </svg>
       {d && d.flats > 0 && <div class="plot-legend">{UNIT_LABEL.map((l, t) => d.count[t] > 0 && <span key={t}><i style={`background:${UNIT_COLOR[t]}`} />{l} × {d.count[t]}</span>)}</div>}
     </>

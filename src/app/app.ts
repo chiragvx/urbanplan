@@ -852,7 +852,7 @@ export class App implements AppApi {
     if (this.E.markers.length) this.showMarkers(true);
     if (c.origin !== 'load') this.scheduleSave();
     for (const id of c.ids) if (this.doc.get(id)?.kind === 'layer' || this.doc.base.get(id)?.kind === 'layer') { this.world.applyLayers(); this.lastView = ''; break; }
-    document.title = `${this.doc.version !== this.doc.savedVersion ? '• ' : ''}${this.doc.meta.name} — UrbanPlan`;
+    document.title = `${this.doc.dirty ? '• ' : ''}${this.doc.meta.name} — UrbanPlan`;
   }
 
   private loop() {

@@ -12,6 +12,9 @@ import { drawAssetLayers, drawAssetTool, isAssetLine } from './assetoverlay';
 import { lineShape } from '../assets';
 import { ink } from './ink';
 import { UNIT_COLOR } from '../doc/site';
+import { inset, sideMargin } from '../doc/plot';
+import { pending } from './bulk';
+import { routePick } from './smartsel';
 
 export interface Handle {
   kind: 'width' | 'anchor' | 'in' | 'out';
@@ -52,6 +55,10 @@ export function drawOverlay(E: Editor) {
   else if (hv && !selection.value.some((s) => s.id === hv.id)) outline(E, hv.id, HOVER, 1.5, 0);
   // selection
   for (const s of selection.value) outline(E, s.id, ACCENT, 2, 0.12);
+  // a bulk change waiting in the preview bar: the result as a ghost, rule flags in amber
+  if (pending.value) previewGhost(E);
+  if (tool.value === 'paint') paintTool(E);
+  if (routePick.on && cursor.value) readout(E, cursor.value, [routePick.a ? 'Route: click where it ends' : 'Route: click where it starts']);
 
   if (!readOnly.value) {
     if (tool.value === 'select') widthHandles(E);
@@ -143,7 +150,25 @@ export function drawOverlay(E: Editor) {
 
 // ---------------- plot sandbox ----------------
 
-const PLOT = '#2f5bff', DPRED = '#e5484d';
+const PLOT = '#2f5bff', DPRED = '#e5484d', PLOT_FLAG = '#c98300';
+
+/** Amber diagonal hatching over what of a building lies outside its envelope (past the margins). */
+function hatchPast(E: Editor, quads: number[][], env: number[]) {
+  const ctx = E.ctx, path = (ring: number[]) => { for (let i = 0; i < ring.length; i += 2) { const p = E.project(ring[i], ring[i + 1], 0); if (!p) return false; if (i) ctx.lineTo(p[0], p[1]); else ctx.moveTo(p[0], p[1]); } ctx.closePath(); return true; };
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const q of quads) for (let i = 0; i < q.length; i += 2) { const p = E.project(q[i], q[i + 1], 0); if (!p) return; x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }
+  ctx.save();
+  ctx.beginPath(); for (const q of quads) if (!path(q)) { ctx.restore(); return; }
+  ctx.clip();
+  // (outside the envelope: a frame round it with the envelope as its hole)
+  ctx.beginPath(); ctx.rect(x0 - 2, y0 - 2, x1 - x0 + 4, y1 - y0 + 4);
+  if (env.length >= 6 && !path(env)) { ctx.restore(); return; }
+  ctx.clip('evenodd');
+  ctx.fillStyle = 'rgba(201,131,0,0.18)'; ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+  ctx.beginPath(); for (let x = x0 - (y1 - y0); x < x1; x += 6) { ctx.moveTo(x, y1); ctx.lineTo(x + (y1 - y0), y0); }
+  ctx.strokeStyle = PLOT_FLAG; ctx.lineWidth = 1.1; ctx.stroke();
+  ctx.restore();
+}
 
 /** Plots in the plan: the strip the DP road takes (red), the plot's edge, the buildable footprint, the numbers. */
 function drawPlots(E: Editor) {
@@ -166,7 +191,9 @@ function drawPlots(E: Editor) {
         for (const u of b.units) poly(E, u.ring, true, UNIT_COLOR[u.t], fine ? 0.75 : 0.01, 0.75);
         for (const c of b.corridors) poly(E, c, true, '#c9ccd4', 0.01, 0.8);
         for (const c of b.cores) poly(E, c, true, '#6b7280', 0.5, 0.85);
-        for (const q of b.quads) poly(E, q, true, b.clash ? DPRED : '#1c2333', b.clash ? 2 : 1.25, 0);
+        // a departure from the rules is amber, only the part past the margins hatched; red only for an overlap
+        if (b.clash === 'margins' && r.net.length >= 6) hatchPast(E, b.quads, inset(r.net, r.edges, r.rules.front, sideMargin(r.rules, b.height)));
+        for (const q of b.quads) poly(E, q, true, b.clash === 'overlap' ? DPRED : b.clash || b.overHeight ? PLOT_FLAG : '#1c2333', b.clash || b.overHeight ? 2 : 1.25, 0);
       }
     }
     if (E.view.scale < 0.6) continue;
@@ -174,7 +201,11 @@ function drawPlots(E: Editor) {
     const F = env.length >= 6 ? env : o.ring;
     for (let i = 0; i < F.length; i += 2) { x += F[i]; z += F[i + 1]; }
     const p = at(E, x / (F.length / 2), z / (F.length / 2));
-    label(ctx, p, d && built ? `${o.name} · ${d.flats} flats · ${Math.max(...d.buildings.map((b) => b.floors)) + d.under} floors` : `${o.name} · ${Math.round(r.netArea).toLocaleString('en-IN')} m² · ${r.floors} floors`, 11);
+    // only what the plot has said: flats need a use, floors need a building (an empty plot shows its area)
+    const tall = d && built ? `${Math.max(...d.buildings.map((b) => b.floors)) + d.under} floors` : '';
+    label(ctx, p, d && built
+      ? `${o.name} · ${d.known.use && d.flats ? `${d.flats} flats` : `${Math.round(d.bua).toLocaleString('en-IN')} m² built`} · ${tall}`
+      : `${o.name} · ${Math.round(r.netArea).toLocaleString('en-IN')} m²`, 11);
   }
 }
 
@@ -200,6 +231,34 @@ function plotTool(E: Editor) {
   }
   if (T.snap) { const p = at(E, T.snap[0], T.snap[1]); ctx.strokeStyle = '#ff6a2b'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p[0], p[1], 7, 0, Math.PI * 2); ctx.stroke(); }
   else if (T.cursor) dot(ctx, at(E, T.cursor[0], T.cursor[1]), 3, PLOT, PLOT);
+}
+
+// ---------------- bulk preview / paint ----------------
+
+const AMBER = '#f5a524';
+
+/** The previewed change: new outlines dashed in the accent, removed ones in red, flagged buildings amber. */
+function previewGhost(E: Editor) {
+  const p = pending.value!, ctx = E.ctx;
+  // very large previews draw the first few thousand pieces (the counts in the bar are complete)
+  const G = p.ghosts.length > 4000 ? p.ghosts.slice(0, 4000) : p.ghosts;
+  for (const g of G) {
+    const color = g.tone === 'gone' ? WARN : g.tone === 'flag' ? AMBER : ACCENT;
+    ctx.setLineDash(g.tone === 'flag' ? [] : [6, 4]);
+    poly(E, g.pts, g.closed, color, g.tone === 'flag' ? 2 : 1.6, g.tone === 'flag' ? 0.35 : g.tone === 'gone' ? 0.18 : 0.14);
+  }
+  ctx.setLineDash([]);
+}
+
+/** The paint brush: the stroke so far filled, the road under the cursor outlined, the type and count by the cursor. */
+function paintTool(E: Editor) {
+  const T = E.paint, S = T.stroke, t = T.type;
+  if (S) for (const id of S.ids) sectionOutline(E, id, ACCENT, 2, 0.35);
+  if (T.hoverId && !S?.set.has(T.hoverId)) sectionOutline(E, T.hoverId, HOVER, 2, 0.12);
+  if (!T.cursor) return;
+  const lines = [t ? T.label(t) : 'Alt-click a road to take its type'];
+  if (S?.ids.length) lines.push(`${S.ids.length} section${S.ids.length === 1 ? '' : 's'} · ${S.len >= 1000 ? `${(S.len / 1000).toFixed(1)} km` : `${Math.round(S.len)} m`}${S.skipped ? ' · stops at a name change (Shift)' : ''}`);
+  readout(E, T.cursor, lines);
 }
 
 // ---------------- terrain ----------------
@@ -280,6 +339,36 @@ function heightText(l0: number, l1: number, len: number): string {
   return `${l1 >= 0 ? `height ${l1.toFixed(1)} m` : `${(-l1).toFixed(1)} m deep${-l1 >= 6.5 ? ' (tunnel)' : ' (open cut)'}`}${Math.abs(g) > 0.05 ? ` · ${g > 0 ? '+' : ''}${g.toFixed(1)} %` : ''}${Math.abs(g) > 8 ? ' steep' : ''}`;
 }
 
+/** Auto height: the stretch's centre line coloured by what each piece becomes (ground, bridge, cutting, tunnel). */
+const KIND_COL: Record<string, string> = { ground: '#71717a', bridge: '#2f5bff', cutting: '#f5a524', tunnel: '#18181b' };
+function structurePreview(E: Editor, pv: NonNullable<Editor['road']['preview']>, liftAt: (i: number) => number) {
+  const ctx = E.ctx, plan = pv.plan!;
+  const acc = [0];
+  for (let i = 1; i < pv.pts.length; i++) acc.push(acc[i - 1] + Math.hypot(pv.pts[i][0] - pv.pts[i - 1][0], pv.pts[i][1] - pv.pts[i - 1][1]));
+  const k = (plan.len || 1) / (acc[acc.length - 1] || 1);
+  // a point at arc length s (plan units) along the preview
+  const ptAt = (s: number) => {
+    const u = s / k;
+    let i = 1;
+    while (i < acc.length - 1 && acc[i] < u) i++;
+    const f = Math.max(0, Math.min(1, (u - acc[i - 1]) / (acc[i] - acc[i - 1] || 1)));
+    const a = pv.pts[i - 1], b = pv.pts[i];
+    return at(E, a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, liftAt(i - 1 + f));
+  };
+  for (const st of plan.stretches) {
+    ctx.beginPath();
+    const q0 = ptAt(st.s0);
+    ctx.moveTo(q0[0], q0[1]);
+    pv.pts.forEach((p, i) => { const s = acc[i] * k; if (s > st.s0 && s < st.s1) { const q = at(E, p[0], p[1], liftAt(i)); ctx.lineTo(q[0], q[1]); } });
+    const q1 = ptAt(st.s1);
+    ctx.lineTo(q1[0], q1[1]);
+    ctx.strokeStyle = st.steep ? '#f5a524' : KIND_COL[st.kind]; ctx.lineWidth = st.kind === 'ground' ? 2 : 3.5;
+    ctx.setLineDash(st.kind === 'tunnel' ? [6, 4] : []);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+}
+
 /** Ghost of the stretch at its real width, crossings (junction or bridge), guide lines and the readout. */
 function roadTool(E: Editor) {
   const ctx = E.ctx, T = E.road, sc = E.ppm;
@@ -293,9 +382,13 @@ function roadTool(E: Editor) {
     ctx.lineWidth = w; ctx.setLineDash([]);
     const liftAt = (i: number) => pv.lift0 + ((pv.lift1 - pv.lift0) * i) / Math.max(1, pv.pts.length - 1);
     ctx.beginPath(); pv.pts.forEach((p, i) => { const q = P(p[0], p[1], liftAt(i)); if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); }); ctx.stroke();
-    ctx.strokeStyle = LEVEL(lift); ctx.lineWidth = 2;
-    if (Math.abs(lift) > 0.25) ctx.setLineDash(lift > 0 ? [8, 5] : [3, 4]);
-    ctx.stroke(); ctx.setLineDash([]); ctx.lineCap = 'butt';
+    if (pv.plan) structurePreview(E, pv, liftAt);
+    else {
+      ctx.strokeStyle = LEVEL(lift); ctx.lineWidth = 2;
+      if (Math.abs(lift) > 0.25) ctx.setLineDash(lift > 0 ? [8, 5] : [3, 4]);
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+    ctx.lineCap = 'butt';
     // control polygon for the curve modes
     if (T.ctrl.length) {
       ctx.strokeStyle = 'rgba(47,124,246,0.6)'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
@@ -310,11 +403,14 @@ function roadTool(E: Editor) {
       const q = P(x.p[0], x.p[1], x.lift);
       if (x.join) dot(ctx, q, 6, '#fff', '#16a34a');
       else {
+        // auto height: what it builds there (a bridge over / tunnel under); headroom short of 5.5 m is flagged amber
         const clear = Math.abs(x.lift - x.otherLift);
         const low = clear < FLYOVER_DECK - 1;
-        ctx.fillStyle = low ? WARN : '#8b5cf6';
+        const kind = pv.plan?.stretches.find((st) => x.s >= st.s0 - 0.5 && x.s <= st.s1 + 0.5)?.kind;
+        ctx.fillStyle = low ? '#f5a524' : '#8b5cf6';
         ctx.fillRect(q[0] - 5, q[1] - 5, 10, 10);
-        label(ctx, q, `${x.lift > x.otherLift ? 'over' : 'under'} · ${clear.toFixed(1)} m${low ? ' low' : ''}`, 11, -14);
+        const what = kind === 'bridge' ? 'bridge over' : kind === 'tunnel' ? 'tunnel under' : x.lift > x.otherLift ? 'over' : 'under';
+        label(ctx, q, `${what} · ${clear.toFixed(1)} m${low ? ' headroom' : ''}`, 11, -14);
       }
     }
     dot(ctx, P(T.start.pt.x, T.start.pt.z, pv.lift0), 5, '#fff', LEVEL(pv.lift0));

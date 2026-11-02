@@ -5,7 +5,7 @@ import type { Compiler } from '../../src/doc/compile';
 import type { PlotObj } from '../../src/doc/types';
 import { basementsToFit, buildingQuads, pointIn, newBuildingId, presetBuildings, siteOf, solveSite, SQFT, TRAVEL, type PlotSite } from '../../src/doc/site';
 import { polyArea as area } from '../../src/doc/plot';
-import { schemes as optSchemes, siteFor } from '../../src/doc/optimise';
+import { emptySite, fillSite, schemes as optSchemes, siteDefaults, siteFor } from '../../src/doc/optimise';
 import { area as mpArea } from '../../src/doc/ground';
 let ok = true;
 const check = (c: boolean, m: string) => { console.log(`${c ? 'ok  ' : 'FAIL'} ${m}`); if (!c) ok = false; };
@@ -146,7 +146,8 @@ check(twin.length === 2 && !solveSite(big, { ...site, buildings: twin }).over.ov
 // the optimiser: the most built-up area within every rule, on plots small to large, Pune and Mumbai
 const opt = (ring: number[], code: Parameters<typeof analysePlot>[4] = 'udcpr', design?: PlotSite['design'], use: PlotObj['use'] = 'residential') => {
   const R = analysePlot({ get: (id: string) => (id === 's1' ? { ...section, ...{} } : undefined) } as unknown as CityDoc, { geo: (id: string) => (id === 's1' ? { pts: [-400, 0, 400, 0] } : undefined) } as unknown as Compiler, () => ['s1'], { ...plot, ring, use }, code);
-  const st = siteFor(design ? { ...site, buildings: [], design } : undefined, R, use);
+  // ("Fill for me" on its settings: a plot opens empty)
+  const st = siteFor(design ? { ...site, buildings: [], design } : siteDefaults(use), R, use);
   return { R, st, D: solveSite(R, st, use) };
 };
 const legal = (D: ReturnType<typeof solveSite>) => !D.over.fsi && !D.over.height && !D.over.margins && !D.over.overlap && !D.over.fire && !D.over.open && D.parking.have >= D.parking.need;
@@ -215,5 +216,57 @@ check(mixOf.every((m, t) => Math.abs(m - site.mix[t]) <= 0.2) && sizesOk, `mix o
   const pod = solveSite(R2, { ...sp.st, podium: 1 }, 'residential');
   const podA = pod.parking.levels.find((l) => l.kind === 'podium')!.area, plates = pod.buildings.reduce((a, b) => a + b.plate, 0);
   check(Math.abs(podA - plates) < 1, `a podium the buildings' size: ${podA.toFixed(0)} m² (not the ${polyArea(R2.net).toFixed(0)} m² plot)`);
+}
+
+// plots open empty; "Fill for me" builds round what's placed by hand
+{
+  const R = opt([-50, 7, 50, 7, 50, 97, -50, 97]).R;
+  const e = siteFor(undefined, R, 'residential'), De = solveSite(R, e, 'residential');
+  check(e.buildings.length === 0 && e.manual === true && De.buildings.length === 0 && !De.known.building && De.departures.length === 0, 'a plot opens empty: its envelope, no scheme, nothing flagged');
+  const hand = { ...emptySite('residential'), buildings: [{ id: 'h', spine: [-30, 20, 0, 20], depth: 16, floors: 4 }] };
+  const filled = siteFor(fillSite(R, hand, 'residential'), R, 'residential'), Df = solveSite(R, filled, 'residential');
+  const h = Df.buildings.find((b) => b.b.id === 'h');
+  check(!!h && h.floors === 4 && filled.buildings.length > 1 && filled.buildings.filter((b) => b.auto).length === filled.buildings.length - 1 && !Df.over.overlap,
+    `fill for me round a hand-placed building: kept at 4 floors, ${filled.buildings.length - 1} more laid round it, none running into it`);
+  const legacy = siteFor({ ...siteDefaults('residential'), buildings: [{ id: 'b0', spine: [0, 30, 20, 30], depth: 16, floors: 3 }] }, R, 'residential');
+  check(!legacy.buildings.some((b) => b.id === 'b0') && legacy.buildings.length > 0, 'an older optimised site plans afresh (its stored buildings were the optimiser’s)');
+}
+
+// tiny plots: 1,000 sq ft (93 m²) on a 9 m road gets one building in its envelope, no internal roads or drive
+{
+  const lane9 = { ...section, parts: [{ kind: 'lane', width: 9 }], reserve: undefined };
+  const docT = { get: (id: string) => (id === 's1' ? lane9 : undefined) } as unknown as CityDoc;
+  for (const use of ['residential', 'commercial', 'shops', 'none'] as const) {
+    const RT = analysePlot(docT, C, () => ['s1'], { ...plot, ring: [-4.65, 4.5, 4.65, 4.5, 4.65, 14.5, -4.65, 14.5], use });
+    const st = siteFor(siteDefaults(use), RT, use), DT = solveSite(RT, st, use);
+    check(near(RT.area, 93) && st.buildings.length === 1 && !(st.elements ?? []).length && DT.ground.drive.length === 0 && DT.buildings[0].floors >= 1 && !DT.over.overlap,
+      `1,000 sq ft (${use}): one building ${DT.buildings[0]?.plate.toFixed(0)} m² × ${DT.buildings[0]?.floors} floors in the envelope, no roads, ${DT.departures.map((x) => x.key).join(', ') || 'no departures'}`);
+  }
+  const RT = analysePlot(docT, C, () => ['s1'], { ...plot, ring: [-4.65, 4.5, 4.65, 4.5, 4.65, 14.5, -4.65, 14.5] });
+  const DT = solveSite(RT, siteFor(siteDefaults('residential'), RT, 'residential'), 'residential');
+  check(DT.open.need === 0 && !DT.departures.some((x) => x.key === 'open' || x.key.startsWith('fire')), 'a tiny plot: no open-space or fire-tender rules');
+}
+
+// rules flag, never block: a 300-floor tower is laid out as asked, its height and FSI flagged
+{
+  const tower = solveSite(big, { ...site, buildings: [{ id: 't', spine: [0, 0, 24, 0], depth: 20, floors: 300 }] });
+  const t = tower.buildings[0];
+  check(t.floors === 300 && near(t.height, (300 + tower.under) * big.rules.floorH) && t.overHeight && tower.departures.some((x) => x.key === 'height:t') && t.clash !== 'overlap',
+    `a 300-floor tower: ${t.floors} floors, ${t.height} m, flagged (${tower.departures.map((x) => x.key).join(', ')}) not clamped`);
+  const fsi = solveSite(r, { ...site, buildings: [{ id: 'f', spine: [-8, 18, 8, 18], depth: 10, floors: 40 }] });
+  check(fsi.over.fsi && fsi.departures.some((x) => x.key === 'fsi' && /FSI/.test(x.value)), `over the FSI: flagged as a departure (${fsi.departures.find((x) => x.key === 'fsi')?.text})`);
+  const overlap = solveSite(big, { ...site, buildings: [{ id: 'a', spine: [0, 0, 30, 0], depth: 16, floors: 2 }, { id: 'b', spine: [10, 5, 40, 5], depth: 16, floors: 2 }] });
+  check(overlap.over.overlap && !overlap.departures.some((x) => x.ids.length && x.key.startsWith('overlap')), 'buildings through each other are broken (red), not a departure');
+}
+
+// uses: none, per building, generic
+{
+  const none = solveSite(r, { ...site, buildings: [{ id: 'n', spine: [-8, 18, 8, 18], depth: 12, floors: 3 }] }, 'none');
+  check(!none.known.use && none.parking.need === 0 && !none.known.money && none.bua > 0, 'no use yet: built-up area and FSI, but no parking or money asked');
+  const mixed = solveSite(big, { ...site, buildings: [{ id: 'h', spine: [0, 0, 30, 0], depth: 16, floors: 3, use: 'residential' }, { id: 'o', spine: [0, 30, 30, 30], depth: 16, floors: 3, use: 'commercial' }] }, 'none');
+  check(mixed.buildings[0].use === 'residential' && mixed.buildings[1].use === 'commercial' && mixed.count[0] + mixed.count[1] + mixed.count[2] > 0 && mixed.count[3] > 0 && mixed.parking.need > 0 && mixed.known.money,
+    `a use per building: ${mixed.count.slice(0, 3).reduce((a, b) => a + b, 0)} flats and ${mixed.count[3]} offices, ${mixed.parking.need} bays needed`);
+  const school = defaultRules(12, 'school');
+  check(near(school.basic + school.premium + school.tdr, 2.25) && school.ancillary === 0.8, 'a school takes the general FSI for its road, the 80 % ancillary of "other" uses');
 }
 console.log(ok ? 'ALL OK' : 'FAILURES'); process.exit(ok ? 0 : 1);

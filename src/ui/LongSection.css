@@ -1,0 +1,33 @@
+/* The long-section (src/ui/LongSection.tsx): terrain against the road level, stretches by kind. */
+.ls { position: relative; display: flex; flex-direction: column; gap: 2px; min-width: 0; color: var(--text); font-size: 11px; }
+.ls-svg { display: block; width: 100%; height: 104px; overflow: visible; cursor: crosshair; }
+.ls-ground { fill: var(--hatch-b); stroke: var(--neutral-bar); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.ls-water { fill: #8fb8d8; opacity: 0.7; }
+.ls-road { fill: none; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.ls-road.k-ground { stroke: var(--muted); }
+.ls-road.k-bridge { stroke: var(--accent); }
+.ls-road.k-cutting { stroke: var(--warn); }
+.ls-road.k-tunnel { stroke: var(--text); stroke-dasharray: 5 4; }
+.ls-road.steep { stroke-width: 4; filter: drop-shadow(0 0 2px var(--warn)); }
+.ls-pier { stroke: var(--accent); stroke-width: 1; opacity: 0.55; vector-effect: non-scaling-stroke; }
+.ls-mark { fill: var(--panel); stroke: var(--purple); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.ls-mark.join { stroke: var(--ok); }
+.ls-cross { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 2; vector-effect: non-scaling-stroke; }
+.ls-chips { position: relative; height: 26px; }
+.ls-chip-wrap { position: absolute; top: 0; transform: translateX(-50%); }
+.ls-chip { position: relative; display: inline-flex; align-items: center; gap: 3px; height: 24px; min-width: 24px; padding: 0 4px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--muted); cursor: pointer; }
+.ls-chip:disabled { cursor: default; }
+.ls-chip.narrow { height: 18px; min-width: 18px; padding: 0 2px; margin-top: 3px; }
+.ls-chip.k-bridge { color: var(--accent); }
+.ls-chip.k-cutting { color: var(--warn); }
+.ls-chip.k-tunnel { color: var(--text); }
+.ls-chip.steep { border-color: var(--warn); background: var(--warn-soft); }
+.ls-chip.pinned { border-color: currentColor; }
+.ls-chip.on { background: var(--accent-soft); border-color: var(--accent); }
+.ls-chip:hover:not(:disabled) { border-color: var(--accent); }
+.ls-pct { font: 600 10px/1 inherit; color: var(--text); font-variant-numeric: tabular-nums; }
+.ls-lock { position: absolute; right: -5px; top: -5px; display: inline-flex; padding: 1px; border-radius: 50%; background: var(--panel); color: var(--text); font-style: normal; }
+.ls-pop { position: absolute; z-index: 3; bottom: 28px; left: 50%; transform: translateX(-50%); display: flex; gap: 3px; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); }
+.ls-foot { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ls-live { position: absolute; left: 50%; bottom: calc(var(--gap) + 58px); transform: translateX(-50%); z-index: 6; width: min(420px, calc(100% - 24px)); padding: 6px 10px 6px; background: var(--glass); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
+.ls-live .ls-pop { bottom: auto; top: 28px; }

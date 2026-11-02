@@ -1,0 +1,12 @@
+/* the bottom bar in three columns: the categories stay centred however long the map's name or tally gets */
+.dock .bar.bar3 { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; }
+.bar3 .bar-l, .bar3 .bar-r { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.bar3 .bar-r { justify-content: flex-end; }
+.bar3 .bar-r .bb-tools { margin-left: 0; }
+/* the plot sandbox: the one coloured button, the way into Site Studio */
+.bb-plot { flex: none; width: 52px; height: 42px; padding: 0; margin-left: 4px; display: inline-flex; align-items: center; justify-content: center; border: none; border-radius: 99px; background: var(--brand); color: #fff; box-shadow: 0 2px 8px -2px color-mix(in srgb, var(--brand) 60%, transparent); }
+.bb-plot:hover:not(:disabled) { filter: brightness(1.06); }
+.bb-plot.on { outline: 2px solid var(--brand); outline-offset: 2px; }
+.bb-plot:disabled { opacity: .45; }
+@media (max-width: 1360px) { .bb-plot { width: 46px; height: 38px; } }
+@media (max-width: 900px) { .dock .bar.bar3 { display: flex; } }

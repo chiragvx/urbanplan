@@ -4,6 +4,8 @@ import { useEffect, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { dialog, docVersion, profileOpen, readOnly, saveSettings, selection, settings } from '../editor/state';
 import { ui } from './ctx';
+import { mapStandard, setMapStandard } from './RoadPicker';
+import { STANDARDS } from '../assets/roadmodel';
 import { Icon, Seg, Toggle, prettyKeys } from './components';
 import { COMMANDS } from '../editor/commands';
 import { gallery, local, repo, type LocalMap, type Published, type RepoMap } from '../app/storage';
@@ -127,7 +129,7 @@ function PublishDialog() {
       <label class="field">Map name<input class="text" value={name} onInput={(e) => setName((e.currentTarget as HTMLInputElement).value)} /></label>
       <label class="field">Your name<input class="text" value={author} onInput={(e) => setAuthor((e.currentTarget as HTMLInputElement).value)} /></label>
       <label class="field">What did you change?<textarea class="text" rows={3} value={desc} onInput={(e) => setDesc((e.currentTarget as HTMLTextAreaElement).value)} placeholder="e.g. Corrected widths of Koregaon Park lanes from the DP sheets; added the planned riverside road." /></label>
-      <p class="muted small">{ui.doc.editCount} edited objects. The base data is © OpenStreetMap contributors (ODbL) — a published map built on it is shared under the ODbL too, with that attribution. Development Plan widths come from PMC's public sheets.</p>
+      <p class="muted small">Your changes: {ui.doc.editSummary}. The base data is © OpenStreetMap contributors (ODbL) — a published map built on it is shared under the ODbL too, with that attribution. Development Plan widths come from PMC's public sheets.</p>
       {done && <div class="ok-box">{done}</div>}
       <div class="btns">
         {repo.available && <button class="primary" disabled={busy} onClick={async () => { setBusy(true); apply(); try { setDone(await ui.app.publishToSite()); } finally { setBusy(false); } }}>Publish to this site's gallery</button>}
@@ -154,8 +156,11 @@ function ExportDialog() {
 
 function SettingsDialog() {
   const s = settings.value;
+  void docVersion.value; // the map's standard lives in its meta
+  const std = mapStandard();
   return (
     <Modal title="Settings">
+      <div class="field" title="How a road's width and features become its cross-section and class. Set per map; new maps take it from the city">Street standard (this map)<Seg value={std} options={STANDARDS.map((x) => ({ value: x.id, label: x.label }))} onChange={(v) => { if (!readOnly.value && v !== std) setMapStandard(v); }} /></div>
       <label class="field">Your name (for published maps)<input class="text" value={s.author} onInput={(e) => saveSettings({ author: (e.currentTarget as HTMLInputElement).value })} /></label>
       <div class="field">Theme<Seg value={s.theme} options={[{ value: 'system', label: 'System' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]} onChange={(v) => saveSettings({ theme: v })} /></div>
       <div class="field">Panels<Seg value={s.panels} options={[{ value: 'floating', label: 'Float over the map' }, { value: 'docked', label: 'Docked beside it' }]} onChange={(v) => saveSettings({ panels: v })} /></div>

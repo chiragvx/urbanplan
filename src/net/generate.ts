@@ -1027,7 +1027,8 @@ export class RoadMesher {
     const solidAt = (id: string) => { const n = this.nodes.get(id); return this.kinds.get(id) === 'junction' && (this.ends.get(id)?.length ?? 0) >= 3 && (n?.signals || t.major) ? 30 : 0; };
     segmentMarkings(markings, g, S, z, prof, offs, [solidAt(g.s.a), solidAt(g.s.b)]);
     if (g.s.elevated) structure(concrete, g, S, z, t, this.T);
-    else if (g.s.sunk) underground(concrete, S, z, t, this.T);
+    else if (g.s.sunk) underground(concrete, S, z, t, this.T, [this.portalAt(g, g.s.a), this.portalAt(g, g.s.b)]);
+    else if (g.s.grade) deepCutWalls(concrete, S, z, t, this.T);
     const hw = Math.max(t.hwL, t.hwR) + (prof.deck ? prof.deck.max / 2 : 0);
     let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
     for (let i = 0; i < S.pts.length; i += 2) {
@@ -1037,11 +1038,20 @@ export class RoadMesher {
       key, layers: { asphalt: pack(asphalt), paving: pack(paving), markings: pack(markings), concrete: pack(concrete) },
       x0: x0 - hw, z0: z0 - hw, x1: x1 + hw, z1: z1 + hw,
       stamps: g.s.grade
-        ? [{ line: new Float32Array(S.pts), hw, carve: true, code: g.s.code, z: Float32Array.from({ length: S.pts.length / 2 }, (_, i) => z(i, S.pts[i * 2], S.pts[i * 2 + 1]) - LIFT) }]
+        ? gradedStamps(S, z, hw, g.s.code, this.T)
         : g.s.sunk && !g.s.elevated ? trenchStamps(S, z, hw, g.s.code, this.T)
         : g.s.elevated ? [{ line: new Float32Array(S.pts), hw, carve: false, code: g.s.code }]
         : [{ line: new Float32Array(S.pts), hw, carve: true, code: g.s.code, z: Float32Array.from({ length: S.pts.length / 2 }, (_, i) => z(i, S.pts[i * 2], S.pts[i * 2 + 1]) - LIFT) }],
     });
+  }
+
+  /**
+   * A tunnel piece ending at a node where the road carries on out of the ground (a cutting, a graded or ground road):
+   * its end needs a portal face (inside one sunk run the trench / tunnel change draws its own).
+   */
+  private portalAt(g: SegGeo, nodeId: string): boolean {
+    const E = this.ends.get(nodeId) ?? [];
+    return E.some((e) => e.g !== g && !e.g.s.sunk);
   }
 
   private buildNode(id: string) {
@@ -2315,7 +2325,7 @@ function runs(n: number, f: (i: number) => boolean): [number, number, boolean][]
  * Below ground: retaining walls up to the ground (with a parapet) where it's an open trench; where it's deeper than
  * COVER, a tunnel box (walls, ceiling) under untouched ground, and a portal wall where the trench goes under.
  */
-function underground(gb: GeomBuilder, S: Sub, z: (i: number, x: number, zz: number) => number, t: RoadType, T: (x: number, z: number) => number) {
+function underground(gb: GeomBuilder, S: Sub, z: (i: number, x: number, zz: number) => number, t: RoadType, T: (x: number, z: number) => number, ends: [boolean, boolean] = [false, false]) {
   const n = S.s.length;
   if (n < 2) return;
   const L = t.hwL + 0.3, R = -(t.hwR + 0.3), W = 0.45; // inner faces of the walls; wall thickness
@@ -2347,7 +2357,8 @@ function underground(gb: GeomBuilder, S: Sub, z: (i: number, x: number, zz: numb
     sweep(gb, sub, L, R, (k, x, zz) => Math.min(z(k + a, x, zz) + CEIL + 0.6, T(x, zz) - 0.8), COL.concrete); // roof slab (kept under the ground)
     // portals: where the open trench meets the covered part, a face wall up to the ground
     for (const i of [a, b]) {
-      if ((i === a && i === 0) || (i === b && i === n - 1)) continue;
+      // the piece's own ends: only where the road carries on out of the ground there (a cutting, a ground road)
+      if ((i === a && i === 0 && !ends[0]) || (i === b && i === n - 1 && !ends[1])) continue;
       const x = S.pts[i * 2], zz = S.pts[i * 2 + 1];
       const yaw = Math.atan2(-S.nrm[i * 2], S.nrm[i * 2 + 1]);
       gb.box(x, zz, zc(i) + CEIL - 0.2, T(x, zz) + 0.4, 0.8, L - R + 0.6, yaw, COL.concrete);
@@ -2377,6 +2388,48 @@ function trenchStamps(S: Sub, z: (i: number, x: number, zz: number) => number, h
       out.push({ line: new Float32Array(S.pts.slice(a * 2, e * 2 + 2)), hw: hw + 0.3, carve: true, code, z: zs });
     }
     a = b + 1;
+  }
+  return out;
+}
+
+// ---------------- deep cuttings ----------------
+
+/** Deeper than this below the ground, a graded road's cut stands between retaining walls (1:2 slopes run out). */
+const DEEP_CUT = 9;
+
+/** Retaining walls (with a coping a parapet's height above the ground) along the stretches of a graded piece cut deep. */
+function deepCutWalls(gb: GeomBuilder, S: Sub, z: (i: number, x: number, zz: number) => number, t: RoadType, T: (x: number, z: number) => number) {
+  const n = S.s.length;
+  if (n < 2) return;
+  const deep = (i: number) => T(S.pts[i * 2], S.pts[i * 2 + 1]) - z(i, S.pts[i * 2], S.pts[i * 2 + 1]) > DEEP_CUT;
+  const L = t.hwL + 0.3, R = -(t.hwR + 0.3), W = 0.45;
+  for (const [a, b, d] of runs(n, deep)) {
+    if (!d || b <= a) continue;
+    const sub = slice(S, a, b);
+    const zs = (k: number, x: number, zz: number) => z(k + a, x, zz);
+    const bottom = (k: number, x: number, zz: number) => zs(k, x, zz) - 0.4;
+    const top = (k: number, x: number, zz: number) => Math.max(T(x, zz), zs(k, x, zz)) + 0.6;
+    wallAlong(gb, sub, L, bottom, top, false, COL.concrete);
+    wallAlong(gb, sub, R, bottom, top, true, COL.concrete);
+    sweep(gb, sub, L + W, L, top, COL.concrete);
+    sweep(gb, sub, R, R - W, top, COL.concrete);
+  }
+}
+
+/** Terrain stamps of a graded piece: cut / filled to the road, except where it's cut deep (a hole between its walls). */
+function gradedStamps(S: Sub, z: (i: number, x: number, zz: number) => number, hw: number, code: number, T: (x: number, z: number) => number): Stamp[] {
+  const n = S.s.length;
+  const zc = (i: number) => z(i, S.pts[i * 2], S.pts[i * 2 + 1]);
+  const deep = (i: number) => T(S.pts[i * 2], S.pts[i * 2 + 1]) - zc(i) > DEEP_CUT;
+  const out: Stamp[] = [];
+  for (const [a, b0, d] of runs(n, deep)) {
+    const b = Math.max(b0, Math.min(n - 1, a + 1));
+    if (d) out.push({ line: new Float32Array(S.pts.slice(a * 2, b * 2 + 2)), hw: hw + 0.3, carve: false, hole: true, code });
+    else {
+      const zs = new Float32Array(b - a + 1);
+      for (let i = a; i <= b; i++) zs[i - a] = zc(i) - LIFT;
+      out.push({ line: new Float32Array(S.pts.slice(a * 2, b * 2 + 2)), hw, carve: true, code, z: zs });
+    }
   }
   return out;
 }

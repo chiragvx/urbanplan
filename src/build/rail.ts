@@ -270,6 +270,22 @@ function weldEnds(R: RS[], ends: string[][], dropped: boolean[]) {
 }
 
 /** roadCenters: centre lines of roads that run under the metro (from the network). */
+/** Track level along a piece that carries its own (auto height, src/build/railauto.ts): at fraction t of its length. */
+function levelAlong(r: { pts: Float32Array; zs?: Float32Array }): ((t: number) => number) | null {
+  const zs = r.zs;
+  if (!zs || zs.length < 2) return null;
+  const n = r.pts.length / 2, cum = [0];
+  for (let i = 1; i < n; i++) cum.push(cum[i - 1] + Math.hypot(r.pts[i * 2] - r.pts[i * 2 - 2], r.pts[i * 2 + 1] - r.pts[i * 2 - 1]));
+  const L = cum[n - 1] || 1;
+  return (t: number) => {
+    const u = t * L;
+    let i = 1;
+    while (i < n - 1 && cum[i] < u) i++;
+    const f = Math.max(0, Math.min(1, (u - cum[i - 1]) / (cum[i] - cum[i - 1] || 1)));
+    return zs[i - 1] + (zs[i] - zs[i - 1]) * f;
+  };
+}
+
 export function buildRail(tile: TileData, hf: Heightfield, roadCenters: { pts: Float32Array; oneway: boolean }[] = []) {
   const ballast = new GeomBuilder(), steel = new GeomBuilder(), structure = new GeomBuilder();
   const T = (x: number, z: number) => hf.sampleSurface(x, z);
@@ -285,14 +301,14 @@ export function buildRail(tile: TileData, hf: Heightfield, roadCenters: { pts: F
   weldEnds(R, ends, dropped);
   const off = new Map<string, number>();
   tile.rails.forEach((r, i) => {
-    if (r.tunnel) return;
+    if (r.tunnel || (r as { zs?: Float32Array }).zs) return;
     const d = r.bridge || r.layer > 0 ? r.deck ?? DECK * Math.max(1, r.layer) : 0;
     for (const k of ends[i]) off.set(k, Math.max(off.get(k) ?? 0, d));
   });
   for (let iter = 0; iter < 40; iter++) {
     let changed = false;
     tile.rails.forEach((r, i) => {
-      if (r.bridge || r.layer > 0) return;
+      if (r.bridge || r.layer > 0 || (r as { zs?: Float32Array }).zs) return;
       const [a, b] = ends[i];
       const oa = off.get(a) ?? 0, ob = off.get(b) ?? 0;
       const na = Math.max(oa, ob - GRADE * R[i].len), nb = Math.max(ob, oa - GRADE * R[i].len);
@@ -310,11 +326,11 @@ export function buildRail(tile: TileData, hf: Heightfield, roadCenters: { pts: F
     const p0 = [RS.pts[0], RS.pts[1]], p1 = [RS.pts[m * 2 - 2], RS.pts[m * 2 - 1]];
     const za = T(p0[0], p0[1]) + oa, zb = T(p1[0], p1[1]) + ob;
     // per-sample height; lifted pieces run straight between their ends (never dipping into valleys)
-    const ys = new Float32Array(m), gs = new Float32Array(m);
+    const ys = new Float32Array(m), gs = new Float32Array(m), own = levelAlong(r);
     for (let k = 0; k < m; k++) {
       const x = RS.pts[k * 2], z = RS.pts[k * 2 + 1], t = RS.len ? RS.s[k] / RS.len : 0;
       gs[k] = T(x, z);
-      ys[k] = lifted ? Math.max(za + (zb - za) * t, gs[k] + (r.deck ?? DECK) * 0.8) : gs[k] + oa + (ob - oa) * t + 0.3;
+      ys[k] = own ? Math.max(own(t), r.bridge ? -Infinity : gs[k]) + 0.3 : lifted ? Math.max(za + (zb - za) * t, gs[k] + (r.deck ?? DECK) * 0.8) : gs[k] + oa + (ob - oa) * t + 0.3;
     }
     const elevated = (k: number) => ys[k] - gs[k] > 2.5;
     const anyElevated = Array.from(ys).some((y, k) => y - gs[k] > 2.5);

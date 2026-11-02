@@ -29,6 +29,8 @@ import { PlotTool } from './plottool';
 import { TerrainView } from './terrainview';
 import { newId } from '../doc/ids';
 import { drawOverlay, type Handle } from './overlay';
+import { PaintTool } from './painttool';
+import { cancelRoute, inBox, routeClick, routePick } from './smartsel';
 import { DEFAULT_DEPTH, DEFAULT_SIZE } from '../doc/base';
 
 type Drag =
@@ -43,7 +45,8 @@ type Drag =
   | { kind: 'anchor'; owner: Id; k: number; handle?: 'in' | 'out'; start: [number, number]; base: Anchor[] | number[]; moved: boolean; n: number; alt: boolean }
   | { kind: 'pen'; idx: number; start: [number, number] }
   | { kind: 'measure'; a: [number, number]; b: [number, number] }
-  | { kind: 'mt' };
+  | { kind: 'mt' }
+  | { kind: 'paint' };
 
 /** File / app-level actions the editor's commands need (implemented by the app shell). */
 export interface AppApi {
@@ -87,6 +90,8 @@ export class Editor {
   readonly terrain: TerrainCompiler;
   readonly terra: TerrainTool;
   readonly plot: PlotTool;
+  /** paint a road type onto existing roads (U) */
+  readonly paint: PaintTool;
   readonly tview: TerrainView;
   /** terrain changed under a brush stroke: roads re-drape there when it ends */
   private pendingTerrain: Region | null = null;
@@ -120,6 +125,7 @@ export class Editor {
     this.terrain = new TerrainCompiler(doc, hf);
     this.terra = new TerrainTool(this);
     this.plot = new PlotTool(this);
+    this.paint = new PaintTool(this);
     this.tview = new TerrainView(this);
     this.dpr.onLoad = () => { this.overlayDirty = true; };
     this.view = new PlanView(engine.planCamera, world.tile.half);
@@ -499,8 +505,11 @@ export class Editor {
     const now = performance.now();
     const dbl = now - this.lastClick.t < 350 && Math.hypot(s[0] - this.lastClick.x, s[1] - this.lastClick.y) < 6;
     this.lastClick = { t: now, x: s[0], y: s[1] };
-    if (dbl) { this.doubleClick(w, e); return; }
     const t = tool.value;
+    // picking a route (Shift+R): the next two clicks are its ends
+    if (routePick.on && (t === 'select' || t === 'direct')) { routeClick(this, w); this.overlayDirty = true; return; }
+    if (t === 'paint') { this.paint.down(w, e.altKey, e.shiftKey); this.drag = { kind: 'paint' }; return; }
+    if (dbl) { this.doubleClick(w, e); return; }
     if (t === 'pen') { if (settings.value.roadMode === 'freeform') return this.penDown(w, e); this.road.click(w, e.ctrlKey || e.metaKey, e.shiftKey, e.altKey); return; }
     if (t === 'wand') { void this.fillAt(w); return; }
     if (t === 'plot') { this.plot.click(w); this.overlayDirty = true; return; }
@@ -566,6 +575,7 @@ export class Editor {
       case 'bulldoze': this.bulldozeAt(w, e.shiftKey, d.n); break;
       case 'terrain': this.terra.move(w); break;
       case 'mt': this.mt.dragTo(w); break;
+      case 'paint': this.paint.move(w, e.altKey, e.shiftKey); break;
       case 'measure': d.b = this.snapPoint(w, e.shiftKey ? d.a : null).p; this.measure = { a: d.a, b: d.b }; break;
       case 'junction': {
         if (!d.moved && !moved(d.start)) break;
@@ -611,6 +621,7 @@ export class Editor {
     if (mode.value === '3d' && d.kind !== 'pan') this.syncSoon(0);
     const w = this.toWorld(...this.local(e));
     if (d.kind === 'mt') { this.mt.up(); return; }
+    if (d.kind === 'paint') { this.paint.up(); return; }
     if (d.kind === 'terrain') {
       this.terra.up(w);
       const p = this.pendingTerrain;
@@ -624,18 +635,10 @@ export class Editor {
       const [ax, az] = d.a, [bx, bz] = d.b;
       if (Math.hypot(bx - ax, bz - az) * this.ppm < 4) { if (!d.add) select([]); return; }
       const r: [number, number, number, number] = [Math.min(ax, bx), Math.min(az, bz), Math.max(ax, bx), Math.max(az, bz)];
-      const kinds: Kind[] = tool.value === 'direct' || d.deep ? ['section', 'junction', 'line'] : ['section', 'junction', 'line'];
-      const ids = this.hit.inRect(...r, kinds, this.canPick);
-      const out = new Map<Id, Sel>();
-      for (const id of ids) {
-        const o = this.doc.get(id)!;
-        if (o.kind === 'section') { const s = d.deep ? { kind: 'section' as const, id } : { kind: 'road' as const, id: o.road }; out.set(s.id, s); }
-        else if (o.kind === 'line') out.set(id, { kind: 'line', id });
-      }
-      // junctions only when nothing else was caught
-      if (!out.size) for (const id of ids) if (this.doc.get(id)?.kind === 'junction') out.set(id, { kind: 'junction', id });
-      select([...out.values()], d.add);
-      status.value = `${out.size} selected`;
+      // what it picks up follows the box-select toggles (roads, junctions, assets, plots)
+      const out = inBox(this, r, d.deep);
+      select(out, d.add);
+      status.value = `${out.length} selected`;
       return;
     }
     if (d.kind === 'junction' && d.moved) {
@@ -699,6 +702,7 @@ export class Editor {
     if (tool.value === 'terrain') { this.terra.cursor = w; this.overlayDirty = true; return; }
     if (tool.value === 'plot') { this.plot.hover(w); this.overlayDirty = true; return; }
     if (tool.value === 'multi') { this.mt.hover(w, { shiftKey: shift, altKey: !!e?.altKey, ctrlKey: ctrl }); return; }
+    if (tool.value === 'paint') { this.paint.hover(w); return; }
     if (tool.value === 'bulldoze') {
       const p = this.pickAt(w[0], w[1]);
       const next: Sel | null = !p ? null : p.kind === 'section' ? (shift ? { kind: 'road', id: this.doc.get<'section'>(p.id)!.road } : { kind: 'section', id: p.id }) : { kind: p.kind, id: p.id };
@@ -718,7 +722,7 @@ export class Editor {
   }
 
   private baseCursor() {
-    return { select: 'default', direct: 'default', pen: 'crosshair', knife: 'crosshair', line: 'crosshair', measure: 'crosshair', hand: 'grab', bulldoze: 'crosshair', wand: 'cell', terrain: 'crosshair', route: 'crosshair', place: 'copy', area: 'crosshair', multi: 'crosshair', plot: 'crosshair' }[tool.value];
+    return { select: 'default', direct: 'default', pen: 'crosshair', knife: 'crosshair', line: 'crosshair', measure: 'crosshair', hand: 'grab', bulldoze: 'crosshair', wand: 'cell', terrain: 'crosshair', route: 'crosshair', place: 'copy', area: 'crosshair', multi: 'crosshair', plot: 'crosshair', paint: 'crosshair' }[tool.value];
   }
   updateCursor() { this.overlay.style.cursor = this.spaceDown ? 'grab' : this.baseCursor(); }
 
@@ -1111,6 +1115,8 @@ export class Editor {
     else if (t !== 'terrain' && this.terrainViewByTool) { this.terrainViewByTool = false; if (terrainView.value) { terrainView.value = false; this.applyExaggeration(); } }
     if (t !== 'measure') this.measure = null;
     if (t !== 'multi') this.mt.reset();
+    if (t !== 'paint') this.paint.cancel();
+    cancelRoute();
     tool.value = t;
     this.updateCursor();
     this.overlayDirty = true;
@@ -1128,6 +1134,7 @@ export class Editor {
       route: this.at.hint(), place: this.at.hint(), area: this.at.hint(),
       multi: this.mt.hint(),
       plot: this.plot.hint(),
+      paint: this.paint.hint(),
     }[t];
   }
 }

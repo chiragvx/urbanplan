@@ -1,4 +1,6 @@
-// The most a plot can build: Site Studio's starting point and what it goes back to on "Re-optimise".
+// The most a plot can build: Site Studio's "Fill for me". A plot opens empty (its margin envelope only); filling lays
+// the most built-up area round whatever was placed by hand, and plans again as its settings change until a building
+// is shaped by hand. On a plot too small for rows of blocks it fills the envelope with one building.
 //
 // Inside the margins for each height (front margins on the road sides, H/5 sides), kept 6 m off the plot's other
 // sides once the buildings top 15 m (the fire tender's way, which the internal drive runs along), with the
@@ -10,7 +12,7 @@
 //
 // Pure: a plot report and the site's settings in, a site out.
 import { clipHalf, inset, polyArea, sideMargin, type PlotReport, type PlotUse } from './plot';
-import { basementsToFit, DEFAULT_SITE, elementRings, FIRE_H, FIRE_W, GATES_FROM, RG_FROM, RG_SHARE, roadFrame, spanU, type PlotSite, type SiteBuilding, type SiteElement } from './site';
+import { basementsToFit, buildingQuads, DEFAULT_SITE, elementRings, FIRE_H, FIRE_W, GATES_FROM, RG_FROM, RG_SHARE, roadFrame, spanU, type PlotSite, type SiteBuilding, type SiteElement } from './site';
 
 export type Typology = 'auto' | 'slab' | 'tower';
 export const TYPOLOGIES: { value: Typology; label: string; title: string }[] = [
@@ -19,10 +21,10 @@ export const TYPOLOGIES: { value: Typology; label: string; title: string }[] = [
   { value: 'tower', label: 'Towers', title: 'Compact point blocks, as tall as the rules allow' },
 ];
 
-/** what the optimiser is asked for (kept on the site) */
+/** what the optimiser is asked for (kept on the site); targets for "Fill for me", never caps on what's placed by hand */
 export interface Design {
   type: Typology;
-  /** at most this many floors of flats, and buildings (0: as the rules allow) */
+  /** at most this many floors of flats, and buildings (0: any, as the rules allow) */
   maxFloors: number; maxBuildings: number;
   /** metres more between buildings than the rules ask */
   spacing?: number;
@@ -44,12 +46,16 @@ export const ACCESS: { value: Access; label: string; title: string }[] = [
 /** internal road width (two lanes), the buildings' setback from it, a roundabout's radius at a road's end / a crossing */
 const ROAD_W = 7, ROAD_SET = 3, END_R = 9, CROSS_R = 7;
 /** roads across the plot about this far apart */
-const BLOCK: Record<PlotUse, number> = { residential: 75, commercial: 90, industrial: 120 };
+const BLOCK: Record<'residential' | 'commercial' | 'industrial', number> = { residential: 75, commercial: 90, industrial: 120 };
+
+/** the packing's shapes for a use (homes, offices and sheds have their own; the rest are laid out like offices, a
+ *  garden or car park like homes, being low) */
+const shapeUse = (u: PlotUse): 'residential' | 'commercial' | 'industrial' => (u === 'industrial' ? 'industrial' : u === 'residential' || u === 'none' || u === 'garden' || u === 'carpark' ? 'residential' : 'commercial');
 
 /** Plate sizes by use. Flats: slabs 10–22 m deep (shallow single-loaded ones for small plots, double-loaded from
  *  14 m), towers about 500–860 m². Offices: deeper plates and larger towers. Industry: sheds as deep as the work
  *  needs (24–60 m, or the whole zone), no towers. A slab longer than `max` is split (a block, not a wall). */
-const SHAPES: Record<PlotUse, { depths: number[]; fillTo: number; towers: [number, number][]; max: number; min: number }> = {
+const SHAPES: Record<'residential' | 'commercial' | 'industrial', { depths: number[]; fillTo: number; towers: [number, number][]; max: number; min: number }> = {
   residential: { depths: [10, 12, 14, 16, 18, 20, 22], fillTo: 24, towers: [[24, 20], [30, 22], [36, 24]], max: 72, min: 12 },
   commercial: { depths: [16, 18, 20, 22, 24], fillTo: 28, towers: [[30, 24], [36, 30], [42, 30]], max: 80, min: 16 },
   industrial: { depths: [24, 30, 36, 45, 60], fillTo: 80, towers: [], max: 120, min: 15 },
@@ -74,8 +80,9 @@ export interface Scheme {
 export function schemes(r: PlotReport, design: Design, use: PlotUse, under = 1, site?: PlotSite): Scheme[] {
   // (pure, and slow: kept for the same plot, settings and fixed elements, so reshaping the buildings by hand doesn't
   // plan the whole site again on every move)
-  const fixedEls = (site?.elements ?? []).filter((e) => !e.auto && (e.kind === 'parking' || e.kind === 'road' || e.kind === 'roundabout')).map((e) => [e.kind, e.spine, e.ring, e.depth]);
-  const key = JSON.stringify([r.net, r.edges, r.bua, r.area, r.rules, r.code, r.parts, design, use, under, fixedEls]);
+  const fixedEls = (site?.elements ?? []).filter((e) => !e.auto && (e.kind === 'parking' || e.kind === 'road' || e.kind === 'roundabout' || e.kind === 'tank')).map((e) => [e.kind, e.spine, e.ring, e.depth]);
+  const fixedB = handPlaced(site).map((b) => [b.spine, b.depth, b.closed, b.floors]);
+  const key = JSON.stringify([r.net, r.edges, r.bua, r.area, r.rules, r.code, r.parts, design, use, under, fixedEls, fixedB]);
   const hit = SCHEMES.get(key);
   if (hit) return hit;
   const out = schemesOf(r, design, use, under, site);
@@ -85,8 +92,16 @@ export function schemes(r: PlotReport, design: Design, use: PlotUse, under = 1, 
 }
 const SCHEMES = new Map<string, Scheme[]>();
 
-function schemesOf(r: PlotReport, design: Design, use: PlotUse, under: number, site?: PlotSite): Scheme[] {
-  const R = r.rules, fh = R.floorH, S = SHAPES[use];
+/** The buildings placed by hand that "Fill for me" builds round (none on an older optimised site). */
+const handPlaced = (site?: PlotSite) => (site?.fill ? site.buildings.filter((b) => !b.auto && b.spine.length >= 4) : []);
+
+function schemesOf(r0: PlotReport, design: Design, use: PlotUse, under: number, site?: PlotSite): Scheme[] {
+  const fh = r0.rules.floorH, S = SHAPES[shapeUse(use)];
+  // what the buildings placed by hand already build comes off what's left to fill (their floors as they stand)
+  const hand = handPlaced(site);
+  const handBua = hand.reduce((a, b) => a + buildingQuads(b).reduce((s, q) => s + polyArea(q), 0) * Math.max(1, b.floors), 0);
+  const r: PlotReport = hand.length ? { ...r0, bua: Math.max(0, r0.bua - handBua) } : r0;
+  const R = r.rules;
   if (r.net.length < 6 || r.bua <= 0) return [];
   const F = roadFrame(r);
   let maxN = Math.max(0, Math.floor(R.maxH / fh + 1e-6) - under);
@@ -94,8 +109,12 @@ function schemesOf(r: PlotReport, design: Design, use: PlotUse, under: number, s
   const rgNeed = Math.max(use === 'residential' && r.area >= RG_FROM ? r.area * RG_SHARE : 0, (r.area * (design.green ?? 0)) / 100);
   const NL = F.toL(r.net);
   // what's placed by hand and stays put: parking buildings, roads, roundabouts (lots and gardens give way)
-  const fixed = (site?.elements ?? []).filter((e) => !e.auto && (e.kind === 'parking' || e.kind === 'road' || e.kind === 'roundabout'))
-    .flatMap(elementRings).map((q) => box(F.toL(q), ROAD_SET));
+  const fixed = [
+    ...(site?.elements ?? []).filter((e) => !e.auto && (e.kind === 'parking' || e.kind === 'road' || e.kind === 'roundabout' || e.kind === 'tank'))
+      .flatMap(elementRings).map((q) => box(F.toL(q), ROAD_SET)),
+    // (the buildings placed by hand, with a fire tender's way round them)
+    ...hand.flatMap(buildingQuads).map((q) => box(F.toL(q), FIRE_W)),
+  ];
   const prefer: 'slab' | 'tower' = use !== 'industrial' && (design.type === 'tower' || (design.type === 'auto' && r.code !== 'udcpr')) ? 'tower' : 'slab';
   const best: Record<'slab' | 'tower', (Scheme & { score: number }) | null> = { slab: null, tower: null };
 
@@ -154,24 +173,82 @@ function schemesOf(r: PlotReport, design: Design, use: PlotUse, under: number, s
         if (cur && cur.score >= score) continue;
         const buildings: SiteBuilding[] = rects.map(([u0, v0, u1, v1], i) => {
           const vm = (v0 + v1) / 2, a = turn ? [vm, u0] : [u0, vm], b = turn ? [vm, u1] : [u1, vm];
-          return { id: `b${i}`, spine: [...F.toW(a[0], a[1]), ...F.toW(b[0], b[1])].map((x) => Math.round(x * 100) / 100), depth: v1 - v0, floors: fl[i] };
+          return { id: `b${i}`, spine: [...F.toW(a[0], a[1]), ...F.toW(b[0], b[1])].map((x) => Math.round(x * 100) / 100), depth: v1 - v0, floors: fl[i], auto: true };
         }).filter((_, i) => fl[i] > 0);
         best[t.type] = { type: t.type, buildings, rg: rg ? rg.flatMap((_, i) => (i % 2 ? [] : F.toW(rg![i], rg![i + 1]))) : null, roads: acc.roads, bua, floors, score };
       }
     }
   }
   const out = [best.slab, best.tower].filter((x): x is Scheme & { score: number } => !!x).sort((a, b) => b.score - a.score);
+  if (!out.length && !hand.length) {
+    // too small for rows of blocks: one building filling the envelope
+    const one = fillEnvelope(r, use, under, design.maxFloors);
+    return one ? [one] : [];
+  }
   return out.map(({ score: _, ...s }) => s);
 }
 
-/** The site on a plot: as shaped by hand, else optimised for its settings. */
+/** One building filling the envelope (the biggest rectangle square to the road inside it), as many floors as the
+ *  built-up area, the height limit and the margins at that height allow. A plot whose margins leave nothing gets
+ *  one on the plot as it is, flagged. */
+export function fillEnvelope(r: PlotReport, use: PlotUse, under: number, maxFloors = 0): Scheme | null {
+  const R = r.rules, fh = R.floorH, F = roadFrame(r);
+  if (r.net.length < 6) return null;
+  let maxN = Math.max(1, Math.floor(R.maxH / fh + 1e-6) - under);
+  if (maxFloors > 0) maxN = Math.min(maxN, maxFloors);
+  let best: { rect: [number, number, number, number]; n: number; bua: number } | null = null;
+  const cache = new Map<number, [number, number, number, number] | null>();
+  for (let n = 1; n <= maxN; n++) {
+    const sd = Math.round(sideMargin(R, (n + under) * fh) * 100) / 100;
+    if (!cache.has(sd)) { const e = inset(r.net, r.edges, R.front, sd); cache.set(sd, e.length >= 6 ? bigRect(F.toL(e)) : null); }
+    const rect = cache.get(sd);
+    if (!rect) break;
+    const plate = area(rect), b = Math.min(r.bua > 0 ? r.bua : plate * n, plate * n);
+    if (!best || b > best.bua + 0.5) best = { rect, n, bua: b };
+    if (plate * n >= r.bua) break;
+  }
+  // nothing inside the margins: the plot itself (less a metre round), one floor
+  if (!best) { const rect = bigRect(F.toL(inset(r.net, r.edges.map(() => false), 0, 1))); if (!rect) return null; best = { rect, n: 1, bua: area(rect) }; }
+  const [u0, v0, u1, v1] = best.rect, plate = area(best.rect);
+  const floors = r.bua > 0 ? Math.max(1, Math.min(best.n, Math.floor(r.bua / plate + 1e-6))) : 1;
+  // the spine along the longer side
+  const along = u1 - u0 >= v1 - v0;
+  const a = along ? [u0, (v0 + v1) / 2] : [(u0 + u1) / 2, v0], b = along ? [u1, (v0 + v1) / 2] : [(u0 + u1) / 2, v1];
+  const b0: SiteBuilding = { id: 'b0', spine: [...F.toW(a[0], a[1]), ...F.toW(b[0], b[1])].map((x) => Math.round(x * 100) / 100), depth: Math.round((along ? v1 - v0 : u1 - u0) * 100) / 100, floors, auto: true };
+  return { type: use === 'industrial' || floors * fh <= 24 ? 'slab' : 'tower', buildings: [b0], rg: null, roads: [], bua: plate * floors, floors };
+}
+
+/** The biggest rectangle square to the axes inside a convex ring (local u, v), on a 24-step grid of its depth. */
+function bigRect(P: number[]): [number, number, number, number] | null {
+  if (P.length < 6) return null;
+  let V0 = Infinity, V1 = -Infinity;
+  for (let i = 1; i < P.length; i += 2) { V0 = Math.min(V0, P[i]); V1 = Math.max(V1, P[i]); }
+  const N = 24, step = (V1 - V0) / N;
+  let best: [number, number, number, number] | null = null, ba = 0;
+  for (let i = 0; i < N; i++) for (let j = i + 1; j <= N; j++) {
+    const v0 = V0 + i * step, v1 = V0 + j * step, s = spanU(P, v0, v1);
+    if (!s) continue;
+    const a = (s[1] - s[0]) * (v1 - v0);
+    if (a > ba) { ba = a; best = [s[0], v0, s[1], v1]; }
+  }
+  return best && ba > 0.5 ? best.map((x) => Math.round(x * 100) / 100) as [number, number, number, number] : null;
+}
+
+/** The site on a plot: none yet, an empty one (the plot and its envelope); as shaped by hand; else filled for its
+ *  settings. */
 export function siteFor(site: PlotSite | undefined, r: PlotReport, use: PlotUse): PlotSite {
-  return site?.manual ? site : optimise(r, site ?? siteDefaults(use), use);
+  if (!site) return emptySite(use);
+  return site.manual ? site : optimise(r, site, use);
+}
+
+/** A plot as it opens the first time: nothing on it, parking as its use usually has it, no basements yet. */
+export function emptySite(use: PlotUse): PlotSite {
+  return { ...siteDefaults(use), basements: 0, manual: true };
 }
 
 /** A new site's settings by use: flats over a parking stilt; offices and sheds on the ground, sheds parked in the yard. */
 export function siteDefaults(use: PlotUse): PlotSite {
-  if (use === 'residential') return { ...DEFAULT_SITE, buildings: [] };
+  if (use === 'residential' || use === 'none') return { ...DEFAULT_SITE, buildings: [] };
   return { ...DEFAULT_SITE, buildings: [], stilt: false, ...(use === 'industrial' ? { surfacePick: true, basements: 0 } : {}) };
 }
 
@@ -179,7 +256,15 @@ export function siteDefaults(use: PlotUse): PlotSite {
 export function optimise(r: PlotReport, base: PlotSite, use: PlotUse): PlotSite {
   const s = schemes(r, base.design ?? DEFAULT_DESIGN, use, (base.stilt ? 1 : 0) + base.podium, base)[0];
   const elements = [...(base.elements ?? []).filter((e) => !e.auto), ...(s?.roads ?? [])];
-  return park(r, { ...base, buildings: s?.buildings ?? [], rg: s?.rg ?? undefined, elements: elements.length ? elements : undefined }, use);
+  // (the filled buildings take ids of their own, clear of the hand-placed ones)
+  const filled = (s?.buildings ?? []).map((b, i) => ({ ...b, id: `a${i}`, auto: true }));
+  return park(r, { ...base, buildings: [...handPlaced(base), ...filled], rg: s?.rg ?? undefined, elements: elements.length ? elements : undefined }, use);
+}
+
+/** "Fill for me": the most built-up area round what's placed, the hand-placed buildings kept at their floors. */
+export function fillSite(r: PlotReport, site: PlotSite, use: PlotUse, floorsNow: Record<string, number> = {}): PlotSite {
+  const buildings = site.buildings.filter((b) => !b.auto).map((b) => ({ ...b, floors: b.floors || floorsNow[b.id] || 1 }));
+  return { ...site, buildings, elements: site.elements?.filter((e) => !e.auto), fill: true, manual: undefined };
 }
 
 /** As many basements as the parking needs; surface bays as picked, or (left to it) when they save a basement. */
@@ -303,7 +388,7 @@ function accessRoads(r: PlotReport, Z: number[], NL: number[], design: Design, u
   if (mode !== 'spine' && mode !== 'grid') return { roads, keep };
   let U0 = Infinity, U1 = -Infinity, V0 = Infinity, V1 = -Infinity;
   for (let i = 0; i < Z.length; i += 2) { U0 = Math.min(U0, Z[i]); U1 = Math.max(U1, Z[i]); V0 = Math.min(V0, Z[i + 1]); V1 = Math.max(V1, Z[i + 1]); }
-  const block = BLOCK[use];
+  const block = BLOCK[shapeUse(use)];
   const ns = mode === 'grid' ? Math.max(1, Math.round((U1 - U0) / (block * 1.2))) : 1;
   const segs: [number[], number[]][] = [];
   const W = (u: number, v: number) => F.toW(u, v).map((x) => Math.round(x * 100) / 100);

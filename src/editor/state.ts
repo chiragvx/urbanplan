@@ -2,7 +2,7 @@
 import { signal, computed } from '@preact/signals';
 import type { Id, Kind } from '../doc/types';
 
-export type Tool = 'select' | 'direct' | 'pen' | 'knife' | 'line' | 'measure' | 'hand' | 'bulldoze' | 'wand' | 'terrain' | 'route' | 'place' | 'area' | 'multi' | 'plot';
+export type Tool = 'select' | 'direct' | 'pen' | 'knife' | 'line' | 'measure' | 'hand' | 'bulldoze' | 'wand' | 'terrain' | 'route' | 'place' | 'area' | 'multi' | 'plot' | 'paint';
 /** Road tool modes, as in Cities: Skylines (freeform = the Bézier pen; replace = CS's upgrade tool). */
 export type RoadMode = 'straight' | 'curve' | 'complex' | 'continuous' | 'freeform' | 'replace';
 export type ViewMode = '2d' | '3d';
@@ -14,6 +14,8 @@ export interface AnchorRef { owner: Id; k: number; handle?: 'in' | 'out' }
 export const tool = signal<Tool>('select');
 export const mode = signal<ViewMode>('2d');
 export const selection = signal<Sel[]>([]);
+/** what a box select (marquee) picks up; junctions also come when nothing else was caught */
+export const boxKinds = signal<{ roads: boolean; junctions: boolean; assets: boolean; plots: boolean }>({ roads: true, junctions: false, assets: true, plots: true });
 export const hover = signal<Sel | null>(null);
 export const anchorSel = signal<AnchorRef | null>(null);
 /** bumps on every document change (UI re-renders from the doc) */
@@ -22,7 +24,7 @@ export const docVersion = signal(0);
 export const readOnly = signal(false);
 /** Site Studio: the plot open in it, its tool, the building and node selected, the level shown (-1 = flats) */
 export const studio = signal<Id | null>(null);
-export const studioTool = signal<'select' | 'draw' | import('../doc/site').ElementKind>('select');
+export const studioTool = signal<'select' | 'draw' | import('../doc/site').ShelfTool>('select');
 export const studioSel = signal<string | null>(null);
 export const studioLevel = signal(-1);
 /** the studio's 3D: the scheme as it would be built, or its flats floor by floor */
@@ -54,6 +56,8 @@ export const status = signal('');
 export const penClass = signal('residential');
 /** height above the ground the road tool draws at (PageUp / PageDown) */
 export const penLift = signal(0);
+/** the road picker's height setting for new roads: worked out per segment (auto), or pinned on the ground / a bridge / a tunnel */
+export const roadHeight = signal<'auto' | 'ground' | 'bridge' | 'tunnel'>('auto');
 export const lineLayer = signal<Id>('');
 /** the asset being built (palette): its id; the road tool also takes its cross-section from it */
 export const buildAsset = signal<string>('');
@@ -81,6 +85,8 @@ export interface Settings {
   /** round lengths to this many metres (0 = off) */ snapLength: number;
   /** ramp gradient for flyovers (0.05 = 5 %) */ grade: number;
   /** new roads from the road tool are graded (Cities: Skylines style) instead of following the terrain */ roadGraded: boolean;
+  /** auto height: the road tool works out ground / bridge / cutting / tunnel per stretch (src/doc/structure.ts) */ roadAuto: boolean;
+  /** its thresholds (m), over the defaults */ structRules: Partial<import('../doc/structure').StructRules>;
   /** terrain tool */
   terrainOp: import('../doc/types').EarthworkOp; brushRadius: number; brushStrength: number;
   levelHeight: number | null; levelBalanced: boolean; embankOffset: number; embankWidth: number; pondDepth: number;
@@ -97,7 +103,7 @@ export interface Settings {
 function loadSettings(): Settings {
   const def: Settings = {
     author: '', wheel: 'zoom', snap: true, showGrid: false, units: 'm',
-    roadMode: 'straight', elevStep: 2.5, snapGeometry: true, snapAngles: true, snapGuides: true, snapLength: 1, grade: 0.035, roadGraded: false,
+    roadMode: 'straight', elevStep: 2.5, snapGeometry: true, snapAngles: true, snapGuides: true, snapLength: 1, grade: 0.035, roadGraded: false, roadAuto: true, structRules: {},
     terrainOp: 'shift', brushRadius: 40, brushStrength: 0.5, levelHeight: null, levelBalanced: true, embankOffset: 2, embankWidth: 10, pondDepth: 2, exaggeration: 1,
     graphics: 'simple', customAssets: [], theme: 'system', panels: 'floating', mtMode: 'addNode', imageryKeys: {}, recentAssets: [], toursDone: [],
   };

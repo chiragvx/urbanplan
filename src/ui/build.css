@@ -1,0 +1,20 @@
+/* the drawing strip (DrawStrip.tsx): one row of icons above the bottom bar while a draw tool is in use; the build
+   palette, when reopened from it, sits above it. Height agents' long-section: bottom ≥ var(--gap) + 58px. */
+.drawstrip { position: absolute; left: 50%; bottom: var(--gap); transform: translateX(-50%); z-index: 6; display: flex; align-items: center; gap: 2px; padding: 4px 6px; max-width: calc(100% - 24px); overflow-x: auto; scrollbar-width: none; background: var(--glass); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); color: var(--text); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); user-select: none; }
+.drawstrip button { flex: none; border: none; background: transparent; color: inherit; }
+.ds-btn { width: 36px; height: 36px; padding: 0; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; }
+.ds-btn:hover:not(.on) { background: var(--panel-2); }
+.ds-btn.on { background: var(--accent-soft); color: var(--accent); }
+.ds-type { display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 8px 0 4px; border-radius: 10px; font: 600 12px/1 inherit; font-variant-numeric: tabular-nums; }
+.ds-type img { width: 44px; height: 28px; border-radius: 5px; background: #cfd8c4; }
+.ds-type:hover, .ds-type.on { background: var(--panel-2); }
+.ds-caret { font-style: normal; color: var(--muted); font-size: 10px; }
+.ds-type.on .ds-caret { transform: rotate(180deg); }
+.ds-sep { width: 1px; height: 24px; background: var(--line); margin: 0 4px; flex: none; }
+.ds-val { min-width: 44px; text-align: center; font: 600 12px/1 inherit; font-variant-numeric: tabular-nums; padding: 7px 4px; border-radius: 7px; background: var(--panel-2); }
+.ds-val.up { color: var(--up); }
+.ds-val.down { color: var(--down); }
+.ds-step { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.drawstrip select { flex: none; max-width: 130px; }
+/* the palette reopened while drawing: above the strip */
+#stage-ui .buildbar.over-strip { bottom: calc(var(--gap) + 58px); }

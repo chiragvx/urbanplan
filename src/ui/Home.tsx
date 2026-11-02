@@ -8,6 +8,7 @@ import { saveSettings, settings } from '../editor/state';
 import { Icon } from './components';
 import { AccountButton } from './account';
 import { session } from '../auth/auth';
+import './hovercard';
 import { deleteProject, listProjects, saveProject, type Project } from '../app/cloud';
 
 export interface CityEntry {
@@ -147,8 +148,8 @@ export function Home() {
                         <div><dt>Buildings</dt><dd>{big(c.counts.buildings)}</dd></div>
                       </dl>
                       <div class="city-btns">
-                        <button class="primary" onClick={() => go({ region: c.id })}>Open</button>
-                        <button onClick={() => go({ region: c.id, new: '1' })}>New map</button>
+                        <button class="primary" title={n ? `Open: carry on with your last map of ${c.name}` : `Open: ${c.name} as it is today, ready to edit`} onClick={() => go({ region: c.id })}>Open</button>
+                        <button title={`New map: a clean copy of ${c.name}, with none of your edits${n ? ' (your other maps stay saved)' : ''}`} onClick={() => go({ region: c.id, new: '1' })}>New map</button>
                       </div>
                     </div>
                   </article>

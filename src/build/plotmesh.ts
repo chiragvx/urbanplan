@@ -7,6 +7,9 @@
 // solved map (doc/ground): each layer one surface at its own height, kerbed where it stands above the next, so
 // nothing overlaps or flickers; painted bays with wheel stops, benches along the garden paths, and the planting.
 //
+// What departs from the rules is hatched amber, and only that part: the floors above the height limit. The hand-placed
+// walls, water tanks and play areas stand on the ground with the rest.
+//
 // Pure geometry: a solved site and a ground height in, vertex-coloured builders (solid and glass) and trees out.
 import earcut from 'earcut';
 import { GeomBuilder, rgbHex } from './geom';
@@ -29,7 +32,8 @@ const C = {
   metalRoof: rgbHex(0x9eabb5), dock: rgbHex(0x9a958b), fire: rgbHex(0xe5484d),
   soil: rgbHex(0x8a7a62), kerb: rgbHex(0xc9c3b6), lotTop: rgbHex(0x5d6168), pavers: rgbHex(0xc4bdb0), path: rgbHex(0xd8c9a8),
   lawn2: rgbHex(0x86ad60), mulch: rgbHex(0x6a5038), brick: rgbHex(0xa0644a), stop: rgbHex(0xd9d4ca), bench: rgbHex(0x7a5a3c),
-  benchLeg: rgbHex(0x3e4248), yellow: rgbHex(0xe8c547),
+  benchLeg: rgbHex(0x3e4248), yellow: rgbHex(0xe8c547), amber: rgbHex(0xe0a020), amberDeep: rgbHex(0xb87800),
+  sand: rgbHex(0xe2c995), tankBody: rgbHex(0xd8dde2), play: rgbHex(0xd9534f),
 };
 
 function hash01(n: number) {
@@ -115,14 +119,42 @@ export function buildPlotModel(r: PlotReport, d: SiteReport, use: PlotUse, groun
       solid.box(p[0] - nx * 3, p[1] - nz * 3, base, base + n * lh + 3, 5, 5, Math.atan2(b[1] - a[1], b[0] - a[0]), C.wall);
     }
   }
-  // a blocked fire tender's way stays marked
-  for (const b of d.buildings) if (!b.fireOk) for (const q of b.fire) drapeFine(solid, q, (x, z) => ground(x, z) + 0.45, C.fire);
+  // a blocked fire tender's way stays marked (amber: a departure, not a break)
+  for (const b of d.buildings) if (!b.fireOk) for (const q of b.fire) drapeFine(solid, q, (x, z) => ground(x, z) + 0.45, C.amber);
+  // the compound wall and the walls drawn by hand, following the ground
+  for (const w of G.wall) for (let i = 0; i + 3 < w.length; i += 2) {
+    const ax = w[i], az = w[i + 1], bx = w[i + 2], bz = w[i + 3], L = Math.hypot(bx - ax, bz - az), k = Math.max(1, Math.ceil(L / 3));
+    for (let s2 = 0; s2 < k; s2++) {
+      const x0 = ax + ((bx - ax) * s2) / k, z0 = az + ((bz - az) * s2) / k, x1 = ax + ((bx - ax) * (s2 + 1)) / k, z1 = az + ((bz - az) * (s2 + 1)) / k;
+      const g0 = ground(x0, z0), g1 = ground(x1, z1);
+      wallSlab(solid, x0, z0, x1, z1, g0 - 0.3, g1 - 0.3, g0 + 1.8, g1 + 1.8, 0.23, C.wall, C.coping);
+    }
+  }
+  for (const e of d.site.elements ?? []) {
+    // a water tank: a drum on a plinth
+    if (e.kind === 'tank' && e.spine.length >= 4) {
+      const cx = (e.spine[0] + e.spine[2]) / 2, cz = (e.spine[1] + e.spine[3]) / 2, rad = e.depth / 2, q = circleAt(cx, cz, rad);
+      const g = ground(cx, cz);
+      for (const [a, c] of edges(q)) faceOut(solid, q, a, c, g - 0.2, g + 3, C.tankBody);
+      cap(solid, q, g + 3, true, C.roof);
+    }
+    // a play area: a soft surface, a frame for the swings
+    if (e.kind === 'play') {
+      const q = ringOf(e);
+      if (q.length < 6) continue;
+      drapeFine(solid, q, (x, z) => ground(x, z) + 0.36, C.sand);
+      const [cx, cz] = centroid(q), g = ground(cx, cz) + 0.36;
+      for (const s2 of [-1.6, 1.6]) solid.box(cx + s2, cz, g, g + 2.2, 0.12, 0.12, 0, C.play);
+      solid.box(cx, cz, g + 2.2, g + 2.32, 3.4, 0.12, 0, C.play);
+    }
+  }
 
   // ---------------- the buildings ----------------
   const podium = d.site.podium;
   let podBase = Infinity;
   for (const b of d.buildings) {
-    const style = use === 'industrial' ? 'industrial' : use === 'commercial' ? 'glass' : b.height <= 12 ? 'house' : 'apartment';
+    const bu = b.use ?? use;
+    const style = bu === 'industrial' ? 'industrial' : bu !== 'residential' && bu !== 'none' ? 'glass' : b.height <= 12 ? 'house' : 'apartment';
     const pal = PALETTES[style === 'glass' ? 'apartment' : style];
     const tint = rgbHex(pal[Math.floor(hash01(hashStr(b.b.id) + 7) * pal.length)]);
     let gMin = Infinity, gMax = -Infinity;
@@ -136,7 +168,9 @@ export function buildPlotModel(r: PlotReport, d: SiteReport, use: PlotUse, groun
       cap(solid, P, base, true, C.plinth);
     }
     const ext = exterior(b);
-    if (use === 'industrial') { shed(solid, glass, b, ext, base, fh, tint); continue; }
+    // above the height limit: those floors hatched amber, just proud of the faces
+    if (b.overHeight) for (const [a, c, P] of ext) hatchFace(solid, P, a, c, base + r.rules.maxH, top + 1, C.amber, C.amberDeep);
+    if (bu === 'industrial') { shed(solid, glass, b, ext, base, fh, tint); continue; }
     const stilt = d.site.stilt;
     const f0 = base + (stilt ? fh : 0) + podium * fh; // the first floor of flats / offices
     // the stilt: columns round the edge and through the middle, the cores, the soffit
@@ -468,6 +502,26 @@ function tri(gb: GeomBuilder, a: number[], b: number[], m: number[], y0: number,
   gb.tri(i, i + 1, i + 2); gb.tri(i, i + 2, i + 1);
 }
 const circleAt = (x: number, z: number, rad: number) => { const out: number[] = []; for (let k = 0; k < 24; k++) { const a = (k / 24) * Math.PI * 2; out.push(x + Math.cos(a) * rad, z + Math.sin(a) * rad); } return out; };
+/** Amber over a face from y0 to y1: a wash and diagonal stripes, 0.1 m proud of it. */
+function hatchFace(gb: GeomBuilder, P: number[], a: number[], c: number[], y0: number, y1: number, wash: RGB, stripe: RGB) {
+  if (y1 <= y0) return;
+  const len = Math.hypot(c[0] - a[0], c[1] - a[1]);
+  if (len < 0.3) return;
+  const [nx, nz] = outward(P, a, c), tx = (c[0] - a[0]) / len, tz = (c[1] - a[1]) / len;
+  faceOut(gb, P, a, c, y0, y1, mix(wash, [1, 1, 1], 0.35), 0.1);
+  // stripes at 45°, 0.5 m wide every 2 m, clipped to the face
+  const H = y1 - y0, at = (s: number, y: number) => [a[0] + tx * s + nx * 0.14, y, a[1] + tz * s + nz * 0.14];
+  for (let s0 = -H; s0 < len; s0 += 2) {
+    const pts: number[][] = [];
+    // the stripe's band between s = s0 + (y - y0) and s0 + 0.5 + (y - y0), clipped to 0..len
+    for (const [sa, ya] of [[s0, y0], [s0 + 0.5, y0], [s0 + 0.5 + H, y1], [s0 + H, y1]] as const) pts.push([Math.max(0, Math.min(len, sa)), ya]);
+    if (Math.max(...pts.map((p) => p[0])) - Math.min(...pts.map((p) => p[0])) < 0.05) continue;
+    const i = gb.v(...(at(pts[0][0], pts[0][1]) as [number, number, number]), nx, 0, nz, ...stripe);
+    for (let k = 1; k < 4; k++) gb.v(...(at(pts[k][0], pts[k][1]) as [number, number, number]), nx, 0, nz, ...stripe);
+    gb.tri(i, i + 1, i + 2); gb.tri(i, i + 2, i + 3); gb.tri(i, i + 2, i + 1); gb.tri(i, i + 3, i + 2);
+  }
+}
+
 /** a thin strip a→b, w wide */
 function strip(ax: number, az: number, bx: number, bz: number, w: number) {
   const L = Math.hypot(bx - ax, bz - az) || 1, nx = (-(bz - az) / L) * (w / 2), nz = ((bx - ax) / L) * (w / 2);

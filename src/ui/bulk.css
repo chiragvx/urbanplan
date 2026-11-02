@@ -1,0 +1,51 @@
+/* Bulk edits: the multi-selection panel (MultiPanel) and the preview bar (PreviewBar). */
+
+/* ---- preview bar ---- */
+.pv-host { position: absolute; left: 0; right: 0; bottom: 14px; display: flex; justify-content: center; pointer-events: none; z-index: 6; }
+.pv-bar {
+  pointer-events: auto; display: flex; align-items: center; gap: 14px; max-width: min(860px, calc(100% - 32px));
+  padding: 8px 8px 8px 14px; border-radius: var(--radius); background: var(--panel); color: var(--text);
+  box-shadow: var(--shadow); border: 1px solid var(--line); font-size: 12.5px;
+}
+.pv-text { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; }
+.pv-label { font-weight: 700; }
+.pv-sum { color: var(--text); }
+.pv-flag { color: #a35f00; background: var(--warn-soft); border: 1px solid var(--warn-line); border-radius: 999px; padding: 1px 8px; font-weight: 600; }
+.pv-btns { display: flex; gap: 6px; flex: none; }
+.pv-btns button { border-radius: 8px; padding: 6px 12px; font-weight: 600; border: 1px solid var(--line-2); background: var(--panel-2); color: var(--text); cursor: pointer; }
+.pv-btns .pv-apply { background: var(--accent); border-color: var(--accent); color: #fff; }
+.pv-btns .pv-apply:hover { background: var(--accent-hover); }
+.pv-btns button:disabled { opacity: 0.5; cursor: default; }
+
+/* ---- multi-selection panel ---- */
+.mp { display: flex; flex-direction: column; gap: 10px; }
+.mp-head { display: flex; align-items: center; gap: 8px; }
+.mp-head .insp-kind { flex: 1; }
+.mp-box { display: flex; gap: 2px; }
+.mp-box button { border: 1px solid transparent; background: transparent; border-radius: 6px; padding: 3px; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
+.mp-box button.on { color: var(--accent); background: var(--accent-soft); }
+.mp-block { border-top: 1px solid var(--line); padding-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.mp-block-head { display: flex; align-items: baseline; gap: 6px; font-size: 12px; }
+.mp-block-head b { font-size: 13px; }
+.mp-block-head .muted { color: var(--muted); }
+.mp-bars { display: flex; flex-direction: column; gap: 3px; }
+.mp-bar { display: grid; grid-template-columns: 64px 1fr 28px; align-items: center; gap: 6px; border: none; background: transparent; padding: 2px 4px; border-radius: 6px; cursor: pointer; color: var(--text); font-size: 12px; text-align: left; }
+.mp-bar:hover { background: var(--panel-2); }
+.mp-bar .mp-track { height: 8px; border-radius: 4px; background: var(--panel-3); overflow: hidden; }
+.mp-bar .mp-fill { height: 100%; background: var(--accent); border-radius: 4px; }
+.mp-bar .mp-n { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.mp-hint { font-size: 11px; color: var(--muted); }
+.mp-width { display: flex; align-items: center; gap: 6px; }
+.mp-width input { width: 100%; min-width: 0; padding: 5px 8px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--panel); color: var(--text); font: inherit; font-size: 12.5px; }
+.mp-width input::placeholder { color: var(--text); opacity: 0.75; }
+.mp-icons { display: flex; flex-wrap: wrap; gap: 4px; }
+.mp-ico { position: relative; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 8px; border: 1px solid var(--line-2); background: var(--panel); color: var(--text); cursor: pointer; padding: 0; }
+.mp-ico:hover:not(:disabled) { background: var(--panel-2); }
+.mp-ico.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.mp-ico.mixed { border-style: dashed; border-color: var(--accent); color: var(--accent); }
+.mp-ico.danger { color: var(--danger); }
+.mp-ico:disabled { opacity: 0.45; cursor: default; }
+.mp-ico .mp-count { position: absolute; right: -4px; top: -5px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 9.5px; font-weight: 700; line-height: 15px; text-align: center; }
+.mp-ico .mp-dot { position: absolute; right: 2px; top: 2px; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); }
+.mp-shared { border-top: 1px solid var(--line); padding-top: 8px; }
+.mp-ro { font-size: 11.5px; color: var(--muted); background: var(--panel-2); border-radius: 8px; padding: 6px 8px; }
