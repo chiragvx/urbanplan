@@ -2,13 +2,17 @@
 // building to select it; drag it to move it, drag a node to reshape it, drag the round handle to turn it, drag the
 // square one on its face to change the depth; double-click its spine to add a node, Alt-click a node to drop it.
 // The draw tool lays a new spine node by node (Enter or double-click finishes). Moves snap to the road's angles
-// (every 45°) and to half metres; Shift moves freely. The element tools drop a car park, a lot, a garden or a
-// roundabout where clicked (then shaped like a building), or lay an internal road node by node.
+// (every 45°) and to half metres; Shift moves freely. A car park, a lot or a garden is an area: drag out a rectangle
+// (square to the road), click out any shape (Enter, double-click or the first corner closes it), or double-click an
+// open patch to fill it. Its corners drag (snapping to the plot's and the buildings' corners and the plot's edges),
+// the dot mid-edge adds a corner, Alt-click drops one. The roundabout drops where clicked; a road is laid node by
+// node. The plan shows the ground as solved: every square metre one layer, bays and planting laid out procedurally.
 import { effect } from '@preact/signals';
 import type { Editor } from './editor';
 import type { Id } from '../doc/types';
 import { docVersion, readOnly, studioLevel, studioSel, studioTool, toast } from './state';
-import { buildingQuads, circleRing, ELEMENTS, elementRings, newBuildingId, pointIn, UNIT_COLOR, type ElementKind, type PlotSite, type SiteBuilding, type SiteElement } from '../doc/site';
+import { buildingQuads, circleRing, ELEMENTS, elementCentre, elementRings, isArea, newBuildingId, pointIn, ringOf, UNIT_COLOR, type ElementKind, type PlotSite, type SiteBuilding, type SiteElement } from '../doc/site';
+import { area, flat, fromFlat, grow, inside, inter, nearest, shrink, simplify, union, type MP } from '../doc/ground';
 
 const ACCENT = '#2f5bff', RED = '#e5484d', INK = '#1c2333';
 
@@ -17,7 +21,11 @@ type Drag =
   | { kind: 'move'; b: string; start: [number, number]; spine: number[]; n: number; moved: boolean }
   | { kind: 'node'; b: string; i: number; spine: number[]; n: number; moved: boolean }
   | { kind: 'turn'; b: string; c: [number, number]; a0: number; spine: number[]; n: number }
-  | { kind: 'depth'; b: string; n: number };
+  | { kind: 'depth'; b: string; n: number }
+  | { kind: 'rect'; el: ElementKind; a: [number, number]; moved: boolean }
+  | { kind: 'vertex'; b: string; i: number; ring: number[]; n: number; moved: boolean }
+  | { kind: 'ring'; b: string; start: [number, number]; ring: number[]; n: number; moved: boolean }
+  | { kind: 'turnRing'; b: string; c: [number, number]; a0: number; ring: number[]; n: number };
 
 let dragSeq = 0;
 
@@ -32,6 +40,9 @@ export class StudioCanvas {
   private cursor: [number, number] | null = null;
   /** the node picked (Delete drops it) */
   node: number | null = null;
+  /** an area being clicked out, corner by corner; the rectangle being dragged out */
+  private shape: { kind: ElementKind; pts: number[] } | null = null;
+  private rect: number[] | null = null;
   private dirty = true;
   private raf = 0;
   private off: (() => void)[] = [];
@@ -52,7 +63,7 @@ export class StudioCanvas {
     on('contextmenu', (e) => e.preventDefault());
     this.resize();
     this.fit();
-    const loop = () => { if (this.dirty) { this.dirty = false; this.draw(); } this.raf = requestAnimationFrame(loop); };
+    const loop = () => { if (this.queued) { const q = this.queued; this.queued = null; this.moveNow(q); } if (this.dirty) { this.dirty = false; this.draw(); } this.raf = requestAnimationFrame(loop); };
     this.raf = requestAnimationFrame(loop);
   }
 
@@ -79,7 +90,7 @@ export class StudioCanvas {
 
   private toS = (x: number, z: number): [number, number] => [(x - this.cx) * this.k + this.w / 2, (z - this.cz) * this.k + this.h / 2];
   private toW = (sx: number, sy: number): [number, number] => [(sx - this.w / 2) / this.k + this.cx, (sy - this.h / 2) / this.k + this.cz];
-  private at(e: MouseEvent): [number, number] { const r = this.el.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+  private at(e: { clientX: number; clientY: number }): [number, number] { const r = this.el.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
 
   // ---------------- the site ----------------
 
@@ -128,24 +139,68 @@ export class StudioCanvas {
     if (e.button === 1 || e.button === 2) { this.drag = { kind: 'pan', x: s[0], y: s[1] }; return; }
     if (e.button !== 0) return;
     const tool = studioTool.value;
-    if (tool !== 'select' && tool !== 'draw' && tool !== 'road') { this.place(tool, w); return; }
+    if (tool === 'roundabout') { this.place(tool, w); return; }
+    if (tool === 'parking' || tool === 'lot' || tool === 'garden') {
+      if (this.shape) {
+        // a corner; on the first one again, the shape closes
+        const P = this.shape.pts, f = this.toS(P[0], P[1]);
+        if (P.length >= 6 && Math.hypot(s[0] - f[0], s[1] - f[1]) < 9) { this.closeShape(); return; }
+        const p = this.snapPt(this.snap(w, [P[P.length - 2], P[P.length - 1]], e.shiftKey), e.shiftKey);
+        P.push(p[0], p[1]);
+        this.dirty = true;
+        return;
+      }
+      this.drag = { kind: 'rect', el: tool, a: this.snapPt(w, e.shiftKey), moved: false };
+      return;
+    }
     if (this.drawing()) {
       const last: [number, number] | null = this.draft.length ? [this.draft[this.draft.length - 2], this.draft[this.draft.length - 1]] : null;
-      const p = this.snap(w, last, e.shiftKey);
+      let p = this.snap(w, last, e.shiftKey);
+      if (studioTool.value === 'road') p = this.roadSnap(w, p, e.shiftKey);
       this.draft.push(p[0], p[1]);
       this.dirty = true;
       return;
     }
     const sel = this.building(studioSel.value);
+    // an area's handles: turn, corners (Alt-click drops one), the dots mid-edge (drag one out to add a corner)
+    if (sel && 'kind' in sel && isArea(sel)) {
+      const ring = ringOf(sel), h = this.handles(sel);
+      if (Math.hypot(s[0] - h.turn[0], s[1] - h.turn[1]) < 9) {
+        const c = elementCentre(sel);
+        this.drag = { kind: 'turnRing', b: sel.id, c, a0: Math.atan2(w[1] - c[1], w[0] - c[0]), ring: [...ring], n: ++dragSeq };
+        return;
+      }
+      for (let i = 0; i < ring.length; i += 2) {
+        const p = this.toS(ring[i], ring[i + 1]);
+        if (Math.hypot(s[0] - p[0], s[1] - p[1]) < 8) {
+          if (e.altKey) { this.dropCorner(sel, i / 2); return; }
+          this.node = i / 2;
+          this.drag = { kind: 'vertex', b: sel.id, i: i / 2, ring: [...ring], n: ++dragSeq, moved: false };
+          this.dirty = true;
+          return;
+        }
+      }
+      for (let i = 0; i < ring.length; i += 2) {
+        const j = (i + 2) % ring.length, p = this.toS((ring[i] + ring[j]) / 2, (ring[i + 1] + ring[j + 1]) / 2);
+        if (Math.hypot(ring[j] - ring[i], ring[j + 1] - ring[i + 1]) * this.k < 26) continue;
+        if (Math.hypot(s[0] - p[0], s[1] - p[1]) < 7) {
+          const R = [...ring];
+          R.splice(i + 2, 0, (ring[i] + ring[j]) / 2, (ring[i + 1] + ring[j + 1]) / 2);
+          this.node = i / 2 + 1;
+          this.drag = { kind: 'vertex', b: sel.id, i: i / 2 + 1, ring: R, n: ++dragSeq, moved: false };
+          return;
+        }
+      }
+    }
     // handles of the selected building first: turn, depth, nodes
-    if (sel) {
+    if (sel && !('kind' in sel && isArea(sel))) {
       const h = this.handles(sel);
       if (Math.hypot(s[0] - h.turn[0], s[1] - h.turn[1]) < 9) {
         const c = spineCentre(sel.spine);
         this.drag = { kind: 'turn', b: sel.id, c, a0: Math.atan2(w[1] - c[1], w[0] - c[0]), spine: [...sel.spine], n: ++dragSeq };
         return;
       }
-      if (h.depth && Math.hypot(s[0] - h.depth[0], s[1] - h.depth[1]) < 8) { this.drag = { kind: 'depth', b: sel.id, n: ++dragSeq }; return; }
+      if (h.depth && Math.hypot(s[0] - h.depth[0], s[1] - h.depth[1]) < 8 && !('kind' in sel && sel.kind === 'roundabout')) { this.drag = { kind: 'depth', b: sel.id, n: ++dragSeq }; return; }
       for (let i = 0; i < sel.spine.length; i += 2) {
         const p = this.toS(sel.spine[i], sel.spine[i + 1]);
         if (Math.hypot(s[0] - p[0], s[1] - p[1]) < 8) {
@@ -160,17 +215,61 @@ export class StudioCanvas {
     const hit = this.pick(w);
     studioSel.value = hit;
     this.node = null;
-    if (hit) { const b = this.building(hit)!; this.drag = { kind: 'move', b: hit, start: w, spine: [...b.spine], n: ++dragSeq, moved: false }; }
+    const hb = this.building(hit);
+    if (hb && 'kind' in hb && isArea(hb)) this.drag = { kind: 'ring', b: hb.id, start: w, ring: [...ringOf(hb)], n: ++dragSeq, moved: false };
+    else if (hb) this.drag = { kind: 'move', b: hb.id, start: w, spine: [...hb.spine], n: ++dragSeq, moved: false };
     else this.drag = { kind: 'pan', x: s[0], y: s[1] };
   }
 
+  /** the latest pointer move of a drag, applied once a frame (a fast mouse sends several a frame, each a re-solve) */
+  private queued: { clientX: number; clientY: number; shiftKey: boolean } | null = null;
   private move(e: PointerEvent) {
+    if (this.drag && this.drag.kind !== 'pan') { this.queued = { clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey }; this.dirty = true; return; }
+    this.moveNow(e);
+  }
+  private moveNow(e: { clientX: number; clientY: number; shiftKey: boolean }) {
     const s = this.at(e), w = this.toW(...s);
     this.cursor = w;
     const d = this.drag;
     this.dirty = true;
     if (!d) { this.el.style.cursor = studioTool.value !== 'select' ? 'crosshair' : this.pick(w) ? 'move' : 'default'; return; }
     switch (d.kind) {
+      case 'rect': {
+        const b = this.snapPt(w, e.shiftKey);
+        if (!d.moved && Math.hypot(b[0] - d.a[0], b[1] - d.a[1]) * this.k < 6) break;
+        d.moved = true;
+        this.rect = this.rectRing(d.a, b, e.shiftKey);
+        break;
+      }
+      case 'vertex': {
+        if (!d.moved && Math.hypot(w[0] - d.ring[d.i * 2], w[1] - d.ring[d.i * 2 + 1]) * this.k < 3) break;
+        d.moved = true;
+        const n = d.ring.length / 2, pv = (d.i + n - 1) % n;
+        const p = this.snapPt(this.snap(w, [d.ring[pv * 2], d.ring[pv * 2 + 1]], e.shiftKey), e.shiftKey, d.b);
+        const ring = [...d.ring];
+        ring[d.i * 2] = p[0]; ring[d.i * 2 + 1] = p[1];
+        this.setRing(d.b, ring, 'Reshape', 'studio' + d.n);
+        break;
+      }
+      case 'ring': {
+        const dx = w[0] - d.start[0], dz = w[1] - d.start[1];
+        if (!d.moved && Math.hypot(dx, dz) * this.k < 3) break;
+        d.moved = true;
+        const mx = Math.round(dx * 10) / 10, mz = Math.round(dz * 10) / 10;
+        this.setRing(d.b, d.ring.map((v, i) => v + (i % 2 ? mz : mx)), 'Move', 'studio' + d.n);
+        break;
+      }
+      case 'turnRing': {
+        let a = Math.atan2(w[1] - d.c[1], w[0] - d.c[0]) - d.a0;
+        if (!e.shiftKey) a = Math.round(a / ((5 * Math.PI) / 180)) * ((5 * Math.PI) / 180);
+        const c = Math.cos(a), sn = Math.sin(a);
+        const ring = d.ring.map((_, i) => {
+          const x = d.ring[i - (i % 2)] - d.c[0], z = d.ring[i - (i % 2) + 1] - d.c[1];
+          return Math.round((i % 2 ? d.c[1] + x * sn + z * c : d.c[0] + x * c - z * sn) * 100) / 100;
+        });
+        this.setRing(d.b, ring, 'Turn', 'studio' + d.n);
+        break;
+      }
       case 'pan':
         this.cx -= (s[0] - d.x) / this.k; this.cz -= (s[1] - d.y) / this.k;
         d.x = s[0]; d.y = s[1];
@@ -180,7 +279,13 @@ export class StudioCanvas {
         if (!d.moved && Math.hypot(dx, dz) * this.k < 3) break;
         d.moved = true;
         // whole tenths of a metre, so the building keeps its shape exactly
-        const mx = Math.round(dx * 10) / 10, mz = Math.round(dz * 10) / 10;
+        let mx = Math.round(dx * 10) / 10, mz = Math.round(dz * 10) / 10;
+        const mb = this.building(d.b);
+        if (mb && 'kind' in mb && mb.kind === 'roundabout') {
+          // a roundabout's centre onto a road's node or line
+          const [cx, cz] = spineCentre(d.spine), t = this.roadSnap([cx + dx, cz + dz], [cx + mx, cz + mz], e.shiftKey, d.b);
+          mx = t[0] - cx; mz = t[1] - cz;
+        }
         this.setSpine(d.b, d.spine.map((v, i) => v + (i % 2 ? mz : mx)), 'Move building', 'studio' + d.n);
         break;
       }
@@ -191,7 +296,8 @@ export class StudioCanvas {
         const b = this.building(d.b);
         const prev = d.i > 0 ? d.i - 1 : b?.closed ? n - 1 : -1;
         const ref: [number, number] | null = prev >= 0 ? [d.spine[prev * 2], d.spine[prev * 2 + 1]] : d.i + 1 < n ? [d.spine[(d.i + 1) * 2], d.spine[(d.i + 1) * 2 + 1]] : null;
-        const p = this.snap(w, ref, e.shiftKey);
+        let p = this.snap(w, ref, e.shiftKey);
+        if (b && 'kind' in b && b.kind === 'road') p = this.roadSnap(w, p, e.shiftKey, b.id);
         const spine = [...d.spine];
         spine[d.i * 2] = p[0]; spine[d.i * 2 + 1] = p[1];
         this.setSpine(d.b, spine, 'Reshape building', 'studio' + d.n);
@@ -228,6 +334,16 @@ export class StudioCanvas {
   }
 
   private up(_e: PointerEvent) {
+    if (this.queued) { const q = this.queued; this.queued = null; this.moveNow(q); }
+    const d = this.drag;
+    this.hitSnap = null;
+    if (d?.kind === 'rect') {
+      // dragged: the rectangle; clicked: the first corner of a shape
+      const R = this.rect;
+      this.rect = null;
+      if (d.moved && R) this.addArea(d.el, R);
+      else this.shape = { kind: d.el, pts: [...d.a] };
+    }
     this.drag = null;
     this.dirty = true;
   }
@@ -235,8 +351,17 @@ export class StudioCanvas {
   private dbl(e: MouseEvent) {
     if (this.drawing()) { this.finish(); return; }
     const s = this.at(e), w = this.toW(...s);
+    if (this.shape) {
+      // a double-click straight off: the open patch there, filled; later on, the shape closes
+      const P = this.shape.pts;
+      if (P.length <= 4 && Math.hypot(P[0] - w[0], P[1] - w[1]) * this.k < 8) { const k = this.shape.kind; this.shape = null; this.fill(k, w); return; }
+      // (the double-click's second click added a corner on top of the last)
+      if (P.length >= 4 && Math.hypot(P[P.length - 2] - P[P.length - 4], P[P.length - 1] - P[P.length - 3]) < 0.3) P.splice(-2, 2);
+      this.closeShape();
+      return;
+    }
     const b = this.building(studioSel.value);
-    if (!b) return;
+    if (!b || ('kind' in b && isArea(b))) return;
     // a new node on the spine where it was double-clicked
     const n = b.spine.length / 2, segs = b.closed ? n : n - 1;
     let best = -1, bd = 10 / this.k, bp: [number, number] = [0, 0];
@@ -268,13 +393,19 @@ export class StudioCanvas {
     switch (e.key) {
       case 'Escape':
         if (this.draft.length) { this.draft = []; this.dirty = true; return true; }
+        if (this.shape) { this.shape = null; this.dirty = true; return true; }
         if (studioTool.value !== 'select') { studioTool.value = 'select'; return true; }
         if (this.node !== null) { this.node = null; this.dirty = true; return true; }
         if (b) { studioSel.value = null; return true; }
         return false;
-      case 'Enter': if (this.drawing()) { this.finish(); return true; } return false;
+      case 'Enter':
+        if (this.drawing()) { this.finish(); return true; }
+        if (this.shape) { this.closeShape(); return true; }
+        return false;
       case 'Delete': case 'Backspace':
         if (this.drawing()) { this.draft.splice(-2, 2); this.dirty = true; return true; }
+        if (this.shape) { this.shape.pts.splice(-2, 2); if (!this.shape.pts.length) this.shape = null; this.dirty = true; return true; }
+        if (b && 'kind' in b && isArea(b) && this.node !== null) { this.dropCorner(b, this.node); return true; }
         if (b && this.node !== null) { this.dropNode(b, this.node); return true; }
         if (b) { this.remove(b.id); return true; }
         return false;
@@ -313,6 +444,121 @@ export class StudioCanvas {
     studioTool.value = 'select';
   }
 
+  /** A rectangle from a to b, square to the road (to the screen with Shift), its sides in half metres. */
+  private rectRing(a: [number, number], b: [number, number], free: boolean): number[] {
+    const [ax, az] = free ? [1, 0] : this.axis(), px = -az, pz = ax;
+    let u = (b[0] - a[0]) * ax + (b[1] - a[1]) * az, v = (b[0] - a[0]) * px + (b[1] - a[1]) * pz;
+    if (!free) { u = Math.round(u * 2) / 2; v = Math.round(v * 2) / 2; }
+    const r = (x: number) => Math.round(x * 100) / 100;
+    return [a[0], a[1], a[0] + ax * u, a[1] + az * u, a[0] + ax * u + px * v, a[1] + az * u + pz * v, a[0] + px * v, a[1] + pz * v].map(r);
+  }
+  private addArea(kind: ElementKind, drawn: number[]) {
+    const s = this.site(), m = ELEMENTS.find((x) => x.value === kind), net = this.E.plot.report(this.id)?.net;
+    if (!s || !m || drawn.length < 6) return;
+    // kept on the plot: what of it is on the net plot (the biggest piece)
+    let ring = drawn;
+    if (net && net.length >= 6) {
+      const on = inter(fromFlat(drawn), fromFlat(net));
+      let best: number[] = [], ba = 0;
+      for (const p of on) { const a = area([p]); if (a > ba) { ba = a; best = flat(p[0]); } }
+      if (!best.length) { toast('That’s outside the plot', 'warn'); return; }
+      ring = Math.abs(ba - area(fromFlat(drawn))) < 0.01 ? drawn : simplify(best, 0.05).map((v) => Math.round(v * 100) / 100);
+    }
+    if (area(fromFlat(ring)) < 4) { toast('Too small: drag out a bigger area', 'warn'); return; }
+    const id = newBuildingId();
+    const e: SiteElement = { id, kind, ring, spine: ring.slice(0, 4), depth: 0, floors: 0, ...(kind === 'parking' ? { levels: 3 } : {}) };
+    this.commit({ ...s, elements: [...(s.elements ?? []), e] }, `Add ${m.label.toLowerCase()}`);
+    studioSel.value = id;
+    studioTool.value = 'select';
+  }
+  private closeShape() {
+    const sh = this.shape;
+    this.shape = null;
+    this.dirty = true;
+    if (sh && sh.pts.length >= 6) this.addArea(sh.kind, sh.pts);
+  }
+  /** The open ground under a point, as an area of this kind. */
+  private fill(kind: ElementKind, w: [number, number]) {
+    const d = this.E.plot.layout(this.id);
+    if (!d) return;
+    const M = d.ground.map;
+    const open = union(M.green, M.apron, ...(kind === 'garden' ? [] : [M.lawn, M.path, M.bed]));
+    if (!inside(open, w[0], w[1])) { toast('Nothing open there to fill: drag out an area, or click its corners', 'warn'); return; }
+    // the patch: the open ground cut at its narrow necks (the strips along the wall join it all up), the piece here
+    const K = 4, core = shrink(open, K);
+    const piece = core.find((p) => inside([p], w[0], w[1])) ?? core.map((p) => ({ p, d: nearest([p], w[0], w[1])[2] })).filter((x) => x.d < K * 2).sort((a, b) => a.d - b.d)[0]?.p;
+    const patch = piece ? inter(grow([piece], K + 0.05), open) : open;
+    const here = patch.find((p) => inside([p], w[0], w[1])) ?? patch.sort((a, b) => area([b]) - area([a]))[0];
+    if (!here) return;
+    this.addArea(kind, simplify(flat(here[0]), 0.4).map((v) => Math.round(v * 100) / 100));
+  }
+  private setRing(bid: string, ring: number[], label: string, merge?: string) {
+    const s = this.site();
+    if (!s) return;
+    this.commit({ ...s, elements: s.elements?.map((e) => (e.id === bid ? { ...e, ring, auto: undefined } : e)) }, label, merge);
+  }
+  private dropCorner(e: SiteElement, i: number) {
+    const ring = ringOf(e);
+    if (ring.length <= 6) { toast('An area needs at least three corners', 'warn'); return; }
+    const R = [...ring];
+    R.splice(i * 2, 2);
+    this.setRing(e.id, R, 'Remove a corner');
+    this.node = null;
+  }
+  /** where the last road node snapped to (drawn as a ring), and what */
+  private hitSnap: { p: [number, number]; on: 'node' | 'line' } | null = null;
+  /** A road node (from the cursor at w, `p` as placed so far): onto another road's node or end, a roundabout's
+   *  centre, the drive's corners or a gate; else onto another road's line, the drive or the plot's edge (a gate). */
+  private roadSnap(w: [number, number], p: [number, number], free: boolean, skip?: string): [number, number] {
+    this.hitSnap = null;
+    if (free) return p;
+    const s = this.site(), d = this.E.plot.layout(this.id), r = this.E.plot.report(this.id);
+    const tol = 10 / this.k;
+    const lines: number[][] = [], nodes: number[][] = [];
+    for (const e of s?.elements ?? []) {
+      if (e.id === skip) continue;
+      if (e.kind === 'road') { lines.push(e.spine); for (let i = 0; i < e.spine.length; i += 2) nodes.push([e.spine[i], e.spine[i + 1]]); }
+      if (e.kind === 'roundabout' && e.spine.length >= 4) nodes.push(spineCentre(e.spine));
+    }
+    for (const L of d?.ground.drive ?? []) { lines.push(L); for (let i = 0; i < L.length; i += 2) nodes.push([L[i], L[i + 1]]); }
+    for (const g of d?.ground.gates ?? []) nodes.push([(g[0] + g[2]) / 2, (g[1] + g[3]) / 2]);
+    let best: [number, number] | null = null, bd = tol;
+    for (const [x, z] of nodes) { const dd = Math.hypot(x - w[0], z - w[1]); if (dd < bd) { bd = dd; best = [x, z]; } }
+    if (best) { this.hitSnap = { p: best, on: 'node' }; return best; }
+    const N = r?.net ?? [];
+    for (const [L, closed] of [...lines.map((l) => [l, false] as const), [N, true] as const]) {
+      const n = L.length / 2;
+      for (let i = 0; i < (closed ? n : n - 1); i++) {
+        const j = (i + 1) % n, ax = L[i * 2], az = L[i * 2 + 1], dx = L[j * 2] - ax, dz = L[j * 2 + 1] - az, L2 = dx * dx + dz * dz || 1;
+        const t = Math.max(0, Math.min(1, ((w[0] - ax) * dx + (w[1] - az) * dz) / L2)), px = ax + dx * t, pz = az + dz * t, dd = Math.hypot(px - w[0], pz - w[1]);
+        if (dd < bd) { bd = dd; best = [Math.round(px * 100) / 100, Math.round(pz * 100) / 100]; }
+      }
+    }
+    if (best) { this.hitSnap = { p: best, on: 'line' }; return best; }
+    return p;
+  }
+
+  /** A point snapped to a corner of the plot, a building or another area near it, or onto the plot's edge. */
+  private snapPt(w: [number, number], free: boolean, skip?: string): [number, number] {
+    if (free) return w;
+    const o = this.E.doc.get<'plot'>(this.id), r = this.E.plot.report(this.id), s = this.site();
+    const tol = 9 / this.k;
+    const pts: number[][] = [o?.ring ?? [], r?.net ?? [], ...(s?.buildings ?? []).flatMap(buildingQuads), ...(s?.elements ?? []).filter((e) => e.id !== skip).flatMap(elementRings)];
+    let best: [number, number] | null = null, bd = tol;
+    for (const P of pts) for (let i = 0; i + 1 < P.length; i += 2) { const dd = Math.hypot(P[i] - w[0], P[i + 1] - w[1]); if (dd < bd) { bd = dd; best = [P[i], P[i + 1]]; } }
+    if (best) return best;
+    // onto the net plot's edge
+    const N = r?.net ?? [];
+    bd = tol * 0.8;
+    for (let i = 0; i < N.length; i += 2) {
+      const j = (i + 2) % N.length, dx = N[j] - N[i], dz = N[j + 1] - N[i + 1], L2 = dx * dx + dz * dz || 1;
+      const t = Math.max(0, Math.min(1, ((w[0] - N[i]) * dx + (w[1] - N[i + 1]) * dz) / L2)), px = N[i] + dx * t, pz = N[i + 1] + dz * t;
+      const dd = Math.hypot(px - w[0], pz - w[1]);
+      if (dd < bd) { bd = dd; best = [px, pz]; }
+    }
+    return best ?? w;
+  }
+
   remove(bid: string) {
     const s = this.site();
     if (!s) return;
@@ -324,8 +570,11 @@ export class StudioCanvas {
     const s = this.site();
     if (!s) return;
     // a copy set back from the original by its depth and a gap
-    const [ax, az] = this.axis(), off = b.depth + 6;
-    const id = newBuildingId(), c = { ...b, id, spine: b.spine.map((v, i) => Math.round((v + (i % 2 ? ax : -az) * off) * 100) / 100), auto: undefined };
+    const [ax, az] = this.axis(), area = 'kind' in b && isArea(b as SiteElement);
+    let off = b.depth + 6;
+    if (area) { const R = ringOf(b as SiteElement); let lo = Infinity, hi = -Infinity; for (let i = 0; i < R.length; i += 2) { const v = -az * R[i] + ax * R[i + 1]; lo = Math.min(lo, v); hi = Math.max(hi, v); } off = hi - lo + 4; }
+    const mv = (P: number[]) => P.map((v, i) => Math.round((v + (i % 2 ? ax : -az) * off) * 100) / 100);
+    const id = newBuildingId(), c = { ...b, id, spine: mv(b.spine), ...(area ? { ring: mv(ringOf(b as SiteElement)) } : {}), auto: undefined };
     if ('kind' in b) this.commit({ ...s, elements: [...(s.elements ?? []), c as SiteElement] }, 'Duplicate');
     else this.commit({ ...s, buildings: [...s.buildings, c] }, 'Duplicate building');
     studioSel.value = id;
@@ -350,8 +599,15 @@ export class StudioCanvas {
     return null;
   }
 
-  /** Screen positions of a building's turn handle (above it) and depth handle (on the first wing's face). */
-  private handles(b: SiteBuilding) {
+  /** Screen positions of a building's turn handle (above it) and depth handle (on the first wing's face; none for an
+   *  area). */
+  private handles(b: SiteBuilding | SiteElement) {
+    if ('kind' in b && isArea(b)) {
+      const R = ringOf(b);
+      let top = Infinity, cx = 0;
+      for (let i = 0; i < R.length; i += 2) { const p = this.toS(R[i], R[i + 1]); top = Math.min(top, p[1]); cx += p[0]; }
+      return { turn: [cx / (R.length / 2 || 1), top - 22] as [number, number], depth: null };
+    }
     const q = buildingQuads(b);
     let top = Infinity, cx = 0, n = 0;
     for (const r of q) for (let i = 0; i < r.length; i += 2) { const p = this.toS(r[i], r[i + 1]); top = Math.min(top, p[1]); cx += p[0]; n++; }
@@ -412,30 +668,46 @@ export class StudioCanvas {
     if (level) {
       for (const b of d!.buildings) for (const q of b.quads) stroke(q, '#8a8f99', 1, [2, 2]);
       for (const bay of level.bays) { fill(bay, ACCENT, 0.16); stroke(bay, ACCENT, 0.6); }
-      if (level.ramp) fill(level.ramp, '#f5a524', 0.7);
+      if (level.ramp) { fill(level.ramp, '#f5a524', 0.7); stroke(level.ramp, '#b86e00', 1); }
+      for (const c of level.columns ?? []) fill(c, INK, 0.9);
+      for (const st of level.stairs ?? []) { fill(st, '#e5484d', 0.25); stroke(st, '#e5484d', 1.2); }
     } else if (d) {
-      // the ground: open space, the drive (asphalt, a dashed centre line), surface bays, the wall and its gates
-      const G = d.ground;
-      if (G.rg) fill(G.rg, '#7fb069', 0.45);
-      for (const line of G.drive) {
-        path(line, false); ctx.lineJoin = 'round'; ctx.strokeStyle = '#6b707b'; ctx.lineWidth = G.driveW * this.k; ctx.globalAlpha = 0.55; ctx.stroke(); ctx.globalAlpha = 1;
-        stroke(line, '#ffffff', 1, [6, 6], false);
+      // the ground as solved: each layer once (they never overlap), then the bays, the planting, what was drawn
+      const G = d.ground, M = G.map;
+      const fillMP = (m: MP, color: string, alpha = 1) => {
+        if (!m.length) return;
+        ctx.beginPath();
+        for (const p of m) for (const r of p) for (let i = 0; i < r.length; i++) { const q = this.toS(r[i][0], r[i][1]); if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); }
+        ctx.globalAlpha = alpha; ctx.fillStyle = color; ctx.fill('evenodd'); ctx.globalAlpha = 1;
+      };
+      fillMP(M.green, '#b5d39a'); fillMP(M.lawn, '#97c771'); fillMP(M.bed, '#6c9a4c'); fillMP(M.path, '#e7d8b4'); fillMP(M.apron, '#e4dfd4');
+      fillMP(M.fire, '#d6cfc2'); fillMP(M.lot, '#9aa0aa'); fillMP(M.road, '#6b707b'); fillMP(M.island, '#97c771'); fillMP(M.lotIsland, '#97c771');
+      for (const line of [...G.drive, ...G.roads.map((x) => x.pts)]) stroke(line, '#ffffff', 1, [6, 6], false);
+      for (const e of d.site.elements ?? []) if (e.kind === 'parking') { const q = ringOf(e); fill(q, '#a7adb8', 0.95); stroke(q, INK, 1.2); }
+      // bays: their sides in white, the back darker
+      ctx.lineWidth = Math.max(0.5, 0.12 * this.k);
+      for (const bay of d.parking.levels.filter((l) => l.kind === 'surface' || l.kind === 'lot').flatMap((l) => l.bays)) {
+        ctx.beginPath();
+        const A = this.toS(bay[0], bay[1]), B = this.toS(bay[2], bay[3]), C = this.toS(bay[4], bay[5]), D = this.toS(bay[6], bay[7]);
+        ctx.moveTo(D[0], D[1]); ctx.lineTo(A[0], A[1]); ctx.lineTo(B[0], B[1]); ctx.lineTo(C[0], C[1]);
+        ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.stroke();
       }
-      for (const g of G.gardens) fill(g, '#7fb069', 0.5);
-      for (const e of d.site.elements ?? []) {
-        if (e.kind === 'road') {
-          path(e.spine, false); ctx.lineJoin = 'round'; ctx.lineCap = 'butt'; ctx.strokeStyle = '#6b707b'; ctx.lineWidth = e.depth * this.k; ctx.globalAlpha = 0.6; ctx.stroke(); ctx.globalAlpha = 1;
-          stroke(e.spine, '#ffffff', 1, [6, 6], false);
-        } else if (e.kind === 'roundabout') {
-          const c = circleRing(e, 32);
-          fill(c, '#6b707b', 0.6);
-          fill(circleRing({ ...e, depth: Math.max(2, e.depth - 14) }, 32), '#7fb069', 0.9);
-        } else if (e.kind === 'parking') {
-          for (const q of buildingQuads(e)) { fill(q, '#a7adb8', 0.9); stroke(q, INK, 1.2); }
-        } else if (e.kind === 'lot') for (const q of buildingQuads(e)) stroke(q, '#8a8f99', 1, [4, 3]);
-        else if (e.kind === 'garden') for (const q of buildingQuads(e)) stroke(q, '#4f8a3a', 1, [4, 3]);
+      // the drawn outlines of the lots and gardens (what the layers above leave of them is what shows)
+      for (const e of d.site.elements ?? []) if (e.kind === 'lot' || e.kind === 'garden') stroke(ringOf(e), e.kind === 'lot' ? '#5d636e' : '#3f7a2c', 1, [4, 3]);
+      // planting and benches
+      if (this.k > 0.8) {
+        for (const t of M.plants) {
+          const p = this.toS(t.x, t.z), rr = Math.max(1.2, t.r * this.k);
+          ctx.beginPath(); ctx.arc(p[0], p[1], rr, 0, Math.PI * 2);
+          ctx.fillStyle = t.kind === 4 ? 'rgba(74,125,51,0.85)' : t.kind === 2 ? 'rgba(122,162,76,0.75)' : t.kind === 3 ? 'rgba(47,90,37,0.8)' : 'rgba(79,127,52,0.55)';
+          ctx.fill();
+          if (t.kind !== 4 && rr > 3) { ctx.strokeStyle = 'rgba(47,80,32,0.6)'; ctx.lineWidth = 0.8; ctx.stroke(); }
+        }
+        if (this.k > 2.5) for (const [x, z, a] of M.benches) {
+          const p = this.toS(x, z);
+          ctx.save(); ctx.translate(p[0], p[1]); ctx.rotate(a + Math.PI / 2); ctx.fillStyle = '#7a5a3c'; ctx.fillRect(-0.8 * this.k, -0.22 * this.k, 1.6 * this.k, 0.45 * this.k); ctx.restore();
+        }
       }
-      for (const bay of d.parking.levels.filter((l) => l.kind === 'surface' || l.kind === 'lot').flatMap((l) => l.bays)) { fill(bay, '#8a8f99', 0.12); stroke(bay, '#8a8f99', 0.5); }
       for (const w of G.wall) stroke(w, INK, 2.2, [], false);
       for (const g of G.gates) {
         for (const [x, z] of [[g[0], g[1]], [g[2], g[3]]]) { const p = this.toS(x, z); ctx.fillStyle = INK; ctx.fillRect(p[0] - 3, p[1] - 3, 6, 6); }
@@ -472,11 +744,12 @@ export class StudioCanvas {
     // labels: floors and flats; the car parks' levels and bays
     if (d) {
       ctx.font = '600 11px Inter, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      const lotLv = d.parking.levels.filter((l) => l.kind === 'lot'), lotEls = (d.site.elements ?? []).filter((e) => e.kind === 'lot' && elementRings(e).length);
       if (!level) for (const e of d.site.elements ?? []) {
         if (e.kind !== 'parking' && e.kind !== 'lot') continue;
-        const [cx, cz] = spineCentre(e.spine), p = this.toS(cx, cz);
-        const bays = e.kind === 'lot' ? null : (e.levels ?? 3);
-        const t = bays ? `P · ${bays} levels` : 'Parking lot';
+        const [cx, cz] = elementCentre(e), p = this.toS(cx, cz);
+        const lv = d.parking.levels.find((l) => l.kind === 'structure');
+        const t = e.kind === 'parking' ? `P · ${e.levels ?? 3} levels · ${(lv?.bays.length ?? 0) * (e.levels ?? 3)} bays` : `Lot · ${lotLv[lotEls.indexOf(e)]?.bays.length ?? 0} bays`;
         const tw = ctx.measureText(t).width + 12;
         ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.beginPath(); ctx.roundRect(p[0] - tw / 2, p[1] - 10, tw, 20, 10); ctx.fill();
         ctx.fillStyle = INK; ctx.fillText(t, p[0], p[1] + 0.5);
@@ -494,7 +767,33 @@ export class StudioCanvas {
 
     // the selected building: spine, nodes, handles
     const sel = this.building(studioSel.value);
-    if (sel && !level) {
+    if (sel && !level && 'kind' in sel && isArea(sel)) {
+      const R = ringOf(sel);
+      fill(R, ACCENT, 0.06); stroke(R, ACCENT, 2.5);
+      for (let i = 0; i < R.length; i += 2) {
+        const j = (i + 2) % R.length, m = this.toS((R[i] + R[j]) / 2, (R[i + 1] + R[j + 1]) / 2);
+        if (Math.hypot(R[j] - R[i], R[j + 1] - R[i + 1]) * this.k < 26) continue;
+        ctx.beginPath(); ctx.arc(m[0], m[1], 3.5, 0, Math.PI * 2); ctx.fillStyle = ACCENT; ctx.globalAlpha = 0.55; ctx.fill(); ctx.globalAlpha = 1;
+      }
+      for (let i = 0; i < R.length; i += 2) {
+        const p = this.toS(R[i], R[i + 1]), on = this.node === i / 2;
+        ctx.fillStyle = on ? ACCENT : '#fff'; ctx.fillRect(p[0] - 5, p[1] - 5, 10, 10);
+        ctx.strokeStyle = ACCENT; ctx.lineWidth = 2; ctx.strokeRect(p[0] - 5, p[1] - 5, 10, 10);
+      }
+      // each side's length
+      if (this.k > 1.2) {
+        ctx.font = '600 10px Inter, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        for (let i = 0; i < R.length; i += 2) {
+          const j = (i + 2) % R.length, L = Math.hypot(R[j] - R[i], R[j + 1] - R[i + 1]);
+          if (L * this.k < 40) continue;
+          const m = this.toS((R[i] + R[j]) / 2, (R[i + 1] + R[j + 1]) / 2);
+          ctx.fillStyle = ACCENT; ctx.fillText(`${L.toFixed(1)} m`, m[0], m[1] - 11);
+        }
+      }
+      const h = this.handles(sel);
+      ctx.beginPath(); ctx.arc(h.turn[0], h.turn[1], 7, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = ACCENT; ctx.lineWidth = 2; ctx.stroke();
+      ctx.beginPath(); ctx.arc(h.turn[0], h.turn[1], 3, -0.4, Math.PI * 1.3); ctx.lineWidth = 1.5; ctx.stroke();
+    } else if (sel && !level) {
       stroke(sel.spine, ACCENT, 1.5, [5, 3], !!sel.closed);
       for (const q of 'kind' in sel ? elementRings(sel) : buildingQuads(sel)) stroke(q, ACCENT, 2.5);
       for (let i = 0; i < sel.spine.length; i += 2) {
@@ -512,7 +811,8 @@ export class StudioCanvas {
     // the spine being drawn, with its depth
     if (this.drawing() && (this.draft.length || this.cursor)) {
       const last: [number, number] | null = this.draft.length ? [this.draft[this.draft.length - 2], this.draft[this.draft.length - 1]] : null;
-      const c = this.cursor ? this.snap(this.cursor, last, false) : null;
+      let c = this.cursor ? this.snap(this.cursor, last, false) : null;
+      if (c && this.cursor && studioTool.value === 'road') c = this.roadSnap(this.cursor, c, false);
       const pts = c ? [...this.draft, c[0], c[1]] : this.draft;
       if (pts.length >= 4) for (const q of buildingQuads({ id: 'draft', spine: pts, depth: studioTool.value === 'road' ? 7 : 16, floors: 0 })) { fill(q, studioTool.value === 'road' ? '#6b707b' : ACCENT, 0.2); stroke(q, ACCENT, 1); }
       stroke(pts, ACCENT, 2, [5, 3], false);
@@ -522,6 +822,24 @@ export class StudioCanvas {
         const t = `${Math.hypot(c[0] - last[0], c[1] - last[1]).toFixed(1)} m`;
         ctx.font = '600 11px Inter, system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.fillStyle = INK; ctx.fillText(t, p[0] + 10, p[1] - 10);
       }
+    }
+
+    // where a road node snapped: a ring on a node, a tick on a line
+    if (this.hitSnap && (this.drawing() || this.drag?.kind === 'node' || this.drag?.kind === 'move')) {
+      const p = this.toS(...this.hitSnap.p);
+      ctx.beginPath(); ctx.arc(p[0], p[1], this.hitSnap.on === 'node' ? 8 : 6, 0, Math.PI * 2);
+      ctx.strokeStyle = '#e08a00'; ctx.lineWidth = 2; ctx.stroke();
+      if (this.hitSnap.on === 'line') { ctx.beginPath(); ctx.moveTo(p[0] - 4, p[1] - 4); ctx.lineTo(p[0] + 4, p[1] + 4); ctx.moveTo(p[0] + 4, p[1] - 4); ctx.lineTo(p[0] - 4, p[1] + 4); ctx.stroke(); }
+    }
+
+    // the area being dragged or clicked out
+    if (this.rect) { fill(this.rect, ACCENT, 0.15); stroke(this.rect, ACCENT, 2); }
+    if (this.shape) {
+      const P = this.shape.pts, c = this.cursor ? this.snapPt(this.snap(this.cursor, [P[P.length - 2], P[P.length - 1]], false), false) : null;
+      const pts = c ? [...P, c[0], c[1]] : P;
+      if (pts.length >= 6) fill(pts, ACCENT, 0.12);
+      stroke(pts, ACCENT, 2, [5, 3], false);
+      for (let i = 0; i < P.length; i += 2) { const p = this.toS(P[i], P[i + 1]); ctx.fillStyle = i ? '#fff' : ACCENT; ctx.fillRect(p[0] - 4, p[1] - 4, 8, 8); ctx.strokeStyle = ACCENT; ctx.strokeRect(p[0] - 4, p[1] - 4, 8, 8); }
     }
 
     // scale bar

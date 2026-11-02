@@ -1,7 +1,7 @@
 // Canvas overlay: everything interactive drawn crisply on top of the rendered city — hover / selection outlines,
 // width handles, Bézier anchors, pen and line previews, vector utility lines (2D), measure, snaps, issue markers.
 import type { Editor } from './editor';
-import { accuracyView, anchorSel, dpRegionsOn, hover, mode, terrainShow, terrainView, penClass, penLift, readOnly, selection, settings, tool, osmCompare } from './state';
+import { accuracyView, anchorSel, cursor, dpRegionsOn, hover, mode, terrainShow, terrainView, penClass, penLift, readOnly, selection, settings, tool, osmCompare } from './state';
 import { anchorsOf, FLYOVER_DECK } from '../doc/ops';
 import { LINE_COLOR } from '../doc/base';
 import { template, totalWidth } from '../doc/xsection';
@@ -58,6 +58,19 @@ export function drawOverlay(E: Editor) {
     if (tool.value === 'direct') anchors(E);
   }
   if (tool.value === 'pen' && settings.value.roadMode !== 'freeform' && settings.value.roadMode !== 'replace') roadTool(E);
+  // replace mode: the road a click would change, the whole of it (the section under the cursor stronger: Alt takes
+  // just that), named with what it becomes
+  if (tool.value === 'pen' && settings.value.roadMode === 'replace' && cursor.value && !readOnly.value) {
+    const pk = E.pickAt(cursor.value[0], cursor.value[1]);
+    const sec = pk?.kind === 'section' ? E.doc.get<'section'>(pk.id) : undefined;
+    if (sec) {
+      outline(E, sec.road, WARN, 3, 0.22);
+      outline(E, sec.id, WARN, 4, 0.12);
+      const g = E.C.geo(sec.id), r = E.doc.get(sec.road) as { name?: string } | undefined;
+      const k = g ? (g.pts.length / 4 | 0) * 2 : 0, p = g ? E.project(g.pts[k], g.pts[k + 1], 0) : null;
+      if (p) label(E.ctx, p, `${r?.name || sec.name || 'Road'} → ${penClass.value}`, 12, -18);
+    }
+  }
   drawAssetTool(E);
   if (tool.value === 'multi') E.mt.draw(E.ctx, (x, z) => P(x, z), (p, t, dy) => label(E.ctx, p, t, 12, dy ?? 0));
   lockBadges(E);

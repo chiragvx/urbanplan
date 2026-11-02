@@ -3,7 +3,8 @@
 // from the plot's centre and the ground there; DXF has Y north.
 import type { Editor } from './editor';
 import type { Id } from '../doc/types';
-import { driveQuads, UNIT_COLOR, UNIT_LABEL, type SiteReport } from '../doc/site';
+import { UNIT_COLOR, UNIT_LABEL, type SiteReport } from '../doc/site';
+import { disc, flat, triangles, union } from '../doc/ground';
 import type { PlotReport } from '../doc/plot';
 import { hex, prismTris, type Box } from '../build/prism';
 
@@ -129,8 +130,14 @@ function gather(E: Editor, plot: number[], r: PlotReport, d: SiteReport | null) 
   add('wall', wallBoxes);
   for (const g2 of G.gates) outlines.push({ layer: 'GATES', ring: loc(g2), closed: false });
   for (const line of G.drive) outlines.push({ layer: 'DRIVE', ring: loc(line), closed: false });
-  add('drive', driveQuads(G).map((q) => ({ ring: q, y0: base, y1: base + 0.05, color: hex('#5b6068') })));
-  if (G.rg) { outlines.push({ layer: 'OPEN-SPACE', ring: loc(G.rg), closed: true }); add('open-space', [{ ring: G.rg, y0: base, y1: base + 0.08, color: hex('#86b46a') }]); }
+  // the ground's layers, each at its height (they never overlap), outlined on their own DXF layers
+  const M = G.map;
+  for (const [name, m, h, c] of [['roads', M.road, 0.05, '#5b6068'], ['lots', M.lot, 0.06, '#6b7079'], ['fire-access', M.fire, 0.07, '#cfc8bb'], ['paving', M.apron, 0.08, '#d9d3c7'], ['paths', M.path, 0.08, '#dccfae'], ['lawn', union(M.lawn, M.green, M.island, M.lotIsland), 0.09, '#86b46a'], ['planting', M.bed, 0.12, '#5f8a45']] as const) {
+    if (!m.length) continue;
+    add(name, triangles(m).map((t) => ({ ring: t, y0: base, y1: base + h, color: hex(c) })));
+    for (const p of m) for (const r of p) outlines.push({ layer: name.toUpperCase(), ring: loc(flat(r)), closed: true });
+  }
+  for (const t of M.plants) outlines.push({ layer: t.kind === 4 ? 'SHRUBS' : 'TREES', ring: loc(flat(disc(t.x, t.z, t.r, 12)[0][0])), closed: true });
   return { parts, outlines, origin: [cx, cz, y0] as [number, number, number] };
 }
 

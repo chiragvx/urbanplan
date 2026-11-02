@@ -4,10 +4,11 @@
 // typical floors, parking levels) drawn to scale, the buildings, the flats, the parking, the checks, the money with
 // its cash flow and how it moves with the sale price and the cost, the other scheme, and what was assumed.
 import type { PlotObj } from '../doc/types';
-import { CODE_LABEL, CODE_NOTE, USE_NOTE, sideMargin, type PlotReport } from '../doc/plot';
-import { buildingQuads, CARPET, circleRing, ELEMENTS, FIRE_H, FIRE_W, RG_FROM, RG_SHARE, roadFrame, solveSite, SQFT, TRAVEL, UNIT_COLOR, UNIT_LABEL, type SiteReport } from '../doc/site';
+import { CODE_LABEL, CODE_NOTE, polyArea, USE_NOTE, sideMargin, type PlotReport } from '../doc/plot';
+import { CARPET, ELEMENTS, elementCentre, isArea, ringOf, FIRE_H, FIRE_W, RG_FROM, RG_SHARE, roadFrame, solveSite, SQFT, TRAVEL, UNIT_COLOR, UNIT_LABEL, type SiteReport } from '../doc/site';
 import { schemes, DEFAULT_DESIGN, ACCESS } from '../doc/optimise';
 import { save } from './plotexport';
+import { disc, flat, union, type MP } from '../doc/ground';
 
 const n2 = (v: number) => (Math.round(v * 100) / 100).toFixed(2);
 const csv = (rows: (string | number)[][]) => '﻿' + rows.map((r) => r.map((c) => (typeof c === 'number' ? String(c) : /[",\n]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(',')).join('\r\n');
@@ -65,7 +66,7 @@ const num = (v: number) => Math.round(v).toLocaleString('en-IN');
 // ---------------- drawings ----------------
 
 /** A plan drawn to scale with the road along the bottom: rings in, an SVG out. */
-function planSvg(r: PlotReport, layers: { ring: number[]; fill?: string; stroke?: string; w?: number; dash?: string; op?: number; open?: boolean }[], labels: { x: number; z: number; t: string; dark?: boolean; fill?: string }[], opts: { width?: number; frame?: number[]; pad?: number; maxH?: number } = {}) {
+function planSvg(r: PlotReport, layers: { ring: number[]; mp?: MP; fill?: string; stroke?: string; w?: number; dash?: string; op?: number; open?: boolean }[], labels: { x: number; z: number; t: string; dark?: boolean; fill?: string }[], opts: { width?: number; frame?: number[]; pad?: number; maxH?: number } = {}) {
   const F = roadFrame(r), R = F.toL(opts.frame ?? (r.net.length >= 6 ? r.net : r.footprint));
   let u0 = Infinity, v0 = Infinity, u1 = -Infinity, v1 = -Infinity;
   for (let i = 0; i < R.length; i += 2) { u0 = Math.min(u0, R[i]); u1 = Math.max(u1, R[i]); v0 = Math.min(v0, R[i + 1]); v1 = Math.max(v1, R[i + 1]); }
@@ -75,7 +76,8 @@ function planSvg(r: PlotReport, layers: { ring: number[]; fill?: string; stroke?
   const X = (u: number) => u - u0, Y = (v: number) => v1 - v;
   const pts = (ring: number[]) => { const L = F.toL(ring); const o: string[] = []; for (let i = 0; i < L.length; i += 2) o.push(`${X(L[i]).toFixed(2)},${Y(L[i + 1]).toFixed(2)}`); return o.join(' '); };
   const Wm = u1 - u0, Hm = v1 - v0, k = Wm / 100;
-  const body = layers.filter((l) => l.ring.length >= 4).map((l) => `<${l.open ? 'polyline' : 'polygon'} points="${pts(l.ring)}" style="fill:${l.open ? 'none' : l.fill ?? 'none'};${l.op !== undefined ? `fill-opacity:${l.op};` : ''}stroke:${l.stroke ?? 'none'};stroke-width:${((l.w ?? 0.6) * k).toFixed(3)};${l.dash ? `stroke-dasharray:${l.dash.split(',').map((x) => +x * k).join(',')};` : ''}stroke-linejoin:round"/>`).join('');
+  const dOf = (m: MP) => m.flatMap((p) => p.map((rg) => `M${pts(flat(rg)).replace(/ /g, 'L')}Z`)).join('');
+  const body = layers.filter((l) => l.ring.length >= 4 || l.mp?.length).map((l) => l.mp ? `<path d="${dOf(l.mp)}" fill-rule="evenodd" style="fill:${l.fill};${l.op !== undefined ? `fill-opacity:${l.op};` : ''}"/>` : `<${l.open ? 'polyline' : 'polygon'} points="${pts(l.ring)}" style="fill:${l.open ? 'none' : l.fill ?? 'none'};${l.op !== undefined ? `fill-opacity:${l.op};` : ''}stroke:${l.stroke ?? 'none'};stroke-width:${((l.w ?? 0.6) * k).toFixed(3)};${l.dash ? `stroke-dasharray:${l.dash.split(',').map((x) => +x * k).join(',')};` : ''}stroke-linejoin:round"/>`).join('');
   const text = labels.map((t) => { const L = F.toL([t.x, t.z]); return `<text x="${X(L[0]).toFixed(1)}" y="${Y(L[1]).toFixed(1)}" font-size="${2.6 * k}" text-anchor="middle" dominant-baseline="middle" style="fill:${t.fill ?? (t.dark ? 'var(--p-bldg-text)' : 'var(--p-ink)')}" font-weight="600" font-family="Geist, Inter, system-ui">${esc(t.t)}</text>`; }).join('');
   // scale bar and north
   const bar = [10, 20, 50, 100, 200].find((m) => m > Wm * 0.15) ?? 200;
@@ -91,18 +93,17 @@ function sitePlan(o: PlotObj, r: PlotReport, d: SiteReport) {
   L.push({ ring: o.ring, fill: 'var(--p-plot)', stroke: 'var(--p-accent)', w: 0.5, dash: '2,1.5' });
   for (const q of r.lostRings) L.push({ ring: q, fill: 'var(--p-red)', op: 0.18, stroke: 'var(--p-red)', w: 0.3 });
   if (d.envelope.length >= 6) L.push({ ring: d.envelope, stroke: 'var(--p-accent)', w: 0.3, dash: '1,1' });
-  if (G.rg) L.push({ ring: G.rg, fill: 'var(--p-green)', op: 0.55 });
-  for (const g of G.gardens) L.push({ ring: g, fill: 'var(--p-green)', op: 0.55 });
-  for (const line of G.drive) for (let i = 0; i + 3 < line.length; i += 2) L.push({ ring: [line[i], line[i + 1], line[i + 2], line[i + 3]], stroke: 'var(--p-road)', w: G.driveW, open: true });
-  for (const x of G.roads) L.push({ ring: x.pts, stroke: 'var(--p-road)', w: x.w, open: true });
-  for (const [x, z, rad] of G.circles) L.push({ ring: circleRing({ id: '', spine: [x - rad, z, x + rad, z], depth: rad * 2, floors: 0 }, 28), fill: 'var(--p-road)' });
-  for (const l of d.parking.levels) if (l.kind === 'surface' || l.kind === 'lot') for (const b of l.bays) L.push({ ring: b, stroke: 'var(--p-road)', w: 0.15 });
-  for (const e of d.site.elements ?? []) if (e.kind === 'parking') for (const q of buildingQuads(e)) L.push({ ring: q, fill: 'var(--p-park)', stroke: 'var(--p-ink)', w: 0.35 });
+  // the ground as solved: each layer once
+  const M = G.map;
+  for (const [mp, fill, op] of [[M.green, 'var(--p-green)', 0.4], [M.lawn, 'var(--p-green)', 0.75], [M.bed, 'var(--p-green)', 1], [M.island, 'var(--p-green)', 0.75], [M.lotIsland, 'var(--p-green)', 0.75], [M.path, 'var(--p-pave)', 1], [M.apron, 'var(--p-pave)', 1], [M.fire, 'var(--p-pave)', 1], [M.lot, 'var(--p-park)', 0.6], [M.road, 'var(--p-road)', 1]] as const) L.push({ ring: [], mp: mp as MP, fill, op });
+  for (const l of d.parking.levels) if (l.kind === 'surface' || l.kind === 'lot') for (const b of l.bays) L.push({ ring: b, stroke: 'var(--p-plot)', w: 0.15 });
+  L.push({ ring: [], mp: union(...M.plants.filter((t) => t.kind !== 4).map((t) => disc(t.x, t.z, t.r * 0.8, 10))), fill: 'var(--p-tree)', op: 0.7 });
+  for (const e of d.site.elements ?? []) if (e.kind === 'parking') L.push({ ring: ringOf(e), fill: 'var(--p-park)', stroke: 'var(--p-ink)', w: 0.35 });
   for (const w of G.wall) L.push({ ring: w, stroke: 'var(--p-ink)', w: 0.6, open: true });
   for (const g of G.gates) L.push({ ring: g, stroke: 'var(--p-gate)', w: 0.8, open: true });
   for (const b of d.buildings) for (const q of b.quads) L.push({ ring: q, fill: 'var(--p-bldg)', op: 1, stroke: 'var(--p-bldg)', w: 0.4 });
   const labels = d.buildings.map((b, i) => { const q = b.quads[0]; let x = 0, z = 0; for (let k = 0; k < q.length; k += 2) { x += q[k]; z += q[k + 1]; } return { x: x / (q.length / 2), z: z / (q.length / 2), t: `${bName(i)} · ${b.floors + d.under} fl`, dark: true }; });
-  for (const e of d.site.elements ?? []) if (e.kind === 'parking') { const q = buildingQuads(e)[0]; labels.push({ x: (q[0] + q[4]) / 2, z: (q[1] + q[5]) / 2, t: `P · ${e.levels ?? 3}`, dark: false }); }
+  for (const e of d.site.elements ?? []) if (e.kind === 'parking') { const [x, z] = elementCentre(e); labels.push({ x, z, t: `P · ${e.levels ?? 3}`, dark: false }); }
   return planSvg(r, L, labels);
 }
 
@@ -122,6 +123,8 @@ function parkingPlan(r: PlotReport, d: SiteReport, li: number) {
   for (const b of d.buildings) for (const q of b.quads) L.push({ ring: q, stroke: 'var(--p-ink)', w: 0.3, dash: '0.8,0.8' });
   for (const bay of l.bays) L.push({ ring: bay, fill: 'var(--p-accent)', op: 0.14, stroke: 'var(--p-accent)', w: 0.15 });
   if (l.ramp) L.push({ ring: l.ramp, fill: 'var(--p-ramp)', op: 0.8 });
+  for (const c of l.columns ?? []) L.push({ ring: c, fill: 'var(--p-ink)' });
+  for (const st of l.stairs ?? []) L.push({ ring: st, fill: 'var(--p-red)', op: 0.3, stroke: 'var(--p-red)', w: 0.25 });
   return planSvg(r, L, [], { maxH: 300 });
 }
 
@@ -209,13 +212,13 @@ export function printReport(o: PlotObj, r: PlotReport, d: SiteReport, plan: HTML
   ] as [string, number, string][];
 
   const floorPlans = d.buildings.slice(0, 6).map((b, i) => `<figure><figcaption>Building ${bName(i)}: typical floor · ${m2(b.plate)} · ${b.perFloor.reduce((a, x) => a + x, 0)} ${unitWord} a floor · ${b.cores.length} core${b.cores.length === 1 ? '' : 's'}</figcaption>${floorPlan(r, d, i)}</figure>`).join('');
-  const parkPlans = d.parking.levels.map((l, i) => [l, i] as const).filter(([l]) => l.kind !== 'stilt' && l.bays.length).slice(0, 2).map(([l, i]) => `<figure><figcaption>${level(l.kind)}: ${l.bays.length} bays${l.ramp ? ' · ramp in orange' : ''}</figcaption>${parkingPlan(r, d, i)}</figure>`).join('');
+  const parkPlans = d.parking.levels.map((l, i) => [l, i] as const).filter(([l]) => l.kind !== 'stilt' && l.bays.length).slice(0, 2).map(([l, i]) => `<figure><figcaption>${level(l.kind)}: ${l.bays.length} bays${l.ramp ? ' · ramp (or car lift) in orange' : ''}${l.columns?.length ? `, ${l.columns.length} columns` : ''}${l.stairs?.length ? `, ${l.stairs.length} exit stair${l.stairs.length === 1 ? '' : 's'} and cores in red` : ''}</figcaption>${parkingPlan(r, d, i)}</figure>`).join('');
 
   w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(o.name)}: feasibility report</title><link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@500&display=swap" rel="stylesheet"><style>
 :root{--paper:#09090b;--surface:#111113;--surface-2:#18181b;--line:#232326;--line-strong:#2e2e33;--ink:#fafafa;--ink-2:#d4d4d8;--muted:#a1a1aa;--accent:#5b7cff;--accent-soft:rgba(91,124,255,.14);--orange:#ff7a3d;--ok:#3dd68c;--ok-soft:rgba(61,214,140,.12);--bad:#f2555a;--bad-soft:rgba(242,85,90,.12);
---p-bg:#0d0d0f;--p-plot:#16161a;--p-ink:#e4e4e7;--p-muted:#a1a1aa;--p-accent:#5b7cff;--p-red:#f2555a;--p-green:#2d6b4c;--p-road:#3a3a40;--p-park:#52525b;--p-gate:#ff7a3d;--p-bldg:#e4e4e7;--p-bldg-text:#09090b;--p-corr:#3f3f46;--p-core:#71717a;--p-ramp:#f5b13d;color-scheme:dark}
+--p-bg:#0d0d0f;--p-plot:#16161a;--p-ink:#e4e4e7;--p-muted:#a1a1aa;--p-accent:#5b7cff;--p-red:#f2555a;--p-green:#2d6b4c;--p-road:#3a3a40;--p-park:#52525b;--p-gate:#ff7a3d;--p-bldg:#e4e4e7;--p-bldg-text:#09090b;--p-corr:#3f3f46;--p-core:#71717a;--p-ramp:#f5b13d;--p-pave:#2a2a30;--p-tree:#3f8a5f;color-scheme:dark}
 :root[data-theme=light]{--paper:#fafaf9;--surface:#ffffff;--surface-2:#f4f4f3;--line:#ebebea;--line-strong:#dcdcda;--ink:#0c0c0d;--ink-2:#3f3f46;--muted:#71717a;--accent:#2f5bff;--accent-soft:#eef1ff;--orange:#d9480f;--ok:#1f8a52;--ok-soft:#e8f6ee;--bad:#d92d33;--bad-soft:#fdecec;
---p-bg:#fbfbfa;--p-plot:#ffffff;--p-ink:#0c0c0d;--p-muted:#71717a;--p-accent:#2f5bff;--p-red:#e5484d;--p-green:#a8d5b9;--p-road:#c4c4c8;--p-park:#d4d4d8;--p-gate:#ff6a2b;--p-bldg:#18181b;--p-bldg-text:#fafafa;--p-corr:#e4e4e7;--p-core:#71717a;--p-ramp:#f5a524;color-scheme:light}
+--p-bg:#fbfbfa;--p-plot:#ffffff;--p-ink:#0c0c0d;--p-muted:#71717a;--p-accent:#2f5bff;--p-red:#e5484d;--p-green:#a8d5b9;--p-road:#c4c4c8;--p-park:#d4d4d8;--p-gate:#ff6a2b;--p-bldg:#18181b;--p-bldg-text:#fafafa;--p-corr:#e4e4e7;--p-core:#71717a;--p-ramp:#f5a524;--p-pave:#ebe6dc;--p-tree:#5f9c6f;color-scheme:light}
 *{box-sizing:border-box}html{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 body{font:400 13px/1.55 Geist,Inter,system-ui,sans-serif;letter-spacing:-.006em;color:var(--ink-2);margin:0;padding:8px 0 40px;background:var(--paper);-webkit-font-smoothing:antialiased}
 .page{background:var(--surface);max-width:980px;margin:24px auto;padding:44px 52px;border-radius:20px;border:1px solid var(--line)}
@@ -285,7 +288,7 @@ ${r.roads.map((x) => `<tr><td>${esc(x.name)}</td><td class="n">${n2(x.today)} m<
 </table><small class="note">Gates: ${d.ground.gates.length} · internal roads: ${esc(access.label.toLowerCase())}${design.roundabouts ? ', with roundabouts' : ''}.</small></div></div>
 <h3>Site plan</h3>
 ${sitePlan(o, r, d)}
-<div class="legend" style="margin-top:6px"><span><i style="background:var(--p-bldg)"></i>Buildings</span><span><i style="background:var(--p-road)"></i>Drive, roads, bays</span><span><i style="background:var(--p-green)"></i>Open space, gardens</span><span><i style="background:var(--p-red);opacity:.4"></i>DP road strip</span><span><i style="border:1px dashed var(--p-accent)"></i>Building envelope</span><span><i style="background:var(--p-gate)"></i>Gates</span></div>
+<div class="legend" style="margin-top:6px"><span><i style="background:var(--p-bldg)"></i>Buildings</span><span><i style="background:var(--p-road)"></i>Drive, roads</span><span><i style="background:var(--p-park)"></i>Parking</span><span><i style="background:var(--p-pave)"></i>Paving, paths</span><span><i style="background:var(--p-green)"></i>Gardens, planting</span><span><i style="background:var(--p-red);opacity:.4"></i>DP road strip</span><span><i style="border:1px dashed var(--p-accent)"></i>Building envelope</span><span><i style="background:var(--p-gate)"></i>Gates</span></div>
 </section>
 
 <section class="page">
@@ -314,7 +317,7 @@ ${sitePlan(o, r, d)}
 <table><tr><th>Building</th><th class="n">Plate</th><th class="n">Floors</th><th class="n">Height</th><th class="n">${unitWord[0].toUpperCase() + unitWord.slice(1)} / floor</th><th class="n">${unitWord[0].toUpperCase() + unitWord.slice(1)}</th><th class="n">Cores</th><th class="n">Built-up</th><th>Status</th></tr>
 ${d.buildings.map((b, i) => { const pf = b.perFloor.reduce((a, x) => a + x, 0); return `<tr><td>${bName(i)} · ${b.b.depth} m deep</td><td class="n">${m2(b.plate)}</td><td class="n">${b.floors}${d.under ? ` + ${d.under}` : ''}</td><td class="n">${n2(b.height)} m</td><td class="n">${pf}</td><td class="n">${pf * b.floors}</td><td class="n">${b.cores.length}</td><td class="n">${m2(b.plate * b.floors)}</td><td>${b.clash ? `<span class="bad">${b.clash === 'margins' ? 'past the margins' : 'overlaps'}</span>` : b.fire.length && !b.fireOk ? '<span class="bad">fire access blocked</span>' : '<span class="ok">✓</span>'}</td></tr>`; }).join('')}
 <tr class="tot"><td>Total</td><td class="n">${m2(d.buildings.reduce((a, b) => a + b.plate, 0))}</td><td></td><td class="n">${n2(d.height)} m</td><td></td><td class="n">${num(d.flats)}</td><td class="n">${d.buildings.reduce((a, b) => a + b.cores.length, 0)}</td><td class="n">${m2(d.bua)}</td><td></td></tr></table>
-${els.length ? `<h3>Placed on the site</h3><table><tr><th>Element</th><th class="n">Size</th><th>Note</th></tr>${els.map((e) => { const m = ELEMENTS.find((x) => x.value === e.kind)!; const len = Math.hypot(e.spine[2] - e.spine[0], e.spine[3] - e.spine[1]); return `<tr><td>${m.label}</td><td class="n">${e.kind === 'roundabout' ? `${n2(e.depth)} m across` : e.kind === 'road' ? `${n2(e.depth)} m wide` : `${Math.round(len)} × ${Math.round(e.depth)} m`}</td><td class="muted">${e.kind === 'parking' ? `${e.levels ?? 3} levels` : ''}</td></tr>`; }).join('')}</table>` : ''}
+${els.length ? `<h3>Placed on the site</h3><table><tr><th>Element</th><th class="n">Size</th><th>Note</th></tr>${els.map((e) => { const m = ELEMENTS.find((x) => x.value === e.kind)!; return `<tr><td>${m.label}</td><td class="n">${e.kind === 'roundabout' ? `${n2(e.depth)} m across` : e.kind === 'road' ? `${n2(e.depth)} m wide` : isArea(e) ? m2(Math.abs(polyArea(ringOf(e)))) : ''}</td><td class="muted">${e.kind === 'parking' ? `${e.levels ?? 3} levels` : ''}</td></tr>`; }).join('')}</table>` : ''}
 <h3>Typical floors</h3>
 <div class="cols">${floorPlans}</div>
 <div class="legend">${(res ? [0, 1, 2] : [3]).map((t) => `<span><i style="background:${UNIT_COLOR[t]}"></i>${UNIT_LABEL[t]}</span>`).join('')}<span><i style="background:var(--p-core)"></i>Core (lifts, stairs)</span><span><i style="background:var(--p-corr)"></i>Corridor</span></div>

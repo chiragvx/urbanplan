@@ -10,6 +10,7 @@ import { buildTerrainPatch, buildTerrainSkirt, buildWater } from '../build/terra
 import { shiftInto } from '../geo/heightfield';
 import { placeTrees, treeGeometry, type TreeInstance } from '../build/vegetation';
 import { buildPlotModel } from '../build/plotmesh';
+import { plantGeometries, PLANT_GREENS } from '../build/plants';
 import { landuseRect, landuseUV, type Materials } from '../render/materials';
 import type { Building, TileData } from '../data/tile';
 import type { Heightfield } from '../geo/heightfield';
@@ -19,7 +20,8 @@ import type { Compiler } from '../doc/compile';
 import type { CityDoc, Change } from '../doc/doc';
 import type { BuildingObj, Id, LineObj, PlotObj } from '../doc/types';
 import type { PlotReport } from '../doc/plot';
-import { buildingQuads, driveQuads, UNIT_COLOR, type SiteReport } from '../doc/site';
+import { ringOf, UNIT_COLOR, type SiteReport } from '../doc/site';
+import { triangles } from '../doc/ground';
 import { hex, prismTris, type Box } from '../build/prism';
 import { LINE_COLOR } from '../doc/base';
 import { ChunkSet, type ChunkItem } from './chunks';
@@ -91,6 +93,10 @@ export class World {
   ponds = new THREE.Group();
   /** sandbox plots: the land lost to the DP road, the buildable footprint and the envelope (3D only) */
   plots = new THREE.Group();
+  private plantGeos?: THREE.BufferGeometry[];
+  /** the planting's instanced meshes, kept from one rebuild to the next: three's WebGPU renderer builds an
+   *  instanced mesh's shaders afresh for every new one (it keys them by the object), a long stall on every edit */
+  private plantIMs: (THREE.InstancedMesh | undefined)[] = [];
   private plotM?: { lost: THREE.Material; net: THREE.Material; mass: THREE.Material; edge: THREE.LineBasicNodeMaterial; build: THREE.Material; floor: THREE.LineBasicNodeMaterial; clash: THREE.LineBasicNodeMaterial; solid: THREE.Material; glass: THREE.Material };
   private utilityLayers = new Map<Id, THREE.Mesh>();
   /** catalogue assets that aren't streets / tracks / pipes (canals, power lines, structures, areas), per layer */
@@ -543,7 +549,11 @@ export class World {
   /** Sandbox plots in 3D: the DP strip (red) and the rest (blue) on the ground, the envelope as a glass outline,
    *  and the building in it: flats coloured by type floor by floor, cores, and the stilt / podium levels. */
   buildPlots(list: { o: PlotObj; r: PlotReport | null; d: SiteReport | null }[], look: 'real' | 'flats' = 'flats', real?: Id | null) {
-    for (const c of [...this.plots.children]) { this.plots.remove(c); if (!(c instanceof THREE.InstancedMesh)) (c as THREE.Mesh).geometry.dispose(); else c.dispose(); }
+    for (const c of [...this.plots.children]) {
+      this.plots.remove(c);
+      if (c.userData.keep) continue;
+      if (!(c instanceof THREE.InstancedMesh)) (c as THREE.Mesh).geometry.dispose(); else c.dispose();
+    }
     if (!this.plotM) {
       const flat = (color: number, opacity: number) => new THREE.MeshBasicNodeMaterial({ color, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4 });
       this.plotM = {
@@ -613,10 +623,12 @@ export class World {
       for (const q of d.parking.levels.filter((l) => l.kind === 'surface' || l.kind === 'lot').flatMap((l) => l.bays)) boxes.push({ ring: insetQuad(q, 0.12), y0: base + 0.02, y1: base + 0.07, color: bay });
       // the ground: the drive, the open space, the compound wall and its gate posts
       const G = d.ground, asphalt = hex('#5b6068'), lawn = hex('#86b46a'), wallC = hex('#ddd6c8'), post = hex('#8a8f99');
-      for (const q of driveQuads(G)) boxes.push({ ring: q, y0: base + 0.01, y1: base + 0.05, color: asphalt });
-      if (G.rg) boxes.push({ ring: G.rg, y0: base + 0.01, y1: base + 0.08, color: lawn });
-      for (const g of G.gardens) boxes.push({ ring: g, y0: base + 0.01, y1: base + 0.09, color: lawn });
-      for (const e of d.site.elements ?? []) if (e.kind === 'parking') for (const q of buildingQuads(e)) boxes.push({ ring: q, y0: base, y1: base + 3 * Math.max(1, e.levels ?? 3), color: grey });
+      // (the ground's layers, each at its own height: they never share a square metre)
+      const GM = G.map, paveC = hex('#cfc8bb');
+      for (const [m, y, c] of [[GM.road, 0.04, asphalt], [GM.lot, 0.05, hex('#6b7079')], [GM.fire, 0.06, paveC], [GM.apron, 0.07, paveC], [GM.path, 0.07, hex('#dccfae')], [GM.green, 0.08, lawn], [GM.lawn, 0.08, lawn], [GM.bed, 0.12, hex('#5f8a45')], [GM.island, 0.1, lawn], [GM.lotIsland, 0.1, lawn]] as const) {
+        for (const t of triangles(m)) boxes.push({ ring: t, y0: base, y1: base + y, color: c });
+      }
+      for (const e of d.site.elements ?? []) if (e.kind === 'parking') { const q = ringOf(e); if (q.length >= 6) boxes.push({ ring: q, y0: base, y1: base + 3 * Math.max(1, e.levels ?? 3), color: grey }); }
       for (const w of G.wall) { const q = band(w, 0.12); if (q) boxes.push({ ring: q, y0: base - 0.3, y1: base + 1.8, color: wallC }); }
       for (const g of G.gates) for (const [x, z] of [[g[0], g[1]], [g[2], g[3]]]) boxes.push({ ring: [x - 0.25, z - 0.25, x + 0.25, z - 0.25, x + 0.25, z + 0.25, x - 0.25, z + 0.25], y0: base - 0.3, y1: base + 2.2, color: post });
       for (const b of d.buildings) {
@@ -678,15 +690,28 @@ export class World {
       m.castShadow = true; m.receiveShadow = true;
       this.plots.add(m);
     }
-    if (trees.length) {
-      const im = new THREE.InstancedMesh(treeGeometry('high'), this.M.trees, trees.length);
-      const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), p = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), col = new THREE.Color();
-      const GREENS = [0x4f7a32, 0x5d8a3a, 0x46702c, 0x6b9443, 0x3f6828, 0x789d48];
-      trees.forEach((t, i) => {
+    // the planting, kind by kind, modelled close (the city's own trees stay cheap)
+    const geos = (this.plantGeos ??= plantGeometries(true));
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), p = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), col = new THREE.Color();
+    for (let k = 0; k < geos.length; k++) {
+      const list = trees.filter((t) => t.kind === k);
+      if (!list.length) continue;
+      let had = this.plantIMs[k];
+      if (!had || had.instanceMatrix.count < list.length) {
+        had?.dispose();
+        had = this.plantIMs[k] = new THREE.InstancedMesh(geos[k], this.M.trees, Math.max(64, Math.ceil(list.length * 1.5)));
+        had.userData.keep = true;
+      }
+      const im = had;
+      im.count = list.length;
+      const G = PLANT_GREENS[k];
+      list.forEach((t, i) => {
         q.setFromAxisAngle(up, t.rot); sc.set(t.s, t.h, t.s); p.set(t.x, t.y, t.z);
         im.setMatrixAt(i, m.compose(p, q, sc));
-        im.setColorAt(i, col.setHex(GREENS[Math.floor(t.tint * GREENS.length)]));
+        im.setColorAt(i, col.setHex(G[Math.floor(t.tint * G.length)]));
       });
+      im.instanceMatrix.needsUpdate = true;
+      if (im.instanceColor) im.instanceColor.needsUpdate = true;
       im.castShadow = true; im.receiveShadow = true;
       im.computeBoundingSphere();
       this.plots.add(im);

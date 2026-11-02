@@ -6,6 +6,7 @@ import type { PlotObj } from '../../src/doc/types';
 import { basementsToFit, buildingQuads, pointIn, newBuildingId, presetBuildings, siteOf, solveSite, SQFT, TRAVEL, type PlotSite } from '../../src/doc/site';
 import { polyArea as area } from '../../src/doc/plot';
 import { schemes as optSchemes, siteFor } from '../../src/doc/optimise';
+import { area as mpArea } from '../../src/doc/ground';
 let ok = true;
 const check = (c: boolean, m: string) => { console.log(`${c ? 'ok  ' : 'FAIL'} ${m}`); if (!c) ok = false; };
 const near = (a: number, b: number) => Math.abs(a - b) < 0.5;
@@ -131,7 +132,7 @@ check(near2.over.fire && !near2.over.overlap, 'two tall buildings 4 m apart: no 
 const surf = solveSite(big, { ...site, surface: true, buildings: [{ id: 'a', spine: [0, 0, 30, 0], depth: 16, floors: 3 }] });
 const sl = surf.parking.levels.find((l) => l.kind === 'surface')!;
 check(sl.bays.length > 50 && sl.bays.every((q) => !surf.buildings[0].quads.some((b) => b.some((_, i) => i % 2 === 0 && pointIn(q, b[i], b[i + 1], -0.1)))), `surface parking: ${sl.bays.length} bays round the building`);
-check(surf.open.need === 990 && Math.abs(surf.open.have - (9900 - 480 - sl.bays.length * 12.5)) < 50, `open space: ${surf.open.have.toFixed(0)} m² open of ${surf.open.need} m² needed (10 % of 0.99 ha)`);
+check(surf.open.need === 990 && Math.abs(surf.open.have - (9900 - 480 - mpArea(surf.ground.map.lot) - mpArea(surf.ground.map.road))) < 50, `open space: ${surf.open.have.toFixed(0)} m² open of ${surf.open.need} m² needed (10 % of 0.99 ha), less the parking's rows and aisles`);
 // cash: flows add up to the profit, the money in peaks before the sales come in, an IRR when it pays
 const M = bar.money;
 check(near(M.cum[M.cum.length - 1] / 1e5, M.profit / 1e5) && M.peak > 0 && M.flow.length === M.costs.months + 13, `cash flow: ${M.flow.length} months, peak ₹${(M.peak / 1e7).toFixed(1)} Cr in, IRR ${M.irr === null ? '–' : (M.irr * 100).toFixed(0) + ' %'}`);

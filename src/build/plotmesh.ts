@@ -3,18 +3,21 @@
 // Flats get floor slabs, window bays with piers, balconies on the long faces and an open stilt on columns; low-rise
 // ones read as houses (warm render, sunshades). Offices are curtain wall with mullions and a canopy at the street.
 // Sheds are clad steel on a concrete dado with a clerestory, roller shutters and a pitched roof. On a slope each
-// building stands on a plinth at its highest ground with the base walling down to the lowest; the paving, drive,
-// lawn, bays and compound wall follow the ground; trees line the margins and fill the open space.
+// building stands on a plinth at its highest ground with the base walling down to the lowest. The ground is the
+// solved map (doc/ground): each layer one surface at its own height, kerbed where it stands above the next, so
+// nothing overlaps or flickers; painted bays with wheel stops, benches along the garden paths, and the planting.
 //
 // Pure geometry: a solved site and a ground height in, vertex-coloured builders (solid and glass) and trees out.
 import earcut from 'earcut';
 import { GeomBuilder, rgbHex } from './geom';
 import { PALETTES } from './buildings';
-import { buildingQuads, driveQuads, type BuildingReport, type SiteReport } from '../doc/site';
+import { ringOf, type BuildingReport, type SiteReport } from '../doc/site';
+import type { MP } from '../doc/ground';
 import type { PlotReport, PlotUse } from '../doc/plot';
 
 type RGB = [number, number, number];
-export interface PlotTree { x: number; z: number; y: number; s: number; h: number; rot: number; tint: number }
+/** a plant: where, its canopy radius s and height factor h, its turn, a tint, and its kind (doc/ground Plant) */
+export interface PlotTree { x: number; z: number; y: number; s: number; h: number; rot: number; tint: number; kind: number }
 export interface PlotModel { solid: GeomBuilder; glass: GeomBuilder; trees: PlotTree[] }
 
 const C = {
@@ -24,6 +27,9 @@ const C = {
   ceiling: rgbHex(0xe9e5dc), glassFlat: rgbHex(0x56697a), glassOffice: rgbHex(0x5f7d93), spandrel: rgbHex(0x37414b),
   mullion: rgbHex(0x2a3038), dado: rgbHex(0xa9a59c), clad: rgbHex(0xd7dbde), rib: rgbHex(0xc3c8cc), shutter: rgbHex(0x6f757c),
   metalRoof: rgbHex(0x9eabb5), dock: rgbHex(0x9a958b), fire: rgbHex(0xe5484d),
+  soil: rgbHex(0x8a7a62), kerb: rgbHex(0xc9c3b6), lotTop: rgbHex(0x5d6168), pavers: rgbHex(0xc4bdb0), path: rgbHex(0xd8c9a8),
+  lawn2: rgbHex(0x86ad60), mulch: rgbHex(0x6a5038), brick: rgbHex(0xa0644a), stop: rgbHex(0xd9d4ca), bench: rgbHex(0x7a5a3c),
+  benchLeg: rgbHex(0x3e4248), yellow: rgbHex(0xe8c547),
 };
 
 function hash01(n: number) {
@@ -39,25 +45,53 @@ export function buildPlotModel(r: PlotReport, d: SiteReport, use: PlotUse, groun
 
   // ---------------- the ground ----------------
   const net = r.net.length >= 6 ? r.net : r.footprint;
-  drapeFine(solid, net, (x, z) => ground(x, z) + 0.08, C.paving);
-  const G = d.ground;
-  if (G.rg) drapeFine(solid, G.rg, (x, z) => ground(x, z) + 0.3, C.lawn);
-  for (const g of G.gardens) drapeFine(solid, g, (x, z) => ground(x, z) + 0.32, C.lawn);
-  for (const q of driveQuads(G)) drapeFine(solid, q, (x, z) => ground(x, z) + 0.3, C.asphalt);
-  // the drive's centre line, dashed
-  for (const L of G.drive) for (let i = 0; i + 3 < L.length; i += 2) {
+  const G = d.ground, M = G.map;
+  // soil under it all, then each layer at its height, kerbed: roads lowest, paving a kerb above, lawn and beds above that
+  drapeFine(solid, net, (x, z) => ground(x, z) + 0.01, C.soil);
+  slab(solid, M.road, 0.06, C.asphalt, C.kerb, ground);
+  slab(solid, M.lot, 0.07, C.lotTop, C.kerb, ground);
+  slab(solid, M.fire, 0.12, C.pavers, C.kerb, ground);
+  slab(solid, M.apron, 0.16, C.paving, C.kerb, ground);
+  slab(solid, M.path, 0.17, C.path, C.kerb, ground);
+  slab(solid, M.green, 0.2, C.lawn2, C.kerb, ground);
+  slab(solid, M.lawn, 0.21, C.lawn, C.kerb, ground);
+  slab(solid, M.bed, 0.34, C.mulch, C.brick, ground);
+  slab(solid, M.island, 0.32, C.lawn, C.kerb, ground);
+  slab(solid, M.lotIsland, 0.3, C.lawn, C.kerb, ground);
+  // the drive's and the roads' centre lines, dashed
+  for (const L of [...G.drive, ...G.roads.map((x) => x.pts)]) for (let i = 0; i + 3 < L.length; i += 2) {
     const ax = L[i], az = L[i + 1], bx = L[i + 2], bz = L[i + 3], len = Math.hypot(bx - ax, bz - az);
     const tx = (bx - ax) / len, tz = (bz - az) / len;
-    for (let s = 1.5; s + 3 < len; s += 7) drapeFine(solid, strip(ax + tx * s, az + tz * s, ax + tx * (s + 3), az + tz * (s + 3), 0.08), (x, z) => ground(x, z) + 0.42, C.paint);
+    for (let s = 1.5; s + 3 < len; s += 7) drapeFine(solid, strip(ax + tx * s, az + tz * s, ax + tx * (s + 3), az + tz * (s + 3), 0.12), (x, z) => ground(x, z) + 0.09, C.paint);
   }
-  // roundabouts: a planted island in the middle
-  for (const [x, z, rad] of G.circles) if (rad > 5) drapeFine(solid, circleAt(x, z, rad - 6.5), (px, pz) => ground(px, pz) + 0.55, C.lawn, 2);
   const surf = d.parking.levels.filter((l) => l.kind === 'surface' || l.kind === 'lot').flatMap((l) => l.bays);
+  // bays: lines down both sides, a wheel stop at the back (a bay's first edge is its back)
+  for (const q of surf) {
+    const [a0, a1, b1, b0] = [[q[0], q[1]], [q[2], q[3]], [q[4], q[5]], [q[6], q[7]]];
+    for (const [p, c] of [[a0, b0], [a1, b1]]) drapeFine(solid, strip(p[0], p[1], c[0], c[1], 0.1), (x, z) => ground(x, z) + 0.1, C.paint, 6);
+    const m = lerp(a0, a1, 0.5), dir = lerp(b0, b1, 0.5), L = Math.hypot(dir[0] - m[0], dir[1] - m[1]) || 1;
+    const sx = m[0] + ((dir[0] - m[0]) / L) * 0.75, sz = m[1] + ((dir[1] - m[1]) / L) * 0.75, g = ground(sx, sz);
+    solid.box(sx, sz, g + 0.07, g + 0.2, 1.7, 0.18, Math.atan2(a1[1] - a0[1], a1[0] - a0[0]), C.stop);
+  }
+  // roundabouts: a yellow-and-black kerb is too much; a white ring line round the island
+  for (const [x, z, rad] of G.circles) if (rad > 8) {
+    const ring = circleAt(x, z, rad - 6.2);
+    for (let i = 0; i < ring.length; i += 2) { const j = (i + 2) % ring.length; drapeFine(solid, strip(ring[i], ring[i + 1], ring[j], ring[j + 1], 0.12), (px, pz) => ground(px, pz) + 0.09, C.paint); }
+  }
+  // benches along the garden paths
+  for (const [x, z, a] of M.benches) {
+    const y = ground(x, z) + 0.21, yaw = a + Math.PI / 2, nx = Math.cos(a), nz = Math.sin(a);
+    solid.box(x, z, y + 0.42, y + 0.48, 1.6, 0.45, yaw, C.bench);
+    solid.box(x - nx * 0.22, z - nz * 0.22, y + 0.5, y + 0.85, 1.6, 0.06, yaw, C.bench);
+    for (const s2 of [-0.65, 0.65]) solid.box(x + Math.cos(yaw) * s2, z + Math.sin(yaw) * s2, y, y + 0.42, 0.06, 0.4, yaw, C.benchLeg);
+  }
   // car parks: open decks on columns, a parapet round each, the stair core at a corner
   for (const e of d.site.elements ?? []) {
     if (e.kind !== 'parking') continue;
     const n = Math.max(1, e.levels ?? 3), lh = 3.0;
-    for (const q of buildingQuads(e)) {
+    const q = ringOf(e);
+    if (q.length < 6) continue;
+    {
       let gMax = -Infinity;
       for (let i = 0; i < q.length; i += 2) gMax = Math.max(gMax, ground(q[i], q[i + 1]));
       const base = gMax + 0.2;
@@ -71,31 +105,15 @@ export function buildPlotModel(r: PlotReport, d: SiteReport, use: PlotUse, groun
         cap(solid, q, y, true, f === n ? C.asphalt : C.bay);
         if (f) cap(solid, q, y - 0.3, false, C.ceiling);
       }
+      // bay lines on the roof deck
+      const roof = d.parking.levels.find((l) => l.kind === 'structure');
+      if (roof) for (const b of roof.bays) if (b.every((v, i) => i % 2 || pointInRing(q, v, b[i + 1]))) {
+        for (const [p, c] of [[[b[0], b[1]], [b[6], b[7]]], [[b[2], b[3]], [b[4], b[5]]]]) drapeFine(solid, strip(p[0], p[1], c[0], c[1], 0.1), () => base + n * lh + 0.02, C.paint, 6);
+      }
       const [a, b] = edges(q)[0];
       const p = lerp(a, b, 0.06), [nx, nz] = outward(q, a, b);
       solid.box(p[0] - nx * 3, p[1] - nz * 3, base, base + n * lh + 3, 5, 5, Math.atan2(b[1] - a[1], b[0] - a[0]), C.wall);
     }
-  }
-  for (const q of surf) {
-    drapeFine(solid, q, (x, z) => ground(x, z) + 0.3, C.paint);
-    drapeFine(solid, insetQuad(q, 0.1), (x, z) => ground(x, z) + 0.4, C.bay);
-  }
-  // the compound wall: following the ground in short lengths, with piers
-  for (const w of G.wall) for (let i = 0; i + 3 < w.length; i += 2) {
-    const ax = w[i], az = w[i + 1], bx = w[i + 2], bz = w[i + 3], len = Math.hypot(bx - ax, bz - az);
-    if (len < 0.05) continue;
-    const k = Math.max(1, Math.ceil(len / 3));
-    for (let s = 0; s < k; s++) {
-      const x0 = ax + ((bx - ax) * s) / k, z0 = az + ((bz - az) * s) / k, x1 = ax + ((bx - ax) * (s + 1)) / k, z1 = az + ((bz - az) * (s + 1)) / k;
-      const g0 = ground(x0, z0), g1 = ground(x1, z1);
-      wallSlab(solid, x0, z0, x1, z1, g0 - 0.4, g1 - 0.4, g0 + 1.8, g1 + 1.8, 0.2, C.wall, C.coping);
-      solid.box(x0, z0, g0 - 0.4, g0 + 2.0, 0.36, 0.36, Math.atan2(z1 - z0, x1 - x0), C.coping);
-    }
-    solid.box(bx, bz, ground(bx, bz) - 0.4, ground(bx, bz) + 2.0, 0.36, 0.36, Math.atan2(bz - az, bx - ax), C.coping);
-  }
-  for (const g of G.gates) for (const [x, z] of [[g[0], g[1]], [g[2], g[3]]]) {
-    const y = ground(x, z);
-    solid.box(x, z, y - 0.4, y + 2.4, 0.6, 0.6, Math.atan2(g[3] - g[1], g[2] - g[0]), C.post);
   }
   // a blocked fire tender's way stays marked
   for (const b of d.buildings) if (!b.fireOk) for (const q of b.fire) drapeFine(solid, q, (x, z) => ground(x, z) + 0.45, C.fire);
@@ -205,46 +223,11 @@ export function buildPlotModel(r: PlotReport, d: SiteReport, use: PlotUse, groun
     cap(solid, P, y0 + podium * fh, true, C.roof);
   }
 
-  // ---------------- trees ----------------
-  const keep: number[][] = [...d.buildings.flatMap((b) => b.quads.map((q) => outset(q, 2.5))), ...driveQuads(G).map((q) => outset(q, 1)), ...surf.map((q) => outset(q, 0.8)), ...d.buildings.flatMap((b) => b.fire), ...(d.site.elements ?? []).filter((e) => e.kind === 'parking').flatMap((e) => buildingQuads(e).map((q) => outset(q, 2)))];
-  const near = (x: number, z: number) => G.gates.some((g) => Math.hypot(x - (g[0] + g[2]) / 2, z - (g[1] + g[3]) / 2) < 6);
-  const free = (x: number, z: number) => inPoly(x, z, net) && !keep.some((q) => inPoly(x, z, q)) && !near(x, z) && trees.every((t) => Math.hypot(t.x - x, t.z - z) > 5);
-  const [ncx, ncz] = centroid(net);
-  let seed = hashStr(d.site.buildings.map((b) => b.id).join()) + 1;
-  const rand = () => hash01(seed++);
-  const put = (x: number, z: number, big = 1) => {
-    const s = (3.4 + rand() * 2.4) * big;
-    trees.push({ x, z, y: ground(x, z) - 0.2, s, h: s * (1.1 + rand() * 0.4), rot: rand() * 6.283, tint: rand() });
-  };
-  // along the wall, just inside
-  for (const w of G.wall) for (let i = 0; i + 3 < w.length; i += 2) {
-    const ax = w[i], az = w[i + 1], bx = w[i + 2], bz = w[i + 3], len = Math.hypot(bx - ax, bz - az);
-    if (len < 3) continue;
-    let nx = -(bz - az) / len, nz = (bx - ax) / len;
-    if (nx * (ncx - ax) + nz * (ncz - az) < 0) { nx = -nx; nz = -nz; }
-    for (let s = 3; s < len - 2; s += 7) {
-      const x = ax + ((bx - ax) * s) / len + nx * 2.2, z = az + ((bz - az) * s) / len + nz * 2.2;
-      if (free(x, z)) put(x, z);
-    }
-  }
-  // the gardens and the roundabouts' islands, planted
-  for (const g of G.gardens) {
-    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
-    for (let i = 0; i < g.length; i += 2) { x0 = Math.min(x0, g[i]); x1 = Math.max(x1, g[i]); z0 = Math.min(z0, g[i + 1]); z1 = Math.max(z1, g[i + 1]); }
-    for (let x = x0 + 3; x < x1 - 1; x += 7) for (let z = z0 + 3; z < z1 - 1; z += 7) {
-      const jx = x + (rand() - 0.5) * 3, jz = z + (rand() - 0.5) * 3;
-      if (inPoly(jx, jz, g) && rand() < 0.55 && free(jx, jz)) put(jx, jz);
-    }
-  }
-  for (const [x, z, rad] of G.circles) if (rad > 6) put(x, z, 1.2);
-  // the open space, planted
-  if (G.rg) {
-    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
-    for (let i = 0; i < G.rg.length; i += 2) { x0 = Math.min(x0, G.rg[i]); x1 = Math.max(x1, G.rg[i]); z0 = Math.min(z0, G.rg[i + 1]); z1 = Math.max(z1, G.rg[i + 1]); }
-    for (let x = x0 + 4; x < x1 - 2; x += 9) for (let z = z0 + 4; z < z1 - 2; z += 9) {
-      const jx = x + (rand() - 0.5) * 4, jz = z + (rand() - 0.5) * 4;
-      if (inPoly(jx, jz, G.rg) && rand() < 0.6 && free(jx, jz)) put(jx, jz, 1.15);
-    }
+  // ---------------- planting ----------------
+  const seed = (x: number, z: number) => hash01(Math.round(x * 13.7) * 92821 + Math.round(z * 7.3));
+  for (const p of M.plants) {
+    const t = seed(p.x, p.z);
+    trees.push({ x: p.x, z: p.z, y: ground(p.x, p.z) + (p.kind === 4 ? 0.2 : 0.1), s: p.r, h: p.r * (0.9 + t * 0.25), rot: t * 6.283, tint: seed(p.z, p.x), kind: p.kind });
   }
   return { solid, glass, trees };
 }
@@ -362,12 +345,45 @@ function norm(ax: number, az: number, bx: number, bz: number, cw: number) {
   const L = Math.hypot(bx - ax, bz - az) || 1;
   return [((bz - az) / L) * -cw, ((bx - ax) / L) * cw];
 }
+/** the normal out of ring P across its edge a→c (taken in the ring's order) */
 function outward(P: number[], a: number[], c: number[]) {
-  const L = Math.hypot(c[0] - a[0], c[1] - a[1]) || 1;
-  let nx = (c[1] - a[1]) / L, nz = -(c[0] - a[0]) / L;
-  const [cx, cz] = centroid(P), mx = (a[0] + c[0]) / 2, mz = (a[1] + c[1]) / 2;
-  if (nx * (mx - cx) + nz * (mz - cz) < 0) { nx = -nx; nz = -nz; }
-  return [nx, nz];
+  const L = Math.hypot(c[0] - a[0], c[1] - a[1]) || 1, k = signed(P) > 0 ? 1 : -1;
+  return [((c[1] - a[1]) / L) * k, (-(c[0] - a[0]) / L) * k];
+}
+function pointInRing(r: number[], x: number, z: number) { return inPoly(x, z, r); }
+
+/** A layer of the ground: its top `h` over the ground, and its edges walled down below the ground (a kerb where it
+ *  stands above its neighbour; hidden under one higher). */
+function slab(gb: GeomBuilder, m: MP, h: number, top: RGB, side: RGB, ground: (x: number, z: number) => number) {
+  for (const poly of m) {
+    const rings = poly.map((r) => { const o: number[] = []; for (let i = 0; i < r.length - 1; i++) o.push(r[i][0], r[i][1]); return o; });
+    if (rings[0].length < 6) continue;
+    drapeHoles(gb, rings, (x, z) => ground(x, z) + h, top);
+    rings.forEach((r, ri) => {
+      // out of the solid: away from the outline's inside, into a hole
+      const k = (signed(r) > 0) === (ri === 0) ? 1 : -1, n = r.length / 2;
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n, ax = r[i * 2], az = r[i * 2 + 1], bx = r[j * 2], bz = r[j * 2 + 1], L = Math.hypot(bx - ax, bz - az);
+        if (L < 0.02) continue;
+        const nx = ((bz - az) / L) * k, nz = (-(bx - ax) / L) * k, steps = Math.max(1, Math.ceil(L / 3));
+        for (let s = 0; s < steps; s++) {
+          const x0 = ax + ((bx - ax) * s) / steps, z0 = az + ((bz - az) * s) / steps, x1 = ax + ((bx - ax) * (s + 1)) / steps, z1 = az + ((bz - az) * (s + 1)) / steps;
+          const g0 = ground(x0, z0), g1 = ground(x1, z1);
+          quadV(gb, x0, z0, x1, z1, g0 - 0.25, g1 - 0.25, g0 + h, g1 + h, nx, nz, side);
+        }
+      }
+    });
+  }
+}
+/** a polygon with holes laid on the ground (as drapeFine) */
+function drapeHoles(gb: GeomBuilder, rings: number[][], h: (x: number, z: number) => number, rgb: RGB, step = 4) {
+  const flat: number[] = [], holes: number[] = [];
+  rings.forEach((r, i) => { if (i) holes.push(flat.length / 2); flat.push(...r); });
+  const tris = earcut(flat, holes.length ? holes : undefined);
+  for (let k = 0; k < tris.length; k += 3) {
+    const tri = [tris[k], tris[k + 1], tris[k + 2]].flatMap((t) => [flat[t * 2], flat[t * 2 + 1]]);
+    drapeFine(gb, tri, h, rgb, step);
+  }
 }
 
 /** A vertical face on a→c of ring P, facing out of it, `off` proud of the edge. */

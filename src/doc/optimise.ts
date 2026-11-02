@@ -72,6 +72,20 @@ export interface Scheme {
 
 /** The best layouts on a plot: the overall best first, then the best of the other type. */
 export function schemes(r: PlotReport, design: Design, use: PlotUse, under = 1, site?: PlotSite): Scheme[] {
+  // (pure, and slow: kept for the same plot, settings and fixed elements, so reshaping the buildings by hand doesn't
+  // plan the whole site again on every move)
+  const fixedEls = (site?.elements ?? []).filter((e) => !e.auto && (e.kind === 'parking' || e.kind === 'road' || e.kind === 'roundabout')).map((e) => [e.kind, e.spine, e.ring, e.depth]);
+  const key = JSON.stringify([r.net, r.edges, r.bua, r.area, r.rules, r.code, r.parts, design, use, under, fixedEls]);
+  const hit = SCHEMES.get(key);
+  if (hit) return hit;
+  const out = schemesOf(r, design, use, under, site);
+  SCHEMES.set(key, out);
+  if (SCHEMES.size > 24) SCHEMES.delete(SCHEMES.keys().next().value!);
+  return out;
+}
+const SCHEMES = new Map<string, Scheme[]>();
+
+function schemesOf(r: PlotReport, design: Design, use: PlotUse, under: number, site?: PlotSite): Scheme[] {
   const R = r.rules, fh = R.floorH, S = SHAPES[use];
   if (r.net.length < 6 || r.bua <= 0) return [];
   const F = roadFrame(r);

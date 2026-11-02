@@ -1079,8 +1079,22 @@ export class Editor {
   }
   /** the plots in 3D: the one open in the studio realistic (unless its flats are asked for) */
   rebuildPlots() {
-    this.world.buildPlots(this.doc.all('plot').map((o) => ({ o, r: this.plot.report(o.id), d: this.plot.layout(o.id) })), studioLook.value, studio.value);
+    // once a frame at most, and while edits keep coming (a drag), spaced by what the last rebuild cost: the 3D trails
+    // the plan a little rather than holding every frame up; the last state is always built
+    if (this.plotsRaf) return;
+    const go = () => {
+      if (performance.now() - this.plotsAt < this.plotsCost * 1.5) { this.plotsRaf = requestAnimationFrame(go); return; }
+      this.plotsRaf = 0;
+      const t = performance.now();
+      this.world.buildPlots(this.doc.all('plot').map((o) => ({ o, r: this.plot.report(o.id), d: this.plot.layout(o.id) })), studioLook.value, studio.value);
+      this.plotsAt = performance.now();
+      this.plotsCost = this.plotsAt - t;
+    };
+    this.plotsRaf = requestAnimationFrame(go);
   }
+  private plotsRaf = 0;
+  private plotsAt = 0;
+  private plotsCost = 0;
 
   /** the terrain view was switched on by the terrain tool (and goes off with it) */
   private terrainViewByTool = false;

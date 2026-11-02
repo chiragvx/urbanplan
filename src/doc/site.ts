@@ -7,6 +7,7 @@
 //
 // Pure: a site and a plot report in, numbers and rings (tile metres x,z) out.
 import { clipHalf, inset, polyArea, sideMargin, type PlotCode, type PlotReport, type PlotUse } from './plot';
+import { anglesFor, area as mpArea, fromFlat, fromFlats, inter, layBays, layGround, NO_GROUND, outlines, shrink, union, type GroundMap } from './ground';
 
 /** flat types: 1, 2 and 3 BHK; commercial floors are one office per stretch of corridor */
 export type UnitType = 0 | 1 | 2 | 3;
@@ -40,11 +41,14 @@ export interface SiteBuilding {
   floors: number;
 }
 
-/** Things on the site besides the buildings, shaped like one (a spine and a width): a parking building, a surface
- *  lot and a garden (both laid out on what the buildings leave of them), an internal road, a roundabout. */
+/** Things on the site besides the buildings: a parking building, a surface lot and a garden are areas (a ring, drawn
+ *  or dragged out; the lot and the garden laid out on what the roads and buildings leave of them); an internal road
+ *  is a centre line and a width, a roundabout a point and a width. */
 export type ElementKind = 'parking' | 'lot' | 'garden' | 'road' | 'roundabout';
 export interface SiteElement extends SiteBuilding {
   kind: ElementKind;
+  /** an area's outline (x,z,…); older ones were a spine and a depth, read as the strip along it */
+  ring?: number[];
   /** a parking building's levels */
   levels?: number;
   /** laid by the optimiser (its roads); replaced when it plans again */
@@ -64,8 +68,32 @@ export function circleRing(e: SiteBuilding, sides = 20): number[] {
   return out;
 }
 function spineCentreOf(sp: number[]): [number, number] { let x = 0, z = 0; const n = sp.length / 2; for (let i = 0; i < sp.length; i += 2) { x += sp[i]; z += sp[i + 1]; } return [x / n, z / n]; }
-/** an element's ground: quads along its spine (a circle for a roundabout) */
-export function elementRings(e: SiteElement): number[][] { return e.kind === 'roundabout' ? [circleRing(e)] : buildingQuads(e); }
+export const isArea = (e: { kind: ElementKind }) => e.kind === 'parking' || e.kind === 'lot' || e.kind === 'garden';
+/** an area's outline: as drawn, or the strip along its spine */
+export function ringOf(e: SiteElement): number[] {
+  if (e.ring && e.ring.length >= 6) return e.ring;
+  if (e.spine.length < 4) return [];
+  const qs = buildingQuads(e);
+  if (qs.length === 1) return qs[0];
+  const m = union(...qs.map(fromFlat));
+  let best: number[] = [], a = 0;
+  for (const r of outlines(m)) { const x = Math.abs(polyArea(r)); if (x > a) { a = x; best = r; } }
+  return best;
+}
+/** an element's ground: its outline (a circle for a roundabout, quads along a road) */
+export function elementRings(e: SiteElement): number[][] {
+  if (e.kind === 'roundabout') return e.spine.length >= 4 ? [circleRing(e)] : [];
+  if (isArea(e)) { const r = ringOf(e); return r.length >= 6 ? [r] : []; }
+  return buildingQuads(e);
+}
+/** the middle of an element (where its label goes, what it turns about) */
+export function elementCentre(e: SiteElement): [number, number] {
+  if (!isArea(e)) return spineCentreOf(e.spine);
+  const r = ringOf(e);
+  let x = 0, z = 0, a = 0;
+  for (let i = 0; i < r.length; i += 2) { const j = (i + 2) % r.length, c = r[i] * r[j + 1] - r[j] * r[i + 1]; a += c; x += (r[i] + r[j]) * c; z += (r[i + 1] + r[j + 1]) * c; }
+  return Math.abs(a) > 1e-6 ? [x / (3 * a), z / (3 * a)] : spineCentreOf(r);
+}
 
 export interface PlotSite {
   buildings: SiteBuilding[];
@@ -120,7 +148,12 @@ export const CARPET = 0.8;
 export const SQFT = 10.7639;
 /** fire escape travel distance to a staircase, residential (NBC 2016 Part 4, Table 22): cores at most twice this apart */
 export const TRAVEL = 30;
-const CORRIDOR = 2, BAY_W = 2.5, BAY_L = 5, AISLE = 6, RAMP = 4;
+const CORRIDOR = 2, BAY_W = 2.5, BAY_L = 5, AISLE = 6;
+/** decks reached by ramp (basements, podiums): a column (0.6 m) after every three bays, 0.6 m clear of the retaining
+ *  wall, a two-way ramp 6 m wide at 1 in 8 with 3 m level landings each end (a car lift on a deck too short for it), and an exit stair (4 × 6 m) wherever a
+ *  car is more than 45 m from one (or a building's core coming down through the deck); two ways out from a deck over
+ *  500 m² */
+const COL = 0.6, WALL_CLEAR = 0.6, RAMP_W = 6, RAMP_SLOPE = 8, EXIT_TRAVEL = 45, STAIR: [number, number] = [4, 6];
 /** a core (lifts, stairs, lobby) along the corridor: one stair, or two above 15 m (NBC 2016 Part 4, 4.4.2.4) */
 const coreLength = (height: number) => (height > 15 ? 8 : 6);
 /** buildings above this need a clear motorable way round them for a fire tender, this wide (NBC 2016 Part 4) */
@@ -131,7 +164,11 @@ export const FIRE_H = 15, FIRE_W = 6;
 export const RG_FROM = 4000, RG_SHARE = 0.1;
 
 export interface Unit { t: UnitType; ring: number[]; carpet: number }
-export interface Level { kind: 'stilt' | 'podium' | 'basement' | 'surface' | 'structure' | 'lot'; bays: number[][]; ramp: number[] | null; area: number }
+export interface Level {
+  kind: 'stilt' | 'podium' | 'basement' | 'surface' | 'structure' | 'lot'; bays: number[][]; ramp: number[] | null; area: number;
+  /** a deck's columns, and its exit stairs and the cores coming down through it */
+  columns?: number[][]; stairs?: number[][];
+}
 
 export interface BuildingReport {
   b: SiteBuilding;
@@ -189,12 +226,17 @@ export interface SiteReport {
 }
 
 export interface Ground {
+  /** the ground as one map: roads, lots, gardens, paving and planting, each square metre one of them */
+  map: GroundMap;
   wall: number[][]; gates: number[][]; drive: number[][]; driveW: number; rg: number[] | null;
   /** internal roads (centre line and width) and roundabouts (x, z, radius) */
   roads: { pts: number[]; w: number }[]; circles: number[][];
   /** gardens, as the buildings leave them */
   gardens: number[][];
 }
+
+/** a seed for the planting that stays put while the site is reshaped */
+const hashIds = (s: PlotSite) => { let h = 7; for (const b of [...s.buildings, ...(s.elements ?? [])]) for (let i = 0; i < b.id.length; i++) h = (h * 31 + b.id.charCodeAt(i)) >>> 0; return h; };
 
 let seq = 0;
 export const newBuildingId = () => `b${Date.now().toString(36)}${(seq++).toString(36)}`;
@@ -333,9 +375,10 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
     if (B[i].quads.some((a) => B[j].quads.some((c) => convexOverlap(a, c)))) B[i].overlap = B[j].overlap = true;
   }
   // (and into a parking building, a road or a roundabout: lots and gardens give way)
-  const els = (site.elements ?? []).filter((e) => e.spine.length >= 4);
-  const solid = els.filter((e) => e.kind === 'parking' || e.kind === 'road' || e.kind === 'roundabout').flatMap(elementRings);
-  for (const x of B) if (x.quads.some((a) => solid.some((c) => convexOverlap(a, c)))) x.overlap = true;
+  const els = (site.elements ?? []).filter((e) => elementRings(e).length > 0);
+  const solid = els.filter((e) => e.kind === 'road' || e.kind === 'roundabout').flatMap(elementRings);
+  const decks = els.filter((e) => e.kind === 'parking').map(ringOf);
+  for (const x of B) if (x.quads.some((a) => solid.some((c) => convexOverlap(a, c)) || decks.some((c) => mpArea(inter(fromFlat(a), fromFlat(c))) > 0.5))) x.overlap = true;
   // floors: as asked, then the rest of the FSI shared out a floor at a time, lowest building first
   let used = 0;
   for (const x of B) if (x.b.floors > 0) { x.floors = x.b.floors; used += x.floors * x.plate; }
@@ -383,7 +426,20 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
   cars = Math.ceil(cars * 1.05); scooters = Math.ceil(scooters * 1.05);
   trucks = Math.ceil(trucks);
   const need = cars + Math.ceil(scooters / 4) + trucks * 3;
-  const ground = groundOf(r, site, height > FIRE_H), paved = driveQuads(ground);
+  const ground = groundOf(r, site, height > FIRE_H);
+  // the ground laid out: what's left of each lot and garden, bays packed into the lots (and, asked for, the open
+  // ground), the rest paved and planted
+  const lots = els.filter((e) => e.kind === 'lot'), F0 = roadFrame(r);
+  const laid = layGround({
+    net: r.net, wall: ground.wall, gates: ground.gates,
+    lines: [...ground.drive.map((pts) => ({ pts, w: ground.driveW })), ...ground.roads], circles: ground.circles,
+    build: buildings.flatMap((b) => b.quads), structures: decks, fire: buildings.filter((b) => b.fireOk).flatMap((b) => b.fire),
+    lots: lots.map(ringOf), gardens: [...(site.rg ? [site.rg] : []), ...els.filter((e) => e.kind === 'garden').map(ringOf)],
+    surface: site.surface && buildings.length && r.net.length >= 6 ? inset(r.net, r.edges.map(() => false), 0, 1.5) : null,
+    axis: [F0.ux, F0.uz], seed: hashIds(site),
+  });
+  ground.map = laid.map;
+  ground.gardens = outlines(union(laid.map.lawn, laid.map.bed, laid.map.path));
   const levels: Level[] = [];
   if (buildings.length) {
     if (site.stilt) {
@@ -395,38 +451,35 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
     // podium levels under the buildings (not the whole envelope: that's a car park the size of the plot)
     for (let k = 0; k < site.podium; k++) {
       const lv: Level = { kind: 'podium', bays: [], ramp: null, area: 0 };
-      for (const b of buildings) for (const q of b.quads) { const l = levelIn('podium', q, F); lv.bays.push(...l.bays); lv.ramp ??= l.ramp; lv.area += l.area; }
+      const cores = buildings.flatMap((b) => b.cores);
+      lv.columns = []; lv.stairs = [];
+      for (const b of buildings) for (const q of b.quads) {
+        const l = levelIn('podium', q, F, { floorH: fh, cores, ramp: !lv.ramp });
+        lv.bays.push(...l.bays); lv.ramp ??= l.ramp; lv.area += l.area; lv.columns.push(...(l.columns ?? [])); lv.stairs.push(...(l.stairs ?? []));
+      }
       levels.push(lv);
     }
     const base = r.net.length >= 6 ? inset(r.net, r.edges.map(() => false), 0, 1.5) : [];
-    for (let k = 0; k < site.basements; k++) levels.push(levelIn('basement', base, F));
-    if (site.surface) {
-      // bays on the open ground: clear of the buildings, the fire tender's way round the tall ones, the drive and
-      // the open space
-      const s = levelIn('surface', base, F), keep = [...buildings.flatMap((b) => [...b.quads, ...b.fire]), ...paved, ...(ground.rg ? [ground.rg] : [])];
-      s.bays = s.bays.filter((q) => !keep.some((k) => convexOverlap(q, k)));
-      s.ramp = null; s.area = s.bays.length * BAY_W * BAY_L;
-      levels.push(s);
+    const cores = buildings.flatMap((b) => b.cores);
+    for (let k = 0; k < site.basements; k++) levels.push(levelIn('basement', base, F, { floorH: Math.max(3, fh), cores, ramp: true }));
+    if (laid.surfaceBays) {
+      // bays on the open ground: clear of the buildings, the fire tender's way round the tall ones, the roads, the
+      // lots and gardens
+      const b = laid.surfaceBays.bays;
+      levels.push({ kind: 'surface', bays: b, ramp: null, area: b.length * BAY_W * BAY_L });
     }
   }
-  // parking buildings, level on level; lots, on what the buildings leave of them
+  // parking buildings, level on level (the ramps take a corner of each); lots, as they're left
   for (const e of els) {
-    if (e.kind === 'parking') for (let k = 0; k < Math.max(1, e.levels ?? 3); k++) {
-      const lv: Level = { kind: 'structure', bays: [], ramp: null, area: 0 };
-      for (const q of buildingQuads(e)) { const l = levelIn('structure', q, frameAlong(e)); lv.bays.push(...l.bays); lv.ramp ??= l.ramp; lv.area += l.area; }
-      levels.push(lv);
-    }
-    if (e.kind === 'lot') {
-      const keep = [...buildings.flatMap((b) => [...b.quads, ...b.fire]), ...paved, ...solid];
-      const lv: Level = { kind: 'lot', bays: [], ramp: null, area: 0 };
-      for (const q of buildingQuads(e)) for (const b of baysIn(frameAlong(e).toL(q), false)) {
-        const w = frameAlong(e).toW2(b);
-        if (!keep.some((k) => convexOverlap(w, k))) lv.bays.push(w);
-      }
-      lv.area = lv.bays.length * BAY_W * BAY_L;
-      levels.push(lv);
+    if (e.kind !== 'parking') continue;
+    const P = fromFlat(ringOf(e)), lay = layBays(shrink(P, 0.6), anglesFor(P, [F0.ux, F0.uz]), false);
+    for (let k = 0; k < Math.max(1, e.levels ?? 3); k++) {
+      const ramp = lay.bays.length > 8 ? lay.bays.slice(0, 2) : [];
+      const rq = ramp.length ? [ramp[0][0], ramp[0][1], ramp[1][2], ramp[1][3], ramp[1][4], ramp[1][5], ramp[0][6], ramp[0][7]] : null;
+      levels.push({ kind: 'structure', bays: lay.bays.slice(ramp.length), ramp: rq, area: mpArea(P) });
     }
   }
+  laid.lotBays.forEach((l) => levels.push({ kind: 'lot', bays: l.bays, ramp: null, area: l.bays.length * BAY_W * BAY_L }));
   const have = levels.reduce((s, l) => s + l.bays.length, 0);
 
   // money: land, the FSI bought (premium, TDR, ancillary, in that order of need), building, parking, soft costs
@@ -450,13 +503,10 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
   const revenue = carpet * SQFT * rate.sale;
   const cash = cashflow(m.land + m.premium + m.tdr + m.ancillary, m.build + m.parking + m.soft, revenue, rate);
 
-  // open ground: the net plot less the buildings and the surface bays
-  const surf = levels.filter((l) => l.kind === 'surface' || l.kind === 'lot').flatMap((l) => l.bays);
-  const openHave = openGround(r.net, [...buildings.flatMap((b) => b.quads), ...surf, ...paved]);
+  // open ground: the net plot less the buildings, the roads and the lots; green: the gardens as they're left
+  const openHave = laid.map.openArea;
   const openNeed = r.area >= RG_FROM && use === 'residential' ? r.area * RG_SHARE : 0;
-  // green: the open space kept and the gardens (less what's built on them)
-  const green = (ground.rg ? polyArea(ground.rg) : 0) + ground.gardens.reduce((a, g) => a + polyArea(g), 0)
-    - buildings.reduce((a, b) => a + b.quads.reduce((t, q) => t + ground.gardens.reduce((u, g) => u + overlapArea(q, g), 0), 0), 0);
+  const green = laid.map.gardenArea;
 
   return {
     site, buildings, under, envelope: envAt(height || fh), height, count, flats, carpet, bua,
@@ -613,8 +663,8 @@ function groundOf(r: PlotReport, site: PlotSite, tall: boolean): Ground {
   const els = site.elements ?? [];
   const roads = els.filter((e) => e.kind === 'road' && e.spine.length >= 4).map((e) => ({ pts: e.spine, w: e.depth }));
   const circles = els.filter((e) => e.kind === 'roundabout' && e.spine.length >= 4).map((e) => [...spineCentreOf(e.spine), e.depth / 2]);
-  const gardens = els.filter((e) => e.kind === 'garden').flatMap((e) => buildingQuads(e));
-  const empty: Ground = { wall: [], gates: [], drive: [], driveW: FIRE_W, rg: site.rg ?? null, roads, circles, gardens };
+  const gardens: number[][] = [];
+  const empty: Ground = { map: NO_GROUND, wall: [], gates: [], drive: [], driveW: FIRE_W, rg: site.rg ?? null, roads, circles, gardens };
   if (n < 3 || (!site.buildings.length && !els.length)) return empty;
   const access = site.design?.access ?? 'perimeter';
   const sgn = signedArea(N) > 0 ? 1 : -1;
@@ -680,7 +730,7 @@ function groundOf(r: PlotReport, site: PlotSite, tall: boolean): Ground {
     for (const x of g) { if (x.s0 - s > 0.2) wall.push([...at(k, s), ...at(k, x.s0)]); s = x.s1; }
     if (len(k) - s > 0.2) wall.push([...at(k, s), ...at(k, len(k))]);
   }
-  return { wall, gates: gates.map((x) => [...at(x.k, x.s0), ...at(x.k, x.s1)]), drive, driveW: FIRE_W, rg: site.rg ?? null, roads, circles, gardens };
+  return { map: NO_GROUND, wall, gates: gates.map((x) => [...at(x.k, x.s0), ...at(x.k, x.s1)]), drive, driveW: FIRE_W, rg: site.rg ?? null, roads, circles, gardens };
 }
 
 /** The drive and the internal roads as a quad per stretch (their width either side of the centre line), and the
@@ -800,39 +850,88 @@ function stiltBays(b: BuildingReport): number[][] {
   return out;
 }
 
-/** A podium or basement level: bays over an area, in the road's frame. */
-function levelIn(kind: Level['kind'], ring: number[], F: ReturnType<typeof roadFrame>): Level {
+/** A podium or basement level: bays over an area, in the road's frame, round its columns, its ramp, its exit
+ *  stairs and the cores of the buildings coming down through it. */
+function levelIn(kind: Level['kind'], ring: number[], F: ReturnType<typeof roadFrame>, deck?: { floorH: number; cores: number[][]; ramp: boolean }): Level {
   if (ring.length < 6) return { kind, bays: [], ramp: null, area: 0 };
-  const P = F.toL(ring);
-  const bays = baysIn(P, true), ramp = bays.ramp;
   const toW = (q: number[]) => { const o: number[] = []; for (let i = 0; i < q.length; i += 2) o.push(...F.toW(q[i], q[i + 1])); return o; };
-  return { kind, bays: bays.filter((b) => !ramp || !convexOverlap(b, ramp)).map(toW), ramp: ramp ? toW(ramp) : null, area: polyArea(ring) };
+  if (!deck) {
+    const P = F.toL(ring), bays = baysIn(P, false);
+    return { kind, bays: bays.map(toW), ramp: null, area: polyArea(ring) };
+  }
+  // clear of the retaining wall
+  const P = F.toL(inset(ring, ring.map(() => false).filter((_, i) => i % 2 === 0), 0, WALL_CLEAR));
+  if (P.length < 6) return { kind, bays: [], ramp: null, area: polyArea(ring) };
+  const rampLen = deck.ramp ? deck.floorH * RAMP_SLOPE + 6 : 0;
+  const bays = baysIn(P, deck.ramp, { columns: true, rampLen });
+  const ramp = bays.ramp ? toW(bays.ramp) : null;
+  // exit stairs: the cores coming down count; then one wherever a bay is too far from any, two ways out at least
+  const coresIn = deck.cores.filter((c) => { for (let i = 0; i < c.length; i += 2) if (pointIn(ring, c[i], c[i + 1])) return true; return false; });
+  const exits: number[][] = coresIn.map((c) => { let x = 0, z = 0; for (let i = 0; i < c.length; i += 2) { x += c[i]; z += c[i + 1]; } return [(x * 2) / c.length, (z * 2) / c.length]; });
+  const stairs: number[][] = [];
+  const centres = bays.filter((q) => !ramp || !convexOverlap(q, bays.ramp!)).map((q) => [(q[0] + q[4]) / 2, (q[1] + q[5]) / 2]);
+  const ex = exits.map((e) => F.toL(e));
+  for (let k = 0; k < 12; k++) {
+    // the bay farthest from a way out: a stair there while it's past the travel distance, or there are fewer than two
+    let i = -1, bd = -1;
+    centres.forEach(([u, v], j) => { const d = Math.min(Infinity, ...ex.map(([eu, ev]) => Math.hypot(eu - u, ev - v))); if (d > bd) { bd = d; i = j; } });
+    if (i < 0 || (ex.length >= (polyArea(ring) > 500 ? 2 : 1) && bd <= EXIT_TRAVEL)) break;
+    const [u, v] = centres[i], [a, b] = STAIR;
+    stairs.push(toW([u - a / 2, v - b / 2, u + a / 2, v - b / 2, u + a / 2, v + b / 2, u - a / 2, v + b / 2]));
+    ex.push([u, v]);
+  }
+  const blocked = [...stairs, ...coresIn, ...(ramp ? [ramp] : [])];
+  return {
+    kind, bays: bays.map(toW).filter((q) => !blocked.some((c) => convexOverlap(q, c))), ramp, area: polyArea(ring),
+    columns: (bays.columns ?? []).map(toW), stairs: [...coresIn, ...stairs],
+  };
 }
 
 /** Car bays (2.5 × 5 m, 90°, 6 m aisles) in a convex area: rows of bays both sides of an aisle, module after
- *  module. Levels reached by ramp (podiums, basements) keep a cross aisle along one end joining the aisles, with
- *  the ramp off it. */
-function baysIn(P: number[], withRamp: boolean): number[][] & { ramp?: number[] } {
-  const out: number[][] & { ramp?: number[] } = [];
+ *  module. With columns, the bays go in threes with a column between. Levels reached by ramp keep a cross aisle
+ *  along one end joining the aisles, the ramp off it along the first row. */
+function baysIn(P: number[], withRamp: boolean, o: { columns?: boolean; rampLen?: number } = {}): number[][] & { ramp?: number[]; columns?: number[][] } {
+  const out: number[][] & { ramp?: number[]; columns?: number[][] } = [];
   if (P.length < 6) return out;
   let V0 = Infinity, V1 = -Infinity;
   for (let i = 1; i < P.length; i += 2) { V0 = Math.min(V0, P[i]); V1 = Math.max(V1, P[i]); }
-  const cross = withRamp ? AISLE : 0;
+  const cross = withRamp ? AISLE : 0, cols: number[][] = [];
   const row = (v0: number) => {
     const s = spanU(P, v0, v0 + BAY_L);
     if (!s) return;
-    const n = Math.floor((s[1] - cross - s[0]) / BAY_W + 1e-6);
-    for (let k = 0; k < n; k++) { const u = s[0] + k * BAY_W; out.push([u, v0, u + BAY_W, v0, u + BAY_W, v0 + BAY_L, u, v0 + BAY_L]); }
+    let u = s[0];
+    for (let k = 0; ; k++) {
+      // a column after every third bay
+      if (o.columns && k > 0 && k % 3 === 0) {
+        if (u + COL > s[1] - cross) break;
+        const c = u + COL / 2;
+        for (const cv of [v0 + COL / 2, v0 + BAY_L - COL / 2]) cols.push([c - COL / 2, cv - COL / 2, c + COL / 2, cv - COL / 2, c + COL / 2, cv + COL / 2, c - COL / 2, cv + COL / 2]);
+        u += COL;
+      }
+      if (u + BAY_W > s[1] - cross + 1e-6) break;
+      out.push([u, v0, u + BAY_W, v0, u + BAY_W, v0 + BAY_L, u, v0 + BAY_L]);
+      u += BAY_W;
+    }
   };
   for (let v = V0; v + BAY_L + AISLE <= V1 + 1e-6; v += 2 * BAY_L + AISLE) {
     row(v);
     if (v + 2 * BAY_L + AISLE <= V1 + 1e-6) row(v + BAY_L + AISLE);
     if (v === V0 && withRamp) {
-      // the ramp: beside the cross aisle, in place of the first bays at that end
+      // the ramp: along the first row from the cross aisle, as long as the slope needs (or as the row allows)
       const s = spanU(P, v, v + BAY_L);
-      if (s) out.ramp = [s[1] - cross - RAMP, v, s[1] - cross, v, s[1] - cross, v + BAY_L, s[1] - cross - RAMP, v + BAY_L];
+      if (s) {
+        // (a deck too short for the ramp and a few bays besides gets a car lift instead)
+        const room = s[1] - cross - s[0], lift = !!o.rampLen && room < o.rampLen + 4 * BAY_W;
+        const L = lift ? 3.5 : Math.min(o.rampLen || 4, room), w = lift ? BAY_L + 1 : o.rampLen ? Math.min(RAMP_W, BAY_L + 1) : BAY_L;
+        out.ramp = [s[1] - cross - L, v, s[1] - cross, v, s[1] - cross, v + w, s[1] - cross - L, v + w];
+      }
     }
   }
+  if (out.ramp) {
+    const r = out.ramp;
+    for (let i = out.length - 1; i >= 0; i--) if (convexOverlap(out[i], r)) out.splice(i, 1);
+  }
+  out.columns = cols;
   return out;
 }
 

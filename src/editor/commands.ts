@@ -10,6 +10,7 @@ import {
 import { MODE_LABEL } from './roadtool';
 import { stepTile, revealAsset } from '../ui/BuildPalette';
 import { getAsset } from '../assets';
+import { tourHere } from '../ui/tour';
 import { TERRAIN_OPS } from './terraintool';
 import { SURVEY_LABEL, type Id, type SectionObj } from '../doc/types';
 import type { Part } from '../net/model';
@@ -380,6 +381,7 @@ export const COMMANDS: Command[] = [
   // ---- Help ----
   { id: 'help.keys', label: 'Keyboard shortcuts & help', group: 'Help', keys: '?', run: () => { dialog.value = 'help'; } },
   { id: 'help.about', label: 'About & data sources', group: 'Help', run: () => { dialog.value = 'about'; } },
+  { id: 'help.tour', label: 'Take the tour', group: 'Help', run: () => tourHere() },
 ];
 
 /** "Ctrl+Shift+Z" style key name for an event. */

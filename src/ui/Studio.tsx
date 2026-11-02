@@ -3,6 +3,7 @@
 // plan. Nothing here touches the city map: it all lives on the plot.
 import { Fragment } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { firstTime } from './tour';
 import { docVersion, readOnly, studio, studioGround, studioLevel, studioLook, studioSel, studioTool, toast } from '../editor/state';
 import { isTyping } from '../editor/editor';
 import { StudioCanvas } from '../editor/studiocanvas';
@@ -10,8 +11,8 @@ import { exportPlot } from '../editor/plotexport';
 import { ui } from './ctx';
 import { Icon, NumberField, Seg, Toggle } from './components';
 import type { PlotObj } from '../doc/types';
-import { USE_NOTE, type PlotReport, type PlotUse } from '../doc/plot';
-import { basementsToFit, buildingQuads, CARPET, ELEMENTS, elementRings, GATES_FROM, roadFrame, FIRE_H, FIRE_W, PRESETS, presetBuildings, RG_FROM, RG_SHARE, SQFT, TRAVEL, UNIT_COLOR, UNIT_LABEL, type Costs, type PlotSite, type SiteElement, type SiteReport } from '../doc/site';
+import { polyArea, USE_NOTE, type PlotReport, type PlotUse } from '../doc/plot';
+import { basementsToFit, buildingQuads, CARPET, ELEMENTS, elementRings, GATES_FROM, isArea, ringOf, roadFrame, FIRE_H, FIRE_W, PRESETS, presetBuildings, RG_FROM, RG_SHARE, SQFT, TRAVEL, UNIT_COLOR, UNIT_LABEL, type Costs, type PlotSite, type SiteElement, type SiteReport } from '../doc/site';
 import { ACCESS, DEFAULT_DESIGN, schemes, siteDefaults, type Access, TYPOLOGIES, type Design, type Typology } from '../doc/optimise';
 import { totalWidth } from '../doc/xsection';
 import { areaStatement, printReport, unitSchedule } from '../editor/plotreport';
@@ -48,6 +49,7 @@ export function Studio() {
 }
 
 function StudioView({ o, r, d, site }: { o: PlotObj; r: PlotReport; d: SiteReport; site: PlotSite }) {
+  useEffect(() => firstTime('studio', 900), []);
   const ref = useRef<HTMLCanvasElement>(null);
   const cv = useRef<StudioCanvas | null>(null);
   const [tab, setTab] = useState<Tab>('design');
@@ -154,7 +156,8 @@ function StudioView({ o, r, d, site }: { o: PlotObj; r: PlotReport; d: SiteRepor
           <canvas ref={ref} />
           <Impact o={o} r={r} d={d} ro={ro} />
           {(studioTool.value === 'draw' || studioTool.value === 'road') && <p class="studio-hint">Click the {studioTool.value === 'road' ? 'road' : 'building'}'s line, node by node · Enter or double-click finishes · Backspace drops the last · Shift: no snapping</p>}
-          {studioTool.value !== 'select' && studioTool.value !== 'draw' && studioTool.value !== 'road' && <p class="studio-hint">Click where it goes · then drag, turn and size it like a building</p>}
+          {studioTool.value === 'roundabout' && <p class="studio-hint">Click where it goes · then drag it, and size it in the card</p>}
+          {(studioTool.value === 'parking' || studioTool.value === 'lot' || studioTool.value === 'garden') && <p class="studio-hint">Drag out a rectangle · or click its corners (Enter or the first corner closes it) · double-click an open patch to fill it · Shift: no snapping</p>}
           {sel && studioTool.value === 'select' && (
             <div class="studio-card">
               <div class="studio-card-head"><b>Building</b>{sel.clash && <span class="bad">{sel.clash === 'margins' ? 'past the margins' : 'runs into another'}</span>}</div>
@@ -175,23 +178,18 @@ function StudioView({ o, r, d, site }: { o: PlotObj; r: PlotReport; d: SiteRepor
           )}
           {selEl && studioTool.value === 'select' && (() => {
             const m = ELEMENTS.find((x) => x.value === selEl.kind)!;
-            const len = Math.hypot(selEl.spine[2] - selEl.spine[0], selEl.spine[3] - selEl.spine[1]);
             const setEl = (patch: Partial<SiteElement>, mg?: string) => setSite({ elements: (site.elements ?? []).map((e) => (e.id === selEl.id ? { ...e, ...patch, auto: undefined } : e)), manual: true }, mg);
-            // a new length: the first wing stretched about its middle
-            const setLen = (L: number, mg?: string) => {
-              const [ax, az, bx, bz] = selEl.spine, mx = (ax + bx) / 2, mz = (az + bz) / 2, ux = (bx - ax) / (len || 1), uz = (bz - az) / (len || 1);
-              setEl({ spine: [mx - (ux * L) / 2, mz - (uz * L) / 2, mx + (ux * L) / 2, mz + (uz * L) / 2, ...selEl.spine.slice(4)].map((v) => Math.round(v * 100) / 100) }, mg);
-            };
-            const bays = selEl.kind === 'parking' ? d.parking.levels.filter((l) => l.kind === 'structure').reduce((a, l) => a + l.bays.length, 0) : selEl.kind === 'lot' ? d.parking.levels.filter((l) => l.kind === 'lot').reduce((a, l) => a + l.bays.length, 0) : 0;
+            const area = isArea(selEl), ring = area ? ringOf(selEl) : [];
+            const lotIx = (site.elements ?? []).filter((e) => e.kind === 'lot' && elementRings(e).length).indexOf(selEl);
+            const bays = selEl.kind === 'parking' ? d.parking.levels.filter((l) => l.kind === 'structure').reduce((a, l) => a + l.bays.length, 0) : selEl.kind === 'lot' ? d.parking.levels.filter((l) => l.kind === 'lot')[lotIx]?.bays.length ?? 0 : 0;
             return (
               <div class="studio-card">
                 <div class="studio-card-head"><b>{m.label}</b>{selEl.auto && <span class="muted small">laid by the optimiser</span>}</div>
                 <div class="grid3">
-                  {selEl.kind !== 'road' && selEl.kind !== 'roundabout' && <NumberField label="Length" unit="m" step={1} min={6} max={400} value={Math.round(len)} disabled={ro} onChange={(v, mg) => setLen(v, mg)} />}
-                  <NumberField label={selEl.kind === 'roundabout' ? 'Across' : selEl.kind === 'road' ? 'Width' : 'Depth'} unit="m" step={0.5} min={3} max={200} value={selEl.depth} disabled={ro} onChange={(v, mg) => setEl({ depth: v }, mg)} />
+                  {!area && <NumberField label={selEl.kind === 'roundabout' ? 'Across' : 'Width'} unit="m" step={0.5} min={3} max={200} value={selEl.depth} disabled={ro} onChange={(v, mg) => setEl({ depth: v }, mg)} />}
                   {selEl.kind === 'parking' && <NumberField label="Levels" digits={0} step={1} min={1} max={12} value={selEl.levels ?? 3} disabled={ro} onChange={(v, mg) => setEl({ levels: Math.max(1, Math.round(v)) }, mg)} />}
                 </div>
-                <p class="small muted">{m.title}{bays ? ` · ${bays} bays in all` : ''}</p>
+                <p class="small muted">{area ? `${m2(Math.abs(polyArea(ring)))} drawn, ${ring.length / 2} corners: drag one, drag a dot mid-edge to add one, Alt-click to drop one.` : m.title}{bays ? ` · ${bays} bays${selEl.kind === 'parking' ? ' in all' : ', packed at the best angle'}` : ''}</p>
                 <div class="btns">
                   <button disabled={ro} onClick={() => cv.current?.duplicate(selEl)} title="Ctrl+D"><Icon.copy size={13} /> Duplicate</button>
                   <button class="danger" disabled={ro} onClick={() => cv.current?.remove(selEl.id)} title="Delete"><Icon.trash size={13} /> Remove</button>

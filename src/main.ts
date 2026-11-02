@@ -11,6 +11,7 @@ import { Dialogs, Profile } from './ui/dialogs';
 import { BuildPalette } from './ui/BuildPalette';
 import { Home, cities, cityOf } from './ui/Home';
 import { parse } from './doc/format';
+import { Tour, firstTime } from './ui/tour';
 
 const $ = (id: string) => document.getElementById(id)!;
 // a city (a region streamed in pieces), a single tile (?tile=kp), or a published map (?map=…, on its own city);
@@ -52,12 +53,13 @@ async function boot() {
   render(h(Dock, {}), $('dock'));
   render(h(Studio, {}), $('studio'));
   render(h('div', {}, h(MapCorners, {}), h(ReadOnlyBanner, {}), h(Attribution, {}), h(BuildPalette, {}), h(Toasts, {}), h(Profile, {}), h(CursorHint, {})), $('stage-ui'));
-  render(h('div', {}, h(Palette, {}), h(Dialogs, {})), $('modals'));
+  render(h('div', {}, h(Palette, {}), h(Dialogs, {}), h(Tour, {})), $('modals'));
   startTheme();
   // the map changes size with the window and docked panels: keep the renderer + overlay in step
   new ResizeObserver(() => { app.engine.resize(); app.E.resize(); }).observe($('overlay'));
   $('loading').hidden = true;
   app.engine.resize(); app.E.resize();
+  firstTime('editor', 900);
   if (import.meta.env.DEV) Object.assign(window, { __app: app });
 }
 
