@@ -76,7 +76,7 @@ export function AccountLink() {
   return <a class="chip-account" href={href('account/')} title={s.user.email ?? ''}><span class="avatar">{name[0]?.toUpperCase()}</span><span class="hide-sm">{name}</span></a>;
 }
 
-const NAV: [string, string][] = [['#studio', 'Site Studio'], ['#features', 'Product'], ['#plan', 'Today vs. plan'], ['guides/', 'Guides'], ['pricing/', 'Pricing']];
+const NAV: [string, string][] = [['#studio', 'Site Studio'], ['#features', 'Product'], ['#plan', 'Today vs. plan'], ['pune/dp-report/', 'Pune DP plan'], ['guides/', 'Guides'], ['pricing/', 'Pricing']];
 
 export function Header({ current, lang }: { current?: string; lang?: string }) {
   const [open, setOpen] = useState(false);
@@ -125,7 +125,7 @@ export function Footer({ lang }: { lang?: string }) {
         </div>
         <nav class="foot-maps" aria-label="City maps">
           <a href={href('pune/map/')}>Pune 3D map</a>
-          <a href={href('pune/dp-report/')}>Pune DP report</a>
+          <a href={href('pune/dp-report/')}>Pune DP plan on satellite</a>
           <a href={href('pune/dp-map/')}>Pune DP map</a>
           <a href={href('pune/road-width-map/')}>Pune road width map</a>
           <a href={href('mr/pune/dp-map/')} lang="mr" hrefLang="mr">पुणे विकास आराखडा नकाशा</a>

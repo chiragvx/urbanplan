@@ -217,6 +217,7 @@ export function DpMapPage() {
             merged villages have no DP sheets in {SITE_NAME}.
           </p>
           <p class="small muted" lang="mr"><a href={href('mr/pune/dp-map/')} hrefLang="mr">हे पान मराठीत वाचा: पुणे विकास आराखडा नकाशा</a></p>
+          <div class="notice info" role="note"><Icon.pin /><p><b>Check a plot:</b> the <a href={href('pune/dp-report/')}>Pune DP plan on satellite</a> shows the traced zones, reserved sites and DP roads over satellite imagery. Click any plot for its report, free.</p></div>
           <div class="place-grid">
             <figure class="place-map city-map">
               <img src={href(M.svg.dp!)} width={M.svg.w} height={M.svg.h} fetchpriority="high" alt={`Map of Pune: the area the ${D.sheets} DP sheets cover shaded blue over the old city, the ${km(D.tracedKm)} of road with traced DP widths in red round Bund Garden Road and Kalyani Nagar, and Pimpri-Chinchwad and Hinjewadi outside the sheets`} />

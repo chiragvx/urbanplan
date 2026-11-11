@@ -36,6 +36,9 @@ export const clsLower = (c: string) => clsShort(c).toLowerCase().replace(/^ews /
 export const clsColor = (c: string) => CLASSES[c]?.color ?? '#ccc';
 
 export const DPR_PATH = 'pune/dp-report/';
+/** the locality's DP map picture (baked SVG) and share card (JPG), paths under public/ */
+export const areaMap = (a: DprArea) => `dpr/pune/map/${a.slug}.svg`;
+export const areaCard = (a: DprArea) => `dpr/pune/map/${a.slug}.jpg`;
 export const areaPath = (a: DprArea) => `${DPR_PATH}${a.slug}/`;
 
 /** What a reservation of each class usually means, in plain words. */

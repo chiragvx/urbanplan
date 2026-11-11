@@ -7,10 +7,11 @@ import { createPortal } from 'preact/compat';
 import { signal } from '@preact/signals';
 import type { ComponentChildren } from 'preact';
 import { authReady, emailLink, explain, logReport, startAuth } from '../auth/auth';
-import { AREAS, SUMMARY, DPR_FAQ, DPR_PATH, RESERVED_MEANS, areaOf, areaPath, clsColor, clsLower, clsLabel, clsShort, type DprArea } from './dpreport/data';
+import { AREAS, SUMMARY, DPR_FAQ, DPR_PATH, RESERVED_MEANS, areaOf, areaPath, areaMap, clsColor, clsLower, clsLabel, clsShort, type DprArea } from './dpreport/data';
 import type { Report } from './dpreport/geo';
 import type { DpMap, Overlay } from './dpreport/map';
 import { Crumbs } from './CityMap';
+import { DP_LINKS } from './dpreport/classes';
 import { NotFoundBody } from './NotFound';
 import { APP, href, Icon, Page } from './ui';
 import { SITE_NAME } from './brand';
@@ -40,7 +41,7 @@ const OVERLAYS: [Overlay, string, string][] = [
   ['none', 'Satellite', 'The satellite image alone'],
 ];
 
-function Viewer({ lat, lon, zoom, ring, area }: { lat: number; lon: number; zoom: number; ring?: number; area?: DprArea }) {
+function Viewer({ lat, lon, zoom, ring, area, poster }: { lat: number; lon: number; zoom: number; ring?: number; area?: DprArea; poster?: string }) {
   const el = useRef<HTMLDivElement>(null);
   const M = useRef<DpMap | null>(null);
   const [overlay, setOverlay] = useState<Overlay>('zones');
@@ -97,6 +98,7 @@ function Viewer({ lat, lon, zoom, ring, area }: { lat: number; lon: number; zoom
     <section class="dpr-viewer" id="viewer" aria-label="Pune DP map on satellite imagery">
       <div class="dpr-stage">
         <div class="dpr-map" ref={el} role="application" aria-label="Map: click a plot to see what the Development Plan says there">
+          {poster && area && <img class="dpr-poster" src={href(poster)} width={1000} height={1000} fetchpriority="high" alt={`Development Plan map of ${area.name}, Pune: zones coloured by land use, reserved sites outlined in red, ${area.r} m circle round the centre`} />}
           <noscript><p class="dpr-noscript">The map needs JavaScript. The numbers for this area are below.</p></noscript>
         </div>
         <div class="dpr-tools">
@@ -361,8 +363,8 @@ export function DpHubPage() {
     <Page>
       <section class="wrap guide place dpr">
         <article class="wide">
-          <Crumbs trail={[['Home', ''], ['Pune', 'pune/'], ['Pune DP report', null]]} />
-          <h1>Pune DP report: the Development Plan on satellite, plot by plot</h1>
+          <Crumbs trail={[['Home', ''], ['Pune', 'pune/'], ['Pune DP plan', null]]} />
+          <h1>Pune DP plan on satellite: check any plot's zone and reservations</h1>
           <p class="answer">
             Check what Pune's sanctioned <b>Development Plan</b> says about any plot in the old PMC limits: its <b>zone</b>, whether it or a
             neighbour is <b>reserved</b> for a garden, school or other public use, and the <b>DP roads</b> that may widen past it, drawn over
@@ -406,11 +408,16 @@ function Links() {
     <div class="map-links">
       <a href={href('pune/dp-map/')}><Icon.sheet /><span><b>Pune DP map</b><small>Where the DP sheets are and what's traced</small></span></a>
       <a href={href('guides/dp-road-affects-property/')}><Icon.road /><span><b>Does a DP road affect my property?</b><small>The guide</small></span></a>
+      <a href={href('guides/dp-remark-zone-certificate-pune/')}><Icon.check /><span><b>How to get a DP remark in Pune</b><small>The zone certificate, step by step</small></span></a>
+      <a href={href('guides/pune-dp-colour-code/')}><Icon.sheet /><span><b>Pune DP colour codes</b><small>What each colour on the sheet means</small></span></a>
       <a href={href('guides/what-is-development-plan/')}><Icon.info /><span><b>What is a Development Plan?</b><small>Zones, reservations, DP remarks</small></span></a>
       <a href={href('guides/how-much-can-i-build/')}><Icon.building /><span><b>How much can I build?</b><small>FSI on your plot, in Site Studio</small></span></a>
     </div>
   );
 }
+
+/** the place page (/pune/<slug>/) nearest this locality, if one points here */
+const placeOfArea = (a: DprArea) => Object.entries(DP_LINKS as Record<string, string>).find(([, s]) => s === a.slug)?.[0];
 
 export function DpAreaBySlug({ slug }: { slug: string }) {
   const a = areaOf(slug);
@@ -439,11 +446,12 @@ export function DpAreaPage({ a }: { a: DprArea }) {
     <Page>
       <section class="wrap guide place dpr">
         <article class="wide">
-          <Crumbs trail={[['Home', ''], ['Pune', 'pune/'], ['Pune DP report', DPR_PATH], [a.name, null]]} />
-          <h1>{a.name} DP report: Development Plan zones and reservations on satellite</h1>
+          <Crumbs trail={[['Home', ''], ['Pune', 'pune/'], ['Pune DP plan', DPR_PATH], [a.name, null]]} />
+          <h1>{a.name} DP plan: Development Plan zones and reservations on satellite</h1>
           <p class="answer">{lead(a)}</p>
           {a.aka?.length ? <p class="small muted">Also known as {a.aka.join(', ')}.</p> : null}
-          <Viewer lat={a.lat} lon={a.lon} zoom={16} ring={a.r} area={a} />
+          {placeOfArea(a) && <p class="small muted part-of"><Icon.road /> Road widths and junctions round here: <a href={href(`pune/${placeOfArea(a)}/`)}>{a.name} on the {SITE_NAME} map</a></p>}
+          <Viewer lat={a.lat} lon={a.lon} zoom={16} ring={a.r} area={a} poster={areaMap(a)} />
 
           <h2>Land use in the plan within {a.r} m</h2>
           <div class="dpr-bar big" role="img" aria-label={a.mix.map((m) => `${clsShort(m.cls)} ${m.pct}%`).join(', ')}>
@@ -499,7 +507,7 @@ export function DpAreaPage({ a }: { a: DprArea }) {
               <div class="guide-list">
                 {near.map((b) => (
                   <a key={b.slug} href={href(areaPath(b))}>
-                    <h3>{b.name} DP report</h3>
+                    <h3>{b.name} DP plan</h3>
                     <p>{b.mix[0] ? `${clsShort(b.mix[0].cls)} ${Math.round(b.mix[0].pct)}%` : ''}{b.reserved.length ? ` · ${b.reserved.length} reserved` : ''}</p>
                   </a>
                 ))}

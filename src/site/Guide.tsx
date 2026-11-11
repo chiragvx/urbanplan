@@ -7,6 +7,7 @@ import { envelope, f2, FIRE_H, FIRE_W, fsiAt, guide, GUIDES, m2, MARGIN_STEPS, p
 import { PLACES, type City } from './places/data';
 import { APP, href, Icon, Page } from './ui';
 import { SITE_NAME } from './brand';
+import { DP_CLASSES } from './dpreport/classes';
 
 export const CITY_NAME: Record<City, string> = { pune: 'Pune', mumbai: 'Mumbai' };
 const appIn = (city?: City) => (city ? `${APP}?region=${city}` : APP);
@@ -362,6 +363,87 @@ const BODY: Record<string, FunctionComponent> = {
       </ol>
     </>
   ),
+  'dp-remark-zone-certificate-pune': () => (
+    <>
+      <h2>What a DP remark says</h2>
+      <ul>
+        <li><b>The zone</b> the land is in: residential, commercial, public / semi-public, green and so on.</li>
+        <li><b>Any reservation</b> on it, with its code (a garden, school, market, parking…).</li>
+        <li><b>Any road line</b>: a planned road, or a widening that takes a strip of the plot.</li>
+        <li>Sometimes more: the plan it comes from, the sanction date, notes on modifications.</li>
+      </ul>
+      <h2>Who to ask in and around Pune</h2>
+      <div class="table-wrap">
+        <table class="rules">
+          <caption>The planning authority depends on where the land is. Each lists its documents and fee at its office or on its portal.</caption>
+          <thead><tr><th>Where the land is</th><th>Plan</th><th>Ask</th></tr></thead>
+          <tbody>
+            <tr><td>Pune, old municipal limits</td><td>PMC Development Plan 2007–2027 (sanctioned 2017)</td><td>Pune Municipal Corporation</td></tr>
+            <tr><td>Villages merged into Pune</td><td>Their own DP (in preparation or draft)</td><td>Pune Municipal Corporation</td></tr>
+            <tr><td>Pimpri-Chinchwad</td><td>PCMC Development Plan</td><td>Pimpri Chinchwad Municipal Corporation</td></tr>
+            <tr><td>Cantonments</td><td>Cantonment land-use plan</td><td>The Cantonment Board</td></tr>
+            <tr><td>Rest of the Pune region</td><td>PMRDA Regional / Development Plan</td><td>PMRDA</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <Example>
+        <p>A buyer is looking at a 1,000 m² plot off Karve Road:</p>
+        <ul>
+          <li>On the <a href={href('pune/dp-report/karve-road/')}>Karve Road DP plan</a> they click the plot: residential zone, no reservation on it, a site reserved for a public use about 120 m away.</li>
+          <li>They switch to the DP sheet layer and see the road in front drawn wider than it is today.</li>
+          <li>They apply to the PMC for the DP remark with the CTS number and property card, and ask the architect what the widening takes from the plot and what FSI it brings.</li>
+        </ul>
+      </Example>
+      <h2>Check it yourself first</h2>
+      <ol>
+        <li>Open the <a href={href('pune/dp-report/')}>Pune DP plan on satellite</a> and search for the road or society.</li>
+        <li>Click the plot: its zone, reservations within 250 m and DP roads nearby.</li>
+        <li>Download the PDF (free with your email) to take along when you apply.</li>
+      </ol>
+    </>
+  ),
+
+  'check-dp-reservation-pune': () => (
+    <>
+      <h2>Three ways a plot can be affected</h2>
+      <ul>
+        <li><b>It is a reserved site</b>: outlined in red on the sheet with a code (PG playground, G garden, H hospital, PS primary school…).</li>
+        <li><b>Part of it is reserved</b>: the red outline cuts across the plot.</li>
+        <li><b>A DP road crosses it</b>: a new road, or a widening of the road in front. That is a road line, not a reservation, but it also takes land.</li>
+      </ul>
+      <Example>
+        <p>On the <a href={href('pune/dp-report/aundh/')}>Aundh DP plan</a>, 25 sites within 500 m of the centre are reserved, most of them for public and semi-public use. Click any of them in the table on that page and the map flies to it; the DP sheet layer shows the code printed on it.</p>
+      </Example>
+      <h2>Check yours</h2>
+      <ol>
+        <li>Open the <a href={href('pune/dp-report/')}>Pune DP plan on satellite</a> and find the plot.</li>
+        <li>Click it. A red notice means the plot is in a reserved site; the report also lists reserved sites within 250 m.</li>
+        <li>Switch to <b>DP sheet</b> and zoom in to read the reservation’s code and number.</li>
+        <li>Confirm with a <a href={href('guides/dp-remark-zone-certificate-pune/')}>DP remark from the PMC</a>.</li>
+      </ol>
+    </>
+  ),
+
+  'pune-dp-colour-code': () => (
+    <>
+      <h2>Every colour on the Pune DP</h2>
+      <div class="table-wrap">
+        <table class="rules">
+          <caption>The land-use colours of the PMC Development Plan 2007–2027, as calibrated on the scanned sheets (screen colours; printed sheets vary).</caption>
+          <thead><tr><th>Colour</th><th>Means</th></tr></thead>
+          <tbody>
+            {Object.entries(DP_CLASSES).map(([k, c]) => (
+              <tr key={k}><td><i class="legend-swatch" style={`display:inline-block;width:28px;height:16px;vertical-align:-3px;background:${c.color};border:1px solid rgba(0,0,0,.25)`} /> <code>{c.color}</code></td><td>{c.label}</td></tr>
+            ))}
+            <tr><td><i class="legend-swatch" style="display:inline-block;width:28px;height:16px;vertical-align:-3px;border:2px dashed #e5484d" /> red outline</td><td>A site reserved for a public purpose, with its code and number</td></tr>
+            <tr><td><i class="legend-swatch" style="display:inline-block;width:28px;height:4px;vertical-align:3px;background:#e5484d" /> red parallel lines</td><td>A planned road or road widening, with its width in metres</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h2>See the colours on your plot</h2>
+      <p>The <a href={href('pune/dp-report/')}>Pune DP plan on satellite</a> draws these zones over satellite imagery for the whole of the old PMC limits. Click a plot to see its zone, or switch to the DP sheet layer to see the original colours.</p>
+    </>
+  ),
 };
 
 /** The places of a city, for "see it on the map" links (filled in from src/site/places/data.ts). */
@@ -376,10 +458,14 @@ function CityLinks({ city }: { city: City }) {
 }
 
 /** The city map pages a guide leads on to. */
+const DPR: [string, string] = ['pune/dp-report/', 'Pune DP plan on satellite: check any plot'];
 const MAP_LINKS: Record<string, [string, string][]> = {
-  'dp-road-affects-property': [['pune/dp-map/', 'Pune DP map: where the Development Plan is in ' + SITE_NAME], ['mr/pune/dp-map/', 'पुणे विकास आराखडा नकाशा (मराठी)']],
+  'dp-remark-zone-certificate-pune': [DPR, ['pune/dp-map/', 'Pune DP map']],
+  'check-dp-reservation-pune': [DPR, ['pune/dp-map/', 'Pune DP map']],
+  'pune-dp-colour-code': [DPR, ['mr/pune/dp-map/', 'पुणे विकास आराखडा नकाशा (मराठी)']],
+  'dp-road-affects-property': [DPR, ['pune/dp-map/', 'Pune DP map: where the Development Plan is in ' + SITE_NAME], ['mr/pune/dp-map/', 'पुणे विकास आराखडा नकाशा (मराठी)']],
   'dp-road-widening': [['pune/dp-map/', 'Pune DP map: where the DP road widths are traced'], ['pune/road-width-map/', 'Pune road width map']],
-  'what-is-development-plan': [['pune/dp-map/', 'Pune DP map: the sheets and traced road widths'], ['mr/pune/dp-map/', 'पुणे विकास आराखडा नकाशा (मराठी)']],
+  'what-is-development-plan': [DPR, ['pune/dp-map/', 'Pune DP map: the sheets and traced road widths'], ['mr/pune/dp-map/', 'पुणे विकास आराखडा नकाशा (मराठी)']],
   'road-width-building-height': [['pune/road-width-map/', 'Pune road width map'], ['mumbai/road-width-map/', 'Mumbai road width map']],
   'fsi-calculator-pune': [['pune/road-width-map/', 'Pune road width map: how wide the main roads are'], ['pune/dp-map/', 'Pune DP map']],
   'fsi-calculator-mumbai': [['mumbai/road-width-map/', 'Mumbai road width map: how wide the main roads are']],

@@ -67,7 +67,7 @@ p { margin: 0; }
 .chip-account { display: inline-flex; align-items: center; gap: 8px; padding: 3px 12px 3px 3px; border-radius: 999px; border: 1px solid var(--up-line-strong); color: var(--up-ink); text-decoration: none; font-weight: 500; font-size: var(--up-text-sm); background: var(--up-surface); }
 .chip-account:hover { border-color: var(--up-muted); color: var(--up-ink); }
 .avatar { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--up-ink); color: var(--up-paper); font: 600 0.75rem/1 var(--up-font-body); }
-@media (max-width: 860px) {
+@media (max-width: 1040px) {
   .site-nav { display: none; position: absolute; top: 60px; left: 0; right: 0; flex-direction: column; align-items: stretch; margin: 0; padding: var(--up-space-3) var(--up-space-5) var(--up-space-5); background: var(--up-paper); border-bottom: 1px solid var(--up-line); }
   .site-nav.open { display: flex; }
   .site-nav a { padding: 12px; font-size: var(--up-text-lg); color: var(--up-ink); }

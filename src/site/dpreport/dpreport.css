@@ -8,6 +8,7 @@
 .dpr-stage { position: relative; min-height: 560px; height: min(74vh, 720px); background: #1d2a22; }
 .dpr-map { position: absolute; inset: 0; background: #1d2a22; }
 .dpr-map .leaflet-container, .dpr-map.leaflet-container { font: inherit; background: #1d2a22; cursor: crosshair; }
+.dpr-poster { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .dpr-noscript { color: #fff; padding: 24px; }
 .dpr-tools { position: absolute; z-index: 500; top: 12px; left: 12px; right: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; pointer-events: none; }
 .dpr-tools > * { pointer-events: auto; }

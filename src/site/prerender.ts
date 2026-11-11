@@ -40,6 +40,12 @@ export function head(r: Route, site: string, base = '/'): string {
     `<meta name="description" content="${esc(h.description)}" />`,
     h.noindex ? '<meta name="robots" content="noindex, follow" />' : `<link rel="canonical" href="${esc(url(r.path))}" />`,
   ];
+  // Search Console and Bing Webmaster Tools: their verification codes (set on the host that builds the site), on the home page
+  const env = (import.meta as { env?: Record<string, string | undefined> }).env ?? {};
+  if (r.path === '') {
+    if (env.VITE_GOOGLE_SITE_VERIFICATION) tags.push(`<meta name="google-site-verification" content="${esc(env.VITE_GOOGLE_SITE_VERIFICATION)}" />`);
+    if (env.VITE_BING_SITE_VERIFICATION) tags.push(`<meta name="msvalidate.01" content="${esc(env.VITE_BING_SITE_VERIFICATION)}" />`);
+  }
   if (h.alternates && !h.noindex) {
     for (const [l, p] of Object.entries(h.alternates) as [Lang, string][]) tags.push(`<link rel="alternate" hreflang="${HREFLANG[l]}" href="${esc(url(p))}" />`);
     tags.push(`<link rel="alternate" hreflang="x-default" href="${esc(url(h.alternates.en ?? r.path))}" />`);

@@ -12,7 +12,7 @@ import MAPS_RAW from './maps/generated/maps.json';
 import type { CityMapData } from './maps/types';
 import { DP_FAQ, DATA_FIELDS } from './CityMap';
 import { DP_FAQ_MR } from './CityMapMr';
-import { AREAS, SUMMARY, DPR_FAQ, DPR_PATH, areaPath, clsLower, type DprArea } from './dpreport/data';
+import { AREAS, SUMMARY, DPR_FAQ, DPR_PATH, areaPath, areaMap, areaCard, clsLower, type DprArea } from './dpreport/data';
 
 export { SITE_NAME };
 const MAPS = MAPS_RAW as unknown as Record<City, CityMapData>;
@@ -311,11 +311,11 @@ function dpReportRoutes(): Route[] {
   const hub: Route = {
     path: DPR_PATH, priority: 0.9, updated: S.baked,
     head: {
-      title: 'Pune DP report: Development Plan on satellite', description: hubDesc,
+      title: 'Pune DP plan map on satellite: check any plot', description: hubDesc,
       image: IMG.dp, imageAlt: ALT.dp,
       ld: (url) => [
-        mapLd(url, DPR_PATH, 'Pune DP report: the Development Plan on satellite imagery', hubDesc, 'pune', IMG.dp),
-        crumbs(url, [['Home', ''], ['Pune', 'pune/'], ['Pune DP report', DPR_PATH]]),
+        mapLd(url, DPR_PATH, 'Pune DP plan on satellite: the Development Plan plot by plot', hubDesc, 'pune', IMG.dp),
+        crumbs(url, [['Home', ''], ['Pune', 'pune/'], ['Pune DP plan', DPR_PATH]]),
         faq(DPR_FAQ),
       ],
     },
@@ -324,12 +324,12 @@ function dpReportRoutes(): Route[] {
     const top = a.mix[0] ? `${Math.round(a.mix[0].pct)}% ${clsLower(a.mix[0].cls)}` : 'zones';
     const res = a.reserved.length ? `${a.reserved.length} reserved site${a.reserved.length > 1 ? 's' : ''}` : 'no traced reservations';
     const desc = `${a.name}, Pune: the Development Plan within ${a.r} m on satellite, ${top}, ${res}${a.dpRoads.length ? `, DP road widths` : ''}. Check your plot, free PDF.`;
-    const title = [`${a.name} DP report: zones and reservations`, `${a.name} DP report (Pune)`, `${a.name} DP report`].find((t) => t.length <= 48) ?? `${a.name} DP report`;
+    const title = [`${a.name} DP plan map: zones and reservations`, `${a.name} DP plan map (Pune)`, `${a.name} DP plan map`].find((t) => t.length <= 48) ?? `${a.name} DP plan`;
     return {
-      path: areaPath(a), priority: 0.6, updated: S.baked,
+      path: areaPath(a), priority: 0.6, updated: S.baked, images: [areaMap(a)],
       head: {
         title, description: desc.length <= 155 ? desc : desc.replace(/, DP road widths/, '').slice(0, 155),
-        image: IMG.dp, imageAlt: `The Development Plan round ${a.name}, Pune`, type: 'article',
+        image: areaCard(a), imageAlt: `The Development Plan round ${a.name}, Pune: zones, reserved sites and DP roads`, type: 'article',
         ld: (url) => [
           {
             '@type': 'Place', '@id': url(`${areaPath(a)}#place`), name: `${a.name}, Pune`, url: url(areaPath(a)),
@@ -337,7 +337,8 @@ function dpReportRoutes(): Route[] {
             geo: { '@type': 'GeoCoordinates', latitude: a.lat, longitude: a.lon },
             containedInPlace: { '@type': 'City', name: 'Pune', url: url('pune/') },
           },
-          crumbs(url, [['Home', ''], ['Pune', 'pune/'], ['Pune DP report', DPR_PATH], [a.name, areaPath(a)]]),
+          { '@type': 'Map', name: `${a.name} DP plan map`, url: url(areaPath(a)), image: url(areaMap(a)), spatialCoverage: { '@id': url(`${areaPath(a)}#place`) }, isAccessibleForFree: true, dateModified: S.baked, creator: { '@id': url('#org') } },
+          crumbs(url, [['Home', ''], ['Pune', 'pune/'], ['Pune DP plan', DPR_PATH], [a.name, areaPath(a)]]),
           faq(DPR_FAQ),
         ],
       },

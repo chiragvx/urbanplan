@@ -76,6 +76,13 @@ alt and width / height on images, JSON-LD parses, hreflang reciprocity, every si
 noindex page in the sitemap, and no internal link, script or picture pointing at a missing file or lacking its
 trailing slash.
 
+**Getting found**: set `VITE_GOOGLE_SITE_VERIFICATION` / `VITE_BING_SITE_VERIFICATION` on the host (the `content`
+value of each tool's HTML-tag method) and the home page carries the verification tags; then submit
+`<site>/sitemap.xml` in Google Search Console and Bing Webmaster Tools. After each deploy, `npm run indexnow` sends
+every sitemap URL to the IndexNow engines (Bing, Yandex, Seznam…); its key file is `public/<key>.txt`
+(the key is in `tools/dev/indexnow.mjs`). Each DP plan locality page has its own map picture and share card
+(`public/dpr/pune/map/<slug>.svg|.jpg`, from `bake:dpreport`).
+
 **Performance**: the Supabase library loads only on the account pages, in the editor, or on idle for someone with a
 stored session; other pages show the account chip from what Supabase stored (`peekSession` in `src/auth/auth.ts`).
 The landing page loads about 22 kB of JS (gzipped; it was about 108 kB). The landing video's poster is preloaded

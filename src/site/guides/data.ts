@@ -5,6 +5,7 @@
 import { defaultRules, sideMargin, type PlotCode } from '../../doc/plot';
 import type { City } from '../places/data';
 import { SITE_NAME } from '../brand';
+import { DP_GUIDES } from './dp-guides';
 
 /** where the official answer comes from */
 export type Source = 'pmc' | 'mcgm' | 'udd';
@@ -251,13 +252,14 @@ export const GUIDES: Guide[] = [
     updated: UPDATED,
     faq: [
       ['What is the difference between the DP and the DCR / UDCPR?', 'The DP is the map: zones, reservations and roads. The development control regulations (UDCPR 2020 in Pune, DCPR 2034 in Mumbai) are the rules: FSI, margins, parking and so on. You need both to know what a plot can do.'],
-      ['What does a code like “PG 61” on the DP mean?', `A reservation: here play ground number 61. ${SITE_NAME} knows the reservation codes printed on Pune’s DP sheets and spells them out.`],
-      ['Where can I see the DP for my area?', `The planning authority publishes the sanctioned DP sheets and issues DP remarks for a plot. ${SITE_NAME} lays Pune’s sheets over today’s map in 2D and 3D so you can see them in context.`],
+      ['What does a code like “PG 61” on the DP mean?', `A reservation: here play ground number 61. On the ${SITE_NAME} Pune DP plan, switch to the DP sheet layer and zoom in to read the code printed on the sheet over the plot.`],
+      ['Where can I see the DP for my area?', `The planning authority publishes the sanctioned DP sheets and issues DP remarks for a plot. For Pune, the ${SITE_NAME} Pune DP plan lays the sheets and the traced zones over satellite imagery: click any plot in the old PMC limits.`],
       ['How often does the DP change?', 'A DP is revised roughly every twenty years, with modifications in between. Always check you are looking at the sanctioned, current version.'],
     ],
     related: ['dp-road-affects-property', 'dp-road-widening', 'fsi-calculator-pune', '3d-site-context-architecture-students'],
     sources: ['pmc', 'mcgm'],
   },
+  ...DP_GUIDES,
 ];
 
 export const guide = (slug: string) => GUIDES.find((g) => g.slug === slug);

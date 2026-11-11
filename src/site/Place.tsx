@@ -7,6 +7,7 @@ import type { Idea, PlaceData, RoadFact } from './places/facts';
 import { APP, href, Icon, Page } from './ui';
 import { SITE_NAME } from './brand';
 import { NotFoundBody } from './NotFound';
+import { DP_LINKS } from './dpreport/classes';
 import './place.css';
 
 const n = (v: number) => v.toLocaleString('en-IN');
@@ -203,6 +204,7 @@ export function PlacePage({ place }: { place: Place }) {
             <Icon.pin /> Part of the <a href={href(`${d.city}/map/`)}>{city} 3D map</a>
             {' · '}<a href={href(`${d.city}/road-width-map/`)}>{city} road width map</a>
             {d.city === 'pune' && d.dp !== 'none' && <>{' · '}<a href={href('pune/dp-map/')}>Pune DP map</a></>}
+            {d.city === 'pune' && (DP_LINKS as Record<string, string>)[d.slug] && <>{' · '}<a href={href(`pune/dp-report/${(DP_LINKS as Record<string, string>)[d.slug]}/`)}><b>{d.name} DP plan on satellite</b></a></>}
           </p>
           {(d.aka?.length || osmNames.length) ? (
             <p class="small muted">
@@ -315,6 +317,7 @@ export function CityPage({ city }: { city: City }) {
           </p>
           <div class="map-links">
             <a href={href(`${city}/map/`)}><Icon.cube /><span><b>{label} 3D map</b><small>Roads, buildings and terrain</small></span></a>
+            {city === 'pune' && <a href={href('pune/dp-report/')}><Icon.pin /><span><b>Pune DP plan on satellite</b><small>Check any plot's zone and reservations</small></span></a>}
             {city === 'pune' && <a href={href('pune/dp-map/')}><Icon.sheet /><span><b>Pune DP map</b><small>Where the Development Plan is in {SITE_NAME}</small></span></a>}
             <a href={href(`${city}/road-width-map/`)}><Icon.road /><span><b>{label} road width map</b><small>Main roads by width</small></span></a>
             <a href={href('data/')}><Icon.share /><span><b>Open data</b><small>{label}'s main roads as GeoJSON</small></span></a>

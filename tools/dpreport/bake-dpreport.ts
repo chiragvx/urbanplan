@@ -8,8 +8,12 @@
 // Writes  public/dpr/pune/index.json          classes, frame, the 1 km cells that hold data
 //         public/dpr/pune/c_<i>_<j>.json      parcels (simplified, lon/lat) and DP roads per 1 km cell, for the viewer
 //         src/site/dpreport/generated/areas.json   one entry per locality page (+ the city summary)
+//         public/dpr/pune/map/<slug>.svg + .jpg     each locality's DP map (page picture) and share card (needs ffmpeg)
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import { execFileSync } from 'node:child_process';
+import { Resvg } from '@resvg/resvg-js';
 import { PUNE } from '../places/places.config';
 
 const CITY = 'pune';
@@ -220,6 +224,81 @@ for (const a of areas) {
 }
 areas.sort((a, b) => a.name.localeCompare(b.name));
 
+// ---------------- each locality's DP map: the page's picture (SVG) and its share card (JPG) ----------------
+
+const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/** the plan within `half` m of a point, drawn into a `size` px square */
+function mapSvg(a: AreaOut, half: number, size: number): string {
+  const [cx, cz] = xz(a.lat, a.lon), k = size / (2 * half);
+  const P = ([x, z]: XZ) => `${((x - cx + half) * k).toFixed(1)},${((z - cz + half) * k).toFixed(1)}`;
+  const inBox = (b: number[]) => b[2] >= cx - half && b[0] <= cx + half && b[3] >= cz - half && b[1] <= cz + half;
+  const polys: string[] = [], res: string[] = [];
+  for (const q of near(cx, cz, half * 1.5)) {
+    if (!inBox(q.box)) continue;
+    const d = q.polys.map((poly) => poly.map((ring) => 'M' + simplifyRing(ring, 2.5).map(P).join('L') + 'Z').join('')).join('');
+    polys.push(`<path d="${d}" fill="${dpClasses[q.p.cls]?.color ?? '#ccc'}"/>`);
+    if (q.p.reserved) res.push(`<path d="${d}"/>`);
+  }
+  const roads: string[] = [];
+  for (const r of dpRoads) if (r.pts.some(([x, z]) => Math.abs(x - cx) < half && Math.abs(z - cz) < half)) roads.push(`<path d="M${r.pts.map(P).join('L')}"/>`);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">`
+    + `<rect width="${size}" height="${size}" fill="#e9e6df"/>`
+    + `<g stroke="#5b5b5b" stroke-width="0.5" stroke-linejoin="round">${polys.join('')}</g>`
+    + `<g fill="none" stroke="#e5484d" stroke-width="2.2" stroke-dasharray="6 4">${res.join('')}</g>`
+    + `<g fill="none" stroke="#e5484d" stroke-width="3" stroke-linecap="round" opacity="0.85">${roads.join('')}</g>`
+    + `<circle cx="${size / 2}" cy="${size / 2}" r="${a.r * k}" fill="none" stroke="#0c0c0d" stroke-width="2" stroke-dasharray="8 6"/>`
+    + `<circle cx="${size / 2}" cy="${size / 2}" r="6" fill="#2f5bff" stroke="#fff" stroke-width="2.5"/>`
+    + `</svg>`;
+}
+function wrap(t: string, n: number): string[] {
+  const out: string[] = []; let cur = '';
+  for (const w of t.split(' ')) { if ((cur + ' ' + w).trim().length > n && cur) { out.push(cur); cur = w; } else cur = (cur + ' ' + w).trim(); }
+  if (cur) out.push(cur);
+  return out;
+}
+const CARD_LABEL: Record<string, string> = { psp: 'public use', ews: 'EWS housing', recreational: 'green space', local_commercial: 'local commercial', hill_slope: 'hill slope', services: 'utilities', residential: 'residential', commercial: 'commercial', industrial: 'industrial', defence: 'defence', water: 'water', forest: 'forest', transport: 'transport' };
+function cardSvg(a: AreaOut, inner: string): string {
+  let fs_ = 66, lines = wrap(a.name, 13);
+  if (lines.length > 2) { fs_ = 50; lines = wrap(a.name, 18); }
+  lines = lines.slice(0, 3);
+  const top = 210, y2 = top + lines.length * (fs_ + 8) + 4;
+  const title = lines.map((l, i) => `<text x="64" y="${top + i * (fs_ + 8)}" font-size="${fs_}" font-weight="700">${esc(l)}</text>`).join('');
+  const m0 = a.mix[0];
+  const stats: [string, string, string][] = [
+    [m0 ? `${Math.round(m0.pct)}%` : '—', m0 ? (CARD_LABEL[m0.cls] ?? dpClasses[m0.cls]?.label ?? m0.cls) : 'zones', 'in the DP'],
+    [String(a.reserved.length), 'reserved', 'sites'],
+    [a.dpRoads.length ? `${a.dpRoads[0].dp} m` : String(a.sheets.length), a.dpRoads.length ? 'DP road' : 'DP', a.dpRoads.length ? 'width' : `sheet${a.sheets.length > 1 ? 's' : ''}`],
+  ];
+  const st = stats.map(([v, l, l2], i) => `<g transform="translate(${64 + i * 168} 505)"><text font-size="38" font-weight="700" fill="#ff6a2b">${esc(v)}</text><text y="30" font-size="17" fill="#b9b4ad">${esc(l)}</text><text y="52" font-size="17" fill="#b9b4ad">${esc(l2)}</text></g>`).join('');
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">`
+    + `<rect width="1200" height="630" fill="#0c0c0d"/>`
+    + `<svg x="570" y="0" width="630" height="630" viewBox="0 0 630 630">${inner}</svg>`
+    + `<rect x="570" width="40" height="630" fill="url(#fade)"/><defs><linearGradient id="fade"><stop offset="0" stop-color="#0c0c0d"/><stop offset="1" stop-color="#0c0c0d" stop-opacity="0"/></linearGradient></defs>`
+    + `<g font-family="Inter, Segoe UI, Arial, sans-serif" fill="#ffffff">`
+    + `<rect x="64" y="58" width="30" height="30" rx="8" fill="#0c0c0d" stroke="#ffffff" stroke-opacity="0.2"/><path d="M73 83L77 63M85 83L81 63" stroke="#ff6a2b" stroke-width="3" stroke-linecap="round"/>`
+    + `<text x="106" y="82" font-size="26" font-weight="600">Urban<tspan font-weight="800">Plan</tspan></text>`
+    + `<text x="64" y="${top - fs_ - 10}" font-size="22" fill="#ff6a2b" font-weight="600" letter-spacing="2">PUNE · DP PLAN</text>`
+    + title
+    + `<text x="64" y="${y2}" font-size="26" fill="#d6d1ca">Zones, reservations and DP roads</text>`
+    + st + `</g></svg>`;
+}
+const MAP_DIR = path.join(OUT_PUB, 'map');
+fs.mkdirSync(MAP_DIR, { recursive: true });
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dpr-'));
+let ffmpeg = true;
+for (const a of areas) {
+  const svg = mapSvg(a, 650, 1000);
+  fs.writeFileSync(path.join(MAP_DIR, `${a.slug}.svg`), svg);
+  if (!ffmpeg) continue;
+  try {
+    const png = new Resvg(cardSvg(a, mapSvg(a, 650, 630).replace(/^<svg[^>]*>|<\/svg>$/g, '')), { fitTo: { mode: 'width', value: 1200 }, font: { loadSystemFonts: true, defaultFontFamily: 'Segoe UI' } }).render().asPng();
+    const pp = path.join(tmp, `${a.slug}.png`);
+    fs.writeFileSync(pp, png);
+    execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', pp, '-q:v', '6', path.join(MAP_DIR, `${a.slug}.jpg`)]);
+  } catch (e) { ffmpeg = false; console.warn('share cards skipped (ffmpeg?):', (e as Error).message); }
+}
+fs.rmSync(tmp, { recursive: true, force: true });
+
 const reservedAll = plots.filter((q) => q.p.reserved);
 const summary = {
   city: CITY, baked: new Date().toISOString().slice(0, 10), sheets: plan.sheets.length, parcels: plots.length,
@@ -231,5 +310,15 @@ const summary = {
 };
 fs.mkdirSync(OUT_SRC, { recursive: true });
 fs.writeFileSync(path.join(OUT_SRC, 'areas.json'), JSON.stringify({ summary, areas }));
+fs.writeFileSync(path.join(OUT_SRC, 'classes.json'), JSON.stringify(dpClasses));
+// the place pages (/pune/<slug>/) that have a DP page nearby (within 700 m), for links both ways
+const links: Record<string, string> = {};
+for (const p of PUNE) {
+  const [px, pz] = xz(p.lat, p.lon);
+  let best: AreaOut | null = null, bd = 700;
+  for (const a of areas) { const [ax, az] = xz(a.lat, a.lon), d = Math.hypot(ax - px, az - pz); if (d < bd) { bd = d; best = a; } }
+  if (best) links[p.slug] = best.slug;
+}
+fs.writeFileSync(path.join(OUT_SRC, 'links.json'), JSON.stringify(links));
 console.log(`dp report: ${plots.length} parcels in ${cells.size} cells (${(bytes / 1e6).toFixed(1)} MB), ${dpRoads.length} DP roads, ${areas.length} locality pages`);
 console.log(areas.map((a) => a.slug).join(' '));
