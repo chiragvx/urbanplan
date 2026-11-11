@@ -26,8 +26,18 @@ const STUDIO = [
   { icon: Icon.share, title: 'Hand it on', body: 'Report as PDF; area statement and unit schedule as CSV; DXF.' },
 ];
 
-/** Site Studio at work, recorded from the app: plays while it's on screen, muted, round and round. */
-function StudioVideo({ hero }: { hero?: boolean }) {
+const STUDIO_CLIP = {
+  src: 'studio-procedural.mp4', poster: 'studio-video.webp',
+  label: 'Site Studio at work: a garden drawn in, then a car park, then a building moved and the garden reshaped; the parking bays, paths, trees and paving lay themselves out again each time, in the plan and in 3D.',
+};
+/** the hero: a montage rendered from the editor (npm run film -- intro-01) */
+const INTRO = {
+  src: 'intro.mp4', poster: 'intro.webp',
+  label: 'The editor at work, in three shots: a signal junction inspected and swapped for a roundabout; the Development Plan’s 30 m road line laid over an 18 m road, and the road widened to it; a plot drawn on the land beside the widened road and built up, floor by floor, to the rules.',
+};
+
+/** A clip recorded from the app: plays while it's on screen, muted, round and round. */
+function StudioVideo({ hero, clip = STUDIO_CLIP }: { hero?: boolean; clip?: typeof STUDIO_CLIP }) {
   const ref = useRef<HTMLVideoElement>(null);
   const [still, setStill] = useState(false);
   useEffect(() => {
@@ -39,9 +49,8 @@ function StudioVideo({ hero }: { hero?: boolean }) {
     return () => io.disconnect();
   }, []);
   return (
-    <video ref={ref} class="studio-video" muted loop playsInline preload={hero ? 'metadata' : 'none'} controls={still} poster={img('studio-video.webp')} width="1600" height="900"
-      aria-label="Site Studio at work: a garden drawn in, then a car park, then a building moved and the garden reshaped; the parking bays, paths, trees and paving lay themselves out again each time, in the plan and in 3D.">
-      <source src={img('studio-procedural.mp4')} type="video/mp4" />
+    <video ref={ref} class="studio-video" muted loop playsInline preload={hero ? 'metadata' : 'none'} controls={still} poster={img(clip.poster)} width="1600" height="900" aria-label={clip.label}>
+      <source src={img(clip.src)} type="video/mp4" />
     </video>
   );
 }
@@ -77,10 +86,10 @@ export function Landing() {
             {authReady && !signedIn && <a class="btn btn-lg" href={href('signup/')}>Create an account</a>}
           </div>
           <div class="frame">
-            <StudioVideo hero />
-            <span class="float" style="left:-18px;top:18%"><span class="dot" style="background:var(--up-blue)" /><span><b>₹17.8 Cr</b><small>profit, as you draw</small></span></span>
-            <span class="float" style="right:-18px;top:42%"><span class="dot" style="background:var(--up-ok)" /><span><b>All checks met</b><small>FSI, margins, fire, parking</small></span></span>
-            <span class="float" style="left:12%;bottom:-18px"><span class="dot" style="background:var(--up-reserve)" /><span><b>332 bays</b><small>laid out for you</small></span></span>
+            <StudioVideo hero clip={INTRO} />
+            <span class="float" style="left:-18px;top:18%"><span class="dot" style="background:var(--up-ok)" /><span><b>Signal → roundabout</b><small>junctions, redrawn live</small></span></span>
+            <span class="float" style="right:-18px;top:42%"><span class="dot" style="background:var(--up-reserve)" /><span><b>DP road lines</b><small>over today’s roads</small></span></span>
+            <span class="float" style="left:12%;bottom:-18px"><span class="dot" style="background:var(--up-blue)" /><span><b>Plot to tower</b><small>built to the rules</small></span></span>
           </div>
         </div>
       </section>

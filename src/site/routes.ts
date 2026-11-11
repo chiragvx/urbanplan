@@ -112,13 +112,13 @@ const STATIC: Route[] = [
     head: {
       title: `${SITE_NAME}: edit the real city, see what it becomes`,
       description: 'A map editor for Pune and Mumbai. Draw roads, flyovers and tunnels, lay the Development Plan over today’s city, and see what a plot can hold, in 2D and 3D.',
-      image: IMG.studio, imageAlt: ALT.studio, preload: 'site/studio-video.webp',
+      image: IMG.studio, imageAlt: ALT.studio, preload: 'site/intro.webp',
       ld: (url) => [
         { '@type': 'WebSite', '@id': url('#site'), name: SITE_NAME, url: url(''), inLanguage: 'en-IN', publisher: { '@id': url('#org') } },
         org(url), app(url),
       ],
     },
-    images: ['site/studio-video.webp', 'site/studio-towers.webp', 'site/dp-2d.webp', 'site/city-detail.webp'],
+    images: ['site/intro.webp', 'site/studio-video.webp', 'site/studio-towers.webp', 'site/dp-2d.webp', 'site/city-detail.webp'],
   },
   {
     path: 'app/', priority: 0.9, updated: SITE_UPDATED,

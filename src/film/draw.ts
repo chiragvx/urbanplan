@@ -3,9 +3,15 @@
 import { BRAND, COBALT, FONT, GREEN, INK, ORANGE, PAPER, RED } from './brand';
 import type { V2 } from './types';
 
-export const W = 1080, H = 1920;
+/** the frame (CSS px): 1080 × 1920 for the vertical episodes; a scene can ask for another (Scene.size) */
+export let W = 1080, H = 1920;
 /** where text may go: 8% margins, and clear of the bottom 15% (Reels / Shorts draw their buttons and caption there) */
-export const SAFE = { x0: 86, x1: W - 86, y0: 154, y1: Math.round(H * 0.85) };
+export let SAFE = { x0: 86, x1: W - 86, y0: 154, y1: Math.round(H * 0.85) };
+/** Another frame size (before anything is drawn). Landscape keeps 5% margins all round: no app chrome to avoid. */
+export function setFrame(w: number, h: number) {
+  W = w; H = h;
+  SAFE = h >= w ? { x0: 86, x1: W - 86, y0: 154, y1: Math.round(H * 0.85) } : { x0: Math.round(W * 0.05), x1: Math.round(W * 0.95), y0: Math.round(H * 0.06), y1: Math.round(H * 0.94) };
+}
 const inSafe = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 /** world point (x, z, height above the ground) → canvas pixels, or null behind the camera */
 export type Project = (x: number, z: number, lift?: number) => V2 | null;
@@ -56,7 +62,7 @@ export function caption(ctx: CanvasRenderingContext2D, text: string, a: number, 
   const lh = S.px * S.lh, padX = 44, padY = 34;
   const tw = Math.max(...lines.map((l) => ctx.measureText(l).width));
   const bw = tw + padX * 2, bh = lines.length * lh + padY * 2 - (lh - S.px) ;
-  const y0 = at === 'top' ? 250 : at === 'centre' ? (H - bh) / 2 : SAFE.y1 - 40 - bh;
+  const y0 = at === 'top' ? SAFE.y0 + 96 : at === 'centre' ? (H - bh) / 2 : SAFE.y1 - 40 - bh;
   const slide = (1 - ease.out(a)) * 40;
   ctx.globalAlpha = a;
   ctx.translate(0, slide);
@@ -427,4 +433,62 @@ export function cards(ctx: CanvasRenderingContext2D, stats: { label: string; val
     richLeft(ctx, s.value, x + 40, y + 104, PAPER);
     ctx.restore();
   });
+}
+
+// ---- montage (the landing page's intro) ----
+
+/** A corridor on the ground (the DP's road width): a soft fill and dashed edges, drawn on along its length. */
+export function band(ctx: CanvasRenderingContext2D, P: Project, pts: V2[], u: number, a: number, color = RED) {
+  if (a <= 0 || pts.length < 4) return;
+  // the ring is the left edge out and the right edge back: grow both from the start
+  const n = pts.length / 2, k = Math.max(2, Math.round(n * ease.inOut(clamp01(u))));
+  const left = pts.slice(0, k), right = pts.slice(pts.length - k).reverse();
+  const L = left.map(([x, z]) => P(x, z, 0.5)), R = right.map(([x, z]) => P(x, z, 0.5));
+  if (L.some((p) => !p) || R.some((p) => !p)) return;
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.beginPath();
+  L.forEach((p, i) => (i ? ctx.lineTo(p![0], p![1]) : ctx.moveTo(p![0], p![1])));
+  for (let i = R.length - 1; i >= 0; i--) ctx.lineTo(R[i]![0], R[i]![1]);
+  ctx.closePath();
+  ctx.fillStyle = color; ctx.globalAlpha = a * 0.22; ctx.fill();
+  ctx.globalAlpha = a;
+  ctx.setLineDash([26, 16]); ctx.lineWidth = 6; ctx.strokeStyle = color; ctx.lineCap = 'round';
+  ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 8;
+  for (const E of [L, R]) { ctx.beginPath(); E.forEach((p, i) => (i ? ctx.lineTo(p![0], p![1]) : ctx.moveTo(p![0], p![1]))); ctx.stroke(); }
+  ctx.restore();
+}
+
+/** The shot's title, bottom left: a step number in orange and a line of text, on a dark glass card. */
+export function shotTitle(ctx: CanvasRenderingContext2D, n: number, text: string, sub: string | undefined, a: number) {
+  if (a <= 0) return;
+  ctx.save();
+  const k = ease.out(a);
+  ctx.globalAlpha = a;
+  ctx.font = font(50, 700);
+  const tw = ctx.measureText(text).width;
+  ctx.font = font(32, 500);
+  const sw = sub ? ctx.measureText(sub).width : 0;
+  const badge = 64, pad = 30, w = badge + pad * 3 + Math.max(tw, sw), h = sub ? 150 : 112;
+  const x = SAFE.x0 - (1 - k) * 40, y = SAFE.y1 - h;
+  ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 36; ctx.shadowOffsetY = 10;
+  ctx.fillStyle = 'rgba(12,12,13,0.82)';
+  pill(ctx, x, y, w, h, 28); ctx.fill();
+  ctx.shadowColor = 'transparent';
+  ctx.fillStyle = ORANGE;
+  ctx.beginPath(); ctx.arc(x + pad + badge / 2, y + h / 2, badge / 2, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = INK; ctx.font = font(36, 800); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(String(n), x + pad + badge / 2, y + h / 2 + 2);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  ctx.font = font(50, 700); ctx.fillStyle = PAPER;
+  const tx = x + pad * 2 + badge;
+  ctx.fillText(text, tx, y + (sub ? 70 : 72));
+  if (sub) { ctx.font = font(32, 500); richLeft(ctx, sub, tx, y + 118, 'rgba(250,250,249,0.72)'); }
+  ctx.restore();
+}
+
+/** A dip through ink (a cut between shots; the loop's ends). */
+export function dip(ctx: CanvasRenderingContext2D, a: number) {
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha = clamp01(a); ctx.fillStyle = INK; ctx.fillRect(0, 0, W, H); ctx.restore();
 }

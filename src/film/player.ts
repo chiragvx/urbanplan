@@ -9,7 +9,7 @@ import { BRAND, GREEN, RED } from './brand';
 import * as D from './draw';
 import type { Key, Measured, Place, Scene, V2 } from './types';
 
-const { W, H, fade, clamp01, ease } = D;
+const { fade, clamp01, ease } = D;
 
 /** One edit of the fix (a step, or one tick of a step's tween). */
 interface Edit { t: number; step: number; run: () => void; changed: boolean }
@@ -45,7 +45,7 @@ export class Player {
     this.fps = scene.fps ?? 30;
     this.count = Math.round(scene.duration * this.fps);
     this.kit = new Kit(app.doc, app.C, app.hf);
-    this.cv.width = W; this.cv.height = H;
+    this.cv.width = D.W; this.cv.height = D.H;
     this.ctx = this.cv.getContext('2d')!;
     this.ctx.imageSmoothingQuality = 'high';
   }
@@ -359,7 +359,7 @@ export class Player {
     cam.fov = k.fov;
     cam.near = Math.max(0.5, k.dist * 0.01);
     cam.far = 20000;
-    cam.aspect = W / H;
+    cam.aspect = D.W / D.H;
     cam.updateProjectionMatrix();
     cam.lookAt(k.at[0], ty, k.at[1]);
     cam.updateMatrixWorld();
@@ -414,14 +414,14 @@ export class Player {
       img.data.set(px.subarray(src, src + row), y * row);
     }
     ctx.putImageData(img, 0, 0);
-    this.ctx.drawImage(cv, 0, 0, W, H);
+    this.ctx.drawImage(cv, 0, 0, D.W, D.H);
   }
 
   /** world point → canvas pixels with the current camera */
   private project: D.Project = (x, z, lift = 0) => {
     const v = new THREE.Vector3(x, this.app.hf.sampleSurface(x, z) + lift, z).project(this.app.engine.camera);
     if (v.z > 1 || v.z < -1) return null;
-    return [((v.x + 1) / 2) * W, ((1 - v.y) / 2) * H];
+    return [((v.x + 1) / 2) * D.W, ((1 - v.y) / 2) * D.H];
   };
 
   /** `{before.cross}` → the measured number */
@@ -448,6 +448,7 @@ export class Player {
       if (m.kind === 'circle') D.ring(ctx, P, pl.ring ?? this.kit.circle(pl.p ?? [0, 0], m.r ?? 30, 64), u, a, m.color ?? RED);
       else if (m.kind === 'dim' && pl.line) D.dim(ctx, P, pl.line[0], pl.line[1], this.text(m.text), u, a, m.color ?? RED);
       else if (m.kind === 'tag') D.tag(ctx, P, pl.p ?? this.pointOf(m.place), this.text(m.text), a, m.color ?? RED, false);
+      else if (m.kind === 'band' && pl.ring) D.band(ctx, P, pl.ring, clamp01((t - m.t0) / 1.0), a, m.color ?? RED);
     }
     // each step's tag while it lands
     S.steps.forEach((st) => {
@@ -459,14 +460,24 @@ export class Player {
     if (C) D.counter(ctx, fade(t, C.t0, C.t1), this.text(C.text), this.text(C.label), C.sub && this.text(C.sub));
     if (K && t >= K.t0 && t <= K.t1) D.cards(ctx, K.stats.map((s) => ({ ...s, label: this.text(s.label), value: this.text(s.value) })), t - K.t0, clamp01((K.t1 - t) / 0.3));
     if (S.wipe) D.wipe(ctx, (t - S.wipe.t0) / (S.wipe.t1 - S.wipe.t0), this.text(S.wipe.text));
+    S.shots?.forEach((sh, i) => D.shotTitle(ctx, i + 1, this.text(sh.title), sh.sub && this.text(sh.sub), fade(t, sh.t0, sh.t1, 0.4, 0.3)));
+  }
+
+  /** how far into ink the frame is: the cuts, and a loop's two ends */
+  private dipAt(t: number) {
+    const S = this.scene, half = 0.22;
+    let a = 0;
+    for (const c of S.cuts ?? []) a = Math.max(a, 1 - Math.abs(t - c) / half);
+    if (S.loop) a = Math.max(a, 1 - t / 0.5, 1 - (S.duration - t) / 0.5);
+    return clamp01(a);
   }
 
   /** the before / after split: BEFORE (rendered earlier) wipes in from the right over the AFTER frame */
   private split(t: number, before: ImageBitmap) {
     const S = this.scene.split!, ctx = this.ctx;
     const u = ease.inOut(clamp01((t - S.t0) / 0.7));
-    const x = W - (W / 2) * u;
-    ctx.save(); ctx.beginPath(); ctx.rect(0, 0, x, H); ctx.clip(); ctx.drawImage(before, 0, 0, W, H); ctx.restore();
+    const x = D.W - (D.W / 2) * u;
+    ctx.save(); ctx.beginPath(); ctx.rect(0, 0, x, D.H); ctx.clip(); ctx.drawImage(before, 0, 0, D.W, D.H); ctx.restore();
     D.splitChrome(ctx, x, this.text(S.left), this.text(S.right), S.stats.map((s) => ({ label: this.text(s.label), before: this.text(s.before), after: this.text(s.after) })), t - S.t0);
   }
 
@@ -476,6 +487,12 @@ export class Player {
   private async frame(f: number, before?: ImageBitmap) {
     const t = f / this.fps, S = this.scene, ctx = this.ctx;
     const endT = t - S.end.t0;
+    if (S.loop) {
+      await this.render3d(t, false);
+      this.overlays(t);
+      D.dip(ctx, ease.inOut(this.dipAt(t)));
+      return;
+    }
     if (!BRAND.branded) {
       // unbranded: the film runs to the last frame on the 3D, the closing question over the last shot
       await this.render3d(t, false);

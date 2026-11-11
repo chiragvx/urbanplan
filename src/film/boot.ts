@@ -5,7 +5,7 @@ import { App } from '../app/app';
 import { Player } from './player';
 import { SCENES } from './scenes';
 import { FONT, INK } from './brand';
-import { W, H } from './draw';
+import * as D from './draw';
 
 /** Same numbers every run: Math.random drives a few cosmetic things (ground texture speckle, new ids). */
 function seedRandom(seed: number) {
@@ -33,6 +33,8 @@ export async function bootFilm(Q: URLSearchParams) {
   if (!load) { fail(`No film scene “${id}” (src/film/scenes.ts lists them)`); return; }
   const scene = (await load()).default;
   seedRandom(1);
+  if (scene.size) D.setFrame(scene.size[0], scene.size[1]);
+  const { W, H } = D;
   // the stage: exactly 1080 × 1920 CSS pixels, scaled to fit the window
   document.body.style.cssText = `margin:0;background:${INK};overflow:hidden`;
   $('home').hidden = true;

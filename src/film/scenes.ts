@@ -13,4 +13,5 @@ export const SCENES: Record<string, () => Promise<{ default: Scene }>> = {
   'wi-09': () => import('../../tools/film/scenes/wi-09'),
   'wi-10': () => import('../../tools/film/scenes/wi-10'),
   'p-01': () => import('../../tools/film/scenes/p-01'),
+  'intro-01': () => import('../../tools/film/scenes/intro-01'),
 };

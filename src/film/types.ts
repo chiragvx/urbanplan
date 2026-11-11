@@ -45,7 +45,9 @@ export type Mark =
   | { kind: 'dim'; t0: number; t1: number; place: string; text: string; color?: string }
   | { kind: 'tag'; t0: number; t1: number; place: string; text: string; color?: string }
   /** an outline that moves in: from rings[0] to rings[1] from at[0] over `dur` s, then on to rings[2] from at[1], … (a setback pulling in) */
-  | { kind: 'outline'; t0: number; t1: number; rings: string[]; at: number[]; dur?: number; color?: string };
+  | { kind: 'outline'; t0: number; t1: number; rings: string[]; at: number[]; dur?: number; color?: string }
+  /** a corridor on the ground (a ring: one edge out, the other back), filled and dashed, drawn on along its length */
+  | { kind: 'band'; t0: number; t1: number; place: string; color?: string };
 
 export interface Scene {
   id: string;
@@ -80,6 +82,12 @@ export interface Scene {
    * without it they stay for the whole film.
    */
   cars?: { place: string; leave?: number }[];
+
+  // ---- montage (the landing page's intro) ----
+  /** the frame in CSS px, default [1080, 1920] */ size?: [number, number];
+  /** a loop: no chip, bug, end card or closing; the film dips from and to ink at its ends so it joins up */ loop?: boolean;
+  /** cuts between shots: a quick dip through ink at each time (move the camera keys across it) */ cuts?: number[];
+  /** each shot's title, bottom left, numbered */ shots?: { t0: number; t1: number; title: string; sub?: string }[];
 
   // ---- plots (Plot Twist) ----
   /** when the score turns from the opening to the build, with no wipe (sound.ts; default the wipe's end) */ beat?: number;
