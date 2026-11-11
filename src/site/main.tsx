@@ -1,14 +1,9 @@
-// The website's pages, one HTML entry each (index.html, pricing/, login/ …), all rendered from here by data-page.
-import { render, type FunctionComponent } from 'preact';
+// The website's pages, all rendered from here: <div id="site" data-page="…"> names the page (src/site/views.ts).
+// The build prerenders every page, so its HTML is already there and is hydrated; in development it's rendered afresh.
+import { hydrate, render } from 'preact';
 import './site.css';
-import { Landing } from './Landing';
-import { Pricing } from './Pricing';
-import { Login, Signup, Forgot, Reset } from './AuthPages';
-import { Account } from './Account';
-import { Terms, Privacy } from './Legal';
-
-const PAGES: Record<string, FunctionComponent> = { landing: Landing, pricing: Pricing, login: Login, signup: Signup, forgot: Forgot, reset: Reset, account: Account, terms: Terms, privacy: Privacy };
+import { viewOf } from './views';
 
 const root = document.getElementById('site')!;
-const Page = PAGES[root.dataset.page ?? 'landing'] ?? Landing;
-render(<Page />, root);
+const view = viewOf(root.dataset.page ?? '') ?? viewOf('404')!;
+void view().then((v) => (root.firstElementChild ? hydrate(v, root) : render(v, root)));

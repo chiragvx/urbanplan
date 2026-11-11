@@ -25,7 +25,8 @@ const CARS: [number, number, number, string][] = [
 /** The street as it is and as the DP widens it: plays by itself while it's on screen (a click takes over). */
 export function TodayPlanned() {
   const [planned, setPlanned] = useState(false);
-  const [auto, setAuto] = useState(!reduced());
+  // playing at first, as the prerendered page shows it; reduced motion stops it once the page is up
+  const [auto, setAuto] = useState(true);
   const [t, setT] = useState(0);      // 0 today … 1 as planned
   const [clock, setClock] = useState(0);
   const ref = useRef<SVGSVGElement>(null);
@@ -39,6 +40,7 @@ export function TodayPlanned() {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    if (reduced()) { setAuto(false); autoRef.current = false; }
     const io = new IntersectionObserver(([e]) => {
       const s = state.current;
       // the first look starts the clock afresh, so it doesn't flip the moment it's seen

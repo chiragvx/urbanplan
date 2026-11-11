@@ -1,0 +1,30 @@
+<!doctype html>
+<!-- The website's page template: every route in src/site/routes.ts but the landing page and the editor is built
+     from it. The build fills in <head> (in place of <title>) and the prerendered page and its data-page; in development
+     the dev server does the same without the page (vite.config.ts). -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UrbanPlan</title>
+    <meta name="theme-color" content="#0c0c0d" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@500;600&display=swap" rel="stylesheet" />
+    <script>
+      // theme before first paint: the same setting as the editor's
+      try {
+        const s = JSON.parse(localStorage.getItem('pune-remix:settings') || '{}');
+        const d = s.theme === 'dark' || ((!s.theme || s.theme === 'system') && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.dataset.theme = d ? 'dark' : 'light';
+      } catch (e) { document.documentElement.dataset.theme = 'light'; }
+    </script>
+  </head>
+  <body>
+    <div id="site" data-page=""></div>
+    <script type="module" src="/src/site/main.tsx"></script>
+  </body>
+</html>

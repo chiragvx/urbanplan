@@ -17,7 +17,13 @@
     "map": "esbuild tools/map-cli.ts --bundle --platform=node --format=esm --outfile=tools/dev/map-cli.mjs --log-level=warning && node tools/dev/map-cli.mjs",
     "test": "esbuild tools/dev/test-doc.ts --bundle --platform=node --format=esm --outfile=tools/dev/test-doc.mjs --log-level=warning && node tools/dev/test-doc.mjs && esbuild tools/dev/test-xs.ts --bundle --platform=node --format=esm --outfile=tools/dev/test-xs.mjs --log-level=warning && node tools/dev/test-xs.mjs && esbuild tools/dev/test-region.ts --bundle --platform=node --format=esm --outfile=tools/dev/test-region.mjs --log-level=warning && node tools/dev/test-region.mjs && esbuild tools/dev/test-plot.ts --bundle --platform=node --format=esm --outfile=tools/dev/test-plot.mjs --log-level=warning && node tools/dev/test-plot.mjs",
     "fetch:region": "node tools/fetch-region.mjs",
-    "bake:region": "esbuild tools/bake-region.ts --bundle --platform=node --format=esm --packages=external --outfile=tools/dev/bake-region.mjs --log-level=warning && node --max-old-space-size=12000 tools/dev/bake-region.mjs"
+    "bake:region": "esbuild tools/bake-region.ts --bundle --platform=node --format=esm --packages=external --outfile=tools/dev/bake-region.mjs --log-level=warning && node --max-old-space-size=12000 tools/dev/bake-region.mjs",
+    "bake:places": "esbuild tools/places/bake-places.ts --bundle --platform=node --format=esm --packages=external --outfile=tools/dev/bake-places.mjs --log-level=warning && node tools/dev/bake-places.mjs",
+    "bake:maps": "esbuild tools/maps/bake-maps.ts --bundle --platform=node --format=esm --packages=external --outfile=tools/dev/bake-maps.mjs --log-level=warning && node --max-old-space-size=8000 tools/dev/bake-maps.mjs",
+    "bake:dpreport": "esbuild tools/dpreport/bake-dpreport.ts --bundle --platform=node --format=esm --packages=external --outfile=tools/dev/bake-dpreport.mjs --log-level=warning && node --max-old-space-size=8000 tools/dev/bake-dpreport.mjs",
+    "check:site": "node tools/dev/check-site.mjs",
+    "film:set": "esbuild tools/film/set.ts --bundle --platform=node --format=esm --outfile=tools/dev/film-set.mjs --log-level=warning && node tools/dev/film-set.mjs",
+    "film": "node tools/film/film.mjs"
   },
   "dependencies": {
     "@preact/signals": "2.10.0",
@@ -27,12 +33,16 @@
     "clipper-lib": "^6.4.2",
     "earcut": "^3.0.1",
     "geotiff": "^3.0.5",
+    "leaflet": "^1.9.4",
     "osm2streets-js": "^0.1.4",
     "preact": "^10.29.8",
     "three": "^0.186.1"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "@types/leaflet": "^1.9.12",
     "@webgpu/types": "^0.1.51",
+    "preact-render-to-string": "^6.8.2",
     "typescript": "^5.6.3",
     "vite": "^5.4.10"
   }

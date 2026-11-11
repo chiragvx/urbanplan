@@ -1,6 +1,9 @@
 // Your account: who you're signed in as, your profile, your plan, sign out.
 import { useEffect, useState } from 'preact/hooks';
-import { authReady, explain, loadProfile, ROLES, saveProfile, session, signOut, type Profile, type Role } from '../auth/auth';
+import { authReady, startAuth, explain, loadProfile, ROLES, saveProfile, session, signOut, type Profile, type Role } from '../auth/auth';
+
+// (these pages need the account service: load it as soon as the page's code does)
+if (typeof window !== 'undefined') void startAuth();
 import { APP, href, Icon, Page } from './ui';
 
 export function Account() {
@@ -66,7 +69,6 @@ function Signed() {
           <h2 style="font-size:var(--up-text-xl)">Sign-in</h2>
           <dl class="kv">
             <dt>Email</dt><dd>{u.email}</dd>
-            <dt>Signed in with</dt><dd>{(u.app_metadata?.provider as string) === 'google' ? 'Google' : 'Email'}</dd>
             <dt>Member since</dt><dd>{since}</dd>
           </dl>
           <div class="cta-row"><a class="btn" href={href('forgot/')}>Change password</a><button class="btn btn-ghost" onClick={() => void out()}>Sign out</button></div>

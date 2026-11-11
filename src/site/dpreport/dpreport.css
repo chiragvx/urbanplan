@@ -1,0 +1,105 @@
+/* The DP report pages (src/site/DpReport.tsx): the satellite map with the plan over it, the report panel beside it,
+   the email gate for the PDF, and the print sheet the browser saves as the PDF. */
+.dpr .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.dpr .tiny { font-size: var(--up-text-xs); }
+.dpr .h3 { font-size: var(--up-text-lg); letter-spacing: -0.025em; line-height: 1.25; margin: 0; }
+
+.dpr-viewer { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 0; border: 1px solid var(--up-line); border-radius: var(--up-radius-lg); overflow: hidden; background: var(--up-surface); scroll-margin-top: 72px; }
+.dpr-stage { position: relative; min-height: 560px; height: min(74vh, 720px); background: #1d2a22; }
+.dpr-map { position: absolute; inset: 0; background: #1d2a22; }
+.dpr-map .leaflet-container, .dpr-map.leaflet-container { font: inherit; background: #1d2a22; cursor: crosshair; }
+.dpr-noscript { color: #fff; padding: 24px; }
+.dpr-tools { position: absolute; z-index: 500; top: 12px; left: 12px; right: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; pointer-events: none; }
+.dpr-tools > * { pointer-events: auto; }
+.dpr-search { display: flex; gap: 6px; flex: 1 1 260px; max-width: 420px; position: relative; }
+.dpr-search .input { height: 40px; box-shadow: var(--up-shadow-sm); }
+.dpr-search .btn { height: 40px; }
+.dpr-search-msg { position: absolute; top: 46px; left: 0; right: 0; margin: 0; padding: 8px 10px; border-radius: var(--up-radius-sm); background: var(--up-surface); color: var(--up-ink); font-size: var(--up-text-sm); box-shadow: var(--up-shadow-sm); }
+.dpr-seg { display: inline-flex; padding: 3px; border-radius: 999px; background: rgba(12, 12, 13, 0.72); backdrop-filter: blur(8px); }
+.dpr-seg button, .dpr-chip { border: 0; background: transparent; color: #fff; font: 500 var(--up-text-sm) / 1 var(--up-font-body); padding: 9px 13px; border-radius: 999px; cursor: pointer; }
+.dpr-seg button.on { background: #fff; color: #0c0c0d; }
+.dpr-chip { background: rgba(12, 12, 13, 0.72); backdrop-filter: blur(8px); opacity: 0.7; }
+.dpr-chip.on { opacity: 1; }
+.dpr-opacity { display: inline-flex; align-items: center; padding: 6px 12px; border-radius: 999px; background: rgba(12, 12, 13, 0.72); }
+.dpr-opacity input { width: 96px; accent-color: #fff; }
+.dpr-hint { position: absolute; z-index: 500; left: 50%; bottom: 20px; transform: translateX(-50%); padding: 8px 14px; border-radius: 999px; background: rgba(12, 12, 13, 0.8); color: #fff; font-size: var(--up-text-sm); white-space: nowrap; pointer-events: none; }
+.dpr-pin span { display: block; width: 28px; height: 28px; background: #2f5bff; border: 3px solid #fff; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45); }
+
+.dpr-panel { border-left: 1px solid var(--up-line); padding: var(--up-space-5); overflow-y: auto; max-height: min(74vh, 720px); min-height: 560px; }
+.dpr-empty { display: grid; gap: var(--up-space-3); align-content: start; }
+.dpr-empty > svg { width: 28px; height: 28px; color: var(--up-blue); }
+.dpr-empty p { color: var(--up-ink-2); font-size: var(--up-text-sm); }
+.dpr-legend { list-style: none; padding: 0 !important; margin: var(--up-space-2) 0 0; display: grid !important; grid-template-columns: 1fr 1fr; gap: 6px 10px !important; font-size: var(--up-text-xs); }
+.dpr-legend li { display: flex; align-items: center; gap: 6px; }
+.legend-swatch.dpr-res { background: transparent; border: 2px dashed #e5484d; }
+.legend-swatch.dpr-road { background: #e5484d; height: 4px; border-radius: 2px; }
+.dpr .legend-swatch { display: inline-block; vertical-align: -1px; flex: none; }
+
+.dpr-report { display: grid; gap: var(--up-space-3); align-content: start; transition: opacity 0.15s; }
+.dpr-report.busy { opacity: 0.55; }
+.dpr-report .eyebrow { margin: 0; }
+.dpr-report h3 { font-size: var(--up-text-sm); text-transform: uppercase; letter-spacing: 0.04em; color: var(--up-muted); margin: var(--up-space-2) 0 0; }
+.dpr-report p { margin: 0; font-size: var(--up-text-sm); }
+.dpr-zone { display: flex; align-items: center; gap: 10px; }
+.dpr-zone .legend-swatch { width: 18px; height: 18px; border-radius: 5px; }
+.dpr-flag { grid-template-columns: auto 1fr; }
+.dpr-list { list-style: none; padding: 0 !important; margin: 0; display: grid; gap: 8px !important; font-size: var(--up-text-sm); }
+.dpr-list li { display: block; }
+.dpr-warn { color: var(--up-orange-ink); font-weight: 500; }
+.dpr-bar { display: flex; height: 10px; border-radius: 999px; overflow: hidden; background: var(--up-surface-2); border: 1px solid var(--up-line); }
+.dpr-bar.big { height: 18px; }
+.dpr-bar span { display: block; height: 100%; }
+.dpr-dl { display: grid; gap: var(--up-space-2); margin-top: var(--up-space-2); }
+.dpr-dl .btn svg { width: 16px; height: 16px; }
+.dpr-dl .pulse { animation: dpr-pulse 1.6s ease-in-out 3; }
+@keyframes dpr-pulse { 50% { box-shadow: 0 0 0 6px rgba(47, 91, 255, 0.25); } }
+.dpr-gate { display: grid; gap: var(--up-space-2); padding: var(--up-space-3); border-radius: var(--up-radius); background: var(--up-blue-soft); font-size: var(--up-text-sm); }
+.dpr-gate-row { display: flex; gap: 6px; }
+.dpr-gate-row .input { flex: 1; min-width: 0; }
+.dpr-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.dpr-actions .btn { flex: 1; justify-content: center; }
+.dpr-actions .btn svg { width: 16px; height: 16px; }
+
+.dpr-steps { list-style: none; padding: 0 !important; display: grid !important; grid-template-columns: repeat(3, 1fr); gap: var(--up-space-3) !important; margin: var(--up-space-2) 0; }
+.dpr-steps li { display: grid; gap: 4px; padding: var(--up-space-4); border-radius: var(--up-radius-lg); border: 1px solid var(--up-line); background: var(--up-surface); font-size: var(--up-text-sm); }
+.dpr-steps svg { color: var(--up-blue); margin-bottom: 4px; }
+.dpr-steps span { color: var(--up-muted); }
+.dpr .rules td .legend-swatch { margin-right: 6px; }
+.dpr-areas h3 { font-size: var(--up-text-md); }
+
+@media (max-width: 920px) {
+  .dpr-viewer { grid-template-columns: 1fr; }
+  .dpr-stage { height: 62vh; min-height: 420px; }
+  .dpr-panel { border-left: 0; border-top: 1px solid var(--up-line); max-height: none; min-height: 0; }
+  .dpr-steps { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) {
+  .dpr-tools { top: 8px; left: 8px; right: 8px; }
+  .dpr-search { flex-basis: 100%; max-width: none; }
+  .dpr-opacity { display: none; }
+}
+
+/* the print sheet: hidden on screen; when printing, the only thing on the page */
+.dpr-print { display: none; }
+@media print {
+  @page { size: A4; margin: 12mm; }
+  body > *:not(.dpr-print) { display: none !important; }
+  .dpr-print { display: block !important; color: #000; background: #fff; font: 10pt/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .dpr-print header { display: flex; justify-content: space-between; border-bottom: 2px solid #000; padding-bottom: 4px; font-size: 9pt; }
+  .dpr-print h1 { font-size: 17pt; margin: 8px 0 2px; letter-spacing: -0.02em; }
+  .dpr-print h2 { font-size: 10.5pt; margin: 8px 0 4px; }
+  .dpr-print .meta { font-size: 8.5pt; color: #444; margin: 0 0 6px; }
+  .dpr-print .meta a { color: #444; }
+  .dpr-print .summary { display: grid; grid-template-columns: 1fr 1.6fr 1fr; gap: 6px; margin: 6px 0; }
+  .dpr-print .summary div { border: 1px solid #ccc; border-radius: 4px; padding: 5px 7px; display: grid; }
+  .dpr-print .summary span { font-size: 7.5pt; text-transform: uppercase; color: #555; }
+  .dpr-print .pics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .dpr-print figure { margin: 0; }
+  .dpr-print img { width: 100%; border: 1px solid #999; }
+  .dpr-print figcaption { font-size: 7.5pt; color: #444; }
+  .dpr-print .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .dpr-print table { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
+  .dpr-print th, .dpr-print td { text-align: left; border-bottom: 1px solid #ddd; padding: 2px 4px; }
+  .dpr-print footer { margin-top: 10px; border-top: 1px solid #999; padding-top: 6px; font-size: 7.5pt; color: #333; }
+  .dpr-print footer p { margin: 0 0 3px; }
+}

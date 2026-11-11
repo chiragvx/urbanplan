@@ -40,7 +40,7 @@ import {
 export interface SurveyItem { id: string; cls: string; reserved: boolean; area: number; code?: string; status: SurveyStatus; x: number; z: number }
 import { download, local, pickFile, repo, saveToDisk, slug } from './storage';
 import { cloudOn, cloudState, readProject, readVersion, saveProject, type Version } from './cloud';
-import { session } from '../auth/auth';
+import { session, startAuth } from '../auth/auth';
 
 export class App implements AppApi {
   engine!: Engine;
@@ -69,8 +69,8 @@ export class App implements AppApi {
   /** how long each boot stage took (ms) */
   readonly bootTimes: Record<string, number> = {};
 
-  /** Boot on a region (`region`) or a single tile (`tile`). */
-  async boot(src: { tile?: string; region?: string }, progress: (f: number, msg: string) => void) {
+  /** Boot on a region (`region`) or a single tile (`tile`). `film`: film mode (src/film) drives every frame itself. */
+  async boot(src: { tile?: string; region?: string }, progress: (f: number, msg: string) => void, opts: { film?: boolean } = {}) {
     const $ = (id: string) => document.getElementById(id) as HTMLCanvasElement;
     let tb = performance.now();
     const lap = (k: string) => { const t = performance.now(); this.bootTimes[k] = Math.round(t - tb); tb = t; };
@@ -188,13 +188,16 @@ export class App implements AppApi {
     this.bindDrop();
     // start in the plan view, framing Koregaon Park (or, in a region, where the window opened)
     this.engine.setPlan(true); this.world.setPlan(true); this.engine.plan = true;
-    if (this.stream) this.E.view.goTo(this.tile.ox! + this.startOffset[0], this.tile.oz! + this.startOffset[1], 0.5, 1);
+    if (this.stream) this.E.view.goTo(this.tile.ox! + this.startOffset[0], this.tile.oz! + this.startOffset[1], this.startScale, 1);
     else this.E.view.goTo(-350, 150, 0.5, 1);
+    // film mode: no saved maps, no account, no frame loop (and nothing it edits is saved)
+    if (opts.film) { readOnly.value = true; return; }
     progress(0.97, 'Opening your map…');
     await this.restore();
     this.resumeView();
     // signed in (now or later): the map goes to the account too
     let was = false;
+    void startAuth();
     session.subscribe((x) => { const on = !!x?.user; if (on && !was) this.scheduleCloud(1500); if (!on) cloudState.value = { s: 'off' }; was = on; });
     (window as unknown as Record<string, unknown>).city = new CityApi(this.doc, {
       select: (ids) => select(ids.map((id) => ({ kind: this.doc.get(id)!.kind, id }))),
@@ -297,8 +300,23 @@ export class App implements AppApi {
 
   // ---------------- startup: which map ----------------
 
-  /** in a region: where the first view looks, relative to the window centre */
+  /** in a region: where the first view looks, relative to the window centre, and how close (pixels per metre) */
   private startOffset: [number, number] = [0, 0];
+  private startScale = 0.5;
+
+  /**
+   * A link to a place: `?at=<lat>,<lon>[,<zoom>]` (zoom as on web maps, 17 ≈ a neighbourhood) — the point in the
+   * region's frame and the 2D scale, or null.
+   */
+  private atParam(R: RegionManifest): { p: [number, number]; scale?: number } | null {
+    const v = (new URLSearchParams(location.search).get('at') ?? '').split(',').map(Number);
+    if (v.length < 2 || !v.slice(0, 2).every(Number.isFinite)) return null;
+    const [lat, lon, zoom] = v, F = R.frame;
+    const p: [number, number] = [(lon - F.lon0) * F.kx, -(lat - F.lat0) * F.kz];
+    const [x0, z0, x1, z1] = R.bounds;
+    if (p[0] < x0 || p[0] > x1 || p[1] < z0 || p[1] > z1) return null; // not in this city
+    return { p, scale: Number.isFinite(zoom) ? 2 ** zoom / (156543.03 * Math.cos((lat * Math.PI) / 180)) : undefined };
+  }
 
   /** The newest map saved in this browser for this city (or a tile it took over). */
   private async lastHere(id: string, legacy: Record<string, unknown> = {}) {
@@ -307,10 +325,12 @@ export class App implements AppApi {
     return (await local.list()).find((m) => m.meta.tile === id || legacy[m.meta.tile]);
   }
 
-  /** Region: open where the last map's edits are, else the city's start (Koregaon Park in Pune). */
+  /** Region: open at the place linked to (?at=), else where the last map's edits are, else the city's start (Koregaon Park in Pune). */
   private async startPoint(R: RegionManifest): Promise<[number, number]> {
-    let p: [number, number] | null = null;
-    try {
+    const at = this.atParam(R);
+    let p: [number, number] | null = at?.p ?? null;
+    if (at?.scale) this.startScale = at.scale;
+    if (!p) try {
       const last = await this.lastHere(R.id, R.legacy);
       if (last) {
         const f = this.toRegion(parse(last.text), R);

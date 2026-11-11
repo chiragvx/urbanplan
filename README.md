@@ -21,20 +21,100 @@ npm test        # headless document + cross-section tests
 
 ## Website and accounts
 
-The site is a few static pages around the editor, all built by `npm run build`:
+The site is static pages around the editor, all built and prerendered by `npm run build`:
 
 | Path | What |
 |---|---|
 | `/` | landing page (`index.html`); old editor links (`/?map=…`, `/?region=…`) forward to `/app/` |
 | `/app/` | the editor (`app/index.html`, `src/main.ts`) |
 | `/pricing/`, `/terms/`, `/privacy/` | pricing and the beta's terms and privacy notice |
-| `/login/`, `/signup/`, `/forgot/`, `/reset/`, `/account/` | accounts |
+| `/guides/`, `/guides/<slug>/` | guides: FSI, setbacks, TDR, DP roads … (`src/site/Guide.tsx`, words in `src/site/guides/data.ts`) |
+| `/pune/`, `/mumbai/`, `/<city>/<slug>/` | city and place pages (`src/site/Place.tsx`, `src/site/places/data.ts`) |
+| `/pune/map/`, `/mumbai/map/` | the 3D map of each city: what's on it, how to use it, every place page by area (`src/site/CityMap.tsx`) |
+| `/pune/dp-map/` | where the Pune DP is in the site: sheets (old PMC), traced widths (part of east-central Pune only) |
+| `/pune/road-width-map/`, `/mumbai/road-width-map/` | main roads coloured by width, the widest / narrowest named roads |
+| `/mr/pune/map/`, `/mr/pune/dp-map/` | Marathi versions (`src/site/CityMapMr.tsx`), hreflang-paired with the English pages |
+| `/pune/dp-report/`, `/pune/dp-report/<locality>/` | the DP report: Pune's Development Plan on satellite, click a plot for its zone, reservations and DP roads; PDF download behind an email sign-in (`src/site/DpReport.tsx`) |
+| `/data/` | open data: sources, licence, GeoJSON downloads of each city's main roads (`public/data/`, ODbL) |
+| `/login/`, `/signup/`, `/forgot/`, `/reset/`, `/account/` | accounts (`noindex`) |
+| `/404.html` | not-found page (`noindex`), linking to the hubs |
+| `/sitemap.xml`, `/robots.txt`, `/llms.txt`, `/site.webmanifest` | written by the build from the routes |
 
-Pages are Preact components in `src/site/` (one entry, `src/site/main.tsx`, picks the page from `data-page`). The design
-theme — colours, type, spacing, for light and dark — is `src/theme/tokens.css`; the site and the editor share the theme
-setting, so switching it in one switches both.
+Every page is a route in **`src/site/routes.ts`**: its path, its head (title, description, language and hreflang
+alternates, social card picture and alt, LCP preload, JSON-LD) and its sitemap priority, date and pictures; what it
+renders is in **`src/site/views.ts`** (path → lazily loaded component). The browser loads only `views.ts` and the
+page's own chunk: `routes.ts` and its data stay in the build. **The brand name and fallback URL are in
+`src/site/brand.ts`** (`SITE_NAME`, `LOGO_PARTS`, `SITE_URL_FALLBACK`, `THEME_COLOR`): every page, card, manifest and
+llms.txt reads them, so a rename or new domain is one edit there (the share pictures and icons are re-made with
+`npm run bake:maps` / `bake:places`). The pages are Preact components in `src/site/`; the
+design theme (colours, type, spacing, light and dark) is `src/theme/tokens.css`, and the site and the editor share
+the theme setting, so switching it in one switches both.
 
-**Accounts** run on Supabase Auth: email + password, a one-time email link, or Google; password reset. They're
+**Prerendering.** After `vite build`, the `urbanplan-site` plugin in `vite.config.ts` loads `src/site/prerender.ts`
+in Node (a throwaway Vite SSR loader), renders each route with `preact-render-to-string`, and writes
+`dist/<path>/index.html`: the built template (`src/site/page.html`, or `index.html` / `app/index.html` for the
+two pages with their own) with the head tags in place of its `<title>` and the page inside `<div id="site"
+data-page="<path>">`. In the browser `src/site/main.tsx` finds the route by `data-page` and hydrates it. So pages must
+render the same in Node and on first load: no `window`, `document`, `localStorage`, `location` or Supabase while
+rendering; read them in `useEffect` (see `useSearch` in `src/site/ui.tsx`), or let CSS pick (the theme button draws
+both icons). In `npm run dev` the template pages are served with their head and rendered in the browser.
+
+**To add a page**: write the component, add its view to `src/site/views.ts` and a route to `ROUTES` in
+`src/site/routes.ts` (path, head, priority, updated), and link it from somewhere. No HTML file, no Vite config. Social cards are 1200 × 630 JPGs in
+`public/site/og-*.jpg` (WebP isn't reliable for link previews).
+
+**SEO**: unique title (60 characters or fewer; the site name is added when it fits) and description (155 or fewer),
+canonical link, `<html lang>`, Open Graph (`og:locale`, image size and alt) and Twitter cards per page; JSON-LD
+(WebSite, Organization and SoftwareApplication on the landing page; `Map` with a `spatialCoverage` City and GeoShape
+on the map pages; `Place` with `GeoCoordinates` and `containedInPlace` on place pages; two `Dataset`s with ODbL,
+creator and `DataDownload` on `/data/`; BreadcrumbList everywhere; FAQPage on guides and the DP map); hreflang
+en-IN / mr-IN / x-default both ways and in the sitemap; `<image:image>` entries in the sitemap; lastmod is the bake
+date for data pages; `noindex` pages left out. The build warns on long or shared titles and descriptions and on
+hreflang that doesn't point back (`checkHeads` in `src/site/prerender.ts`); **`npm run check:site`** (after a build)
+checks `dist/` in full: title, description, canonical, OG on every page, duplicates, one `<h1>` and heading order,
+alt and width / height on images, JSON-LD parses, hreflang reciprocity, every sitemap URL and picture exists, no
+noindex page in the sitemap, and no internal link, script or picture pointing at a missing file or lacking its
+trailing slash.
+
+**Performance**: the Supabase library loads only on the account pages, in the editor, or on idle for someone with a
+stored session; other pages show the account chip from what Supabase stored (`peekSession` in `src/auth/auth.ts`).
+The landing page loads about 22 kB of JS (gzipped; it was about 108 kB). The landing video's poster is preloaded
+with high priority and the video itself is `preload="metadata"`. Fonts still come from Google Fonts (Geist):
+self-hosting them would need `@fontsource/geist` added as a dependency.
+
+**City map data.** `npm run bake:maps` (`tools/maps/bake-maps.ts`, after `bake:region` and `bake:places`) reads
+each baked region and writes `src/site/maps/generated/maps.json` (the numbers on the map pages: lengths by class and
+width band, the widest / narrowest / longest named main roads, DP sheet coverage and traced widths), the SVG maps
+(`public/citymap/<city>/*.svg`, kept under 80 kB), the share pictures (`og-*.jpg`, needs ffmpeg), the GeoJSON
+downloads (`public/data/<city>-main-roads.geojson`: expressway to collector centre lines with name, class, width in
+the model, lanes, structure and OSM way ids; about 8 MB, 0.5 MB gzipped; ODbL, credit "© OpenStreetMap
+contributors"; DP traces deliberately left out) and the icons (`public/favicon.svg`, `apple-touch-icon.png`,
+`icon-192.png`, `icon-512.png`).
+
+**DP report.** `npm run bake:dpreport` (`tools/dpreport/bake-dpreport.ts`, after `bake:maps`) reads the traced DP
+(`data/raw/cities/pune/plan.json` from `tools/dp/plan.py`), the DP road widths (`data/raw/dp/widths.json`), today's
+main roads (`public/data/pune-main-roads.geojson`) and OSM localities (`data/raw/cities/pune/places.json`, fetched
+from Overpass: `node[place~"^(suburb|neighbourhood|quarter|locality|village)$"]` in the city bbox) and writes the
+viewer's data (`public/dpr/pune/`: parcels simplified to ~1 m and DP roads per 1 km cell, in half metres of the city
+frame; ≈14 MB, ≈4.5 MB gzipped) and the locality pages' facts (`src/site/dpreport/generated/areas.json`: a page
+wherever at least 45 % of the 500 m circle is traced). The viewer (`src/site/dpreport/map.ts`, Leaflet, loaded only on
+these pages) draws Esri World Imagery with the traced zones or the registered DP sheets
+(`public/regions/pune/dp/`) over it; the point report is `src/site/dpreport/geo.ts`; place search is OSM Nominatim
+(on submit only, per its usage policy). **Download**: the PDF is the browser's print-to-PDF of a print sheet with two
+canvas maps (`src/site/dpreport/print.ts`). With accounts on it first asks for an email and sends a one-time sign-in
+link back to the same spot (`?at=…&dl=1`); without accounts it downloads directly. Each download is noted in
+`dp_reports` (run `supabase/migrations/0003_dp_reports.sql`), and **add `<site>/pune/dp-report/**` to the Supabase
+redirect URLs**, or the sign-in link lands on the Site URL instead. Esri's imagery terms need checking before heavy
+commercial use (a keyed provider can replace `ESRI_IMAGERY` in `map.ts` and `print.ts`).
+
+**Marathi pages need a native review.** `/mr/pune/map/` and `/mr/pune/dp-map/` were written without a native Marathi
+speaker (numbers are the same as the English pages, in Latin digits). Their `<head>` carries an HTML comment saying
+so; have them read before promoting them, and remove the `note` in `routes.ts` once done. Absolute URLs come from **`SITE_URL`** (or
+`VITE_SITE_URL`, also read from `.env.local`): the site's address with its base path, no trailing slash, e.g.
+`SITE_URL=https://urbanplan.app`. Set it on the host that builds the site; without it the build warns and uses the
+fallback in `src/site/brand.ts`.
+
+**Accounts** run on Supabase Auth: email + password or a one-time email link; password reset. They're
 optional: without the env vars below the editor works as before and the account pages say accounts aren't set up.
 To switch them on:
 
@@ -44,8 +124,6 @@ To switch them on:
    plan), filled from sign-up, readable and editable only by its owner (the plan can't be changed from the browser).
 3. *Authentication → URL configuration*: set the Site URL to the site's address and add `<site>/account/` and
    `<site>/reset/` (and `http://localhost:5173/**` for development) to the redirect URLs.
-4. Optional: *Authentication → Providers → Google* for "Continue with Google" (a Google Cloud OAuth client whose
-   redirect URI is the callback URL Supabase shows there).
 
 The editor shows a *Sign in* button (top right of the map, and on the start menu) once accounts are on; leaving the
 editor for the account pages saves the map in the browser first.

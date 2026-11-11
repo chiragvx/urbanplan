@@ -39,7 +39,7 @@ function StudioVideo({ hero }: { hero?: boolean }) {
     return () => io.disconnect();
   }, []);
   return (
-    <video ref={ref} class="studio-video" muted loop playsInline preload={hero ? 'auto' : 'metadata'} controls={still} poster={img('studio-video.webp')} width="1600" height="900"
+    <video ref={ref} class="studio-video" muted loop playsInline preload={hero ? 'metadata' : 'none'} controls={still} poster={img('studio-video.webp')} width="1600" height="900"
       aria-label="Site Studio at work: a garden drawn in, then a car park, then a building moved and the garden reshaped; the parking bays, paths, trees and paving lay themselves out again each time, in the plan and in 3D.">
       <source src={img('studio-procedural.mp4')} type="video/mp4" />
     </video>
@@ -108,11 +108,11 @@ export function Landing() {
             <span class="float" style="left:10%;bottom:-18px"><span class="dot" style="background:var(--up-verge)" /><span><b>Drawn, not typed</b><small>the rest lays itself out</small></span></span>
           </div>
           <div class="bento" style="margin-top:var(--up-space-3)">
-            <Tile w="w4" media={<img src={img('studio-towers.webp')} alt="Three residential towers on a plot with an internal road and a roundabout, over satellite imagery." loading="lazy" />} title="The most it can hold" sub="Towers or slabs. FSI by road width, as built or as the DP widens it." />
-            <Tile media={<img src={img('studio-dp.webp')} alt="The Development Plan sheet draped over the 3D terrain around a plot." loading="lazy" />} title="On satellite or the DP" sub="Lay either under the 3D." />
-            <Tile w="w3" media={<img src={img('studio-offices.webp')} alt="Glass office towers on the same plot." loading="lazy" />} title="Offices" sub="Curtain walls, deeper plates, parking by floor area." />
-            <Tile w="w3" media={<img src={img('studio-sheds.webp')} alt="Two industrial sheds with loading docks." loading="lazy" />} title="Industrial sheds" sub="Wide spans, loading bays, truck parking." />
-            <Tile w="w4" media={<a href={REPORT} target="_blank" rel="noopener"><img src={img('report.webp')} alt="The cover of a feasibility report: the scheme in 3D and its headline figures." loading="lazy" style="object-position:top center" /></a>} title="A report for the meeting" sub="Plans to scale, rules with clauses, compliance, costs and cash flow. Print or PDF." />
+            <Tile w="w4" media={<img width={720} height={540} src={img('studio-towers.webp')} alt="Three residential towers on a plot with an internal road and a roundabout, over satellite imagery." loading="lazy" />} title="The most it can hold" sub="Towers or slabs. FSI by road width, as built or as the DP widens it." />
+            <Tile media={<img width={720} height={540} src={img('studio-dp.webp')} alt="The Development Plan sheet draped over the 3D terrain around a plot." loading="lazy" />} title="On satellite or the DP" sub="Lay either under the 3D." />
+            <Tile w="w3" media={<img width={720} height={540} src={img('studio-offices.webp')} alt="Glass office towers on the same plot." loading="lazy" />} title="Offices" sub="Curtain walls, deeper plates, parking by floor area." />
+            <Tile w="w3" media={<img width={720} height={540} src={img('studio-sheds.webp')} alt="Two industrial sheds with loading docks." loading="lazy" />} title="Industrial sheds" sub="Wide spans, loading bays, truck parking." />
+            <Tile w="w4" media={<a href={REPORT} target="_blank" rel="noopener"><img width={979} height={600} src={img('report.webp')} alt="The cover of a feasibility report: the scheme in 3D and its headline figures." loading="lazy" style="object-position:top center" /></a>} title="A report for the meeting" sub="Plans to scale, rules with clauses, compliance, costs and cash flow. Print or PDF." />
             <Tile media={<SectionArt />} title="Roads, what if" sub="Widen a road in the study; see the FSI move." />
           </div>
           <div class="soon" style="margin-top:var(--up-space-3)">
@@ -137,9 +137,9 @@ export function Landing() {
             <a class="btn btn-primary btn-lg" href={REPORT} target="_blank" rel="noopener">Open the sample report <Icon.arrow /></a>
           </div>
           <a class="report-stack" href={REPORT} target="_blank" rel="noopener" aria-label="Open the sample report in a new tab">
-            <img class="rp rp-c" src={img('report-money.webp')} alt="The report's money page: costs, profit and the cash flow." loading="lazy" />
-            <img class="rp rp-b" src={img('report-plans.webp')} alt="The report's site plan, drawn to scale: buildings, parking, gardens and trees." loading="lazy" />
-            <img class="rp rp-a" src={img('report-cover.webp')} alt="The report's cover: the scheme in 3D and its headline figures." loading="lazy" />
+            <img width={1000} height={1294} class="rp rp-c" src={img('report-money.webp')} alt="The report's money page: costs, profit and the cash flow." loading="lazy" />
+            <img width={1000} height={1063} class="rp rp-b" src={img('report-plans.webp')} alt="The report's site plan, drawn to scale: buildings, parking, gardens and trees." loading="lazy" />
+            <img width={1000} height={1243} class="rp rp-a" src={img('report-cover.webp')} alt="The report's cover: the scheme in 3D and its headline figures." loading="lazy" />
             <span class="report-open">Open the report ↗</span>
           </a>
         </div>
@@ -151,11 +151,11 @@ export function Landing() {
             <h2>Everything a street needs.</h2>
           </div>
           <div class="bento">
-            <Tile w="w4" media={<img src={img('dp-2d.webp')} alt="The 2D plan with Development Plan zones coloured over the streets." loading="lazy" />} title="The Development Plan, on the map" sub="Sheets, zones and road lines over today's city." />
+            <Tile w="w4" media={<img width={1200} height={584} src={img('dp-2d.webp')} alt="The 2D plan with Development Plan zones coloured over the streets." loading="lazy" />} title="The Development Plan, on the map" sub="Sheets, zones and road lines over today's city." />
             <Tile media={<SectionArt />} title="Real cross-sections" sub="Lanes, medians, footpaths. IRC and UDCPR presets." />
             <Tile media={<TerrainArt />} title="Terrain and earthworks" sub="Cut, fill and slopes on real elevation." />
-            <Tile w="w4" media={<img src={img('flyover-3d.webp')} alt="An elevated deck on piers beside a river, in 3D." loading="lazy" />} title="Flyovers, bridges and tunnels" sub="Ramps at your grade. Headroom checked." />
-            <Tile w="w3" media={<img src={img('city-detail.webp')} alt="A dense neighbourhood of Pune in 3D." loading="lazy" />} title="Every building, in 3D" sub="Press Tab to switch views." />
+            <Tile w="w4" media={<img width={1100} height={505} src={img('flyover-3d.webp')} alt="An elevated deck on piers beside a river, in 3D." loading="lazy" />} title="Flyovers, bridges and tunnels" sub="Ramps at your grade. Headroom checked." />
+            <Tile w="w3" media={<img width={960} height={540} src={img('city-detail.webp')} alt="A dense neighbourhood of Pune in 3D." loading="lazy" />} title="Every building, in 3D" sub="Press Tab to switch views." />
             <Tile w="w3" media={<ChecksArt />} title="Checks as you draw" sub="DP lines, buffers, headroom, junctions." />
           </div>
         </div>
@@ -206,7 +206,7 @@ export function Landing() {
 
       <section class="wrap">
         <div class="cta-panel">
-          <img src={img('dp-2d.webp')} alt="" loading="lazy" />
+          <img width={1200} height={584} src={img('dp-2d.webp')} alt="" loading="lazy" />
           <h2>Start with your plot.</h2>
           <p>Free in beta. No install.</p>
           <div class="cta-row">

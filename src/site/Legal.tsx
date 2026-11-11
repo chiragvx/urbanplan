@@ -1,5 +1,6 @@
 // Terms and privacy for the beta. Plain-language drafts: have them reviewed before charging anyone.
 import { href, Page } from './ui';
+import { SITE_NAME } from './brand';
 
 const UPDATED = '1 November 2026';
 
@@ -10,12 +11,12 @@ export function Terms() {
         <article>
           <span class="eyebrow">Legal</span>
           <h1 style="font-size:var(--up-text-3xl)">Terms of use (beta)</h1>
-          <p class="muted small">Last updated {UPDATED}. These terms cover the free beta of UrbanPlan.</p>
-          <h2>What UrbanPlan is</h2>
-          <p>UrbanPlan is a map editor and design tool. It shows cities from open data and published planning documents, and lets you draw changes to them. It is offered as a beta: features change, and parts of the map are known to be wrong.</p>
+          <p class="muted small">Last updated {UPDATED}. These terms cover the free beta of {SITE_NAME}.</p>
+          <h2>What {SITE_NAME} is</h2>
+          <p>{SITE_NAME} is a map editor and design tool. It shows cities from open data and published planning documents, and lets you draw changes to them. It is offered as a beta: features change, and parts of the map are known to be wrong.</p>
           <h2>Not advice, not a legal record</h2>
           <ul>
-            <li>Nothing in UrbanPlan is engineering, legal, planning or financial advice.</li>
+            <li>Nothing in {SITE_NAME} is engineering, legal, planning or financial advice.</li>
             <li>The Development Plan layer is traced from scanned sheets and lined up to within a few metres. It is a survey aid. It is not a DP remark, a zone certificate, a part plan or a legal boundary.</li>
             <li>Before you buy, sell, lend against, design or build anything, check with the planning authority and a licensed professional.</li>
           </ul>
@@ -30,7 +31,7 @@ export function Terms() {
           <h2>No warranty</h2>
           <p>The beta is provided as is, without warranties. To the extent the law allows, we are not liable for losses from using it or relying on it.</p>
           <h2>Changes</h2>
-          <p>We'll update these terms as UrbanPlan grows, and say so on this page. Paid plans will come with their own terms before anyone is charged.</p>
+          <p>We'll update these terms as {SITE_NAME} grows, and say so on this page. Paid plans will come with their own terms before anyone is charged.</p>
         </article>
       </section>
     </Page>
@@ -49,8 +50,8 @@ export function Privacy() {
           <p>The editor runs in your browser. Your maps and settings are stored in your browser's local storage and never sent to us, unless you publish or export a map. Map tiles and imagery you switch on are loaded from their providers (for example OpenStreetMap or a satellite provider), who see your request.</p>
           <h2>With an account</h2>
           <ul>
-            <li><b>What we keep:</b> your email address, your name, and optionally your organisation and role. If you sign in with Google, we receive your name and email from Google.</li>
-            <li><b>Why:</b> to sign you in, to show your account, and to tell you about UrbanPlan features you signed up for.</li>
+            <li><b>What we keep:</b> your email address, your name, and optionally your organisation and role.</li>
+            <li><b>Why:</b> to sign you in, to show your account, and to tell you about {SITE_NAME} features you signed up for.</li>
             <li><b>Where:</b> accounts are run on Supabase (our authentication and database provider).</li>
             <li><b>Not sold:</b> we don't sell your personal data.</li>
           </ul>

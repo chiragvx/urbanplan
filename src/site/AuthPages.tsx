@@ -1,8 +1,11 @@
 // Sign in, create an account, forgotten password, set a new password.
 import { useEffect, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import { authEvent, authReady, emailLink, explain, google, ROLES, sendReset, session, setPassword, shortName, signIn, signUp, type Role } from '../auth/auth';
-import { APP, Header, href, Icon, nextUrl } from './ui';
+import { authEvent, authReady, startAuth, emailLink, explain, ROLES, sendReset, session, setPassword, shortName, signIn, signUp, type Role } from '../auth/auth';
+
+// (these pages need the account service: load it as soon as the page's code does)
+if (typeof window !== 'undefined') void startAuth();
+import { APP, Header, href, Icon, nextUrl, useSearch } from './ui';
 
 /** The two-column frame: the city in 3D (left), the form (right). */
 function AuthFrame({ children }: { children: ComponentChildren }) {
@@ -12,7 +15,7 @@ function AuthFrame({ children }: { children: ComponentChildren }) {
       <Header />
       <main id="main" class="auth">
         <aside class="auth-side">
-          <img src={href('site/city-clean.webp')} alt="" />
+          <img width={1220} height={740} src={href('site/city-clean.webp')} alt="" />
           <h2>Your city, edited.</h2>
           <p>Free in beta, with or without an account.</p>
         </aside>
@@ -43,16 +46,6 @@ function Password({ id, value, onInput, auto, invalid }: { id: string; value: st
   );
 }
 
-function GoogleButton({ label }: { label: string }) {
-  const [err, setErr] = useState('');
-  return (
-    <>
-      <button type="button" class="btn btn-block btn-lg" disabled={!authReady} onClick={() => google().catch((e) => setErr(explain(e)))}><Icon.google />{label}</button>
-      {err && <Alert kind="error">{err}</Alert>}
-    </>
-  );
-}
-
 /** Already signed in: say so instead of showing the form again. */
 function SignedIn() {
   const u = session.value!.user;
@@ -64,6 +57,7 @@ function SignedIn() {
 }
 
 export function Login() {
+  const search = useSearch();
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
   const [link, setLink] = useState(false);
@@ -80,13 +74,11 @@ export function Login() {
   };
   return (
     <AuthFrame>
-      <div style="display:grid;gap:8px"><h1>Sign in</h1><p class="muted">New here? <a href={href(`signup/${location.search}`)}>Create an account</a></p></div>
+      <div style="display:grid;gap:8px"><h1>Sign in</h1><p class="muted">New here? <a href={href(`signup/${search}`)}>Create an account</a></p></div>
       {!authReady ? <NotSetUp /> : session.value ? <SignedIn /> : sent ? (
         <Alert kind="ok"><b>Check your email.</b> We sent a sign-in link to {email}. Open it on this device to continue.</Alert>
       ) : (
         <>
-          <GoogleButton label="Continue with Google" />
-          <div class="or">or</div>
           <form class="form" onSubmit={submit} noValidate={false}>
             <div class="field"><label for="email">Email</label><input class="input" id="email" type="email" autoComplete="email" required value={email} onInput={(e) => setEmail((e.target as HTMLInputElement).value)} /></div>
             {!link && <div class="field"><label for="password">Password</label><Password id="password" value={pw} onInput={setPw} auto="current-password" /></div>}
@@ -104,7 +96,8 @@ export function Login() {
 }
 
 export function Signup() {
-  const plan = new URLSearchParams(location.search).get('plan') ?? undefined;
+  const search = useSearch();
+  const plan = new URLSearchParams(search).get('plan') ?? undefined;
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
@@ -127,14 +120,12 @@ export function Signup() {
     <AuthFrame>
       <div style="display:grid;gap:8px">
         <h1>Create your account</h1>
-        <p class="muted">{plan === 'pro' || plan === 'firm' ? `We'll let you know when ${plan === 'pro' ? 'Pro' : 'Firm'} is ready. ` : ''}Already have one? <a href={href(`login/${location.search}`)}>Sign in</a></p>
+        <p class="muted">{plan === 'pro' || plan === 'firm' ? `We'll let you know when ${plan === 'pro' ? 'Pro' : 'Firm'} is ready. ` : ''}Already have one? <a href={href(`login/${search}`)}>Sign in</a></p>
       </div>
       {!authReady ? <NotSetUp /> : session.value && !done ? <SignedIn /> : done === 'confirm' ? (
         <Alert kind="ok"><b>Check your email to finish.</b> We sent a confirmation link to {email}. Open it and you'll land on your account page.</Alert>
       ) : (
         <>
-          <GoogleButton label="Sign up with Google" />
-          <div class="or">or</div>
           <form class="form" onSubmit={submit}>
             <div class="field"><label for="name">Your name</label><input class="input" id="name" autoComplete="name" required value={name} onInput={(e) => setName((e.target as HTMLInputElement).value)} /></div>
             <div class="field"><label for="email">Email</label><input class="input" id="email" type="email" autoComplete="email" required value={email} onInput={(e) => setEmail((e.target as HTMLInputElement).value)} /></div>

@@ -1,7 +1,8 @@
 // Shared pieces of the website: the logo, header (nav, theme, account), footer, icons, theme switch.
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import { authReady, BASE, session, shortName } from '../auth/auth';
+import { authReady, BASE, peekSession, session, shortName } from '../auth/auth';
+import { LOGO_PARTS, SITE_NAME } from './brand';
 
 export const href = (p: string) => `${BASE}${p}`;
 export const APP = href('app/');
@@ -17,7 +18,7 @@ export function Mark({ size = 30 }: { size?: number }) {
   );
 }
 
-export const Logo = () => <a class="brand" href={href('')} aria-label="UrbanPlan home"><Mark /><span>Urban<b>Plan</b></span></a>;
+export const Logo = () => <a class="brand" href={href('')} aria-label={`${SITE_NAME} home`}><Mark /><span>{LOGO_PARTS[0]}{LOGO_PARTS[1] && <b>{LOGO_PARTS[1]}</b>}</span></a>;
 
 const I = (d: string, size = 18) => () => (
   <svg viewBox="0 0 20 20" width={size} height={size} fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={d} /></svg>
@@ -41,9 +42,6 @@ export const Icon = {
   pin: I('M10 18s6-5.5 6-10a6 6 0 10-12 0c0 4.5 6 10 6 10zM10 10a2 2 0 100-4 2 2 0 000 4z'),
   info: I('M10 18a8 8 0 100-16 8 8 0 000 16zM10 9v5M10 6v.5'),
   arrow: I('M4 10h12M11 5l5 5-5 5'),
-  google: () => (
-    <svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true"><path fill="#4285F4" d="M17.6 9.2c0-.6-.1-1.2-.2-1.7H9v3.3h4.8a4.1 4.1 0 01-1.8 2.7v2.2h2.9c1.7-1.6 2.7-3.9 2.7-6.5z" /><path fill="#34A853" d="M9 18c2.4 0 4.5-.8 6-2.2l-2.9-2.2c-.8.5-1.8.9-3.1.9-2.3 0-4.3-1.6-5-3.7H1v2.3A9 9 0 009 18z" /><path fill="#FBBC05" d="M4 10.8a5.4 5.4 0 010-3.5V5H1a9 9 0 000 8.1l3-2.3z" /><path fill="#EA4335" d="M9 3.6c1.3 0 2.5.5 3.4 1.3L15 2.4A9 9 0 001 5l3 2.3c.7-2.1 2.7-3.7 5-3.7z" /></svg>
-  ),
 };
 
 // ---------- theme (the same setting as the editor's) ----------
@@ -55,17 +53,22 @@ export function setTheme(dark: boolean) {
   try { localStorage.setItem(KEY, JSON.stringify({ ...readSettings(), theme: dark ? 'dark' : 'light' })); } catch { /* private mode */ }
 }
 
+// Both icons are drawn and the stylesheet shows the one for the theme the page opened in: prerendered pages don't
+// know the theme, and the first render has to match their HTML.
 function ThemeToggle() {
-  const [d, setD] = useState(isDark());
+  const [d, setD] = useState(false);
+  useEffect(() => setD(isDark()), []);
   return (
-    <button class="icon-btn" aria-label={d ? 'Use the light theme' : 'Use the dark theme'} title={d ? 'Light theme' : 'Dark theme'} onClick={() => { setTheme(!d); setD(!d); }}>
-      {d ? <Icon.sun /> : <Icon.moon />}
+    <button class="icon-btn theme-btn" aria-label={d ? 'Use the light theme' : 'Use the dark theme'} title={d ? 'Light theme' : 'Dark theme'} onClick={() => { const to = !isDark(); setTheme(to); setD(to); }}>
+      <span class="if-dark"><Icon.sun /></span><span class="if-light"><Icon.moon /></span>
     </button>
   );
 }
 
 /** "Sign in" or the signed-in account (avatar + first name). */
 export function AccountLink() {
+  // (who's signed in, from what Supabase stored, after the page is up: the library itself loads only where it's needed)
+  useEffect(() => peekSession(), []);
   const s = session.value;
   if (!authReady || s === null) return <a class="btn btn-ghost hide-sm" href={href('login/')}>Sign in</a>;
   if (s === undefined) return <span class="btn btn-ghost hide-sm" aria-hidden="true" style="visibility:hidden">Sign in</span>;
@@ -73,13 +76,13 @@ export function AccountLink() {
   return <a class="chip-account" href={href('account/')} title={s.user.email ?? ''}><span class="avatar">{name[0]?.toUpperCase()}</span><span class="hide-sm">{name}</span></a>;
 }
 
-const NAV: [string, string][] = [['#studio', 'Site Studio'], ['#features', 'Product'], ['#plan', 'Today vs. plan'], ['pricing/', 'Pricing']];
+const NAV: [string, string][] = [['#studio', 'Site Studio'], ['#features', 'Product'], ['#plan', 'Today vs. plan'], ['guides/', 'Guides'], ['pricing/', 'Pricing']];
 
-export function Header({ current }: { current?: string }) {
+export function Header({ current, lang }: { current?: string; lang?: string }) {
   const [open, setOpen] = useState(false);
   const onHome = current === 'landing';
   return (
-    <header class="site-head">
+    <header class="site-head" lang={lang}>
       <div class="wrap">
         <Logo />
         <nav class={`site-nav ${open ? 'open' : ''}`} aria-label="Main">
@@ -101,14 +104,18 @@ export function Header({ current }: { current?: string }) {
   );
 }
 
-export function Footer() {
+export function Footer({ lang }: { lang?: string }) {
   return (
-    <footer class="site-foot">
+    <footer class="site-foot" lang={lang}>
       <div class="wrap">
         <div class="foot-row">
           <Logo />
           <nav aria-label="Footer">
             <a href={APP}>Editor</a>
+            <a href={href('guides/')}>Guides</a>
+            <a href={href('pune/')}>Pune</a>
+            <a href={href('mumbai/')}>Mumbai</a>
+            <a href={href('data/')}>Open data</a>
             <a href={href('pricing/')}>Pricing</a>
             <a href={href('signup/')}>Create an account</a>
             <a href={href('login/')}>Sign in</a>
@@ -116,6 +123,15 @@ export function Footer() {
             <a href={href('privacy/')}>Privacy</a>
           </nav>
         </div>
+        <nav class="foot-maps" aria-label="City maps">
+          <a href={href('pune/map/')}>Pune 3D map</a>
+          <a href={href('pune/dp-report/')}>Pune DP report</a>
+          <a href={href('pune/dp-map/')}>Pune DP map</a>
+          <a href={href('pune/road-width-map/')}>Pune road width map</a>
+          <a href={href('mr/pune/dp-map/')} lang="mr" hrefLang="mr">पुणे विकास आराखडा नकाशा</a>
+          <a href={href('mumbai/map/')}>Mumbai 3D map</a>
+          <a href={href('mumbai/road-width-map/')}>Mumbai road width map</a>
+        </nav>
         <div class="foot-legal">
           <span>© OpenStreetMap contributors (ODbL) · Copernicus DEM GLO-30 © DLR/Airbus · DP sheets © Pune Municipal Corporation.</span>
           <span>A survey aid and concept tool. Not engineering advice, a DP remark or a zone certificate.</span>
@@ -125,15 +141,23 @@ export function Footer() {
   );
 }
 
-export function Page({ current, children }: { current?: string; children: ComponentChildren }) {
+/** A page of the website. `chrome`: the language of the header and footer when the page's own differs (they're in English). */
+export function Page({ current, chrome, children }: { current?: string; chrome?: string; children: ComponentChildren }) {
   return (
     <>
-      <a class="skip" href="#main">Skip to content</a>
-      <Header current={current} />
+      <a class="skip" href="#main" lang={chrome}>Skip to content</a>
+      <Header current={current} lang={chrome} />
       <main id="main">{children}</main>
-      <Footer />
+      <Footer lang={chrome} />
     </>
   );
+}
+
+/** `location.search`, once the page is up: prerendered pages render first without it, so the HTML matches. */
+export function useSearch(): string {
+  const [s, setS] = useState('');
+  useEffect(() => setS(location.search), []);
+  return s;
 }
 
 /** A same-site path to go to after signing in (?next=/app/…); anything else falls back to the account page. */

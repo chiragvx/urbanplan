@@ -64,7 +64,9 @@ async function boot() {
   if (import.meta.env.DEV) Object.assign(window, { __app: app });
 }
 
-if (Q.has('region') || Q.has('tile') || Q.has('map')) boot();
+// film mode (dev only): renders a "What If" episode on the film set, no UI (src/film, tools/film/README.md)
+if (import.meta.env.DEV && Q.has('film')) void import('./film/boot').then((m) => m.bootFilm(Q));
+else if (Q.has('region') || Q.has('tile') || Q.has('map')) boot();
 else {
   $('loading').hidden = true;
   $('shell').hidden = true;

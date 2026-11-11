@@ -1,5 +1,6 @@
 // Pricing: free during the beta; Pro and Firm are announced, not sold yet (no prices until they ship).
 import { APP, href, Icon, Page } from './ui';
+import { SITE_NAME } from './brand';
 
 const PLANS = [
   {
@@ -19,7 +20,7 @@ const PLANS = [
 const FAQ: [string, string][] = [
   ['Is it really free?', 'Yes. Everything in the editor today is free during the beta, and it keeps working without an account. Paid plans will add things that cost us money to run: storage, exports, imagery and analysis.'],
   ['Which cities does it cover?', 'Pune and Pimpri-Chinchwad (PMC and PCMC), and Mumbai (MCGM, Colaba to Dahisar and Mulund). The Development Plan layer covers Pune’s sanctioned DP for the old city limits.'],
-  ['Can I rely on it for a purchase or an approval?', 'No. UrbanPlan is a survey aid and a design tool. The DP layer is traced from scanned sheets and lined up to within a few metres; it is not a DP remark, a zone certificate or legal boundary. Always check with the planning authority and a licensed architect.'],
+  ['Can I rely on it for a purchase or an approval?', `No. ${SITE_NAME} is a survey aid and a design tool. The DP layer is traced from scanned sheets and lined up to within a few metres; it is not a DP remark, a zone certificate or legal boundary. Always check with the planning authority and a licensed architect.`],
   ['Where does the data come from?', 'Roads and buildings from OpenStreetMap, terrain from the Copernicus GLO-30 elevation model, and the Development Plan from Pune Municipal Corporation’s published sheets. Every layer says where it came from in the editor.'],
   ['Do my maps leave my browser?', 'Not unless you publish or export them. Today maps are saved in your browser. An account stores your email and profile; saving maps to your account comes with Pro.'],
 ];

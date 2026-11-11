@@ -9,3 +9,5 @@ tools/dev/*.json
 .env
 .env.local
 .env.*.local
+film/out/
+film/tts/
