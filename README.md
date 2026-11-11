@@ -111,7 +111,7 @@ commercial use (a keyed provider can replace `ESRI_IMAGERY` in `map.ts` and `pri
 speaker (numbers are the same as the English pages, in Latin digits). Their `<head>` carries an HTML comment saying
 so; have them read before promoting them, and remove the `note` in `routes.ts` once done. Absolute URLs come from **`SITE_URL`** (or
 `VITE_SITE_URL`, also read from `.env.local`): the site's address with its base path, no trailing slash, e.g.
-`SITE_URL=https://urbanplan.app`. Set it on the host that builds the site; without it the build warns and uses the
+`SITE_URL=https://urbanplan-seven.vercel.app`. Set it on the host that builds the site; without it the build warns and uses the
 fallback in `src/site/brand.ts`.
 
 **Accounts** run on Supabase Auth: email + password or a one-time email link; password reset. They're

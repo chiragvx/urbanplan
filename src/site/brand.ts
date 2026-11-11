@@ -9,8 +9,8 @@ export const LOGO_PARTS: [string, string] = ['Urban', 'Plan'];
 /** For the home-screen icon (12 characters or fewer). */
 export const SHORT_NAME = SITE_NAME;
 /** The site's address when neither SITE_URL nor VITE_SITE_URL is set on the host that builds it. */
-// TODO: confirm the real domain, then set SITE_URL on the host (or change this fallback)
-export const SITE_URL_FALLBACK = 'https://urbanplan.app';
+// the Vercel deployment until a custom domain is set up (urbanplan.app is someone else's site)
+export const SITE_URL_FALLBACK = 'https://urbanplan-seven.vercel.app';
 /** The browser bar and home-screen colour (the dark of the logo). */
 export const THEME_COLOR = '#0c0c0d';
 export const TAGLINE = 'Edit the real city, see what it becomes';
