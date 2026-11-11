@@ -16,6 +16,20 @@ function Tile({ w, media, title, sub }: { w?: 'w3' | 'w4'; media: ComponentChild
   );
 }
 
+/** A card in the features bento: a line of copy over a picture that bleeds to its edges. */
+function Card({ w, dark, wide, eyebrow, head, more, media, link }: { w: 2 | 3 | 4 | 6; dark?: boolean; wide?: boolean; eyebrow: string; head: string; more: string; media: ComponentChildren; link?: [string, string] }) {
+  return (
+    <article class={`ab-card ab-${w}${dark ? ' ab-dark' : ''}${wide ? ' ab-wide' : ''}`}>
+      <div class="ab-copy">
+        <span class="ab-eyebrow">{eyebrow}</span>
+        <h3><b>{head}</b> {more}</h3>
+        {link && <a class="ab-link" href={link[0]}>{link[1]} <Icon.arrow /></a>}
+      </div>
+      <div class="ab-media">{media}</div>
+    </article>
+  );
+}
+
 // what Site Studio does, a line each
 const STUDIO = [
   { icon: Icon.road, title: 'Internal roads', body: 'A drive round the edge, a spine, a grid or none. Roundabouts too.' },
@@ -110,13 +124,7 @@ export function Landing() {
             <h2>Site Studio.</h2>
             <p>Draw a plot. It plans the most built-up scheme the rules allow, with roads, parking and open space, and tells you what it's worth.</p>
           </div>
-          <div class="frame" style="margin-top:0">
-            <StudioVideo />
-            <span class="float" style="left:-18px;top:22%"><span class="dot" style="background:var(--up-blue)" /><span><b>FSI 4.33</b><small>of 4.35 allowed</small></span></span>
-            <span class="float" style="right:-18px;top:56%"><span class="dot" style="background:var(--up-reserve)" /><span><b>300 flats</b><small>planned for you</small></span></span>
-            <span class="float" style="left:10%;bottom:-18px"><span class="dot" style="background:var(--up-verge)" /><span><b>Drawn, not typed</b><small>the rest lays itself out</small></span></span>
-          </div>
-          <div class="bento" style="margin-top:var(--up-space-3)">
+          <div class="bento">
             <Tile w="w4" media={<img width={720} height={540} src={img('studio-towers.webp')} alt="Three residential towers on a plot with an internal road and a roundabout, over satellite imagery." loading="lazy" />} title="The most it can hold" sub="Towers or slabs. FSI by road width, as built or as the DP widens it." />
             <Tile media={<img width={720} height={540} src={img('studio-dp.webp')} alt="The Development Plan sheet draped over the 3D terrain around a plot." loading="lazy" />} title="On satellite or the DP" sub="Lay either under the 3D." />
             <Tile w="w3" media={<img width={720} height={540} src={img('studio-offices.webp')} alt="Glass office towers on the same plot." loading="lazy" />} title="Offices" sub="Curtain walls, deeper plates, parking by floor area." />
@@ -157,15 +165,23 @@ export function Landing() {
       <section class="section" id="features">
         <div class="wrap">
           <div class="section-head center">
-            <h2>Everything a street needs.</h2>
+            <h2>Everything in one editor.</h2>
+            <p>The city as it is, the plan it's meant to follow, and what a plot can become.</p>
           </div>
-          <div class="bento">
-            <Tile w="w4" media={<img width={1200} height={584} src={img('dp-2d.webp')} alt="The 2D plan with Development Plan zones coloured over the streets." loading="lazy" />} title="The Development Plan, on the map" sub="Sheets, zones and road lines over today's city." />
-            <Tile media={<SectionArt />} title="Real cross-sections" sub="Lanes, medians, footpaths. IRC and UDCPR presets." />
-            <Tile media={<TerrainArt />} title="Terrain and earthworks" sub="Cut, fill and slopes on real elevation." />
-            <Tile w="w4" media={<img width={1100} height={505} src={img('flyover-3d.webp')} alt="An elevated deck on piers beside a river, in 3D." loading="lazy" />} title="Flyovers, bridges and tunnels" sub="Ramps at your grade. Headroom checked." />
-            <Tile w="w3" media={<img width={960} height={540} src={img('city-detail.webp')} alt="A dense neighbourhood of Pune in 3D." loading="lazy" />} title="Every building, in 3D" sub="Press Tab to switch views." />
-            <Tile w="w3" media={<ChecksArt />} title="Checks as you draw" sub="DP lines, buffers, headroom, junctions." />
+          <div class="ab">
+            <Card w={4} dark eyebrow="Site Studio" head="Draw a plot. See the most it can hold." more="Towers or slabs, FSI by road width, as built or as the DP widens it."
+              media={<img width={720} height={540} src={img('studio-towers.webp')} alt="Three residential towers on a plot with an internal road and a roundabout, over satellite imagery." loading="lazy" />} />
+            <Card w={2} eyebrow="DP plan" head="Pune’s Development Plan, on satellite." more="Click a plot: its zone, reservations and DP roads." link={[href('pune/dp-report/'), 'Check a plot']}
+              media={<img width={1503} height={812} src={img('dp-satellite.webp')} style="object-position:38% 70%" alt="The Pune DP plan in Aundh: zones coloured over satellite imagery, a plot clicked and its report beside it." loading="lazy" />} />
+            <Card w={3} eyebrow="3D editor" head="Every building, every road." more="2,390 km² of Pune and Mumbai in 3D. Tab flips to the plan."
+              media={<img width={1600} height={900} src={img('city-3d.webp')} alt="A Pune neighbourhood by the river in 3D: streets, buildings and terrain." loading="lazy" />} />
+            <Card w={3} eyebrow="Structures" head="Flyovers, bridges and tunnels." more="Ramps at your grade, headroom checked."
+              media={<img width={1100} height={505} src={img('flyover-3d.webp')} alt="An elevated deck on piers beside a river, in 3D." loading="lazy" />} />
+            <Card w={2} eyebrow="Roads" head="Real cross-sections." more="Lanes, medians, footpaths. IRC and UDCPR presets." media={<SectionArt />} />
+            <Card w={2} eyebrow="Terrain" head="Cut and fill." more="Slopes and earthworks on real elevation." media={<TerrainArt />} />
+            <Card w={2} eyebrow="Checks" head="Flagged, never blocked." more="DP lines, buffers, headroom, junctions." media={<ChecksArt />} />
+            <Card w={6} dark wide eyebrow="Site Studio" head="The plan and the 3D, side by side." more="Place a tower, drag out a garden or a car park. Paths, trees and bays lay themselves out; flats, FSI and profit update as you go." link={[APP, 'Open the editor']}
+              media={<StudioVideo />} />
           </div>
         </div>
       </section>

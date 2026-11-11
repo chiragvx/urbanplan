@@ -13,8 +13,8 @@ import type { V2 } from './types';
 import type { PlotObj } from '../doc/types';
 import type { Place } from './types';
 import { analysePlot, centroid, inset, sideMargin, type PlotCode, type PlotReport, type PlotUse } from '../doc/plot';
-import { solveSite, type PlotSite, type SiteReport } from '../doc/site';
-import { DEFAULT_DESIGN, siteDefaults, siteFor, type Design } from '../doc/optimise';
+import { solveSite, type PlotSite, type SiteBuilding, type SiteElement, type SiteReport } from '../doc/site';
+import { DEFAULT_DESIGN, park, siteDefaults, siteFor, type Design } from '../doc/optimise';
 
 export type Dir = 'N' | 'E' | 'S' | 'W';
 
@@ -291,9 +291,11 @@ export class Kit {
    *  per road width and rules, not per floor). */
   plotPlan() {
     const o = this.plotObj(), r = this.plotReport();
-    const key = JSON.stringify([o.ring, o.use, r.roadW, r.rules, this.plotCode, this.plotDesign]);
+    // laid out by hand (plotSite): that layout, not the optimiser's
+    const hand = o.site?.notes?.hand ? o.site : null;
+    const key = JSON.stringify([o.ring, o.use, r.roadW, r.rules, this.plotCode, this.plotDesign, hand && [hand.buildings, hand.elements]]);
     if (this.planned?.key !== key) {
-      const site = siteFor({ ...siteDefaults(o.use), design: this.plotDesign }, r, o.use);
+      const site = hand ? park(r, { ...hand, surfacePick: true }, o.use) : siteFor({ ...siteDefaults(o.use), design: this.plotDesign }, r, o.use);
       this.planned = { key, r, site, d: solveSite(r, site, o.use) };
     }
     return this.planned;
@@ -306,6 +308,17 @@ export class Kit {
     if (n === null) { this.doc.set(id, 'site', undefined); return; }
     const { site } = this.plotPlan();
     this.doc.set(id, 'site', { ...site, manual: true, notes: { ...site.notes, film: String(n) } });
+  }
+
+  /** Lay the plot out by hand, as Site Studio does: these buildings (floors 0: as many as the rules allow) and these
+   *  gardens, lots, … with `up` (0–1) of the tallest building's floors up. Parking is worked out for the layout. */
+  plotSite(buildings: SiteBuilding[], elements: SiteElement[], up = 1) {
+    const o = this.plotObj();
+    const site: PlotSite = { ...siteDefaults(o.use), buildings, elements: elements.length ? elements : undefined, manual: true, notes: { hand: '1', film: '0' } };
+    this.doc.set(o.id, 'site', site);
+    const { site: solved, d } = this.plotPlan();
+    const floors = Math.max(0, ...d.buildings.map((b) => b.floors));
+    this.doc.set(o.id, 'site', { ...solved, manual: true, notes: { hand: '1', film: String(Math.round(up * floors)) } });
   }
 
   /** how many floors are up (null: vacant) */

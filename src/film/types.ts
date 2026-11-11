@@ -47,7 +47,11 @@ export type Mark =
   /** an outline that moves in: from rings[0] to rings[1] from at[0] over `dur` s, then on to rings[2] from at[1], … (a setback pulling in) */
   | { kind: 'outline'; t0: number; t1: number; rings: string[]; at: number[]; dur?: number; color?: string }
   /** a corridor on the ground (a ring: one edge out, the other back), filled and dashed, drawn on along its length */
-  | { kind: 'band'; t0: number; t1: number; place: string; color?: string };
+  | { kind: 'band'; t0: number; t1: number; place: string; color?: string }
+  /** the plot tool drawing a place's ring: corner by corner over `dur` s from t0, then the closed plot until t1 */
+  | { kind: 'draw'; t0: number; t1: number; place: string; dur: number; color?: string }
+  /** a thing placed on the plot with a tool from Site Studio's shelf: clicked down (a building) or dragged out (`drag`: a garden, a lot) */
+  | { kind: 'place'; t0: number; t1: number; place: string; tool: string; drag?: boolean; color?: string };
 
 export interface Scene {
   id: string;

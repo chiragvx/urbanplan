@@ -5,7 +5,7 @@ import * as THREE from 'three/webgpu';
 import type { App } from '../app/app';
 import { treeGeometry } from '../build/vegetation';
 import { Kit } from './kit';
-import { BRAND, GREEN, RED } from './brand';
+import { BRAND, COBALT, GREEN, RED } from './brand';
 import * as D from './draw';
 import type { Key, Measured, Place, Scene, V2 } from './types';
 
@@ -448,6 +448,8 @@ export class Player {
       if (m.kind === 'circle') D.ring(ctx, P, pl.ring ?? this.kit.circle(pl.p ?? [0, 0], m.r ?? 30, 64), u, a, m.color ?? RED);
       else if (m.kind === 'dim' && pl.line) D.dim(ctx, P, pl.line[0], pl.line[1], this.text(m.text), u, a, m.color ?? RED);
       else if (m.kind === 'tag') D.tag(ctx, P, pl.p ?? this.pointOf(m.place), this.text(m.text), a, m.color ?? RED, false);
+      else if (m.kind === 'place' && pl.ring) D.placeTool(ctx, P, pl.ring, t - m.t0, a, this.text(m.tool), !!m.drag, m.color ?? COBALT);
+      else if (m.kind === 'draw' && pl.ring) D.drawTool(ctx, P, pl.ring, t - m.t0, m.dur, a, m.color ?? COBALT);
       else if (m.kind === 'band' && pl.ring) D.band(ctx, P, pl.ring, clamp01((t - m.t0) / 1.0), a, m.color ?? RED);
     }
     // each step's tag while it lands

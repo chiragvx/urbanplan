@@ -492,3 +492,135 @@ export function dip(ctx: CanvasRenderingContext2D, a: number) {
   if (a <= 0) return;
   ctx.save(); ctx.globalAlpha = clamp01(a); ctx.fillStyle = INK; ctx.fillRect(0, 0, W, H); ctx.restore();
 }
+
+/**
+ * The plot tool at work: a cursor clicks the corners one by one (a dashed rubber band with its length follows it from
+ * the last corner), comes back to the first to close the shape, and the plot fills in. `s` is seconds since the tool
+ * started, `dur` how long the drawing takes; the closed outline then stays at alpha `a`.
+ */
+export function drawTool(ctx: CanvasRenderingContext2D, P: Project, pts: V2[], s: number, dur: number, a: number, color = COBALT) {
+  if (a <= 0 || s < 0 || pts.length < 3) return;
+  const n = pts.length, legs = n + 1, slot = dur / legs;
+  // the cursor comes in from outside the plot, then visits every corner and the first again
+  const c0 = pts[0], cx = pts.reduce((q, p) => q + p[0], 0) / n, cz = pts.reduce((q, p) => q + p[1], 0) / n;
+  const start: V2 = [c0[0] + (c0[0] - cx) * 0.9, c0[1] + (c0[1] - cz) * 0.9];
+  const stops = [start, ...pts, pts[0]];
+  const leg = Math.min(legs - 1, Math.floor(s / slot)), f = clamp01((s - leg * slot) / (slot * 0.72));
+  const g = ease.inOut(f), A = stops[leg], B = stops[leg + 1];
+  const cur: V2 = s >= dur ? pts[0] : [A[0] + (B[0] - A[0]) * g, A[1] + (B[1] - A[1]) * g];
+  // corners clicked so far: corner i is clicked at the end of leg i's move
+  const clickAt = (i: number) => i * slot + slot * 0.72;
+  const placed = pts.filter((_, i) => s >= clickAt(i));
+  const closed = s >= clickAt(n);
+  const Q = (p: V2) => P(p[0], p[1], 0.6);
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  if (closed) {
+    // the plot: filled, a flash as it closes
+    const k = clamp01((s - clickAt(n)) / 0.5);
+    const S = pts.map(Q);
+    if (S.every(Boolean)) {
+      ctx.beginPath(); S.forEach((p, i) => (i ? ctx.lineTo(p![0], p![1]) : ctx.moveTo(p![0], p![1]))); ctx.closePath();
+      ctx.fillStyle = color; ctx.globalAlpha = a * (0.16 + 0.3 * (1 - ease.out(k))); ctx.fill();
+      ctx.globalAlpha = a;
+      ctx.strokeStyle = color; ctx.shadowColor = color; ctx.shadowBlur = 24; ctx.lineWidth = 12; ctx.stroke();
+      ctx.shadowBlur = 0; ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 3; ctx.stroke();
+    }
+  } else if (placed.length) {
+    // the sides drawn so far
+    const S = placed.map(Q);
+    if (S.every(Boolean)) {
+      ctx.beginPath(); S.forEach((p, i) => (i ? ctx.lineTo(p![0], p![1]) : ctx.moveTo(p![0], p![1])));
+      ctx.strokeStyle = color; ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 10; ctx.lineWidth = 8; ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+    // the rubber band from the last corner to the cursor, with its length
+    const last = placed[placed.length - 1], L0 = Q(last), C = Q(cur), len = Math.hypot(cur[0] - last[0], cur[1] - last[1]);
+    if (L0 && C) {
+      ctx.setLineDash([18, 12]); ctx.strokeStyle = color; ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.moveTo(L0[0], L0[1]); ctx.lineTo(C[0], C[1]); ctx.stroke(); ctx.setLineDash([]);
+      if (len > 6) label(ctx, (L0[0] + C[0]) / 2, (L0[1] + C[1]) / 2, `${Math.round(len)} m`, color, clamp01(len / 12), 34);
+    }
+  }
+  // the corners: a white dot each, popping in as it's clicked
+  pts.forEach((p, i) => {
+    const k = clamp01((s - clickAt(i)) / 0.25);
+    if (k <= 0) return;
+    const q = Q(p);
+    if (!q) return;
+    const r = 11 * (0.6 + 0.4 * ease.back(k));
+    ctx.beginPath(); ctx.arc(q[0], q[1], r, 0, Math.PI * 2);
+    ctx.fillStyle = PAPER; ctx.fill(); ctx.lineWidth = 5; ctx.strokeStyle = color; ctx.stroke();
+    // the click: a ring spreading out
+    if (k < 1) { ctx.globalAlpha = a * (1 - k); ctx.beginPath(); ctx.arc(q[0], q[1], 14 + 36 * ease.out(k), 0, Math.PI * 2); ctx.lineWidth = 4; ctx.stroke(); ctx.globalAlpha = a; }
+  });
+  // the cursor, gone soon after the shape closes
+  const ca = closed ? 1 - clamp01((s - clickAt(n) - 0.3) / 0.4) : clamp01(s / 0.3);
+  const C = Q(cur);
+  const press = [...pts.keys(), n].some((i) => Math.abs(s - clickAt(i)) < 0.08);
+  if (C && ca > 0) { ctx.globalAlpha = a * ca; cursor(ctx, C[0], C[1], 'Plot', color, press); }
+  ctx.restore();
+}
+
+/** The pointer with its tool's chip beside it (pressed: a touch smaller). */
+function cursor(ctx: CanvasRenderingContext2D, x: number, y: number, tool: string, color: string, press = false) {
+  ctx.save();
+  ctx.translate(x, y); const k = (press ? 0.88 : 1) * 1.5; ctx.scale(k, k);
+  ctx.beginPath();
+  ctx.moveTo(0, 0); ctx.lineTo(0, 26); ctx.lineTo(6.5, 20); ctx.lineTo(11, 30); ctx.lineTo(15, 28); ctx.lineTo(10.5, 18.5); ctx.lineTo(19, 18.5); ctx.closePath();
+  ctx.shadowColor = 'rgba(0,0,0,0.45)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 2;
+  ctx.fillStyle = PAPER; ctx.fill(); ctx.shadowColor = 'transparent';
+  ctx.lineWidth = 1.6; ctx.strokeStyle = INK; ctx.stroke();
+  ctx.font = font(15, 700);
+  const tw = ctx.measureText(tool).width;
+  ctx.fillStyle = color; pill(ctx, 22, 26, tw + 22, 26, 13); ctx.fill();
+  ctx.fillStyle = PAPER; ctx.textBaseline = 'middle'; ctx.fillText(tool, 33, 39.5);
+  ctx.restore();
+}
+
+/**
+ * Placing a thing on the plot (Site Studio's shelf): the cursor comes in with the tool. `drag`: pressed at the
+ * ring's first corner and dragged to its third, a dashed box growing behind it (a garden, a lot); otherwise it
+ * carries the ring as a ghost and clicks it down at its place (a building). `s` seconds since t0: it arrives at 0.7,
+ * lets go at 1.5 (drag) or clicks at 0.8; the outline fades out over the half second after.
+ */
+export function placeTool(ctx: CanvasRenderingContext2D, P: Project, ring: V2[], s: number, a: number, tool: string, drag: boolean, color = COBALT) {
+  if (a <= 0 || s < 0 || ring.length < 3) return;
+  const n = ring.length, cx = ring.reduce((q, p) => q + p[0], 0) / n, cz = ring.reduce((q, p) => q + p[1], 0) / n;
+  const anchor: V2 = drag ? ring[0] : [cx, cz];
+  const from: V2 = [anchor[0] + 34, anchor[1] - 26];
+  const g = ease.inOut(clamp01(s / 0.7));
+  let cur: V2 = [from[0] + (anchor[0] - from[0]) * g, from[1] + (anchor[1] - from[1]) * g];
+  const done = drag ? 1.5 : 0.8;
+  let box: V2[] | null = null;
+  if (drag) {
+    const B = ring[2], d = ease.inOut(clamp01((s - 0.75) / 0.7));
+    const e: V2 = [anchor[0] + (B[0] - anchor[0]) * d, anchor[1] + (B[1] - anchor[1]) * d];
+    if (s > 0.75) { cur = e; box = [anchor, [e[0], anchor[1]], e, [anchor[0], e[1]]]; }
+  } else {
+    // the ghost rides with the cursor
+    box = ring.map(([x, z]) => [x - cx + cur[0], z - cz + cur[1]] as V2);
+  }
+  const fadeOut = 1 - clamp01((s - done - 0.1) / 0.5);
+  const Q = (p: V2) => P(p[0], p[1], 0.8);
+  ctx.save();
+  ctx.globalAlpha = a * fadeOut;
+  if (box) {
+    const S = box.map(Q);
+    if (S.every(Boolean)) {
+      ctx.beginPath(); S.forEach((p, i) => (i ? ctx.lineTo(p![0], p![1]) : ctx.moveTo(p![0], p![1]))); ctx.closePath();
+      ctx.fillStyle = color; ctx.globalAlpha = a * fadeOut * (s >= done ? 0.3 : 0.18); ctx.fill();
+      ctx.globalAlpha = a * fadeOut;
+      ctx.setLineDash(s >= done ? [] : [16, 10]); ctx.lineWidth = 6; ctx.strokeStyle = color; ctx.lineJoin = 'round';
+      ctx.shadowColor = 'rgba(0,0,0,0.3)'; ctx.shadowBlur = 8; ctx.stroke(); ctx.setLineDash([]); ctx.shadowBlur = 0;
+    }
+  }
+  // the click / the let-go: a ring spreading out under the pointer
+  const k = clamp01((s - done) / 0.35), C = Q(cur);
+  if (C && k > 0 && k < 1) { ctx.globalAlpha = a * (1 - k); ctx.beginPath(); ctx.arc(C[0], C[1], 12 + 40 * ease.out(k), 0, Math.PI * 2); ctx.lineWidth = 4; ctx.strokeStyle = PAPER; ctx.stroke(); }
+  const ca = clamp01(s / 0.3) * (1 - clamp01((s - done - 0.3) / 0.4));
+  const press = drag ? s > 0.7 && s < done : Math.abs(s - done) < 0.08;
+  if (C && ca > 0) { ctx.globalAlpha = a * ca; cursor(ctx, C[0], C[1], tool, color, press); }
+  ctx.restore();
+}
