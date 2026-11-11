@@ -1,12 +1,11 @@
 // The DP report (/pune/dp-report/ and a page per locality, /pune/dp-report/<slug>/): Pune's Development Plan on
 // satellite imagery. The map and the on-screen report are free for anyone (and the pages are prerendered, so search
-// engines index them); the PDF download asks for an email sign-in once, then is free too.
+// engines index them); the PDF download is free for anyone signed in (or opened with the share key).
 // Data: src/site/dpreport/ (baked by tools/dpreport/bake-dpreport.ts; the viewer loads public/dpr/<city>/).
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { createPortal } from 'preact/compat';
 import { signal } from '@preact/signals';
 import type { ComponentChildren } from 'preact';
-import { authReady, emailLink, explain, logReport, startAuth } from '../auth/auth';
+
 import { AREAS, SUMMARY, DPR_FAQ, DPR_PATH, RESERVED_MEANS, areaOf, areaPath, areaMap, clsColor, clsLower, clsLabel, clsShort, type DprArea } from './dpreport/data';
 import type { Report } from './dpreport/geo';
 import type { DpMap, Overlay } from './dpreport/map';
@@ -20,9 +19,9 @@ import './dpreport/dpreport.css';
 
 const n = (v: number) => v.toLocaleString('en-IN');
 const areaText = (ha: number) => (ha >= 1 ? `${ha.toFixed(ha >= 10 ? 0 : 1)} ha` : `${n(Math.round(ha * 1e4 / 10) * 10)} m²`);
-const sqm = (m2: number) => (m2 >= 1e4 ? `${(m2 / 1e4).toFixed(1)} ha` : `${n(Math.round(m2 / 10) * 10)} m²`);
-const Swatch = ({ cls }: { cls: string }) => <i class="legend-swatch" style={`background:${clsColor(cls)};border:1px solid rgba(0,0,0,.25)`} />;
-const appAt = (lat: number, lon: number) => `${APP}?region=pune&at=${lat.toFixed(5)},${lon.toFixed(5)},18`;
+export const sqm = (m2: number) => (m2 >= 1e4 ? `${(m2 / 1e4).toFixed(1)} ha` : `${n(Math.round(m2 / 10) * 10)} m²`);
+export const Swatch = ({ cls }: { cls: string }) => <i class="legend-swatch" style={`background:${clsColor(cls)};border:1px solid rgba(0,0,0,.25)`} />;
+export const appAt = (lat: number, lon: number) => `${APP}?region=pune&at=${lat.toFixed(5)},${lon.toFixed(5)},18`;
 
 /** a reserved site or a table row asks the viewer to show a point (the links still work without JS: ?at=…#viewer) */
 const pickRequest = signal<{ lat: number; lon: number; t: number } | null>(null);
@@ -51,7 +50,6 @@ function Viewer({ lat, lon, zoom, ring, area, poster }: { lat: number; lon: numb
   const [rep, setRep] = useState<Report | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [wantDl, setWantDl] = useState(false);
 
   const pick = async (la: number, lo: number, fly = false) => {
     M.current?.pick(la, lo, fly);
@@ -68,7 +66,6 @@ function Viewer({ lat, lon, zoom, ring, area, poster }: { lat: number; lon: numb
     let dead = false;
     const q = new URLSearchParams(location.search), at = q.get('at')?.split(',').map(Number);
     const start = at && at.length >= 2 && at.every(Number.isFinite) ? { lat: at[0], lon: at[1] } : null;
-    if (q.get('dl') === '1') setWantDl(true);
     import('./dpreport/map').then(({ createMap }) => createMap(el.current!, {
       lat: start?.lat ?? lat, lon: start?.lon ?? lon, zoom: start ? 18 : zoom, overlay: 'zones', opacity: 0.6,
       ring: ring ? { lat, lon, r: ring } : undefined,
@@ -121,7 +118,7 @@ function Viewer({ lat, lon, zoom, ring, area, poster }: { lat: number; lon: numb
         {failed && <div class="dpr-hint">The map couldn't load. Check your connection and reload the page.</div>}
       </div>
       <aside class="dpr-panel" aria-live="polite">
-        {rep ? <ReportCard r={rep} area={area} busy={busy} wantDl={wantDl} /> : (
+        {rep ? <ReportCard r={rep} busy={busy} /> : (
           <div class="dpr-empty">
             <Icon.pin />
             <h2 class="h3">Click any plot on the map</h2>
@@ -159,7 +156,7 @@ function OverlayLegend() {
 
 // ---------------- the report for a point ----------------
 
-function ReportCard({ r, area, busy, wantDl }: { r: Report; area?: DprArea; busy: boolean; wantDl: boolean }) {
+function ReportCard({ r, busy }: { r: Report; busy: boolean }) {
   const p = r.parcel;
   return (
     <div class={`dpr-report ${busy ? 'busy' : ''}`}>
@@ -214,9 +211,9 @@ function ReportCard({ r, area, busy, wantDl }: { r: Report; area?: DprArea; busy
         </>
       )}
 
-      <Download r={r} area={area} auto={wantDl} />
+      <a class="btn btn-primary btn-block" href={reportHref(r.lat, r.lon)}><Icon.sheet /> Full report and PDF</a>
       <div class="dpr-actions">
-        <button class="btn" onClick={() => { void navigator.clipboard?.writeText(location.href); }} title="Copy a link to this report"><Icon.share /> Copy link</button>
+        <CopyLink />
         <a class="btn" href={appAt(r.lat, r.lon)}><Icon.cube /> Open in 3D</a>
       </div>
       <p class="tiny muted">Traced from the PMC's sanctioned DP sheets, accurate to a few metres. A survey aid, not an official DP remark or zone certificate.</p>
@@ -224,112 +221,42 @@ function ReportCard({ r, area, busy, wantDl }: { r: Report; area?: DprArea; busy
   );
 }
 
-// ---------------- the download (email sign-in, then free) ----------------
-
-type Dl = 'idle' | 'ask' | 'sending' | 'sent' | 'making' | 'ready';
-
-function Download({ r, area, auto }: { r: Report; area?: DprArea; auto: boolean }) {
-  const [st, setSt] = useState<Dl>('idle');
-  const [email, setEmail] = useState('');
-  const [err, setErr] = useState('');
-  const [pics, setPics] = useState<[string, string] | null>(null);
-
-  const signedIn = async () => {
-    if (!authReady) return true; // accounts not set up on this build: nothing to ask
-    const c = await startAuth();
-    return !!(c && (await c.auth.getSession()).data.session);
-  };
-  const make = async () => {
-    setSt('making'); setErr('');
-    try {
-      const { reportPictures } = await import('./dpreport/print');
-      setPics(await reportPictures(r.lat, r.lon, r.parcel));
-      setSt('ready');
-      void logReport({ lat: r.lat, lon: r.lon, area: area?.slug, cls: r.parcel?.cls });
-      requestAnimationFrame(() => setTimeout(() => window.print(), 150));
-    } catch (e) { setErr(explain(e)); setSt('idle'); }
-  };
-  const start = async () => { setErr(''); if (await signedIn()) await make(); else setSt('ask'); };
-  useEffect(() => { if (auto) void signedIn().then((ok) => ok && setSt('idle')); }, []);
-
-  const send = async (e: Event) => {
-    e.preventDefault(); setSt('sending'); setErr('');
-    try {
-      const u = new URL(location.href); u.searchParams.set('at', `${r.lat.toFixed(5)},${r.lon.toFixed(5)}`); u.searchParams.set('dl', '1'); u.hash = 'viewer';
-      await emailLink(email.trim(), u.toString());
-      setSt('sent');
-    } catch (x) { setErr(explain(x)); setSt('ask'); }
-  };
-
-  return (
-    <div class="dpr-dl">
-      {(st === 'idle' || st === 'making' || st === 'ready') && (
-        <button class={`btn btn-primary btn-block ${auto ? 'pulse' : ''}`} onClick={() => void (st === 'ready' ? window.print() : start())} disabled={st === 'making'}>
-          <Icon.sheet /> {st === 'making' ? 'Making the PDF…' : auto ? 'Download your report (PDF)' : 'Download the report (PDF)'}
-        </button>
-      )}
-      {(st === 'ask' || st === 'sending') && (
-        <form class="dpr-gate" onSubmit={send}>
-          <label for="dpr-email"><b>Free PDF.</b> Enter your email: we'll send a sign-in link that brings you back here to download.</label>
-          <div class="dpr-gate-row">
-            <input id="dpr-email" class="input" type="email" autoComplete="email" required placeholder="you@example.com" value={email} onInput={(e) => setEmail((e.target as HTMLInputElement).value)} />
-            <button class="btn btn-primary" type="submit" disabled={st === 'sending'}>{st === 'sending' ? 'Sending…' : 'Send link'}</button>
-          </div>
-          <p class="tiny muted">By continuing you agree to the <a href={href('terms/')}>terms</a> and <a href={href('privacy/')}>privacy notice</a>. No password, no spam.</p>
-        </form>
-      )}
-      {st === 'sent' && <p class="notice ok"><Icon.check /><span>Check <b>{email}</b> for the link. Open it on this device and your report downloads from this spot.</span></p>}
-      {err && <p class="notice error" role="alert"><Icon.info /><span>{err}</span></p>}
-      {pics && <PrintSheet r={r} area={area} pics={pics} />}
-    </div>
-  );
+/**
+ * The share key: a link with `?key=<it>` downloads without signing in (for reports handed to people directly). Only its
+ * SHA-256 is here; once a page is opened with it, the rest of the visit (this tab) is unlocked too.
+ */
+const SHARE_KEY_SHA256 = '79a6400fdf1bda2b0bc1d1691268e1f952e72544d7c7511d02a0a81b87655478';
+export async function shareUnlocked(): Promise<boolean> {
+  try {
+    if (sessionStorage.getItem('dpr-key') === SHARE_KEY_SHA256) return true;
+    const k = new URLSearchParams(location.search).get('key');
+    if (!k || !crypto.subtle) return false;
+    const h = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(k))), (b) => b.toString(16).padStart(2, '0')).join('');
+    if (h !== SHARE_KEY_SHA256) return false;
+    sessionStorage.setItem('dpr-key', h);
+    return true;
+  } catch { return false; }
 }
 
-function PrintSheet({ r, area, pics }: { r: Report; area?: DprArea; pics: [string, string] }) {
-  const [host] = useState(() => { const d = document.createElement('div'); d.className = 'dpr-print'; return d; });
-  useEffect(() => { document.body.appendChild(host); return () => host.remove(); }, []);
-  const p = r.parcel, date = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
-  return createPortal(
-    <article>
-      <header>
-        <div><b>{SITE_NAME}</b> · DP report</div>
-        <div>{date}</div>
-      </header>
-      <h1>Development Plan report{area ? `: ${area.name}, Pune` : ', Pune'}</h1>
-      <p class="meta">Point {r.lat.toFixed(5)}, {r.lon.toFixed(5)} · <a href={location.href}>{location.href.replace(/[?#].*$/, '')}?at={r.lat.toFixed(5)},{r.lon.toFixed(5)}</a></p>
-      <section class="summary">
-        <div><span>DP zone</span><b>{p ? clsLabel(p.cls) : r.covered ? 'Road / open strip on the plan' : 'Not on the traced sheets'}</b></div>
-        <div><span>Reserved</span><b>{p?.reserved ? `Yes: ${RESERVED_MEANS[p.cls] ?? 'a public use'}` : 'No (this parcel)'}</b></div>
-        <div><span>Parcel on the sheet</span><b>{p ? `${sqm(p.area)} · sheet ${p.sheet}` : '—'}</b></div>
-      </section>
-      <div class="pics">
-        <figure><img src={pics[0]} alt="" /><figcaption>Satellite with the traced DP zones (reserved sites dashed red, the parcel in blue)</figcaption></figure>
-        <figure><img src={pics[1]} alt="" /><figcaption>The PMC DP sheet, registered over the satellite image</figcaption></figure>
-      </div>
-      <section class="cols">
-        <div>
-          <h2>DP roads within 150 m</h2>
-          {r.roads.length ? <table><thead><tr><th>Road</th><th>Away</th><th>Today</th><th>DP</th></tr></thead><tbody>{r.roads.map((d) => <tr key={d.name}><td>{d.name}</td><td>{d.m} m</td><td>{d.w} m</td><td><b>{d.dp} m</b></td></tr>)}</tbody></table> : <p>No DP road width traced near this point yet. Read the road widths on the sheet.</p>}
-        </div>
-        <div>
-          <h2>Reserved sites within 250 m</h2>
-          {r.reserved.length ? <table><thead><tr><th>For</th><th>Area</th><th>Where</th></tr></thead><tbody>{r.reserved.map((x) => <tr key={x.p.id}><td>{clsShort(x.p.cls)}</td><td>{sqm(x.p.area)}</td><td>{x.m ? `${x.m} m ${x.dir}` : 'this plot'}</td></tr>)}</tbody></table> : <p>None traced within 250 m.</p>}
-          <h2>Land use within 100 m</h2>
-          <p>{r.mix.map((m) => `${clsShort(m.cls)} ${m.pct}%`).join(' · ') || '—'}{r.unmarked ? ` · roads / untraced ${r.unmarked}%` : ''}</p>
-        </div>
-      </section>
-      <footer>
-        <p><b>Not an official DP remark.</b> Traced by {SITE_NAME} from the Pune Municipal Corporation's Development Plan for the old limits (2007–2027, sanctioned 5 Jan 2017), registered to within a few metres. Modifications after the sheets were published are not shown. For the legal position, apply to the PMC for a DP remark / zone certificate.</p>
-        <p>Imagery © Esri, Maxar, Earthstar Geographics · DP sheets © Pune Municipal Corporation · Roads © OpenStreetMap contributors (ODbL).</p>
-      </footer>
-    </article>,
-    host,
-  );
+/** The full report page for a point (keeping the share key, if this page has it). */
+export function reportHref(lat: number, lon: number): string {
+  const key = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('key') : null;
+  return href(`${DPR_PATH}report/?at=${lat.toFixed(5)},${lon.toFixed(5)}${key ? `&key=${encodeURIComponent(key)}` : ''}`);
+}
+
+/** Copy this page's link (the plot, and the share key if the page was opened with it). */
+export function CopyLink({ hash = 'viewer' }: { hash?: string }) {
+  const [done, setDone] = useState(false);
+  const copy = async () => {
+    const u = new URL(location.href); u.searchParams.delete('dl'); u.hash = hash;
+    try { await navigator.clipboard.writeText(u.toString()); setDone(true); setTimeout(() => setDone(false), 1800); } catch { prompt('Copy this link', u.toString()); }
+  };
+  return <button class="btn" onClick={() => void copy()} title="Copy a link to this report"><Icon.share /> {done ? 'Copied' : 'Copy link'}</button>;
 }
 
 // ---------------- the pages ----------------
 
-function Provenance() {
+export function Provenance() {
   return (
     <aside class="calc place-prov" aria-label="Where this comes from">
       <h2>Where this comes from</h2>
@@ -352,7 +279,7 @@ function Steps() {
   const S: [() => any, string, string][] = [
     [Icon.pin, 'Find the plot', 'Search a road or society, or zoom in on the satellite image.'],
     [Icon.sheet, 'Click it', 'See its DP zone, reserved sites around it and the DP roads that may widen.'],
-    [Icon.check, 'Download the PDF', 'Two maps and the facts on one page. Free with your email.'],
+    [Icon.check, 'Get the full report', 'Red flags, the DP sheet, a checklist and a PDF. Free with an account.'],
   ];
   return <ol class="dpr-steps">{S.map(([I, t, d]) => <li key={t}><I /><b>{t}</b><span>{d}</span></li>)}</ol>;
 }

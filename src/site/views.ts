@@ -28,6 +28,7 @@ export function viewOf(path: string): View | null {
     case 'pune/map/': case 'mumbai/map/': return () => import('./CityMap').then((m) => el(m.MapPage, { city: path.split('/')[0] as 'pune' | 'mumbai' }));
     case 'pune/road-width-map/': case 'mumbai/road-width-map/': return () => import('./CityMap').then((m) => el(m.WidthMapPage, { city: path.split('/')[0] as 'pune' | 'mumbai' }));
     case 'pune/dp-report/': return () => import('./DpReport').then((m) => el(m.DpHubPage, {}));
+    case 'pune/dp-report/report/': return () => import('./DpReportPage').then((m) => el(m.DpReportPage, {}));
     case 'pune/dp-map/': return () => import('./CityMap').then((m) => el(m.DpMapPage, {}));
     case 'mr/pune/map/': return () => import('./CityMapMr').then((m) => el(m.MapPageMr, {}));
     case 'mr/pune/dp-map/': return () => import('./CityMapMr').then((m) => el(m.DpMapPageMr, {}));

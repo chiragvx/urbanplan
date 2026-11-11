@@ -69,7 +69,7 @@ export function Login() {
     e.preventDefault();
     setBusy(true); setErr('');
     try {
-      if (link) { await emailLink(email); setSent(true); } else { await signIn(email, pw); location.assign(nextUrl()); }
+      if (link) { await emailLink(email, new URL(nextUrl(), location.href).href); setSent(true); } else { await signIn(email, pw); location.assign(nextUrl()); }
     } catch (x) { setErr(explain(x)); } finally { setBusy(false); }
   };
   return (
@@ -112,7 +112,7 @@ export function Signup() {
     if (!agree) { setErr('Please accept the terms to create an account.'); return; }
     setBusy(true); setErr('');
     try {
-      const r = await signUp(email.trim(), pw, name.trim(), (role || 'other') as Role, plan === 'pro' || plan === 'firm' ? plan : undefined);
+      const r = await signUp(email.trim(), pw, name.trim(), (role || 'other') as Role, plan === 'pro' || plan === 'firm' ? plan : undefined, new URL(nextUrl(), location.href).href);
       if (r.confirm) setDone('confirm'); else location.assign(nextUrl());
     } catch (x) { setErr(explain(x)); } finally { setBusy(false); }
   };

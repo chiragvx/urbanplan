@@ -398,7 +398,7 @@ const BODY: Record<string, FunctionComponent> = {
       <ol>
         <li>Open the <a href={href('pune/dp-report/')}>Pune DP plan on satellite</a> and search for the road or society.</li>
         <li>Click the plot: its zone, reservations within 250 m and DP roads nearby.</li>
-        <li>Download the PDF (free with your email) to take along when you apply.</li>
+        <li>Download the PDF (free with an account) to take along when you apply.</li>
       </ol>
     </>
   ),

@@ -86,9 +86,10 @@ export const ROLES: [Role, string][] = [
 ];
 
 /** `interest`: the plan they asked about on the pricing page (pro / firm), if any. */
-export async function signUp(email: string, password: string, fullName: string, role: Role, interest?: string) {
+/** `back`: where the confirmation link should land (a full URL on this site); the account page by default. */
+export async function signUp(email: string, password: string, fullName: string, role: Role, interest?: string, back?: string) {
   const data_ = { full_name: fullName, role, ...(interest ? { interest } : {}) };
-  const { data, error } = await (await need()).auth.signUp({ email, password, options: { data: data_, emailRedirectTo: page('account/') } });
+  const { data, error } = await (await need()).auth.signUp({ email, password, options: { data: data_, emailRedirectTo: back ?? page('account/') } });
   if (error) throw error;
   // with email confirmation on (the default), there's a user but no session until they open the link
   return { confirm: !data.session };

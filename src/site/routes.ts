@@ -344,7 +344,9 @@ function dpReportRoutes(): Route[] {
       },
     };
   };
-  return [hub, ...AREAS.map(page)];
+  // the report for a clicked point: one page that reads ?at=, not indexed (there's one per click)
+  const report: Route = { path: `${DPR_PATH}report/`, priority: 0, updated: S.baked, head: { title: 'DP report for a plot in Pune', description: 'What the Pune Development Plan says about a plot: its zone, reservations, DP roads and red flags, on satellite.', noindex: true } };
+  return [hub, report, ...AREAS.map(page)];
 }
 
 export const ROUTES: Route[] = [
