@@ -1,13 +1,12 @@
-"""Line-based tracing of DP sheets into a clean polygon coverage (plots with land use), in the city frame.
+"""Tracing of DP sheets into a clean polygon coverage (plots with land use), in the city frame. Pure image scripts.
 
-The colour-blob tracer (regions.py) breaks plots apart and leaves gaps. This one follows how the sheet is drawn:
-
-  1. lines: black plot / building lines, red verges, blue modification lines, plus edges where the fill colour
-     changes — together they cut the sheet into faces (4-connected areas between lines)
-  2. every line pixel goes to its nearest face, so neighbouring faces share their edge exactly (no gaps, no overlaps)
-  3. faces get the land use most of their pixels are coloured with (legend colours calibrated on the sheet);
-     specks (letter holes, symbols) merge into their neighbour; a building outline (a face surrounded by one plot of
-     the same land use) merges into its plot
+  1. colours: the sheet's own palette (palette.py — legend colours as this sheet prints them, hatched mixes included);
+     every pixel is a land use, paper or ink (paper and ink compete as colours, so pale fills don't swallow roads)
+  2. drawing over the fills comes off: a colour region needs a solid core (opening by reconstruction), so lines,
+     lettering, hatch and boundary dots of any colour become ink; ink takes the nearest fill's colour, so a boundary
+     drawn as a line lands on its middle; a majority filter and speck removal clean the grain
+  3. faces: where the land use changes, and red verges; every line pixel goes to its nearest face (shared edges, no
+     gaps); a building outline (a face surrounded by one plot of the same land use) merges into its plot
   4. a red verge around a face (or a circled code on it) marks a site reserved for a public purpose
   5. polygons come out of the label map with shared edges (rasterio), go through the sheet's registration into the
      city frame, and are simplified as one coverage (shapely), so edges stay shared
@@ -20,6 +19,7 @@ import numpy as np, cv2
 sys.path.insert(0, os.path.dirname(__file__))
 import align
 import regions as RG
+import palette as PL
 from measure import load_reg, correction
 
 import rasterio.features
@@ -42,35 +42,6 @@ def masks(img):
     return ink, red, blue
 
 
-def classify_hue(img, who, cen):
-    """Sector I (1:2,000) colours by hue family: the sheets shade every building grey over the plot colour, which
-    dulls the colour (lower chroma, darker) but keeps its hue. Measured on the sheets: residential 96–102°,
-    commercial blue −94…−110°, public / semi-public pink ~17°, recreational green ~132°, EWS orange ~89° (high chroma)."""
-    H, W = img.shape[:2]
-    cls = np.full((H, W), 255, np.uint8)
-    dist = np.full((H, W), RG.MAX_DE * 0.3, np.float32)
-    K = {k: i for i, k in enumerate(KEYS)}
-    for j0 in range(0, H, 400):
-        sl = slice(j0, j0 + 400)
-        lab = cv2.cvtColor(img[sl], cv2.COLOR_RGB2LAB).astype(np.float32)
-        a, b = lab[:, :, 1] - 128, lab[:, :, 2] - 128
-        C = np.hypot(a, b)
-        h = np.degrees(np.arctan2(b, a))
-        out = np.full(C.shape, 255, np.uint8)
-        rules = [
-            ((h >= 80) & (h <= 115) & (C >= 18), K['residential']),
-            ((h >= 80) & (h < 95) & (C >= 58), K['ews']),
-            ((h >= -132) & (h <= -80) & (C >= 6), K['commercial']),
-            ((h >= -2) & (h <= 32) & (C >= 8), K['psp']),
-            ((h >= 115) & (h <= 155) & (C >= 25), K['recreational']),
-            ((h >= 50) & (h < 80) & (C >= 10) & (C <= 40), K['services']),
-            ((h >= -75) & (h <= -25) & (C >= 22), K['industrial']),
-        ]
-        for m, k in rules: out[m] = k
-        cls[sl] = out
-    return cls, dist
-
-
 def trace_sheet(name, dpi):
     t0 = time.time()
     Ainv, cps, reg = load_reg(name)
@@ -81,33 +52,76 @@ def trace_sheet(name, dpi):
     img = img[:, :fw].copy()
     px_m = reg['m_per_px300'] * 300 / dpi          # metres per pixel at this dpi
     px_area = px_m * px_m
-    # ---- colours: calibrate the legend on this sheet, classify every pixel
-    who = np.zeros(img.shape[:2], np.uint8)
-    # Sector I (1:2,000) hatches buildings in grey over the plot colour and writes everywhere: classify the colours
-    # through a median filter (it washes the hatch out) and don't cut at black ink — plots of one land use merge anyway
-    detailed = name.startswith('S1')
-    cen = RG.calibrate(img, who)
-    cls, dist = (classify_hue if detailed else RG.classify)(img, who, cen)
+    # ---- colours: the sheet's own palette (palette.py) — every pixel is a land use, paper, or ink
+    pal = PL.sheet_palette(name)
+    cls, dist = PL.classify(img, pal)
     ink, red, blue = masks(img)
-    if detailed:
-        # hatch / text / lines are ink; the fill shows between them: give each ink pixel its nearest clean pixel's class
-        dirty = (ink | red | blue).astype(np.uint8)
-        _, lab = cv2.distanceTransformWithLabels(dirty, cv2.DIST_L2, 3, labelType=cv2.DIST_LABEL_PIXEL)
-        lut = np.concatenate([[255], cls[dirty == 0]]).astype(np.uint8)
-        cls = np.where(dirty == 1, lut[np.minimum(lab, len(lut) - 1)], cls)
-        del lab, lut
-    # ---- lines: drawn lines + edges where the (classified) fill changes
-    lines = (red | blue) if detailed else (ink | red | blue)
-    c = cls.astype(np.int16)
-    edge = np.zeros_like(lines)
-    # every change of fill — including coloured ↔ white, so plots and the (white) roads between them part ways
-    edge[:, 1:] |= c[:, 1:] != c[:, :-1]
-    edge[1:, :] |= c[1:, :] != c[:-1, :]
-    lines |= edge
-    # join line ends that almost meet (≤ 1 px)
-    lines = cv2.morphologyEx(lines.astype(np.uint8), cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8)).astype(bool)
+    P = len(KEYS)                                   # paper (white: roads, unzoned land)
+    z = np.where(cls == PL.PAPER, P, cls).astype(np.uint8)
+    # strokes are ink whatever colour they match: grey lines read as transport, brown as services, blue as commercial,
+    # anti-aliased red as public / semi-public. A class's pixels that don't survive an opening wider than a stroke go.
+    # Opening by reconstruction: a region of one colour stays only if it has a solid core (≥ ~9 m across at 1:10,000,
+    # ~4 m at 1:2,000) — then it keeps its exact outline; strokes, lettering, hatch and boundary dots have no core.
+    rc = 3
+    kc = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * rc + 1, 2 * rc + 1))
+    k3 = np.ones((3, 3), np.uint8)
+    for v in np.unique(z):
+        if v == 255: continue
+        m = (z == v).astype(np.uint8)
+        if v == P:   # paper: only its thinnest slivers (between double lines) go
+            z[(m == 1) & (cv2.morphologyEx(m, cv2.MORPH_OPEN, k3) == 0)] = 255
+            continue
+        n, lab = cv2.connectedComponents(m, connectivity=8)
+        core = cv2.erode(m, kc)
+        keep = np.zeros(n, bool); keep[np.unique(lab[core > 0])] = True; keep[0] = False
+        z[(m == 1) & ~keep[lab]] = 255
+    z[cv2.dilate(red.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0] = 255
+    # ink (lines, hatch, text, symbols) takes the colour of the nearest fill or paper: a boundary drawn as a line ends
+    # up on the line's middle
+    def refill(z):
+        hole = (z == 255).astype(np.uint8)
+        if not hole.any(): return z
+        _, lab = cv2.distanceTransformWithLabels(hole, cv2.DIST_L2, 3, labelType=cv2.DIST_LABEL_PIXEL)
+        lut = np.concatenate([[P], z[hole == 0]]).astype(np.uint8)
+        return np.where(hole == 1, lut[np.minimum(lab, len(lut) - 1)], z)
+    z = refill(z)
+    # majority filter (a pixel takes its neighbourhood's commonest value): scan grain and ragged edges go
+    r = max(2, int(round(1.2 / px_m)))
+    best, bestv = np.zeros(z.shape, np.float32), z.copy()
+    for v in np.unique(z):
+        c = cv2.boxFilter((z == v).astype(np.float32), -1, (2 * r + 1, 2 * r + 1), normalize=False)
+        up = c > best
+        best[up] = c[up]; bestv[up] = v
+    z = bestv; del best, bestv
+    # specks (a letter's worth) dissolve into what surrounds them
+    for v in np.unique(z):
+        n, lab, st, _ = cv2.connectedComponentsWithStats((z == v).astype(np.uint8), connectivity=4)
+        tiny = st[:, cv2.CC_STAT_AREA] * px_area < ((80 if px_m > 1 else 25) if v != P else 15)
+        tiny[0] = False
+        if tiny.any(): z[tiny[lab]] = 255
+    z = refill(z)
+    cls = np.where(z == P, 255, z).astype(np.uint8)
+    # ---- lines: where the land use changes, and red verges (they bound reserved sites inside one land use)
+    # circled reservation codes: red rings (radius ~9-28 m on the sheet). Found first: a ring is a label, not a verge —
+    # it mustn't cut a round "site" out of the zone it's written on
+    circles = []
+    blur = cv2.GaussianBlur(red.astype(np.uint8) * 255, (5, 5), 0)
+    circ = cv2.HoughCircles(blur, cv2.HOUGH_GRADIENT, dp=1, minDist=18 / px_m, param1=60, param2=22, minRadius=int(9 / px_m), maxRadius=int(28 / px_m))
+    if circ is not None:
+        redd = cv2.dilate(red.astype(np.uint8), np.ones((3, 3), np.uint8))
+        ang = np.linspace(0, 2 * np.pi, 48, endpoint=False)
+        for cx, cy, rad in circ[0]:
+            xs = np.clip((cx + rad * np.cos(ang)).astype(int), 0, red.shape[1] - 1); ys = np.clip((cy + rad * np.sin(ang)).astype(int), 0, red.shape[0] - 1)
+            if redd[ys, xs].mean() > 0.6: circles.append((float(cx), float(cy), float(rad)))
+    ring = np.zeros(red.shape, np.uint8)
+    for cx, cy, rad in circles: cv2.circle(ring, (int(round(cx)), int(round(cy))), int(round(rad)), 1, max(3, int(round(2.5 / px_m))))
+    verge = red & (ring == 0)
+    lines = verge.copy()
+    c = z.astype(np.int16)
+    lines[:, 1:] |= c[:, 1:] != c[:, :-1]
+    lines[1:, :] |= c[1:, :] != c[:-1, :]
     lines[0, :] = lines[-1, :] = True; lines[:, 0] = lines[:, -1] = True
-    del edge, c
+    del c, z
     # ---- faces: 4-connected areas between lines
     nf, faces = cv2.connectedComponents((~lines).astype(np.uint8), connectivity=4, ltype=cv2.CV_32S)
     # majority land use per face (bincount over (face, class))
@@ -154,7 +168,7 @@ def trace_sheet(name, dpi):
     ero = cv2.erode(full.astype(np.float32), np.ones((3, 3), np.uint8)).astype(np.int32)
     border = (dil != full) | (ero != full)
     fb = full[border].astype(np.int64)
-    red_b = np.bincount(fb, weights=red[border].astype(np.float64), minlength=nf)
+    red_b = np.bincount(fb, weights=verge[border].astype(np.float64), minlength=nf)
     all_b = np.bincount(fb, minlength=nf).astype(np.float64)
     red_share = red_b / np.maximum(1, all_b)
     # recompute land use over merged faces
@@ -164,7 +178,11 @@ def trace_sheet(name, dpi):
     # ---- parcels: neighbouring faces of the same land use join up (plot and building lines inside one zone), except
     # reserved sites, which keep their own outline; river pieces join regardless (red flood lines run through them)
     wi = KEYS.index('water')
-    resv = (red_share > 0.55) & (major2 != wi)
+    # a reserved site is bounded by a red verge — but red hatch (slum / restriction overlays) slices a zone into strips
+    # with red edges too: a site must also be wider than a hatch strip and bigger than a symbol
+    cnt = np.bincount(full.ravel(), minlength=nf).astype(np.float64)
+    width_m = 4 * cnt / np.maximum(1, all_b) * px_m
+    resv = (red_share > 0.55) & (major2 != wi) & (width_m >= 10) & (cnt * px_area >= 150)
     pairs = set()
     for a2, b2 in ((full[:, 1:], full[:, :-1]), (full[1:, :], full[:-1, :])):
         m = a2 != b2
@@ -185,7 +203,7 @@ def trace_sheet(name, dpi):
     np.add.at(counts3, r2, counts2)
     major2 = counts3[:, :len(KEYS)].argmax(1)
     land = np.bincount(r2, weights=land.astype(np.float64), minlength=nf) > 0
-    red_share = np.where(np.arange(nf) == r2, red_share, 0.0)
+    resv = resv & (np.arange(nf) == r2)
     roots = r2
     fit = np.bincount(full.ravel(), weights=np.minimum(dist, RG.MAX_DE).ravel(), minlength=nf) / np.maximum(1, np.bincount(full.ravel(), minlength=nf))
     # ---- polygons with shared edges (pixel space), into the city frame
@@ -207,7 +225,7 @@ def trace_sheet(name, dpi):
         if not g.is_valid: g = shapely.make_valid(g)
         polys.append(g)
         cls_i = int(major2[f])
-        props.append({'face': f, 'cls': KEYS[cls_i], 'reserved': bool(red_share[f] > 0.55), 'fit': float(1 - fit[f] / RG.MAX_DE)})
+        props.append({'face': f, 'cls': KEYS[cls_i], 'reserved': bool(resv[f]), 'fit': float(1 - fit[f] / RG.MAX_DE)})
     # merge pieces of the same face, then simplify the whole coverage together (edges stay shared)
     byface = {}
     for g, p in zip(polys, props): byface.setdefault(p['face'], ([], p))[0].append(g)
@@ -225,19 +243,18 @@ def trace_sheet(name, dpi):
         feats.append({'cls': k, 'reserved': p['reserved'] and k != 'water', 'area': round(g.area), 'conf': round(0.6 * p['fit'] + 0.4 * min(1, g.area / 600), 2), 'sheet': name,
                       'geom': mapping(shapely.set_precision(g, 0.1))})
     # circled reservation codes: red rings (radius ~9-28 m on the sheet)
-    markers = []
-    blur = cv2.GaussianBlur(red.astype(np.uint8) * 255, (5, 5), 0)
-    circ = cv2.HoughCircles(blur, cv2.HOUGH_GRADIENT, dp=1, minDist=18 / px_m, param1=60, param2=22, minRadius=int(9 / px_m), maxRadius=int(28 / px_m))
-    if circ is not None:
-        redd = cv2.dilate(red.astype(np.uint8), np.ones((3, 3), np.uint8))
-        ang = np.linspace(0, 2 * np.pi, 48, endpoint=False)
-        for cx, cy, rad in circ[0]:
-            xs = np.clip((cx + rad * np.cos(ang)).astype(int), 0, red.shape[1] - 1); ys = np.clip((cy + rad * np.sin(ang)).astype(int), 0, red.shape[0] - 1)
-            if redd[ys, xs].mean() > 0.6:
-                m = to_city(np.array([[cx + 0.5, cy + 0.5]]))[0]
-                markers.append([round(float(m[0]), 1), round(float(m[1]), 1), round(float(rad * px_m), 1)])
+    markers = [[round(float(m[0]), 1), round(float(m[1]), 1), round(rad * px_m, 1)] for (cx, cy, rad) in circles for m in [to_city(np.array([[cx + 0.5, cy + 0.5]]))[0]]]
     # sheet frame in the city (for choosing between overlapping sheets)
     fr = to_city(np.array([[0, 0], [fw, 0], [fw, H], [0, H]], float))
+    # a reserved site carries its circled code (PG 77, EWS 17…): a red-bordered face without one is a plot along DP
+    # road lines (drawn in red too), not a reservation
+    if markers:
+        mk = shapely.points(np.array([m[:2] for m in markers]))
+        tree = shapely.STRtree(mk)
+        for ft in feats:
+            if ft['reserved'] and not len(tree.query(shape(ft['geom']).buffer(12), predicate='intersects')): ft['reserved'] = False
+    else:
+        for ft in feats: ft['reserved'] = False
     out = {'sheet': name, 'dpi': dpi, 'frame': fr.round(1).tolist(), 'features': feats, 'markers': markers}
     with open(os.path.join(OUT, name + '.json'), 'w', encoding='utf-8') as fh: json.dump(out, fh, separators=(',', ':'))
     by = {}
@@ -252,4 +269,6 @@ if __name__ == '__main__':
     a = ap.parse_args()
     names = a.sheets or sorted(os.path.basename(p)[:-9] for p in glob.glob(os.path.join(align.DP, '*.reg.json')))
     for n in names:
-        trace_sheet(n, a.dpi or (150 if n.startswith('S1') else 200))
+        # Sector I (1:2,000) at 75 dpi (0.68 m/px): its grey building hatch blends into the hatched mixes the palette
+        # knows, and lines / lettering are strokes like on the other sheets
+        trace_sheet(n, a.dpi or (75 if n.startswith('S1') else 200))

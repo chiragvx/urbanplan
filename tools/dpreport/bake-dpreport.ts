@@ -227,6 +227,27 @@ areas.sort((a, b) => a.name.localeCompare(b.name));
 // ---------------- each locality's DP map: the page's picture (SVG) and its share card (JPG) ----------------
 
 const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/** A ring clipped to a box (Sutherland–Hodgman): big parcels reaching far off the map would otherwise be drawn whole. */
+function clipRing(ring: XZ[], x0: number, z0: number, x1: number, z1: number): XZ[] {
+  let out = ring;
+  const edges: [(p: XZ) => boolean, (a: XZ, b: XZ) => XZ][] = [
+    [(p) => p[0] >= x0, (a, b) => [x0, a[1] + (b[1] - a[1]) * (x0 - a[0]) / (b[0] - a[0])]],
+    [(p) => p[0] <= x1, (a, b) => [x1, a[1] + (b[1] - a[1]) * (x1 - a[0]) / (b[0] - a[0])]],
+    [(p) => p[1] >= z0, (a, b) => [a[0] + (b[0] - a[0]) * (z0 - a[1]) / (b[1] - a[1]), z0]],
+    [(p) => p[1] <= z1, (a, b) => [a[0] + (b[0] - a[0]) * (z1 - a[1]) / (b[1] - a[1]), z1]],
+  ];
+  for (const [inside, cut] of edges) {
+    const src = out; out = [];
+    for (let i = 0; i < src.length; i++) {
+      const a = src[i], b = src[(i + 1) % src.length];
+      if (inside(b)) { if (!inside(a)) out.push(cut(a, b)); out.push(b); }
+      else if (inside(a)) out.push(cut(a, b));
+    }
+    if (!out.length) break;
+  }
+  return out;
+}
+
 /** the plan within `half` m of a point, drawn into a `size` px square */
 function mapSvg(a: AreaOut, half: number, size: number): string {
   const [cx, cz] = xz(a.lat, a.lon), k = size / (2 * half);
@@ -235,7 +256,10 @@ function mapSvg(a: AreaOut, half: number, size: number): string {
   const polys: string[] = [], res: string[] = [];
   for (const q of near(cx, cz, half * 1.5)) {
     if (!inBox(q.box)) continue;
-    const d = q.polys.map((poly) => poly.map((ring) => 'M' + simplifyRing(ring, 2.5).map(P).join('L') + 'Z').join('')).join('');
+    // rings that come down to under 3 distinct points at this size draw nothing (and crash resvg): drop them
+    const ringD = (ring: XZ[]) => { const pts = [...new Set(clipRing(simplifyRing(ring, 2.5), cx - half * 1.05, cz - half * 1.05, cx + half * 1.05, cz + half * 1.05).map(P))]; return pts.length >= 3 ? 'M' + pts.join('L') + 'Z' : ''; };
+    const d = q.polys.map((poly) => poly.map(ringD).join('')).join('');
+    if (!d) continue;
     polys.push(`<path d="${d}" fill="${dpClasses[q.p.cls]?.color ?? '#ccc'}"/>`);
     if (q.p.reserved) res.push(`<path d="${d}"/>`);
   }

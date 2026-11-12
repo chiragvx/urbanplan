@@ -57,10 +57,13 @@ def main():
     # pale blue is the river or C-1 commercial: OSM water decides
     water = shapely.union_all([Polygon(np.array(poly[0]).reshape(-1, 2), [np.array(h).reshape(-1, 2) for h in poly[1:] if len(h) >= 6]).buffer(0)
                                for poly in align.ref['water'] if poly and len(poly[0]) >= 6])
+    # (OSM misses most nalas, so shape decides too: C-1 is a block or two — compact and small; rivers and nalas are long)
     for p in plots:
         if p['cls'] in ('water', 'local_commercial'):
-            inter = p['geom'].intersection(water).area if p['geom'].intersects(water) else 0.0
-            p['cls'] = 'water' if inter > 0.3 * p['geom'].area else 'local_commercial'
+            g = p['geom']
+            inter = g.intersection(water).area if g.intersects(water) else 0.0
+            compact = 4 * math.pi * g.area / max(1.0, g.length) ** 2
+            p['cls'] = 'water' if inter > 0.3 * g.area or compact < 0.3 or g.area > 30000 else 'local_commercial'
             if p['cls'] == 'water': p['reserved'] = False
     # markers (circled codes) found per sheet
     markers = [m for t in traces for m in t.get('markers', [])]
