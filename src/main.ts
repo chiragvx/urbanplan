@@ -1,5 +1,6 @@
 // UrbanPlan — map editor: 2D plan editing with an instant 3D view, on top of the baked city.
 import { render, h } from 'preact';
+import { inject } from '@vercel/analytics';
 import { App } from './app/app';
 import { setUI } from './ui/ctx';
 import { MapCorners, Dock, Palette, Toasts, ReadOnlyBanner, Attribution, CursorHint } from './ui/chrome';
@@ -13,6 +14,9 @@ import { Home, cities, cityOf } from './ui/Home';
 import { parse } from './doc/format';
 import { Tour, firstTime } from './ui/tour';
 import { LiveLongSection } from './ui/LongSection';
+
+// Vercel Web Analytics (page views; a no-op off Vercel)
+inject();
 
 const $ = (id: string) => document.getElementById(id)!;
 // a city (a region streamed in pieces), a single tile (?tile=kp), or a published map (?map=…, on its own city);

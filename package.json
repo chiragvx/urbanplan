@@ -31,6 +31,7 @@
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.118.0",
     "@types/three": "^0.186.0",
+    "@vercel/analytics": "^2.0.1",
     "clipper-lib": "^6.4.2",
     "earcut": "^3.0.1",
     "geotiff": "^3.0.5",
