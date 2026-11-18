@@ -1,6 +1,7 @@
 // What tools/maps/bake-maps.ts measures for a city (generated/maps.json): the numbers on the city map pages, the
 // road-width map and the open-data page. Types only.
 import type { City } from '../places/data';
+import type { FsiMapData } from '../fsi/model';
 
 /** A named main road (expressway to collector), as one connected run of sections of that name. */
 export interface MapRoad {
@@ -53,4 +54,6 @@ export interface CityMapData {
     bbox: [number, number, number, number];
   };
   download: { file: string; features: number; bytes: number; gzBytes: number };
+  /** the FSI map: main roads by the FSI a plot on them gets */
+  fsi: FsiMapData;
 }

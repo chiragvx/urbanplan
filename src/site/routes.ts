@@ -12,6 +12,7 @@ import MAPS_RAW from './maps/generated/maps.json';
 import type { CityMapData } from './maps/types';
 import { DP_FAQ, DATA_FIELDS } from './CityMap';
 import { DP_FAQ_MR } from './CityMapMr';
+import { fsiFaq, fsiMapDesc } from './FsiPages';
 import { AREAS, SUMMARY, DPR_FAQ, DPR_PATH, areaPath, areaMap, areaCard, clsLower, type DprArea } from './dpreport/data';
 
 export { SITE_NAME };
@@ -304,6 +305,44 @@ function mapRoutes(): Route[] {
   return out;
 }
 
+/** The FSI calculator and the FSI map, for each city. */
+function fsiRoutes(): Route[] {
+  return (['pune', 'mumbai'] as City[]).flatMap((city): Route[] => {
+    const M = MAPS[city], L = CITY_LABEL[city], code = city === 'pune' ? 'UDCPR 2020' : 'DCPR 2034';
+    const calcDesc = `Free ${L} FSI calculator (${code}): enter your plot area and road width to see the basic, premium, TDR and ${city === 'pune' ? 'ancillary' : 'fungible'} FSI, the built-up area and floors.`;
+    const mapDesc = fsiMapDesc(city);
+    return [
+      {
+        path: `${city}/fsi-calculator/`, priority: 0.9, updated: SITE_UPDATED,
+        head: {
+          title: `${L} FSI calculator: by plot area and road width`, description: calcDesc,
+          image: M.fsi.og, imageAlt: `${L}'s main roads coloured by FSI`,
+          ld: (url) => [
+            {
+              '@type': 'WebApplication', name: `${L} FSI calculator`, url: url(`${city}/fsi-calculator/`), applicationCategory: 'UtilitiesApplication',
+              operatingSystem: 'Web browser', description: calcDesc, inLanguage: 'en-IN', isAccessibleForFree: true,
+              offers: { '@type': 'Offer', price: '0', priceCurrency: 'INR' }, spatialCoverage: cityPlace(city), publisher: { '@id': url('#org') },
+            },
+            crumbs(url, [['Home', ''], [L, `${city}/`], [`${L} FSI calculator`, `${city}/fsi-calculator/`]]),
+            faq(fsiFaq(city)),
+          ],
+        },
+      },
+      {
+        path: `${city}/fsi-map/`, priority: 0.8, updated: M.baked, images: [M.fsi.svg],
+        head: {
+          title: `${L} FSI map: what plots get, road by road`, description: mapDesc,
+          image: M.fsi.og, imageAlt: `${L}'s main roads coloured by the FSI a plot on them gets`, preload: M.fsi.svg,
+          ld: (url) => [
+            mapLd(url, `${city}/fsi-map/`, `${L} FSI map`, mapDesc, city, M.fsi.og),
+            crumbs(url, [['Home', ''], [L, `${city}/`], [`${L} FSI map`, `${city}/fsi-map/`]]),
+          ],
+        },
+      },
+    ];
+  });
+}
+
 /** The DP report: the hub (the whole of the plan) and a page per locality. */
 function dpReportRoutes(): Route[] {
   const S = SUMMARY;
@@ -354,6 +393,7 @@ export const ROUTES: Route[] = [
   ...GUIDES.map(guideRoute),
   ...(['pune', 'mumbai'] as City[]).map(cityRoute),
   ...mapRoutes(),
+  ...fsiRoutes(),
   ...PLACES.map(placeRoute),
   ...dpReportRoutes(),
 ].map((r) => ({ ...r, view: viewOf(r.path) ?? undefined }));

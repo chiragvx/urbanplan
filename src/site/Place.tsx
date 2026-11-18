@@ -268,7 +268,7 @@ export function PlacePage({ place }: { place: Place }) {
             </>
           )}
 
-          <p>More on how roads, widths and plots work in {city}: <a href={href('guides/')}>the {SITE_NAME} guides</a> (FSI, road widths, the DP and what a plot can hold), <a href={href(`${d.city}/`)}>every place in {city}</a>, or the whole city on the <a href={href(`${d.city}/road-width-map/`)}>{city} road width map</a>.</p>
+          <p>More on how roads, widths and plots work in {city}: <a href={href('guides/')}>the {SITE_NAME} guides</a> (FSI, road widths, the DP and what a plot can hold), <a href={href(`${d.city}/`)}>every place in {city}</a>, the whole city on the <a href={href(`${d.city}/road-width-map/`)}>{city} road width map</a> and the <a href={href(`${d.city}/fsi-map/`)}>{city} FSI map</a>, or what your plot can build with the <a href={href(`${d.city}/fsi-calculator/`)}>{city} FSI calculator</a>.</p>
 
           <Provenance d={d} />
         </article>
@@ -320,6 +320,8 @@ export function CityPage({ city }: { city: City }) {
             {city === 'pune' && <a href={href('pune/dp-report/')}><Icon.pin /><span><b>Pune DP plan on satellite</b><small>Check any plot's zone and reservations</small></span></a>}
             {city === 'pune' && <a href={href('pune/dp-map/')}><Icon.sheet /><span><b>Pune DP map</b><small>Where the Development Plan is in {SITE_NAME}</small></span></a>}
             <a href={href(`${city}/road-width-map/`)}><Icon.road /><span><b>{label} road width map</b><small>Main roads by width</small></span></a>
+            <a href={href(`${city}/fsi-calculator/`)}><Icon.building /><span><b>{label} FSI calculator</b><small>What your plot can build, by road width</small></span></a>
+            <a href={href(`${city}/fsi-map/`)}><Icon.section /><span><b>{label} FSI map</b><small>Every main road by the FSI its plots get</small></span></a>
             <a href={href('data/')}><Icon.share /><span><b>Open data</b><small>{label}'s main roads as GeoJSON</small></span></a>
           </div>
           {city === 'mumbai' && (

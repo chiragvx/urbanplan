@@ -96,6 +96,7 @@ const EX = envelope(40, 25, 12);
 const BODY: Record<string, FunctionComponent> = {
   'fsi-calculator-pune': () => (
     <>
+      <p class="cta-row" style="justify-content:flex-start"><a class="btn btn-primary" href={href('pune/fsi-calculator/')}>Open the Pune FSI calculator</a><a class="btn" href={href('pune/fsi-map/')}>Pune FSI map</a></p>
       <FsiTable code="udcpr" caption={`FSI by road width outside congested areas, in ${SITE_NAME}’s rule tables (based on UDCPR 2020 Table 6-G, municipal corporations)`} />
       <p>Basic FSI counts on the plot left after the DP road; premium FSI and TDR count on the whole plot. Ancillary FSI ({pct(EX.r.ancillary)} for homes, more for other uses) is worked out on the three together. The old city’s congested areas have their own table:</p>
       <FsiTable code="udcpr" congested caption="FSI by road width in congested areas (based on UDCPR 2020 Table 6-A)" />
@@ -119,6 +120,7 @@ const BODY: Record<string, FunctionComponent> = {
     const isl = envelope(40, 25, 12, 'dcpr-island'), sub = envelope(40, 25, 12, 'dcpr-suburbs');
     return (
       <>
+        <p class="cta-row" style="justify-content:flex-start"><a class="btn btn-primary" href={href('mumbai/fsi-calculator/')}>Open the Mumbai FSI calculator</a><a class="btn" href={href('mumbai/fsi-map/')}>Mumbai FSI map</a></p>
         <FsiTable code="dcpr-island" caption={`Residential FSI by road width, island city, in ${SITE_NAME}’s rule tables (based on published summaries of DCPR 2034 Table 12)`} />
         <FsiTable code="dcpr-suburbs" caption="Residential FSI by road width, suburbs (same source)" />
         <Example>
@@ -467,8 +469,8 @@ const MAP_LINKS: Record<string, [string, string][]> = {
   'dp-road-widening': [['pune/dp-map/', 'Pune DP map: where the DP road widths are traced'], ['pune/road-width-map/', 'Pune road width map']],
   'what-is-development-plan': [DPR, ['pune/dp-map/', 'Pune DP map: the sheets and traced road widths'], ['mr/pune/dp-map/', 'पुणे विकास आराखडा नकाशा (मराठी)']],
   'road-width-building-height': [['pune/road-width-map/', 'Pune road width map'], ['mumbai/road-width-map/', 'Mumbai road width map']],
-  'fsi-calculator-pune': [['pune/road-width-map/', 'Pune road width map: how wide the main roads are'], ['pune/dp-map/', 'Pune DP map']],
-  'fsi-calculator-mumbai': [['mumbai/road-width-map/', 'Mumbai road width map: how wide the main roads are']],
+  'fsi-calculator-pune': [['pune/fsi-calculator/', 'Pune FSI calculator'], ['pune/fsi-map/', 'Pune FSI map'], ['pune/road-width-map/', 'Pune road width map: how wide the main roads are'], ['pune/dp-map/', 'Pune DP map']],
+  'fsi-calculator-mumbai': [['mumbai/fsi-calculator/', 'Mumbai FSI calculator'], ['mumbai/fsi-map/', 'Mumbai FSI map'], ['mumbai/road-width-map/', 'Mumbai road width map: how wide the main roads are']],
   'udcpr-setbacks': [['pune/road-width-map/', 'Pune road width map']],
   '3d-site-context-architecture-students': [['pune/map/', 'Pune 3D map'], ['mumbai/map/', 'Mumbai 3D map'], ['data/', 'Open data: the main road networks as GeoJSON']],
   'how-much-can-i-build': [['pune/road-width-map/', 'Pune road width map'], ['mumbai/road-width-map/', 'Mumbai road width map']],

@@ -128,9 +128,13 @@ export function Footer({ lang }: { lang?: string }) {
           <a href={href('pune/dp-report/')}>Pune DP plan on satellite</a>
           <a href={href('pune/dp-map/')}>Pune DP map</a>
           <a href={href('pune/road-width-map/')}>Pune road width map</a>
+          <a href={href('pune/fsi-calculator/')}>Pune FSI calculator</a>
+          <a href={href('pune/fsi-map/')}>Pune FSI map</a>
           <a href={href('mr/pune/dp-map/')} lang="mr" hrefLang="mr">पुणे विकास आराखडा नकाशा</a>
           <a href={href('mumbai/map/')}>Mumbai 3D map</a>
           <a href={href('mumbai/road-width-map/')}>Mumbai road width map</a>
+          <a href={href('mumbai/fsi-calculator/')}>Mumbai FSI calculator</a>
+          <a href={href('mumbai/fsi-map/')}>Mumbai FSI map</a>
         </nav>
         <div class="foot-legal">
           <span>© OpenStreetMap contributors (ODbL) · Copernicus DEM GLO-30 © DLR/Airbus · DP sheets © Pune Municipal Corporation.</span>

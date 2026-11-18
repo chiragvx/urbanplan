@@ -16,6 +16,7 @@ import { carriageWidth, isOneway, laneCount, totalWidth } from '../../src/doc/xs
 import { CLASS_LABEL, CLASS_RANK, type SectionObj } from '../../src/doc/types';
 import type { PlaceData } from '../../src/site/places/facts';
 import type { CityMapData, MapRoad, WidthBand } from '../../src/site/maps/types';
+import { fsiColor, fsiFor, inIslandCity, STEPS_OF, type FsiBand, type FsiMapData, type FsiRoad, type FsiZone } from '../../src/site/fsi/model';
 
 const OUT_JSON = 'src/site/maps/generated/maps.json';
 const PLACES: PlaceData[] = JSON.parse(fs.readFileSync('src/site/places/generated/places.json', 'utf8'));
@@ -264,6 +265,74 @@ function widthSvg(F: Frame, R: Region, city: string, secs: S[], label: string): 
     `<g fill="none" stroke-linecap="round" stroke-linejoin="round">${paths}</g>`) + markers(F, R, city) + furniture(F));
 }
 
+/**
+ * The FSI map: main roads coloured by the FSI (basic + premium + TDR) a plot fronting them gets under the rule tables,
+ * by the road's width: in Pune the DP width where it's traced and wider, in Mumbai island city or suburbs by where the
+ * road is. A divided road mapped as two one-way carriageways counts as twice one carriageway's width. A soft wide
+ * stroke under each line makes it read as a heat map. Returns the SVG and the length in each FSI class.
+ */
+function fsiSvg(F: Frame, R: Region, city: 'pune' | 'mumbai', secs: S[], label: string): { svg: string; bands: FsiBand[]; dpKm: number } {
+  const groups = new Map<string, { band: FsiBand; lines: number[][] }>();
+  let dpKm = 0;
+  for (const q of secs) {
+    if (rank(q.s) > 4 || q.s.tunnel || q.s.cls === 'busway' || q.pts.length < 4 || !frontable(q.s)) continue;
+    const { w, dp } = fsiWidth(q);
+    if (dp) dpKm += q.len / 1000;
+    const zone = zoneAt(R, city, q.pts[(q.pts.length >> 2) * 2], q.pts[(q.pts.length >> 2) * 2 + 1]);
+    const steps = STEPS_OF[zone];
+    let i = steps.length - 1;
+    while (i > 0 && w < steps[i]) i--;
+    const key = `${zone}|${i}`;
+    let g = groups.get(key);
+    if (!g) {
+      const fsi = Math.round(fsiFor(steps[i], zone) * 100) / 100;
+      g = { band: { zone, lo: steps[i], hi: steps[i + 1] ?? null, fsi, color: fsiColor(fsi), km: 0 }, lines: [] };
+      groups.set(key, g);
+    }
+    g.band.km += q.len / 1000;
+    g.lines.push(toF(F, q.pts));
+  }
+  const list = [...groups.values()].sort((a, b) => a.band.fsi - b.band.fsi);
+  let defs = '', glow = '', lines = '';
+  list.forEach((g, k) => {
+    const d = chained(g.lines, TOL);
+    if (!d) return;
+    const sw = 2.4 + (g.band.fsi - 1) * 1.6;
+    defs += `<path id="f${k}" d="${d}"/>`;
+    glow += `<use href="#f${k}" stroke="${g.band.color}" stroke-width="${(sw * 4.5).toFixed(1)}"/>`;
+    lines += `<use href="#f${k}" stroke="${g.band.color}" stroke-width="${sw.toFixed(1)}"/>`;
+  });
+  const svg = svgDoc(F, `${label}: main roads coloured by the FSI a plot on them gets, by road width, in UrbanPlan's rule tables`, scaled(
+    `<defs>${defs}</defs><g fill="none" stroke-linecap="round" stroke-linejoin="round"><g opacity="0.16">${glow}</g>${lines}</g>`) + markers(F, R, city) + furniture(F));
+  return { svg, bands: list.map((g) => ({ ...g.band, km: r1(g.band.km) })), dpKm: r1(dpKm) };
+}
+/** Roads no plot is entered from: expressways, freeways, sea links, the coastal road, and anything on a deck. */
+const NO_FRONTAGE = /expressway|freeway|sea ?link|coastal road|trans ?harbou?r|atal setu|flyover|bridge|\bghat\b/i;
+const frontable = (s: SectionObj) => s.cls !== 'motorway' && !offGround(s) && !NO_FRONTAGE.test(s.name ?? '');
+/** The width the FSI goes by for a section: a one-way carriageway of a divided road counts twice; the DP width where wider. */
+function fsiWidth(q: S): { w: number; dp: boolean } {
+  let w = totalWidth(q.s.parts);
+  if (isOneway(q.s.parts) && rank(q.s) <= 3) w *= 2;
+  if (q.s.reserve && q.s.reserve > w) return { w: q.s.reserve, dp: true };
+  return { w, dp: false };
+}
+const zoneAt = (R: Region, city: 'pune' | 'mumbai', x: number, z: number): FsiZone => {
+  if (city === 'pune') return 'regular';
+  const [lat, lon] = R.ll(x, z);
+  return inIslandCity(lat, lon) ? 'island' : 'suburbs';
+};
+/** Named main roads by the FSI a plot on them gets (their typical width), the most first. */
+function fsiRoads(roads: MapRoad[], city: 'pune' | 'mumbai'): FsiRoad[] {
+  const seen = new Set<string>();
+  const all = roads.filter((r) => r.cls !== CLASS_LABEL.motorway && !NO_FRONTAGE.test(r.name)).map((r): FsiRoad => {
+    const w = r.oneway ? r1(r.w * 2) : r.w;
+    const zone: FsiZone = city === 'pune' ? 'regular' : inIslandCity(r.at[0], r.at[1]) ? 'island' : 'suburbs';
+    return { name: r.name, w, zone, fsi: Math.round(fsiFor(w, zone) * 100) / 100, km: r.km, at: r.at, ...(r.near ? { near: r.near } : {}) };
+  }).sort((a, b) => b.fsi - a.fsi || b.w - a.w || b.km - a.km).filter((r) => (seen.has(r.name) ? false : (seen.add(r.name), true)));
+  // Mumbai: the most in each part, the island city's tables being higher
+  return city === 'pune' ? all.slice(0, 15) : [...all.filter((r) => r.zone === 'island').slice(0, 8), ...all.filter((r) => r.zone === 'suburbs').slice(0, 8)];
+}
+
 /** Pune: where the DP sheets are registered (the 500 m tiles) and where its road widths are traced. */
 function dpSvg(F: Frame, R: Region, secs: S[], tiles: { x0: number; z0: number; size: number }[]): string {
   // the tiles, merged into runs along each row
@@ -393,6 +462,8 @@ function main() {
     const write = (name: string, svg: string) => { fs.writeFileSync(`${dir}/${name}`, svg); files[name] = `citymap/${city}/${name}`; return svg; };
     const map = write('roads.svg', citySvg(F, R, city, secs, label));
     const width = write('road-widths.svg', widthSvg(F, R, city, secs, label));
+    const fsiMap = fsiSvg(F, R, city, secs, label);
+    write('fsi-map.svg', fsiMap.svg);
     let dp: CityMapData['dp'];
     let dpMap = '';
     if (city === 'pune') {
@@ -418,6 +489,9 @@ function main() {
     const shot = (name: string, svg: string) => { jpg(svg, `${dir}/${name}`, tmp); og[name.replace(/^og-|\.jpg$/g, '')] = `citymap/${city}/${name}`; };
     shot('og-map.jpg', shareSvg(label, [`${label} 3D map`], 'Roads, buildings and terrain', [[`${n(meta.km2)} km²`, 'mapped'], [`${n(Math.round(roadKm))} km`, 'of road'], [`${Math.round(meta.counts.buildings / 1000)}k`, 'buildings']], map));
     shot('og-road-widths.jpg', shareSvg(label, [`${label} road`, 'width map'], 'Main roads by width, from open data', [[`${n(Math.round(mainKm))} km`, 'of main road'], [`${roads.length}`, 'named main roads'], [`${widest[0]?.w ?? 0} m`, 'widest, two-way']], width));
+    const hiFsi = Math.max(...fsiMap.bands.map((b) => b.fsi)), fsiKm = fsiMap.bands.reduce((a, b) => a + b.km, 0);
+    const hiKm = fsiMap.bands.filter((b) => b.fsi >= 2.5).reduce((a, b) => a + b.km, 0);
+    shot('og-fsi-map.jpg', shareSvg(label, [`${label} FSI map`], 'The FSI a plot gets, by the road it fronts', [[`${hiFsi.toFixed(2)}`, 'highest FSI'], [`${Math.round((100 * hiKm) / fsiKm)} %`, 'of main road at 2.5+'], [`${n(Math.round(fsiKm))} km`, 'of main road']], fsiMap.svg));
     if (dp) shot('og-dp-map.jpg', shareSvg('Pune', ['Pune DP map', 'online'], 'Development Plan sheets over today’s city', [[`${dp.sheets}`, 'DP sheets'], [`${n(Math.round(dp.km2))} km²`, 'covered'], [`${n(Math.round(dp.tracedKm))} km`, 'widths traced']], dpMap));
     // ---- the download ----
     const gj = geojson(R, secs, city, baked);
@@ -432,6 +506,7 @@ function main() {
       bbox: [...R.ll(F.x0, F.z0 + F.H / F.k), ...R.ll(F.x0 + F.W / F.k, F.z0)].map((v) => +v.toFixed(4)) as [number, number, number, number],
       svg: { map: files['roads.svg'], width: files['road-widths.svg'], ...(files['dp-coverage.svg'] ? { dp: files['dp-coverage.svg'] } : {}), w: F.W, h: F.H },
       og, ...(dp ? { dp } : {}),
+      fsi: { svg: files['fsi-map.svg'], og: og['fsi-map'], w: F.W, h: F.H, bands: fsiMap.bands, top: fsiRoads(roads, city), ...(city === 'pune' ? { dpKm: fsiMap.dpKm } : {}) } satisfies FsiMapData,
       download: { file: gjFile.replace(/^public\//, ''), features: gj.features, bytes: Buffer.byteLength(gj.text), gzBytes: gz },
     };
     const kb = (f: string) => (fs.statSync(f).size / 1024).toFixed(0);

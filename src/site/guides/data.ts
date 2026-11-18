@@ -80,9 +80,9 @@ const EX = envelope(40, 25, 12);
 export const GUIDES: Guide[] = [
   {
     slug: 'fsi-calculator-pune',
-    title: 'FSI calculator for Pune (UDCPR 2020, by road width)',
-    h1: 'FSI calculator for Pune',
-    description: 'How much FSI a Pune plot gets under UDCPR 2020: basic, premium, TDR and ancillary FSI by road width, a worked example and a free calculator.',
+    title: 'FSI in Pune explained: UDCPR 2020 by road width',
+    h1: 'FSI in Pune, explained',
+    description: 'How FSI works in Pune under UDCPR 2020: basic, premium, TDR and ancillary FSI by road width, the congested-area table and a worked example.',
     answer: `In Pune, FSI under UDCPR 2020 comes in layers: a basic FSI of ${f2(P12.basic)} on the plot, premium FSI you pay the corporation for, TDR you buy and load, and ancillary FSI on top of all three. How much premium and TDR a plot can take goes by the width of the road it fronts. In ${SITE_NAME}’s rule tables (based on UDCPR 2020 Table 6-G), that is ${f2(fsiAt(0))} in all on a road under 9 m, rising to ${f2(fsiAt(30))} on a road 30 m or wider, before ancillary FSI of ${pct(P12.ancillary)} for homes.`,
     city: 'pune',
     updated: UPDATED,
@@ -97,8 +97,8 @@ export const GUIDES: Guide[] = [
   },
   {
     slug: 'fsi-calculator-mumbai',
-    title: 'FSI calculator for Mumbai (DCPR 2034, by road width)',
-    h1: 'FSI calculator for Mumbai',
+    title: 'FSI in Mumbai explained: DCPR 2034 by road width',
+    h1: 'FSI in Mumbai, explained',
     description: 'Residential FSI in Mumbai under DCPR 2034: basic, premium, TDR and fungible FSI by road width, island city against suburbs, with a worked example.',
     answer: `In Mumbai, residential FSI under DCPR 2034 is a basic FSI plus premium FSI and TDR that go up with the width of the road the plot fronts, with fungible FSI on top. In ${SITE_NAME}’s rule tables (based on published summaries of DCPR 2034 Table 12), the island city goes from ${f2(fsiAt(0, 'dcpr-island'))} on a road under 9 m to ${f2(fsiAt(27, 'dcpr-island'))} on a road 27 m or wider, and the suburbs from ${f2(fsiAt(0, 'dcpr-suburbs'))} to ${f2(fsiAt(27, 'dcpr-suburbs'))}; fungible FSI adds ${pct(rulesAt(12, 'dcpr-island').ancillary)} of that.`,
     city: 'mumbai',
