@@ -14,6 +14,7 @@ import {
 } from './fsi/model';
 import './place.css';
 import './fsi.css';
+import { FsiMap } from './fsi/FsiMap';
 
 const nf = (v: number, d = 0) => v.toLocaleString('en-IN', { maximumFractionDigits: d, minimumFractionDigits: 0 });
 const f2 = (v: number) => (Math.round(v * 100) / 100).toString();
@@ -98,6 +99,7 @@ function Calculator({ city }: { city: City }) {
   const bad = !area || !num(s.road);
 
   return (
+    <>
     <div class="fsi-calc">
       <form class="fsi-inputs" onSubmit={(e) => e.preventDefault()} aria-label="Your plot">
         <div class="field">
@@ -186,6 +188,7 @@ function Calculator({ city }: { city: City }) {
           </>
         )}
       </section>
+    </div>
 
       {!bad && (
         <section class="fsi-ladder" aria-label="The same plot on other road widths">
@@ -202,7 +205,7 @@ function Calculator({ city }: { city: City }) {
           </ol>
         </section>
       )}
-    </div>
+    </>
   );
 }
 
@@ -330,34 +333,39 @@ export function FsiMapPage({ city }: { city: City }) {
             {city === 'mumbai' ? <>; the island city’s tables are higher than the suburbs’, so the same width is darker south of Mahim and Sion</> : null}.
             For your own plot, use the <a href={href(`${city}/fsi-calculator/`)}>{L} FSI calculator</a>.
           </p>
-          <div class="place-grid">
-            <figure class="place-map city-map">
-              <img src={href(F.svg)} width={F.w} height={F.h} fetchpriority="high" alt={`Map of ${L}'s main roads coloured by the FSI a plot on them gets, from pale (${f2(legend[0].fsi)}) to dark (${f2(legend[legend.length - 1].fsi)})`} />
-              <figcaption class="legend place-legend">
-                {legend.map((b) => <span key={b.fsi}><i class="legend-swatch" style={`background:${b.color}`} /> FSI {f2(b.fsi)}</span>)}
-              </figcaption>
-            </figure>
-            <aside class="place-side">
-              <div class="table-wrap">
-                <table class="rules">
-                  <caption>Main roads by the FSI their plots get (basic + premium + TDR)</caption>
-                  <thead><tr><th>Road width</th><th class="n">FSI</th><th class="n">Length</th></tr></thead>
-                  <tbody>
-                    {zones.flatMap((z) => [
-                      ...(zones.length > 1 ? [<tr key={z}><th colSpan={3} scope="rowgroup">{zoneName(z)}</th></tr>] : []),
-                      ...F.bands.filter((b) => b.zone === z).sort((a, b) => a.lo - b.lo).map((b) => (
-                      <tr key={z + b.lo}><td><i class="legend-swatch" style={`background:${b.color};display:inline-block;margin-right:8px`} />{bandRange(b)}</td><td class="n"><b>{f2(b.fsi)}</b></td><td class="n">{nf(Math.round(b.km))} km</td></tr>
-                    ))])}
-                  </tbody>
-                </table>
-              </div>
+          <figure class="fsi-figure">
+            {F.view
+              ? <FsiMap view={F.view} base={href('')} svg={href(F.svg)} svgW={F.w} svgH={F.h} calc={href(`${city}/fsi-calculator/`)} alt={`Map of ${L}'s roads coloured by the FSI a plot on them gets, from pale (${f2(legend[0].fsi)}) to dark (${f2(legend[legend.length - 1].fsi)})`} />
+              : <img src={href(F.svg)} width={F.w} height={F.h} alt={`Map of ${L}'s main roads coloured by FSI`} />}
+            <figcaption class="legend place-legend">
+              {legend.map((b) => <span key={b.fsi}><i class="legend-swatch" style={`background:${b.color}`} /> FSI {f2(b.fsi)}</span>)}
+              <span class="muted">Zoom with the wheel, two fingers or +; local streets appear as you go in.</span>
+            </figcaption>
+          </figure>
+          <div class="fsi-map-facts">
+            <div class="table-wrap">
+              <table class="rules">
+                <caption>Main roads by the FSI their plots get (basic + premium + TDR)</caption>
+                <thead><tr><th>Road width</th><th class="n">FSI</th><th class="n">Length</th></tr></thead>
+                <tbody>
+                  {zones.flatMap((z) => [
+                    ...(zones.length > 1 ? [<tr key={z}><th colSpan={3} scope="rowgroup">{zoneName(z)}</th></tr>] : []),
+                    ...F.bands.filter((b) => b.zone === z).sort((a, b) => a.lo - b.lo).map((b) => (
+                    <tr key={z + b.lo}><td><i class="legend-swatch" style={`background:${b.color};display:inline-block;margin-right:8px`} />{bandRange(b)}</td><td class="n"><b>{f2(b.fsi)}</b></td><td class="n">{nf(Math.round(b.km))} km</td></tr>
+                  ))])}
+                </tbody>
+              </table>
+            </div>
+            <div class="fsi-map-cta">
+              <p>The colour is what a plot fronting that road can build to. For your own plot’s area, road and {city === 'pune' ? 'DP widening' : 'part of the city'}, work it out in the calculator.</p>
               <a class="btn btn-primary btn-lg btn-block" href={href(`${city}/fsi-calculator/`)}>Calculate for your plot <Icon.arrow /></a>
-            </aside>
+            </div>
           </div>
 
           <h2>How to read it</h2>
           <ul>
-            <li><b>The colour is the road’s</b>: a plot takes the FSI of the road it’s entered from. A plot on a lane off a dark road gets the lane’s FSI, not the main road’s. Lanes and local streets aren’t drawn; most are under 9 m, where the FSI is {f2(fsiFor(0, zones[0]))}{zones.length > 1 ? ` (suburbs) or ${f2(fsiFor(0, 'island'))} (island city)` : ''}.</li>
+            <li><b>Two views</b>: <b>Roads</b> colours each road by the FSI a plot fronting it gets; <b>Heat map</b> colours each square by the highest FSI any plot in it can get, in squares from 400 m across the whole city down to 25 m zoomed in. Point at (or tap) the map to read the FSI there.</li>
+            <li><b>The colour is the road’s</b>: a plot takes the FSI of the road it’s entered from. A plot on a lane off a dark road gets the lane’s FSI, not the main road’s. Local streets appear as you zoom in; most are under 9 m, where the FSI is {f2(fsiFor(0, zones[0]))}{zones.length > 1 ? ` (suburbs) or ${f2(fsiFor(0, 'island'))} (island city)` : ''}.</li>
             <li><b>FSI before {extraName(zones[0])} FSI</b>: basic, premium and TDR together. {extraName(zones[0])[0].toUpperCase() + extraName(zones[0]).slice(1)} FSI adds {pct(rulesFor(12, zones[0]).ancillary)} on top for homes.</li>
             <li><b>Widths are {SITE_NAME}’s model</b>, from OpenStreetMap lane counts and road classes, not a survey. Many two-lane collectors have no width in OpenStreetMap and come out under 9 m ({nf(Math.round(low))} km here); the real road may well be wider. A divided road counts as both carriageways.</li>
             {city === 'pune' ? (

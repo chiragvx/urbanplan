@@ -306,6 +306,81 @@ function fsiSvg(F: Frame, R: Region, city: 'pune' | 'mumbai', secs: S[], label: 
     `<defs>${defs}</defs><g fill="none" stroke-linecap="round" stroke-linejoin="round"><g opacity="0.16">${glow}</g>${lines}</g>`) + markers(F, R, city) + furniture(F));
   return { svg, bands: list.map((g) => ({ ...g.band, km: r1(g.band.km) })), dpKm: r1(dpKm) };
 }
+/**
+ * The FSI map's data for the page's zoomable map (src/site/fsi/FsiMap.tsx): every road a plot can front, by FSI
+ * class, in two tiers: the main roads (loaded with the page) and the local streets (loaded when the map is zoomed
+ * in). Coordinates in UNIT m from the frame's top-left, simplified at about 3 m, written as one stream of varints:
+ * the number of lines, then per line its class, its point count and each point as a zigzag delta from the point
+ * before (the previous line's last point for its first). A few hundred KB for a city's local streets.
+ */
+const UNIT = 2;
+function fsiData(F: Frame, R: Region, city: 'pune' | 'mumbai', secs: S[], dir: string): NonNullable<FsiMapData['view']> {
+  const keys: string[] = [], classes: { fsi: number; color: string; lo: number; hi: number | null; zone: FsiZone }[] = [];
+  const classOf = (q: S) => {
+    const { w } = fsiWidth(q);
+    const zone = zoneAt(R, city, q.pts[(q.pts.length >> 2) * 2], q.pts[(q.pts.length >> 2) * 2 + 1]);
+    const steps = STEPS_OF[zone];
+    let i = steps.length - 1;
+    while (i > 0 && w < steps[i]) i--;
+    const key = `${zone}|${i}`;
+    let k = keys.indexOf(key);
+    if (k < 0) { const fsi = Math.round(fsiFor(steps[i], zone) * 100) / 100; k = keys.push(key) - 1; classes.push({ fsi, color: fsiColor(fsi), lo: steps[i], hi: steps[i + 1] ?? null, zone }); }
+    return k;
+  };
+  const tiers: [string, (q: S) => boolean][] = [['main', (q) => rank(q.s) <= 4], ['local', (q) => rank(q.s) === 5 || rank(q.s) === 6]];
+  const out: Record<string, { file: string; bytes: number; lines: number; points: number }> = {};
+  for (const [name, keep] of tiers) {
+    const bytes: number[] = [];
+    const v = (n: number) => { n >>>= 0; while (n > 127) { bytes.push((n & 127) | 128); n >>>= 7; } bytes.push(n); };
+    const zz = (n: number) => v((n << 1) ^ (n >> 31));
+    const lines: [number, number[]][] = [];
+    for (const q of secs) {
+      if (!keep(q) || q.s.tunnel || q.s.cls === 'busway' || q.pts.length < 4 || !frontable(q.s)) continue;
+      const P: number[] = [];
+      for (let k = 0; k < q.pts.length; k += 2) P.push(Math.round((q.pts[k] - F.x0) / UNIT), Math.round((q.pts[k + 1] - F.z0) / UNIT));
+      const S2 = simplify(P, 1.5);
+      if (S2.length >= 4) lines.push([classOf(q), S2]);
+    }
+    // sections of one class that meet end to end become one line (fewer headers, fewer first points), then lines
+    // go in a serpentine order of 1 km blocks so the jump from one to the next stays short
+    const joined: [number, number[]][] = [];
+    for (let c = 0; c < classes.length; c++) {
+      const mine = lines.filter((l) => l[0] === c).map((l) => l[1]);
+      const key = (x: number, z: number) => `${x},${z}`;
+      const ends = new Map<string, number[]>();
+      mine.forEach((P, i) => { for (const k of [key(P[0], P[1]), key(P[P.length - 2], P[P.length - 1])]) (ends.get(k) ?? ends.set(k, []).get(k)!).push(i); });
+      const used = new Uint8Array(mine.length);
+      const rev = (P: number[]) => { const o: number[] = []; for (let k = P.length - 2; k >= 0; k -= 2) o.push(P[k], P[k + 1]); return o; };
+      const grow = (P: number[]) => {
+        for (;;) {
+          const k = key(P[P.length - 2], P[P.length - 1]);
+          const nxt = (ends.get(k) ?? []).find((j) => !used[j]);
+          if (nxt === undefined) return P;
+          used[nxt] = 1;
+          const Q = mine[nxt], fwd = key(Q[0], Q[1]) === k ? Q : rev(Q);
+          for (let m = 2; m < fwd.length; m++) P.push(fwd[m]);
+        }
+      };
+      for (let i = 0; i < mine.length; i++) { if (used[i]) continue; used[i] = 1; joined.push([c, grow(rev(grow([...mine[i]])))]); }
+    }
+    const B = 500, blk = (P: number[]) => { const bz = Math.floor(P[1] / B), bx = Math.floor(P[0] / B); return bz * 1e4 + (bz % 2 ? 9999 - bx : bx); };
+    joined.sort((a, b) => blk(a[1]) - blk(b[1]) || a[1][0] - b[1][0]);
+    lines.length = 0; lines.push(...joined);
+    v(lines.length);
+    let px = 0, pz = 0, points = 0;
+    for (const [c, P] of lines) {
+      v(c); v(P.length / 2);
+      for (let k = 0; k < P.length; k += 2) { zz(P[k] - px); zz(P[k + 1] - pz); px = P[k]; pz = P[k + 1]; }
+      points += P.length / 2;
+    }
+    const file = `fsi-${name}.bin`;
+    fs.writeFileSync(`${dir}/${file}`, Buffer.from(bytes));
+    out[name] = { file: `${dir.replace(/^public\//, '')}/${file}`, bytes: bytes.length, lines: lines.length, points };
+  }
+  const places = PLACES.filter((p) => p.city === city).map((p) => { const [x, z] = R.xz(p.lat, p.lon); return { name: p.name.replace(/ \(.*\)$/, ''), slug: p.slug, x: Math.round((x - F.x0) / UNIT), z: Math.round((z - F.z0) / UNIT) }; });
+  console.log(`  fsi data: main ${out.main.lines} lines ${out.main.points} pts ${(out.main.bytes / 1024).toFixed(0)} KB, local ${out.local.lines} lines ${out.local.points} pts ${(out.local.bytes / 1024).toFixed(0)} KB`);
+  return { unit: UNIT, w: Math.ceil(F.W / F.k / UNIT), h: Math.ceil(F.H / F.k / UNIT), classes, main: out.main.file, local: out.local.file, mainBytes: out.main.bytes, localBytes: out.local.bytes, places };
+}
 /** Roads no plot is entered from: expressways, freeways, sea links, the coastal road, and anything on a deck. */
 const NO_FRONTAGE = /expressway|freeway|sea ?link|coastal road|trans ?harbou?r|atal setu|flyover|bridge|\bghat\b/i;
 const frontable = (s: SectionObj) => s.cls !== 'motorway' && !offGround(s) && !NO_FRONTAGE.test(s.name ?? '');
@@ -506,7 +581,7 @@ function main() {
       bbox: [...R.ll(F.x0, F.z0 + F.H / F.k), ...R.ll(F.x0 + F.W / F.k, F.z0)].map((v) => +v.toFixed(4)) as [number, number, number, number],
       svg: { map: files['roads.svg'], width: files['road-widths.svg'], ...(files['dp-coverage.svg'] ? { dp: files['dp-coverage.svg'] } : {}), w: F.W, h: F.H },
       og, ...(dp ? { dp } : {}),
-      fsi: { svg: files['fsi-map.svg'], og: og['fsi-map'], w: F.W, h: F.H, bands: fsiMap.bands, top: fsiRoads(roads, city), ...(city === 'pune' ? { dpKm: fsiMap.dpKm } : {}) } satisfies FsiMapData,
+      fsi: { svg: files['fsi-map.svg'], og: og['fsi-map'], w: F.W, h: F.H, bands: fsiMap.bands, view: fsiData(F, R, city, secs, dir), top: fsiRoads(roads, city), ...(city === 'pune' ? { dpKm: fsiMap.dpKm } : {}) } satisfies FsiMapData,
       download: { file: gjFile.replace(/^public\//, ''), features: gj.features, bytes: Buffer.byteLength(gj.text), gzBytes: gz },
     };
     const kb = (f: string) => (fs.statSync(f).size / 1024).toFixed(0);

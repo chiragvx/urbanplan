@@ -153,4 +153,14 @@ export interface FsiMapData {
   top: FsiRoad[];
   /** km of main road whose rules go by the DP width (Pune) */
   dpKm?: number;
+  /** the zoomable map's data: road classes, the two tiers of roads (paths under public/), the place pages */
+  view?: FsiView;
+}
+export interface FsiView {
+  /** metres per coordinate unit; the frame's size in units (x east, z south, from its top-left) */
+  unit: number; w: number; h: number;
+  /** the road classes the data's lines refer to, by index */
+  classes: { fsi: number; color: string; lo: number; hi: number | null; zone: FsiZone }[];
+  main: string; local: string; mainBytes: number; localBytes: number;
+  places: { name: string; slug: string; x: number; z: number }[];
 }
