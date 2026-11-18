@@ -57,9 +57,6 @@
 .fsi-zoom button { width: 38px; height: 38px; border: 0; border-bottom: 1px solid #e6e1d8; background: #fff; color: #1d1a17; font: 500 20px/1 var(--up-font-body); cursor: pointer; }
 .fsi-zoom button:last-child { border-bottom: 0; font-size: 17px; }
 .fsi-zoom button:hover { background: #f4f1ec; }
-.fsi-here { position: absolute; z-index: 2; width: 200px; display: grid; gap: 2px; padding: 10px 12px; border-radius: var(--up-radius); background: rgba(255, 255, 255, 0.96); color: #1d1a17; text-decoration: none; font-size: var(--up-text-xs); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18); pointer-events: auto; }
-.fsi-here b { font-size: var(--up-text-md); }
-.fsi-here .go { color: var(--up-blue); font-weight: 500; margin-top: 2px; }
 .fsi-map-facts { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(260px, 1fr); gap: var(--up-space-5); align-items: start; }
 .fsi-map-cta { display: grid; gap: var(--up-space-3); padding: var(--up-space-5); border-radius: var(--up-radius-lg); border: 1px solid var(--up-line); background: var(--up-surface); }
 .fsi-map-facts .rules th[scope="rowgroup"] { text-align: left; padding-top: var(--up-space-3); }

@@ -335,7 +335,7 @@ export function FsiMapPage({ city }: { city: City }) {
           </p>
           <figure class="fsi-figure">
             {F.view
-              ? <FsiMap view={F.view} base={href('')} svg={href(F.svg)} svgW={F.w} svgH={F.h} calc={href(`${city}/fsi-calculator/`)} alt={`Map of ${L}'s roads coloured by the FSI a plot on them gets, from pale (${f2(legend[0].fsi)}) to dark (${f2(legend[legend.length - 1].fsi)})`} />
+              ? <FsiMap view={F.view} base={href('')} svg={href(F.svg)} svgW={F.w} svgH={F.h} alt={`Map of ${L}'s roads coloured by the FSI a plot on them gets, from pale (${f2(legend[0].fsi)}) to dark (${f2(legend[legend.length - 1].fsi)})`} />
               : <img src={href(F.svg)} width={F.w} height={F.h} alt={`Map of ${L}'s main roads coloured by FSI`} />}
             <figcaption class="legend place-legend">
               {legend.map((b) => <span key={b.fsi}><i class="legend-swatch" style={`background:${b.color}`} /> FSI {f2(b.fsi)}</span>)}
@@ -364,7 +364,7 @@ export function FsiMapPage({ city }: { city: City }) {
 
           <h2>How to read it</h2>
           <ul>
-            <li><b>Two views</b>: <b>Roads</b> colours each road by the FSI a plot fronting it gets; <b>Heat map</b> colours each square by the highest FSI any plot in it can get, in squares from 400 m across the whole city down to 25 m zoomed in. Point at (or tap) the map to read the FSI there.</li>
+            <li><b>Two views</b>: <b>Roads</b> colours each road by the FSI a plot fronting it gets; <b>Heat map</b> spreads each road's FSI out over the blocks around it, strong and wide for the big roads, faint for lanes, blending where roads meet, in squares from 400 m across the whole city down to 25 m zoomed in. It shows where floor area is concentrated; a plot's own FSI still goes by the road it fronts.</li>
             <li><b>The colour is the road’s</b>: a plot takes the FSI of the road it’s entered from. A plot on a lane off a dark road gets the lane’s FSI, not the main road’s. Local streets appear as you zoom in; most are under 9 m, where the FSI is {f2(fsiFor(0, zones[0]))}{zones.length > 1 ? ` (suburbs) or ${f2(fsiFor(0, 'island'))} (island city)` : ''}.</li>
             <li><b>FSI before {extraName(zones[0])} FSI</b>: basic, premium and TDR together. {extraName(zones[0])[0].toUpperCase() + extraName(zones[0]).slice(1)} FSI adds {pct(rulesFor(12, zones[0]).ancillary)} on top for homes.</li>
             <li><b>Widths are {SITE_NAME}’s model</b>, from OpenStreetMap lane counts and road classes, not a survey. Many two-lane collectors have no width in OpenStreetMap and come out under 9 m ({nf(Math.round(low))} km here); the real road may well be wider. A divided road counts as both carriageways.</li>

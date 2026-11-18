@@ -1,14 +1,14 @@
 // The FSI map's zoomable view (/<city>/fsi-map/): the roads by the FSI their plots get, or a pixel heat map of the
-// highest FSI a plot can get in each square, drawn on a canvas from the baked road data (tools/maps/bake-maps.ts,
+// FSI spreading out from the roads into the blocks around them, drawn on a canvas from the baked road data (tools/maps/bake-maps.ts,
 // fsiData). The main roads load with the page; the local streets when the map is zoomed in. The heat map's squares
 // get finer as it zooms (400 m to 25 m), each level worked out once and kept. The prerendered page shows the static
 // SVG map until the data is in, and keeps it for search engines and pages without scripts.
 import { useEffect, useRef, useState } from 'preact/hooks';
-import type { FsiView } from './model';
+import { fsiColor, type FsiView } from './model';
 
 type Mode = 'roads' | 'heat';
 interface Lines { cls: Uint8Array; start: Uint32Array; xy: Int32Array }
-interface Grid { cell: number; gw: number; gh: number; g: Uint8Array; img: HTMLCanvasElement }
+interface Grid { cell: number; gw: number; gh: number; img: HTMLCanvasElement }
 
 /** The road stream: varints, per line its class, its point count, then zigzag deltas from the point before. */
 function decode(buf: ArrayBuffer): Lines {
@@ -41,55 +41,105 @@ const paths = (L: Lines, classes: number) => {
 };
 
 const LEVELS = [25, 50, 100, 200, 400];
-const BG = '#f2efe9';
 const rgb = (c: string) => [1, 3, 5].map((s) => parseInt(c.slice(s, s + 2), 16));
+const BG = '#f2efe9';
 
-/** The heat map at `cell` m: each square takes the highest FSI of any road through it (at 25 m, within a square of it). */
-function grid(V: FsiView, tiers: Lines[], cell: number): Grid {
-  const u = cell / V.unit, gw = Math.ceil(V.w / u), gh = Math.ceil(V.h / u);
-  const g = new Uint8Array(gw * gh), rank = V.classes.map((c) => c.fsi);
-  const r = cell <= 25 ? 1 : 0, step = u / 2;
-  const stamp = (gx: number, gz: number, k: number) => {
-    for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
-      const x = gx + dx, z = gz + dz;
-      if (x < 0 || z < 0 || x >= gw || z >= gh) continue;
-      const i = z * gw + x, cur = g[i];
-      if (!cur || rank[cur - 1] < rank[k]) g[i] = k + 1;
+/** Blur a gw × gh field in place with a box of radius r, along x then z (three of these make a Gaussian). */
+function box(a: Float32Array, t: Float32Array, gw: number, gh: number, r: number) {
+  if (r < 1) return;
+  const n = 2 * r + 1;
+  for (let z = 0; z < gh; z++) {
+    const o = z * gw;
+    let sum = 0;
+    for (let x = 0; x < Math.min(r, gw); x++) sum += a[o + x];
+    for (let x = 0; x < gw; x++) {
+      if (x + r < gw) sum += a[o + x + r];
+      t[o + x] = sum / n;
+      if (x - r >= 0) sum -= a[o + x - r];
     }
-  };
+  }
+  for (let x = 0; x < gw; x++) {
+    let sum = 0;
+    for (let z = 0; z < Math.min(r, gh); z++) sum += t[z * gw + x];
+    for (let z = 0; z < gh; z++) {
+      if (z + r < gh) sum += t[(z + r) * gw + x];
+      a[z * gw + x] = sum / n;
+      if (z - r >= 0) sum -= t[(z - r) * gw + x];
+    }
+  }
+}
+/** the three box radii whose passes add up to a Gaussian of this sigma (in cells) */
+const boxes = (sigma: number) => {
+  const wi = Math.floor(Math.sqrt(4 * sigma * sigma + 1)), wl = wi % 2 ? wi : wi - 1, wu = wl + 2;
+  const m = Math.round((12 * sigma * sigma - 3 * wl * wl - 12 * wl - 9) / (-4 * wl - 4));
+  return [0, 1, 2].map((k) => ((k < m ? wl : wu) - 1) / 2);
+};
+
+/**
+ * The heat map at `cell` m. Each square a road runs through takes the highest FSI there; then every square spreads
+ * its FSI out, in a tight core and a glow a few hundred metres wide, with a weight that grows with the FSI: a wide road's colour is strong
+ * and reaches further, a lane's is faint. Where several reach, the colours blend by weight (the FSI a plot there
+ * would most likely see), and the colour fades with the total weight, so the blocks between roads aren't empty.
+ */
+function grid(V: FsiView, tiers: Lines[], cell: number): Grid {
+  const u = cell / V.unit, gw = Math.ceil(V.w / u), gh = Math.ceil(V.h / u), n = gw * gh;
+  const g = new Uint8Array(n), rank = V.classes.map((c) => c.fsi), step = u / 2;
   for (const L of tiers) for (let l = 0; l < L.cls.length; l++) {
     const k = L.cls[l];
     for (let p = L.start[l]; p < L.start[l + 1] - 1; p++) {
       const x0 = L.xy[p * 2], z0 = L.xy[p * 2 + 1], x1 = L.xy[p * 2 + 2], z1 = L.xy[p * 2 + 3];
-      const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, z1 - z0) / step));
-      for (let t = 0; t <= n; t++) stamp(Math.floor((x0 + ((x1 - x0) * t) / n) / u), Math.floor((z0 + ((z1 - z0) * t) / n) / u), k);
+      const m = Math.max(1, Math.ceil(Math.hypot(x1 - x0, z1 - z0) / step));
+      for (let t = 0; t <= m; t++) {
+        const x = Math.floor((x0 + ((x1 - x0) * t) / m) / u), z = Math.floor((z0 + ((z1 - z0) * t) / m) / u);
+        if (x < 0 || z < 0 || x >= gw || z >= gh) continue;
+        const i = z * gw + x, cur = g[i];
+        if (!cur || rank[cur - 1] < rank[k]) g[i] = k + 1;
+      }
     }
   }
+  // weight by FSI: the lowest class 0.12, the highest 1
+  const lo = Math.min(...rank), hi = Math.max(...rank);
+  const wt = rank.map((f) => 0.12 + 0.88 * Math.pow(hi > lo ? (f - lo) / (hi - lo) : 1, 1.6));
+  // two spreads: a tight core that keeps each road readable up close, and a wide glow over the blocks around it;
+  // each scaled so a lone straight road of weight 1 comes out at about 1 (a Gaussian line peaks at 1 / (2.5 sigma))
+  const spread = (sigmaM: number) => {
+    const w = new Float32Array(n), wf = new Float32Array(n), tmp = new Float32Array(n), sigma = sigmaM / cell;
+    for (let i = 0; i < n; i++) if (g[i]) { const k = g[i] - 1; w[i] = wt[k]; wf[i] = wt[k] * rank[k]; }
+    if (sigma >= 0.5) for (const r of boxes(sigma)) { box(w, tmp, gw, gh, r); box(wf, tmp, gw, gh, r); }
+    const K = Math.max(1, 2.5 * sigma);
+    for (let i = 0; i < n; i++) { w[i] *= K; wf[i] *= K; }
+    return { w, wf };
+  };
+  const core = spread(Math.max(30, cell * 0.6)), glow = spread(Math.max(220, cell * 1.2));
+  const w = core.w, wf = core.wf;
+  for (let i = 0; i < n; i++) { w[i] = 0.7 * w[i] + glow.w[i]; wf[i] = 0.7 * wf[i] + glow.wf[i]; }
+  const K = 1.5;
+  const lut = Array.from({ length: 256 }, (_, j) => rgb(fsiColor(lo + ((hi - lo) * j) / 255)));
   const img = document.createElement('canvas');
   img.width = gw; img.height = gh;
-  const ctx = img.getContext('2d')!, data = ctx.createImageData(gw, gh), cols = V.classes.map((c) => rgb(c.color));
-  for (let i = 0; i < g.length; i++) {
-    if (!g[i]) continue;
-    const c = cols[g[i] - 1];
-    data.data[i * 4] = c[0]; data.data[i * 4 + 1] = c[1]; data.data[i * 4 + 2] = c[2]; data.data[i * 4 + 3] = 235;
+  const ctx = img.getContext('2d')!, data = ctx.createImageData(gw, gh), d = data.data;
+  for (let i = 0; i < n; i++) {
+    const s = w[i];
+    if (s < 1e-4) continue;
+    const a = 1 - Math.exp(-s * K);
+    if (a < 0.03) continue;
+    const f = wf[i] / s, c = lut[Math.max(0, Math.min(255, Math.round(((f - lo) / (hi - lo || 1)) * 255)))];
+    d[i * 4] = c[0]; d[i * 4 + 1] = c[1]; d[i * 4 + 2] = c[2]; d[i * 4 + 3] = Math.round(Math.min(0.94, a) * 255);
   }
   ctx.putImageData(data, 0, 0);
-  return { cell, gw, gh, g, img };
+  return { cell, gw, gh, img };
 }
 
 const niceM = (m: number) => [50, 100, 200, 500, 1000, 2000, 5000, 10000].reduce((p, q) => (Math.abs(Math.log(q / m)) < Math.abs(Math.log(p / m)) ? q : p));
-const f2 = (v: number) => (Math.round(v * 100) / 100).toString();
-const range = (c: FsiView['classes'][number]) => (c.hi === null ? `${c.lo} m and wider` : c.lo === 0 ? `under ${c.hi} m` : `${c.lo} to ${c.hi} m`);
 
-export function FsiMap({ view: V, base, svg, svgW, svgH, alt, calc }: { view: FsiView; base: string; svg: string; svgW: number; svgH: number; alt: string; calc: string }) {
+export function FsiMap({ view: V, base, svg, svgW, svgH, alt }: { view: FsiView; base: string; svg: string; svgW: number; svgH: number; alt: string }) {
   const wrap = useRef<HTMLDivElement>(null), cv = useRef<HTMLCanvasElement>(null);
-  const [mode, setMode] = useState<Mode>('roads');
+  const [mode, setMode] = useState<Mode>('heat');
   const [ready, setReady] = useState(false);
-  const [here, setHere] = useState<{ k: number; x: number; y: number } | null>(null);
   const [cellM, setCellM] = useState(0);
   // everything the drawing needs, outside Preact's state (it changes on every frame of a drag)
   const S = useRef({
-    mode: 'roads' as Mode, cx: V.w / 2, cz: V.h / 2, s: 0, fit: 0, W: 0, H: 0, dpr: 1, raf: 0,
+    mode: 'heat' as Mode, cx: V.w / 2, cz: V.h / 2, s: 0, fit: 0, W: 0, H: 0, dpr: 1, raf: 0,
     main: null as Lines | null, local: null as Lines | null, localAsked: false,
     mainPaths: null as Path2D[] | null, localPaths: null as Path2D[] | null, grids: new Map<string, Grid>(),
   }).current;
@@ -205,25 +255,25 @@ export function FsiMap({ view: V, base, svg, svgW, svgH, alt, calc }: { view: Fs
     const c = cv.current;
     if (!ready || !c) return;
     const ptr = new Map<number, { x: number; y: number }>();
-    let pinch = 0, moved = 0, mid: { x: number; y: number } | null = null;
+    let pinch = 0, mid: { x: number; y: number } | null = null;
     const local = (e: PointerEvent | WheelEvent | MouseEvent) => { const r = c.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
     const wheel = (e: WheelEvent) => { e.preventDefault(); const p = local(e); zoomAt(Math.exp(-e.deltaY * (e.deltaMode ? 0.04 : 0.0012)), p.x, p.y); };
-    const down = (e: PointerEvent) => { c.setPointerCapture(e.pointerId); ptr.set(e.pointerId, local(e)); moved = 0; if (ptr.size === 2) { const [a, b] = [...ptr.values()]; pinch = Math.hypot(a.x - b.x, a.y - b.y); mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; } };
+    const down = (e: PointerEvent) => { c.setPointerCapture(e.pointerId); ptr.set(e.pointerId, local(e)); if (ptr.size === 2) { const [a, b] = [...ptr.values()]; pinch = Math.hypot(a.x - b.x, a.y - b.y); mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; } };
     const move = (e: PointerEvent) => {
       const p = local(e);
-      if (!ptr.has(e.pointerId)) { probe(p.x, p.y); return; }
+      if (!ptr.has(e.pointerId)) return;
       const o = ptr.get(e.pointerId)!;
       ptr.set(e.pointerId, p);
-      if (ptr.size === 1) { S.cx -= (p.x - o.x) / S.s; S.cz -= (p.y - o.y) / S.s; moved += Math.abs(p.x - o.x) + Math.abs(p.y - o.y); redraw(); }
+      if (ptr.size === 1) { S.cx -= (p.x - o.x) / S.s; S.cz -= (p.y - o.y) / S.s; redraw(); }
       else if (ptr.size === 2) {
         // two fingers: move with their midpoint and zoom with their spread
         const [a, b] = [...ptr.values()], d = Math.hypot(a.x - b.x, a.y - b.y), m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
         if (mid) { S.cx -= (m.x - mid.x) / S.s; S.cz -= (m.y - mid.y) / S.s; }
         if (pinch) zoomAt(d / pinch, m.x, m.y); else redraw();
-        pinch = d; mid = m; moved = 99;
+        pinch = d; mid = m;
       }
     };
-    const up = (e: PointerEvent) => { ptr.delete(e.pointerId); pinch = 0; mid = null; if (moved < 6) { const p = local(e); probe(p.x, p.y); } };
+    const up = (e: PointerEvent) => { ptr.delete(e.pointerId); pinch = 0; mid = null; };
     const cancel = (e: PointerEvent) => { ptr.delete(e.pointerId); pinch = 0; mid = null; };
     const dbl = (e: MouseEvent) => { const p = local(e); zoomAt(2, p.x, p.y); };
     c.addEventListener('wheel', wheel, { passive: false });
@@ -236,19 +286,6 @@ export function FsiMap({ view: V, base, svg, svgW, svgH, alt, calc }: { view: Fs
     };
   }, [ready]);
 
-  /** What's under the pointer: the highest FSI within about 50 m (the 50 m grid, worked out once). */
-  const probe = (x: number, y: number) => {
-    if (!S.main) return;
-    const key = `50|${S.local ? 2 : 1}`;
-    let G = S.grids.get(key);
-    if (!G) { G = grid(V, S.local ? [S.main, S.local] : [S.main], 50); S.grids.set(key, G); }
-    const u = 50 / V.unit, wx = S.cx + (x - S.W / 2) / S.s, wz = S.cz + (y - S.H / 2) / S.s;
-    const gx = Math.floor(wx / u), gz = Math.floor(wz / u);
-    const k = gx >= 0 && gz >= 0 && gx < G.gw && gz < G.gh ? G.g[gz * G.gw + gx] : 0;
-    setHere(k ? { k: k - 1, x, y } : null);
-  };
-
-  const c = here ? V.classes[here.k] : null;
   return (
     <div class="fsi-map">
       <div class="fsi-map-bar">
@@ -256,7 +293,7 @@ export function FsiMap({ view: V, base, svg, svgW, svgH, alt, calc }: { view: Fs
           <button type="button" aria-pressed={mode === 'roads'} onClick={() => setMode('roads')}>Roads</button>
           <button type="button" aria-pressed={mode === 'heat'} onClick={() => setMode('heat')}>Heat map</button>
         </div>
-        <span class="muted small">{mode === 'heat' ? `Highest FSI in each ${cellM || 400} m square` : 'Each road by the FSI its plots get'}</span>
+        <span class="muted small">{mode === 'heat' ? `FSI spreading out from each road, blended where roads meet (${cellM || 400} m squares)` : 'Each road by the FSI its plots get'}</span>
       </div>
       <div class="fsi-map-box" ref={wrap} style={`aspect-ratio:${V.w} / ${V.h}`}>
         <img src={svg} width={svgW} height={svgH} alt={alt} fetchpriority="high" hidden={ready} />
@@ -267,13 +304,6 @@ export function FsiMap({ view: V, base, svg, svgW, svgH, alt, calc }: { view: Fs
             <button type="button" aria-label="Zoom out" onClick={() => zoomAt(1 / 1.8)}>−</button>
             <button type="button" aria-label="Show the whole city" onClick={reset}>⤢</button>
           </div>
-        )}
-        {ready && c && here && (
-          <a class="fsi-here" href={`${calc}?road=${c.lo || 6}${c.zone === 'island' ? '&zone=island' : ''}`} style={`left:${Math.min(here.x + 12, (S.W || 300) - 210)}px;top:${Math.max(8, here.y - 64)}px`}>
-            <b>FSI {f2(c.fsi)}</b>
-            <span>roads {range(c)}{c.zone === 'island' ? ', island city' : c.zone === 'suburbs' ? ', suburbs' : ''}</span>
-            <span class="go">Calculate a plot here →</span>
-          </a>
         )}
       </div>
     </div>
