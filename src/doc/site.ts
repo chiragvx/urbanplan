@@ -43,6 +43,8 @@ export interface SiteBuilding {
   use?: PlotUse;
   /** laid by "Fill for me" (replaced when it fills again); placed by hand when unset */
   auto?: boolean;
+  /** its own flat mix (1 / 2 / 3 BHK shares; unset: the site's) */
+  mix?: [number, number, number];
 }
 
 /** Things on the site besides the buildings: a parking building, a surface lot and a garden are areas (a ring, drawn
@@ -140,6 +142,9 @@ export interface PlotSite {
   fill?: boolean;
   /** a justification typed against each departure from the rules (by its key), for the report */
   notes?: Record<string, string>;
+  /** ground nothing is built on (a no-build zone, an obstruction and its clearance): rings x,z,… The optimiser keeps
+   *  clear of them; a building on one is flagged (as `clash: 'zone'`), never refused */
+  keepOut?: number[][];
 }
 
 export interface PlotOption { name: string; site: PlotSite }
@@ -210,7 +215,7 @@ export interface BuildingReport {
   /** flats per floor by type */
   perFloor: [number, number, number, number];
   /** sticks out of the envelope at its height (margins), or into another building */
-  clash: 'margins' | 'overlap' | null;
+  clash: 'margins' | 'overlap' | 'zone' | null;
   /** the most floors the envelope and the height limit allow it */
   maxFloors: number;
   /** tall enough to need a fire tender's way round: its band (quads), and whether that's clear and on the plot */
@@ -417,8 +422,10 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
     const plate = quads.reduce((s, q) => s + polyArea(q), 0);
     let most = 0;
     while (most < maxN && fits(quads, (most + 1 + under) * fh)) most++;
-    return { b, quads, plate, most, floors: 0, overlap: false };
+    return { b, quads, plate, most, floors: 0, overlap: false, zone: false };
   });
+  // (on a no-build zone or an obstruction's clearance)
+  for (const x of B) if (site.keepOut?.length && x.quads.some((a) => site.keepOut!.some((k) => k.length >= 6 && mpArea(inter(fromFlat(a), fromFlat(k))) > 0.5))) x.zone = true;
   for (let i = 0; i < B.length; i++) for (let j = i + 1; j < B.length; j++) {
     if (B[i].quads.some((a) => B[j].quads.some((c) => convexOverlap(a, c)))) B[i].overlap = B[j].overlap = true;
   }
@@ -445,8 +452,9 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
   const buildings: BuildingReport[] = B.map((x) => {
     const height = (x.floors + under) * fh;
     const bu = useOf(x.b);
-    const lay = layFloor(x.b, site, bu, height, placed);
-    const clash = x.overlap ? 'overlap' : !fits(x.quads, height) ? 'margins' : null;
+    // (a building with its own mix lays its flats by it, counted on its own)
+    const lay = x.b.mix ? layFloor(x.b, { ...site, mix: x.b.mix }, bu, height, [0, 0, 0]) : layFloor(x.b, site, bu, height, placed);
+    const clash = x.overlap ? 'overlap' : x.zone ? 'zone' : !fits(x.quads, height) ? 'margins' : null;
     const fire = height > FIRE_H ? fireBand(x.b) : [];
     const fireOk = fire.every((q) => onSite(r, q) && B.every((y) => y === x || !y.quads.some((c) => convexOverlap(q, c))));
     return { b: x.b, quads: x.quads, plate: x.plate, ...lay, floors: x.floors, height, clash, maxFloors: x.most, fire, fireOk, use: bu, allowedFloors: maxN, overHeight: height > R.maxH + 1e-6 };
@@ -614,6 +622,8 @@ export function departuresOf(r: PlotReport, d: SiteReport): Departure[] {
       out.push({ key: `margins:${b.b.id}`, rule: `Margins${name(i)}`, value: 'past the margins', allowed: `front ${fm(R.front)} m · sides ${fm(side)} m at ${fm(b.height)} m`, clause: r.code === 'udcpr' ? 'UDCPR 2020 Table 6-D' : 'DCPR 2034 Table 18, Reg. 41(2)',
         text: `Past the margins: front ${fm(R.front)} m, sides ${fm(side)} m at its height`, ids: [b.b.id] });
     }
+    if (b.clash === 'zone') out.push({ key: `zone:${b.b.id}`, rule: `No-build zone${name(i)}`, value: 'built on it', allowed: 'kept clear', clause: 'The site’s own constraints (as drawn)',
+      text: 'On a no-build zone or an obstruction’s clearance', ids: [b.b.id] });
     if (!b.fireOk) out.push({ key: `fire:${b.b.id}`, rule: `Fire tender access${name(i)}`, value: 'way round blocked', allowed: `${FIRE_W} m clear round it above ${FIRE_H} m`, clause: 'NBC 2016 Part 4',
       text: `No clear ${FIRE_W} m way round a building over ${FIRE_H} m`, ids: [b.b.id] });
   });

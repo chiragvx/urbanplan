@@ -1,0 +1,48 @@
+/* The building-systems panel (systemsPanel.tsx). Black and white like the rest of Pro: the site's tokens only, an
+   override reads by its "Auto" button (an icon and a word), a failure by inversion and an icon, never colour alone. */
+.sys { display: grid; }
+.sys-top { display: grid; gap: 8px; padding: 16px 0 12px; border-bottom: 1px solid var(--up-line); }
+.sys-cost { display: grid; gap: 1px; padding: 10px 12px; border-radius: 10px; background: var(--up-surface-2); min-width: 0; }
+.sys-cost span { font-size: 11.5px; color: var(--up-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sys-cost b { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.sys-cost small { font-size: 11.5px; color: var(--up-muted); font-variant-numeric: tabular-nums; }
+.sys-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; font-size: 12.5px; color: var(--up-ink-2); }
+.sys-sum b { font-weight: 600; margin-right: 6px; }
+.sys-sum.bad > .ico:first-child { background: var(--up-ink); color: var(--up-paper); border-radius: 50%; padding: 2px; box-sizing: content-box; }
+
+/* a section's header: its cost, and how many fail (inverted, with a cross) */
+.sys-aside { display: inline-flex; align-items: center; gap: 8px; }
+.sys-flag { display: inline-flex; align-items: center; gap: 3px; height: 20px; padding: 0 7px 0 5px; border-radius: 999px; background: var(--up-ink); color: var(--up-paper); font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sys-flag .ico { color: inherit; transform: none !important; }
+
+/* a control with its "Auto" mark at the top right of its label */
+.sys-c { position: relative; min-width: 0; }
+.sys-c > .sys-tag { position: absolute; top: -1px; right: 0; z-index: 1; }
+.sys-c > .f .f-l, .sys-c > .f > .f-l { padding-right: 52px; }
+.sys-row { display: flex; align-items: center; gap: 8px; min-height: 34px; }
+.sys-row > .tog { flex: 1; min-width: 0; }
+.sys-row > .sys-tag { position: static; }
+.sys-tag { display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 6px; border-radius: 6px; font: 500 10.5px/1 var(--up-font-body); letter-spacing: .02em; color: var(--up-muted); border: 1px solid var(--up-line); background: var(--up-surface); white-space: nowrap; }
+.sys-tag.reset { color: var(--up-ink); border-color: var(--up-ink); cursor: pointer; }
+.sys-tag.reset:hover { background: var(--up-ink); color: var(--up-paper); }
+.sys-tag.reset:focus-visible { outline: 2px solid var(--up-ink); outline-offset: 2px; }
+/* an overridden control: a heavier border on its field, so the change shows without the colour */
+.sys-c:has(> .sys-tag.reset) .f-num, .sys-c:has(> .sys-tag.reset) .seg, .sys-c:has(> .sys-tag.reset) .sel { box-shadow: inset 0 0 0 1px var(--up-ink); border-color: var(--up-ink); }
+
+/* a failing / to-check rule, inline in its section */
+.sys-chk { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: start; }
+.sys-chk > .ico { margin-top: 1px; }
+.note.bad .sys-chk > .ico { background: var(--up-ink); color: var(--up-paper); border-radius: 50%; padding: 2px; box-sizing: content-box; margin-top: 0; }
+.sys-chk b { font-weight: 600; }
+.sys-chk small { display: block; color: var(--up-muted); font-size: 11.5px; font-weight: 400; margin-top: 2px; }
+
+.sys .lines dd { white-space: normal; max-width: 60%; }
+.sys-site { color: var(--up-muted); font-weight: 400; }
+
+@media (max-width: 420px) {
+  .sys .row.r3 { grid-template-columns: 1fr 1fr; }
+  .sys .seg button { padding: 6px 4px; font-size: 12px; }
+  .sys .lines div { flex-wrap: wrap; }
+  .sys .lines dd { max-width: none; }
+}
+@media (pointer: coarse) { .sys-tag.reset { height: 28px; padding: 0 9px; } .sys-c > .sys-tag.reset { top: -6px; } }

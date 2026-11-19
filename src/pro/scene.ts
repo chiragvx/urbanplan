@@ -16,6 +16,8 @@ import type { FloorPlan, Opening } from './openings';
 import { SHOP_W, type Shops } from './mixed';
 import { roadFrame } from '../doc/site';
 import { Wire } from './wire';
+import { triangles, type MP } from '../doc/ground';
+import { featureOf, keptOf, shapeOf, type Levels, type SiteFeature } from './siteObjects';
 
 /** a flat's rooms for the X-ray floor (./rooms.ts), by building, by flat of the typical floor */
 export interface RoomsLike { rooms: { kind: string; ring: number[] }[]; walls: number[][] }
@@ -25,12 +27,18 @@ export interface ViewData {
   /** a building's own design system (the project's when unset) */
   dsOf?: (b: number) => DesignSystem;
   rooms?: RoomsLike[][]; roomColor?: Record<string, string>;
+  /** obstructions and no-build zones, the plot's levels, where north is, the building picked */
+  features?: SiteFeature[]; levels?: Levels; north?: number; sel?: string | null;
 }
 export type CameraView = 'fit' | 'street' | 'top';
+/** what's being drawn or edited, over everything: lines (x,y,z pairs) and handles (x,y,z each), in ink */
+export interface Overlay { lines?: number[]; dashed?: number[]; points?: number[]; hot?: number[] }
 export type RenderMode = 'wire' | 'shaded';
 export interface Picked { tag: string; label: string; size: string; floor: number; x: number; y: number }
 
 const box = new THREE.BoxGeometry(1, 1, 1);
+/** a tree's crown and trunk, low-poly, unit-sized (scaled per tree) */
+const crownGeo = new THREE.IcosahedronGeometry(0.5, 0), trunkGeo = new THREE.CylinderGeometry(0.35, 0.5, 1, 6);
 /** an X-ray floor's walls are cut this high, as a plan is */
 const CUT = 1.5;
 const dummy = new THREE.Object3D();
@@ -79,9 +87,9 @@ class Boxes {
     dummy.updateMatrix();
     this.m.push(dummy.matrix.clone()); this.meta.push(meta);
   }
-  mesh(mat: THREE.Material, shadows = true): THREE.InstancedMesh | null {
+  mesh(mat: THREE.Material, shadows = true, geo: THREE.BufferGeometry = box): THREE.InstancedMesh | null {
     if (!this.m.length) return null;
-    const im = new THREE.InstancedMesh(box, mat, this.m.length);
+    const im = new THREE.InstancedMesh(geo, mat, this.m.length);
     this.m.forEach((m, i) => im.setMatrixAt(i, m));
     im.castShadow = shadows; im.receiveShadow = true;
     im.userData.meta = this.meta;
@@ -93,7 +101,23 @@ export class ProView {
   renderer: THREE.WebGLRenderer;
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(40, 1, 0.5, 5000);
+  /** the plan: straight down, no perspective */
+  ortho = new THREE.OrthographicCamera(-50, 50, 50, -50, 0.5, 5000);
+  plan = false;
+  /** told when the view goes into or out of the plan (a camera key can leave it) */
+  onPlan?: (on: boolean) => void;
   controls: OrbitControls;
+  /** the camera in use */
+  get cam(): THREE.Camera { return this.plan ? this.ortho : this.camera; }
+  /** where north points on screen (degrees clockwise from up): for the compass */
+  onNorth?: (deg: number) => void;
+  north = 0;
+  private lastNorth = NaN;
+  private over = new THREE.Group();
+  private overLine = new THREE.LineBasicMaterial({ color: '#000', depthTest: false, transparent: true });
+  private overDash = new THREE.LineDashedMaterial({ color: '#000', dashSize: 0.8, gapSize: 0.6, depthTest: false, transparent: true });
+  private overPts = new THREE.PointsMaterial({ color: '#000', size: 9, sizeAttenuation: false, depthTest: false, transparent: true });
+  private overHot = new THREE.PointsMaterial({ color: '#000', size: 14, sizeAttenuation: false, depthTest: false, transparent: true });
   root = new THREE.Group();
   sun = new THREE.DirectionalLight(0xffffff, 2.4);
   ray = new THREE.Raycaster();
@@ -127,7 +151,8 @@ export class ProView {
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), new THREE.MeshStandardMaterial({ color: '#e6e5e1', roughness: 1 }));
     ground.rotation.x = -Math.PI / 2; ground.position.y = -0.02; ground.receiveShadow = true;
     this.ground = ground;
-    this.scene.add(ground, this.wire.group);
+    this.over.renderOrder = 10;
+    this.scene.add(ground, this.wire.group, this.over);
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = true;
     this.controls.maxPolarAngle = Math.PI / 2 - 0.03;
@@ -140,6 +165,75 @@ export class ProView {
     this.renderer.setSize(r.width, r.height, false);
     this.camera.aspect = r.width / Math.max(1, r.height);
     this.camera.updateProjectionMatrix();
+    this.fitOrtho();
+    this.frame();
+  }
+  /** the plan's frustum for the canvas's shape (its zoom is the controls') */
+  private orthoH = 60;
+  private fitOrtho() {
+    const a = this.camera.aspect || 1, H = this.orthoH;
+    this.ortho.left = -H * a; this.ortho.right = H * a; this.ortho.top = H; this.ortho.bottom = -H;
+    this.ortho.updateProjectionMatrix();
+  }
+  /** 3D or the plan from straight above */
+  setPlan(on: boolean) {
+    if (on === this.plan) return;
+    this.plan = on;
+    this.onPlan?.(on);
+    const c = this.controls;
+    c.object = on ? this.ortho : this.camera;
+    c.enableRotate = !on;
+    c.screenSpacePanning = true;
+    if (on) {
+      const { cx, cz, s } = this.box;
+      this.orthoH = s * 0.75; this.ortho.zoom = 1; this.fitOrtho();
+      c.target.set(cx, 0, cz); this.ortho.position.set(cx, 800, cz); this.ortho.up.set(0, 0, -1); this.ortho.lookAt(cx, 0, cz);
+    } else this.look('fit');
+    c.update(); this.frame();
+  }
+  /** north's direction on the screen, worked out from where the camera looks */
+  private compass() {
+    if (!this.onNorth) return;
+    const t = this.controls.target, n = (this.north * Math.PI) / 180;
+    const a = t.clone().project(this.cam), b = new THREE.Vector3(t.x + Math.sin(n) * 10, t.y, t.z - Math.cos(n) * 10).project(this.cam);
+    const deg = Math.round((Math.atan2(b.x - a.x, (b.y - a.y) / (this.camera.aspect || 1)) * 180) / Math.PI);
+    if (deg !== this.lastNorth) { this.lastNorth = deg; this.onNorth(deg); }
+  }
+
+  // ---------- pointing ----------
+  private ndc(px: number, py: number) { const r = this.canvas.getBoundingClientRect(); return new THREE.Vector2(((px - r.left) / r.width) * 2 - 1, -((py - r.top) / r.height) * 2 + 1); }
+  /** the ground under the pointer (x, z) */
+  groundAt(px: number, py: number, y = 0): [number, number] | null {
+    this.ray.setFromCamera(this.ndc(px, py), this.cam);
+    const o = this.ray.ray.origin, d = this.ray.ray.direction;
+    if (Math.abs(d.y) < 1e-6) return null;
+    const t = (y - o.y) / d.y;
+    return t > 0 ? [o.x + d.x * t, o.z + d.z * t] : null;
+  }
+  /** the building under the pointer (its id) */
+  buildingAt(px: number, py: number): string | null { return this.buildingHit(px, py)?.id ?? null; }
+  /** the building under the pointer, and how high up it was touched */
+  buildingHit(px: number, py: number): { id: string; y: number } | null {
+    this.ray.setFromCamera(this.ndc(px, py), this.cam);
+    const hit = this.ray.intersectObjects(this.wire.masses.children, false)[0];
+    return hit ? { id: hit.object.userData.id as string, y: hit.point.y } : null;
+  }
+  /** a point on the ground on screen (px within the canvas) */
+  toScreen(x: number, y: number, z: number): [number, number] {
+    const v = new THREE.Vector3(x, y, z).project(this.cam), r = this.canvas.getBoundingClientRect();
+    return [((v.x + 1) / 2) * r.width, ((1 - v.y) / 2) * r.height];
+  }
+  /** what's being drawn or edited, drawn over everything */
+  overlay(o: Overlay | null) {
+    this.over.traverse((x) => (x as THREE.Mesh).geometry?.dispose());
+    this.over.clear();
+    if (o) {
+      const g = (a: number[]) => { const b = new THREE.BufferGeometry(); b.setAttribute('position', new THREE.Float32BufferAttribute(a, 3)); return b; };
+      if (o.lines?.length) { const l = new THREE.LineSegments(g(o.lines), this.overLine); l.renderOrder = 10; l.frustumCulled = false; this.over.add(l); }
+      if (o.dashed?.length) { const l = new THREE.LineSegments(g(o.dashed), this.overDash); l.computeLineDistances(); l.renderOrder = 10; l.frustumCulled = false; this.over.add(l); }
+      if (o.points?.length) { const q = new THREE.Points(g(o.points), this.overPts); q.renderOrder = 11; q.frustumCulled = false; this.over.add(q); }
+      if (o.hot?.length) { const q = new THREE.Points(g(o.hot), this.overHot); q.renderOrder = 12; q.frustumCulled = false; this.over.add(q); }
+    }
     this.frame();
   }
   frame() {
@@ -148,7 +242,8 @@ export class ProView {
       if (this.controls.update()) this.frame();
       // (the wireframe keeps drawing while edges fade in or out)
       if (this.wired && this.wire.write()) this.frame();
-      this.renderer.render(this.scene, this.camera);
+      this.compass();
+      this.renderer.render(this.scene, this.cam);
     });
   }
   dispose() { cancelAnimationFrame(this.raf); this.clear(); this.wire.dispose(); this.controls.dispose(); this.renderer.dispose(); }
@@ -169,6 +264,7 @@ export class ProView {
   /** move the camera: the whole site, down at a pedestrian's height from the front road, or straight down */
   look(kind: CameraView) {
     const { cx, cz, s, h } = this.box, c = this.controls;
+    if (this.plan) { if (kind !== 'top' && kind !== 'fit') this.setPlan(false); else { this.orthoH = s * 0.75; this.ortho.zoom = 1; this.fitOrtho(); c.target.set(cx, 0, cz); this.ortho.position.set(cx, 800, cz); c.update(); this.frame(); return; } }
     // (far enough back for the plot or the building, whichever is bigger, with room under the result bar)
     if (kind === 'fit') { const R = Math.max(s, h * 0.95); c.target.set(cx, h * 0.38, cz); this.camera.position.set(cx - R * 1.2, h * 0.38 + R * 1.05, cz - R * 1.75); }
     if (kind === 'street') { c.target.set(cx, Math.min(h * 0.45, 40), cz); this.camera.position.set(cx - s * 0.35, 1.7, cz - s * 0.9 - 12); }
@@ -191,20 +287,21 @@ export class ProView {
     (this.ground.material as THREE.MeshStandardMaterial).color.set(dark ? '#3a3a3c' : '#e6e5e1');
     const css = getComputedStyle(document.documentElement), paper = css.getPropertyValue('--up-paper').trim() || (dark ? '#09090b' : '#fafaf9'), ink = css.getPropertyValue('--up-ink').trim() || (dark ? '#fafafa' : '#0c0c0d');
     this.paper.set(paper); this.wire.colours(paper, ink);
+    for (const m of [this.overLine, this.overDash, this.overPts, this.overHot]) m.color.set(ink);
     this.apply();
   }
   /** the view as a PNG (for the drawings and a share) */
   snapshot(): string {
     // (always the shaded view: it goes into reports and drawings)
     const m = this.mode; if (m !== 'shaded') { this.mode = 'shaded'; this.apply(); }
-    this.renderer.render(this.scene, this.camera);
+    this.renderer.render(this.scene, this.cam);
     const url = this.canvas.toDataURL('image/png');
     if (m !== 'shaded') { this.mode = m; this.apply(); }
     return url;
   }
 
   clear() {
-    this.root.traverse((o) => { const m = o as THREE.Mesh; if (m.geometry && m.geometry !== box) m.geometry.dispose(); });
+    this.root.traverse((o) => { const m = o as THREE.Mesh; if (m.geometry && m.geometry !== box && m.geometry !== crownGeo && m.geometry !== trunkGeo) m.geometry.dispose(); });
     this.root.clear();
     this.pickables = [];
   }
@@ -213,7 +310,7 @@ export class ProView {
   pick(px: number, py: number): Picked | null {
     if (this.wired) return null;
     const r = this.canvas.getBoundingClientRect();
-    this.ray.setFromCamera(new THREE.Vector2(((px - r.left) / r.width) * 2 - 1, -((py - r.top) / r.height) * 2 + 1), this.camera);
+    this.ray.setFromCamera(new THREE.Vector2(((px - r.left) / r.width) * 2 - 1, -((py - r.top) / r.height) * 2 + 1), this.cam);
     const hit = this.ray.intersectObjects(this.pickables, false)[0];
     if (!hit || hit.instanceId === undefined) return null;
     const m = (hit.object as THREE.InstancedMesh).userData.meta[hit.instanceId] as { o: Opening; floor: number; label: string } | undefined;
@@ -256,6 +353,25 @@ export class ProView {
       const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineDashedMaterial({ color: '#3f3f46', dashSize: 1.2, gapSize: 0.8 }));
       line.computeLineDistances(); add(line);
     }
+
+    // the site's own ground: internal roads, lots, paths, lawns and beds, as the ground map lays them; the trees
+    const G = d.ground.map, flatMP = (m: MP, y: number, mt: THREE.Material) => { for (const t of triangles(m)) if (t.length >= 6) mesh(flat(t, y), mt, false); };
+    flatMP(G.road, 0.05, M.road); flatMP(G.lot, 0.05, mat('#8b8e95', { roughness: 0.95 })); flatMP(G.path, 0.06, M.paving);
+    flatMP(G.lawn, 0.06, mat('#9fb889')); flatMP(G.bed, 0.07, mat('#6f8f5a'));
+    const trunks = new Boxes(), crowns = new Boxes();
+    const treeAt = (x: number, z: number, cr: number) => { const h = Math.max(3, cr * 1.6); trunks.add(x, h * 0.25, z, 1, 0, 0.3, h * 0.5, 0.3); crowns.add(x, h * 0.7, z, 1, 0, cr * 1.6, h * 0.6, cr * 1.6); };
+    for (const t of G.plants) if (t.kind <= 1) treeAt(t.x, t.z, Math.max(1.5, t.r));
+    for (const f of v.features ?? []) {
+      const F = featureOf(f.kind);
+      if (f.kind === 'tree' && f.pts.length >= 2) { treeAt(f.pts[0], f.pts[1], f.r ?? F.r); continue; }
+      if (f.kind === 'pole' && f.pts.length >= 2) { trunks.add(f.pts[0], 4.5, f.pts[1], 1, 0, 0.35, 9, 0.35); continue; }
+      const sh = shapeOf(f);
+      const tone = f.kind === 'water' ? mat('#7fa6c4', { roughness: 0.2 }) : f.kind === 'structure' ? mat('#b9b2a6') : f.kind === 'nobuild' ? mat('#e5484d', { transparent: true, opacity: 0.16 }) : mat('#9a9a9a');
+      if (f.kind === 'structure') { for (const t of triangles(sh)) if (t.length >= 6) mesh(prism(t, 0, 4), tone); }
+      else flatMP(sh, 0.08, tone);
+      if (f.kind !== 'nobuild') flatMP(keptOf(f), 0.075, mat('#e5484d', { transparent: true, opacity: 0.1 }));
+    }
+    add(trunks.mesh(mat('#6b5440'), true, trunkGeo)); add(crowns.mesh(mat('#5f7f4c', { roughness: 0.9, flatShading: true }), true, crownGeo));
 
     let bands = new Boxes(), fins = new Boxes(), frames = new Boxes(), panes = new Boxes(), slabs = new Boxes(), rails = new Boxes(), cols = new Boxes(), parts = new Boxes(), doors = new Boxes(), parapets = new Boxes(), signs = new Boxes();
     const flush = () => {
@@ -413,7 +529,8 @@ export class ProView {
       sc.left = -R; sc.right = R; sc.top = R; sc.bottom = -R; sc.near = 1; sc.far = 800; sc.updateProjectionMatrix();
       this.sun.position.set(cx - 120, 220, cz - 90);
     }
-    this.wire.set({ r, d, roads: v.roads, shops: v.shops });
+    this.wire.set({ r, d, roads: v.roads, shops: v.shops, features: v.features, levels: v.levels, north: v.north, sel: v.sel });
+    this.north = v.north ?? 0;
     this.xrayOn = v.xray !== null;
     this.apply();
   }

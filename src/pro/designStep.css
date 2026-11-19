@@ -1,0 +1,62 @@
+/* The Design system step (designStep.tsx). Black and white like the rest of Pro (../theme/tokens.css): selection is
+   an ink ring plus a check, never colour alone. Only the material swatches and the facade preview carry colour, as
+   data. Metrics follow pro.css: 34 px controls, 9 px radius, 13 px text, 4 / 8 / 12 / 16 / 24 spacing. */
+
+/* a check badge on a chosen card or swatch */
+.dss-ck { position: absolute; top: -5px; right: -5px; display: grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; background: var(--up-ink); color: var(--up-paper); box-shadow: 0 0 0 2px var(--up-surface); pointer-events: none; }
+
+/* ---- start from */
+.dss-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 8px; }
+.dss-card { position: relative; display: grid; gap: 6px; align-content: start; min-height: 64px; padding: 10px; text-align: left; border: 1px solid var(--up-line-strong); border-radius: 9px; background: var(--up-surface); color: var(--up-ink); }
+.dss-card:hover { border-color: var(--up-muted); }
+.dss-card[aria-checked="true"] { border-color: var(--up-ink); box-shadow: inset 0 0 0 1px var(--up-ink); }
+.dss-card b { font-size: 12.5px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.dss-card small { position: absolute; right: 8px; bottom: 8px; font: 600 10px/1 var(--up-font-mono); text-transform: uppercase; letter-spacing: .06em; padding: 3px 5px; border-radius: 4px; box-shadow: inset 0 0 0 1px var(--up-line-strong); color: var(--up-muted); }
+.dss-card:has(small) b { padding-right: 40px; }
+.dss-strip { display: flex; gap: 3px; }
+.dss-strip > * { border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .1); }
+.dss-strip i { display: block; width: 18px; height: 18px; }
+.dss-strip .dss-chip { outline: 1px solid rgba(0, 0, 0, .1); outline-offset: -1px; }
+.dss-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; font-size: 12.5px; }
+.dss-acts > span { color: var(--up-ink-2); }
+.dss-changed { width: 100%; color: var(--up-muted) !important; }
+.dss-name { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: end; }
+
+/* ---- the preview: a card in a neutral wash (the materials keep their real colours in both themes) */
+.dss-prev { margin: 0; padding: 16px 0; border-bottom: 1px solid var(--up-line); }
+.dss-elev { display: block; width: 100%; height: auto; max-height: 280px; padding: 12px 12px 4px; border-radius: 9px; background: var(--up-surface-2); color: var(--up-ink); }
+.dss-prev figcaption { margin-top: 8px; font-size: 12px; color: var(--up-ink-2); font-weight: 500; }
+.dss-prev figcaption span { color: var(--up-muted); font-weight: 400; }
+
+/* ---- a material: a row that opens a grid of swatches */
+.dss-mats { display: grid; border: 1px solid var(--up-line-strong); border-radius: 9px; overflow: hidden; }
+.dss-mat + .dss-mat { border-top: 1px solid var(--up-line); }
+.dss-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 8px 10px; border: 0; background: var(--up-surface); color: var(--up-ink); text-align: left; }
+.dss-row:hover { background: var(--up-surface-2); }
+.dss-row:focus-visible { outline: 2px solid var(--up-ink); outline-offset: -2px; }
+.dss-row-t { display: grid; min-width: 0; }
+.dss-row-t small { font-size: 11.5px; color: var(--up-muted); }
+.dss-row-t b { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dss-rate { font: 500 11.5px var(--up-font-mono); color: var(--up-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dss-row > .ico { color: var(--up-muted); transition: transform .15s; }
+.dss-mat.open .dss-row > .ico { transform: rotate(90deg); color: var(--up-ink); }
+.dss-mat.open .dss-row { background: var(--up-surface-2); }
+.dss-chip { display: block; flex: none; border-radius: 5px; box-shadow: 0 0 0 1px var(--up-line-strong); }
+
+.dss-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(36px, 1fr)); gap: 6px; padding: 10px; background: var(--up-surface); }
+.dss-sw { position: relative; display: grid; place-items: center; aspect-ratio: 1; min-width: 36px; padding: 0; border: 0; border-radius: 7px; background: none; }
+.dss-sw .dss-chip { width: 100%; height: 100%; max-width: 40px; max-height: 40px; border-radius: 6px; }
+.dss-sw:hover .dss-chip { box-shadow: 0 0 0 1px var(--up-muted); }
+.dss-sw[aria-checked="true"] .dss-chip { box-shadow: 0 0 0 2px var(--up-surface), 0 0 0 4px var(--up-ink); }
+.dss-sw .dss-ck { top: -3px; right: -3px; }
+.dss-sw:focus-visible { outline: none; }
+.dss-sw:focus-visible .dss-chip { box-shadow: 0 0 0 2px var(--up-surface), 0 0 0 4px var(--up-ink), 0 0 0 6px var(--up-surface), 0 0 0 7px var(--up-muted); }
+
+.dss-cap { caption-side: top; text-align: left; padding: 0 0 6px; font-size: 12px; color: var(--up-muted); }
+
+@media (pointer: coarse) { .dss-grid { grid-template-columns: repeat(auto-fill, minmax(42px, 1fr)); gap: 8px; } }
+@media (max-width: 420px) {
+  .dss-cards { grid-template-columns: 1fr 1fr; }
+  .dss-name { grid-template-columns: 1fr auto; }
+  .dss-name .f { grid-column: 1 / -1; }
+}

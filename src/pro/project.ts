@@ -2,12 +2,13 @@
 // the builder's design system, and what the generator is asked for. Turned into the same PlotReport and SiteReport
 // the editor's Site Studio works from (src/doc/plot.ts, site.ts, optimise.ts), so both give the same numbers.
 import { analysePlot, type PlotCode, type PlotReport, type PlotRules } from '../doc/plot';
-import { defaultCosts, solveSite, type SiteReport } from '../doc/site';
-import { DEFAULT_DESIGN, optimise, siteDefaults, type Typology } from '../doc/optimise';
+import { defaultCosts, solveSite, type PlotSite, type SiteBuilding, type SiteElement, type SiteReport } from '../doc/site';
+import { DEFAULT_DESIGN, optimise, park, siteDefaults, type Access, type Typology } from '../doc/optimise';
 import type { CityDoc } from '../doc/doc';
 import type { Compiler } from '../doc/compile';
 import type { PlotObj } from '../doc/types';
 import { withShops, type Shops } from './mixed';
+import { keepOutOf, type Levels, type SiteFeature } from './siteObjects';
 
 export type ProCity = 'pune' | 'pune-congested' | 'mumbai-island' | 'mumbai-suburbs';
 export const CITIES: { value: ProCity; label: string; code: PlotCode; note: string }[] = [
@@ -19,6 +20,36 @@ export const CITIES: { value: ProCity; label: string; code: PlotCode; note: stri
 
 /** a road along one edge of a drawn plot: its width today and in the Development Plan (0: none wider) */
 export interface EdgeRoad { today: number; dp: number }
+
+/** A building the user owns (placed, shaped, or filled for them then changed): the engine's building with a name,
+ *  its own design system and its systems' settings (./systems.ts). Its own `mix` and `floors` are the engine's. */
+export interface ProBuilding extends SiteBuilding {
+  name?: string;
+  /** a design system preset id (unset: the project's) */
+  style?: string;
+}
+
+/** What "Fill the plot" is asked for: how much of what the rules allow, how many buildings, how they're reached and
+ *  spaced, the green and the play area, where the cars go. The building type and the most floors are the project's
+ *  `typology` and `maxFloors`. */
+export interface Fill {
+  /** share of the permissible built-up area to use (0.3 to 1) */
+  amount: number;
+  /** at most this many buildings (0: as many as fit) */
+  buildings: number;
+  /** metres more between buildings than the rules ask */
+  spacing: number;
+  access: Access;
+  /** % of the plot kept green, at least (the open space the rules ask for is kept anyway) */
+  green: number;
+  /** a play area in the open space */
+  play: boolean;
+  /** where the cars go */
+  parking: 'auto' | 'stilt' | 'basement' | 'podium' | 'surface';
+  /** levels under the ground (unset: as many as the parking needs) */
+  basements?: number;
+}
+export const DEFAULT_FILL: Fill = { amount: 1, buildings: 0, spacing: 0, access: 'perimeter', green: 0, play: true, parking: 'auto' };
 
 export interface ProProject {
   v: 1;
@@ -58,6 +89,32 @@ export interface ProProject {
   costs?: { months?: number; presold?: number; soft?: number };
   /** what the plot sits in, for the NOCs */
   approval?: { nearAirport?: boolean; trees?: boolean; heritage?: boolean; kind?: import('./approvals').PermissionKind };
+  /** what's on and round the plot: obstructions and no-build zones (./siteObjects.ts) */
+  features?: SiteFeature[];
+  /** the plot's levels */
+  levels?: Levels;
+  /** where north is: degrees the plot is turned clockwise (0: north is straight back from the front road) */
+  north?: number;
+  /** what "Fill the plot" is asked for */
+  fill?: Partial<Fill>;
+  /** the buildings and the site's other things once the user owns them (filled then shaped, or placed by hand);
+   *  unset: the fill, worked out afresh on every change */
+  scheme?: { buildings: ProBuilding[]; elements: SiteElement[] };
+  /** the building systems' settings (./systems.ts): the site's plant, and each building's own by its id */
+  systems?: { site?: import('./systems').SystemsSettings; byBuilding?: Record<string, import('./systems').SystemsSettings> };
+}
+
+export const fillOf = (p: ProProject): Fill => ({ ...DEFAULT_FILL, ...(p.fill ?? {}) });
+
+/** parking as asked for, as the engine's settings */
+function parkingOf(f: Fill): Partial<PlotSite> {
+  switch (f.parking) {
+    case 'stilt': return { stilt: true, podium: 0, surfacePick: false };
+    case 'basement': return { stilt: false, podium: 0, surfacePick: false };
+    case 'podium': return { stilt: false, podium: 2, surfacePick: false };
+    case 'surface': return { stilt: false, podium: 0, surfacePick: true };
+    default: return {};
+  }
 }
 
 /** shops sell at about this many times the flats' rate until a price is put in */
@@ -143,19 +200,71 @@ export function plotReport(p: ProProject, floorH = 3): PlotReport {
 export function generate(p: ProProject, r: PlotReport, specRate = 0, premium = 0): { d: SiteReport; shops: Shops | null } {
   const c = defaultCosts(r.code, 'residential');
   const cost = { ...(p.costs ?? {}), build: c.build + specRate, ...(p.land ? { land: p.land } : {}), sale: p.sale > 0 ? p.sale : Math.round((c.sale * (1 + premium)) / 50) * 50 };
-  const base = { ...siteDefaults('residential'), mix: p.mix, cost, design: { ...DEFAULT_DESIGN, type: p.typology, maxFloors: p.maxFloors } };
+  const f = fillOf(p);
+  const base: PlotSite = {
+    ...siteDefaults('residential'), ...parkingOf(f), mix: p.mix, cost, keepOut: keepOutOf(p.features),
+    design: { ...DEFAULT_DESIGN, type: p.typology, maxFloors: p.maxFloors, maxBuildings: f.buildings, spacing: f.spacing, access: f.access, green: f.green },
+  };
+  // the user's own buildings: as they stand, checked
+  if (p.scheme) {
+    let own: PlotSite = { ...base, buildings: p.scheme.buildings, elements: p.scheme.elements, manual: true };
+    own = f.basements === undefined ? park(r, own, 'residential') : { ...own, basements: f.basements };
+    const sh = p.shops;
+    if (!sh || sh.floors <= 0) return { d: solveSite(r, own, 'residential'), shops: null };
+    return withShops(r, own, 'residential', sh, sh.sale > 0 ? sh.sale : Math.round((cost.sale * SHOP_PREMIUM) / 50) * 50);
+  }
   let site = optimise(r, base, 'residential');
   // 'auto' picks the layout that builds the most, which on a small plot can be a block too short for a flat beside
   // its core: then whichever building type houses the most
   if (p.typology === 'auto') {
     const carpet = (x: typeof site) => solveSite(r, x, 'residential').carpet;
     if (carpet(site) < 1) {
-      const alt = (['tower', 'slab'] as const).map((type) => optimise(r, { ...base, design: { ...base.design, type } }, 'residential'));
+      const alt = (['tower', 'slab'] as const).map((type) => optimise(r, { ...base, design: { ...DEFAULT_DESIGN, ...base.design, type } }, 'residential'));
       const best = alt.map((x) => ({ x, c: carpet(x) })).sort((a, b) => b.c - a.c)[0];
       if (best && best.c >= 1) site = best.x;
     }
   }
+  site = shaped(r, site, f);
+  if (f.basements !== undefined) site = { ...site, basements: f.basements };
   const sh = p.shops;
   if (!sh || sh.floors <= 0) return { d: solveSite(r, site, 'residential'), shops: null };
   return withShops(r, site, 'residential', sh, sh.sale > 0 ? sh.sale : Math.round((cost.sale * SHOP_PREMIUM) / 50) * 50);
+}
+
+/** The fill as asked: less than the most (floors off the tallest first until it's under the share), and a play
+ *  area in the open space. */
+function shaped(r: PlotReport, site: PlotSite, f: Fill): PlotSite {
+  let out = site;
+  if (f.amount < 0.999 && site.buildings.length) {
+    const d = solveSite(r, site, 'residential'), target = r.bua * Math.max(0.1, f.amount);
+    const fl = d.buildings.map((b) => b.floors), plate = d.buildings.map((b) => b.plate);
+    let bua = fl.reduce((s, n, i) => s + n * plate[i], 0);
+    while (bua > target) {
+      let k = -1;
+      fl.forEach((n, i) => { if (n > 1 && (k < 0 || n > fl[k])) k = i; });
+      if (k < 0) break;
+      fl[k]--; bua -= plate[k];
+    }
+    const ids = new Map(d.buildings.map((b, i) => [b.b.id, fl[i]]));
+    out = { ...site, buildings: site.buildings.map((b) => ({ ...b, floors: ids.get(b.id) ?? b.floors })) };
+  }
+  if (f.play && out.rg && out.rg.length >= 6) {
+    // (a play area in the middle of the open space, up to 14 x 12 m)
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (let i = 0; i < out.rg.length; i += 2) { x0 = Math.min(x0, out.rg[i]); x1 = Math.max(x1, out.rg[i]); z0 = Math.min(z0, out.rg[i + 1]); z1 = Math.max(z1, out.rg[i + 1]); }
+    const w = Math.min(14, (x1 - x0) * 0.6), h = Math.min(12, (z1 - z0) * 0.6), cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+    if (w >= 5 && h >= 5) {
+      const play: SiteElement = { id: 'play-auto', kind: 'play', spine: [], depth: 0, floors: 0, auto: true, ring: [cx - w / 2, cz - h / 2, cx + w / 2, cz - h / 2, cx + w / 2, cz + h / 2, cx - w / 2, cz + h / 2] };
+      out = { ...out, elements: [...(out.elements ?? []), play] };
+    }
+  }
+  return out;
+}
+
+/** The scheme as it stands, as the user's own to shape: the fill's buildings and things, kept. */
+export function ownScheme(d: SiteReport, styles?: Record<number, string>): NonNullable<ProProject['scheme']> {
+  return {
+    buildings: d.buildings.map((b, i) => ({ ...b.b, floors: b.floors, auto: undefined, name: `Building ${String.fromCharCode(65 + i)}`, ...(styles?.[i] ? { style: styles[i] } : {}) })),
+    elements: (d.site.elements ?? []).map((e) => ({ ...e, auto: undefined })),
+  };
 }

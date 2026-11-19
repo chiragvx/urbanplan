@@ -274,27 +274,6 @@ details.chk.info summary .ico { color: var(--up-muted); }
 .drop span { display: grid; color: var(--up-ink); } .drop small { color: var(--up-muted); font-size: 11.5px; }
 .drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 
-/* plot editor */
-.ped { display: grid; gap: 8px; }
-.ped svg { width: 100%; aspect-ratio: 1; background: var(--up-surface-2); border-radius: 12px; border: 1px solid var(--up-line); touch-action: none; user-select: none; }
-.ped-edge { cursor: pointer; stroke-linecap: round; }
-.ped-len { fill: var(--up-ink-2); font-family: var(--up-font-mono); pointer-events: none; }
-.ped-add { cursor: copy; }
-.ped-add circle { fill: var(--up-surface); stroke: var(--up-ink); stroke-width: inherit; }
-.ped-add path { stroke: var(--up-ink); }
-.ped-pt { fill: var(--up-paper); stroke: var(--up-ink); cursor: grab; }
-.ped-pt.on { fill: var(--up-ink); }
-.ped-plot { fill: color-mix(in srgb, var(--up-ink) 6%, transparent); stroke: var(--up-ink); }
-.ped-box { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--up-line-strong); border-radius: 10px; }
-.ped-box textarea { width: 100%; }
-.ped-err { margin: 0; font-size: 12px; color: var(--up-ink); font-weight: 600; }
-.ped .pro-note { margin: 0; font-size: 12px; color: var(--up-muted); }
-.ped .pf { display: grid; gap: 4px; font-size: 12px; color: var(--up-ink-2); }
-.ped .pf-in { display: flex; align-items: center; height: 32px; border: 1px solid var(--up-line-strong); border-radius: 8px; }
-.ped .pf-in input { flex: 1; min-width: 0; border: 0; background: none; padding: 0 8px; outline: none; }
-.ped .pf-in i { font-style: normal; color: var(--up-muted); padding-right: 8px; }
-.ped .pf-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.ped .pcheck { display: flex; gap: 8px; align-items: center; font-size: 13px; }
 .pbtn { height: 30px; border: 1px solid var(--up-line-strong); background: var(--up-surface); border-radius: 8px; padding: 0 12px; font-size: 12.5px; font-weight: 500; }
 .pbtn:disabled { opacity: 0.45; cursor: default; }
 .pbtn.primary { background: var(--up-ink); border-color: var(--up-ink); color: var(--up-paper); }
@@ -503,3 +482,39 @@ textarea.txt { resize: vertical; min-height: 64px; }
 
 /* dialog: the box takes focus on open; its ring would only be noise */
 .modal:focus { outline: none; }
+
+/* ---------- drawing on the map (./edit.ts, ./sitePanels.tsx) ---------- */
+/* tools: icon over a word, the one in use inverted */
+.toolgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)); gap: 6px; }
+.toolgrid button { display: grid; justify-items: center; gap: 4px; padding: 9px 4px 8px; border: 1px solid var(--up-line); border-radius: 9px; background: var(--up-surface); color: var(--up-ink-2); font: 500 11.5px/1.2 var(--up-font-body); text-align: center; cursor: pointer; }
+.toolgrid button:hover { border-color: var(--up-line-strong); color: var(--up-ink); }
+.toolgrid button[aria-pressed="true"] { background: var(--up-ink); border-color: var(--up-ink); color: var(--up-paper); }
+.hint-line { display: flex; gap: 6px; align-items: center; margin: 0; color: var(--up-muted); font-size: 12.5px; }
+/* what's picked: a card under its list */
+.picked { display: grid; gap: 10px; padding: 12px; border: 1.5px solid var(--up-ink); border-radius: 12px; }
+.picked > header { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.picked > header b { font-size: 14px; } .picked > header small { color: var(--up-muted); font-weight: 400; }
+.picked .sec { border: 0; padding: 0; margin: 0; }
+.turns { display: flex; gap: 4px; }
+/* roads along the edges */
+.edges { display: grid; gap: 6px; }
+.edge { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--up-line); }
+.edge:last-child { border-bottom: 0; }
+.edge-n { display: grid; font-size: 13px; } .edge-n small { color: var(--up-muted); font-size: 11.5px; }
+.edge-p { grid-column: 1 / -1; color: var(--up-muted); font-size: 11.5px; }
+/* lists: features, buildings */
+.flist, .blist { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.fitem { display: flex; gap: 8px; align-items: center; width: 100%; padding: 7px 10px; border: 1px solid var(--up-line); border-radius: 9px; background: var(--up-surface); color: var(--up-ink); font: 500 13px/1.2 var(--up-font-body); text-align: left; cursor: pointer; }
+.fitem small { margin-left: auto; color: var(--up-muted); font-weight: 400; font-size: 11.5px; }
+button.bitem { width: 100%; background: var(--up-surface); color: var(--up-ink); font: inherit; text-align: left; cursor: pointer; }
+button.bitem:hover, .fitem:hover { border-color: var(--up-line-strong); }
+li[aria-current="true"] > .bitem, li[aria-current="true"] > .fitem { border-color: var(--up-ink); box-shadow: inset 0 0 0 1px var(--up-ink); }
+/* the map's own: what to do while drawing, and north */
+.drawhint { position: absolute; left: 50%; top: 100px; transform: translateX(-50%); display: flex; gap: 12px; align-items: center; max-width: calc(100% - 24px); padding: 8px 14px; border-radius: 10px; background: var(--up-ink); color: var(--up-paper); font-size: 13px; box-shadow: 0 6px 20px -8px rgba(0, 0, 0, .4); }
+.drawhint .linkbtn { color: var(--up-paper); }
+.compass { position: absolute; right: 14px; bottom: 16px; width: 48px; height: 48px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--up-line-strong); background: color-mix(in srgb, var(--up-surface) 92%, transparent); color: var(--up-ink); cursor: pointer; padding: 0; }
+.compass .needle { position: relative; display: grid; place-items: center; width: 40px; height: 40px; transition: transform .12s linear; }
+.compass .needle b { position: absolute; top: -3px; font: 700 9px/1 var(--up-font-mono); }
+.compass .needle .ico { fill: var(--up-ink); }
+@media (prefers-reduced-motion: reduce) { .compass .needle { transition: none; } }
+@media (max-width: 900px) { .drawhint { top: 76px; font-size: 12px; } .compass { top: 84px; bottom: auto; right: 10px; width: 42px; height: 42px; } }

@@ -1,7 +1,9 @@
 // UrbanPlan Pro (/pro/): the full planning workspace, beside the simple editor (/app/).
 //
 // The layout follows how a developer works a plot, and keeps the answer in view the whole time:
-// - a rail of six steps on the left (site, scheme, design, money, approval, explore), each with its own panel;
+// - a rail of six steps on the left (site, design system, scheme, money, approval, explore), each with its own panel;
+// - the map (3D or the plan from above, a compass always in its corner) is where the plot, what's on it and the
+//   buildings are drawn, picked and moved (./edit.ts); the panel holds the numbers;
 // - the 3D in the middle, with the result bar over it (built-up, homes, profit, IRR, the rules), which flashes what
 //   each change did to it, so cause and effect are never a scroll away;
 // - view tools along the bottom of the 3D (exterior or an X-ray floor, the camera, the sun);
@@ -30,7 +32,10 @@ import { encodeShare, decodeShare } from './share';
 import { exploreOptions } from './options';
 import { parseBrief, runBrief } from './brief';
 import { Sheets, SHEET_CSS } from './drawings';
-import { ApproveStep, BuildStep, DesignStep, ExploreStep, MoneyStep, SiteStep, STEPS, type Step, type StepProps } from './steps';
+import { ApproveStep, ExploreStep, MoneyStep, STEPS, type Step, type StepProps } from './steps';
+import { SchemeStep, SiteStep2 } from './sitePanels';
+import { DesignSystemStep } from './designStep';
+import { CanvasEdit, SELECT, type Picked as EditPicked, type Tool } from './edit';
 import { Btn, cr, Dialog, Icon, Menu, nf, Num, pct, Range, Seg, Select, sqft, TooltipLayer } from './ui';
 
 const KEY = 'urbanplan:pro:project', REF = 'urbanplan:pro:cloud', SEEN = 'urbanplan:pro:seen';
@@ -67,7 +72,14 @@ function App() {
 
   const [step, setStep] = useState<Step>(() => store.get<Step>('urbanplan:pro:step', 'site'));
   const [panel, setPanel] = useState(true);
-  const go = (s: Step) => { setStep(s); setPanel(true); store.set('urbanplan:pro:step', s); };
+  const go = (s: Step) => { setStep(s); setPanel(true); store.set('urbanplan:pro:step', s); setToolS(SELECT); edit.current?.setTool(SELECT); setPicked(null); };
+  // ---------- the map's tool and what's picked on it ----------
+  const [tool, setToolS] = useState<Tool>(SELECT), [picked, setPicked] = useState<EditPicked>(null), [hint, setHint] = useState<string | null>(null);
+  const edit = useRef<CanvasEdit | null>(null);
+  const setTool = (t: Tool) => { setToolS(t); edit.current?.setTool(t); };
+  const [plan, setPlanS] = useState(false);
+  const setPlan = (on: boolean) => { setPlanS(on); view.current?.setPlan(on); };
+  const needle = useRef<HTMLSpanElement>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const toastT = useRef<number>();
   const toast = (s: string) => { setToastMsg(s); clearTimeout(toastT.current); toastT.current = window.setTimeout(() => setToastMsg(null), 4200); };
@@ -111,6 +123,7 @@ function App() {
     if (user && id && id !== ref?.id) void openId(id);
   }, [user?.id]);
   const viewer = ref?.role === 'viewer';
+  const roRef = useRef(false); roRef.current = readOnly || viewer;
   const fresh = (n: ProProject = { ...DEFAULT_PROJECT }) => { replace(n); setRef(null); lastSaved.current = ''; setDialog(null); history.replaceState(null, '', location.pathname); };
   useEffect(() => {
     if (!user || readOnly || viewer) { setCloud({ s: 'local' }); return; }
@@ -145,11 +158,18 @@ function App() {
     (window as unknown as { proView?: ProView }).proView = v; // (for the console)
     const ro = new ResizeObserver(() => v.resize());
     ro.observe(canvas.current!.parentElement!);
+    v.onPlan = (on) => setPlanS(on);
+    v.onNorth = (deg) => { if (needle.current) needle.current.style.transform = `rotate(${deg}deg)`; };
+    const ce = new CanvasEdit(canvas.current!, {
+      view: () => view.current, p: () => pRef.current, e: () => eRef.current, up: (o) => up(o), step: () => stepRef.current,
+      picked: () => pickedRef.current, pick: (x) => setPicked(x), done: () => { setToolS(SELECT); ce.setTool(SELECT); }, hint: setHint, readOnly: () => roRef.current,
+    });
+    edit.current = ce;
     const theme = () => v.setTheme(document.documentElement.dataset.theme === 'dark');
     theme();
     const mo = new MutationObserver(theme);
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-    return () => { ro.disconnect(); mo.disconnect(); v.dispose(); };
+    return () => { ro.disconnect(); mo.disconnect(); ce.dispose(); v.dispose(); };
   }, []);
   const maxFloor = Math.max(1, ...e.d.buildings.map((b) => b.floors));
   const xr = xray === null ? null : Math.min(xray, maxFloor);
@@ -159,15 +179,20 @@ function App() {
     view.current?.set({
       r: e.r, d: e.d, plans: e.plans, ds: e.ds, xray: xr, shops: e.shops,
       roads: roadLines(o.ring, o.roads).map((l) => ({ pts: l.pts, today: l.road.today })),
-      dsOf: (i) => dsOfBuilding(p, i, e.ds), rooms, roomColor: ROOM_COLOR,
+      dsOf: (i) => dsOfBuilding(p, i, e.ds, e.d.buildings[i]?.b.id), rooms, roomColor: ROOM_COLOR,
+      features: p.features, levels: p.levels, north: p.north, sel: picked?.k === 'building' ? picked.id : null,
     });
+    edit.current?.draw();
     applySun();
-  }, [e, xr, rooms]);
+  }, [e, xr, rooms, picked]);
+  useEffect(() => { edit.current?.draw(); }, [step]);
   const applySun = () => {
     const [lat, lon] = CITY_LATLON[p.city] ?? [18.52, 73.86];
-    view.current?.setSun(sun.on ? sunDirection(lat, lon, indiaTime(2026, sun.month, 21, sun.hour)) : null);
+    // (the sun's direction turned into the plot's frame, where north is turned by p.north)
+    const s = sun.on ? sunDirection(lat, lon, indiaTime(2026, sun.month, 21, sun.hour)) : null, n = ((p.north ?? 0) * Math.PI) / 180;
+    view.current?.setSun(s ? [s[0] * Math.cos(n) - s[2] * Math.sin(n), s[1], s[0] * Math.sin(n) + s[2] * Math.cos(n)] : null);
   };
-  useEffect(applySun, [sun, p.city]);
+  useEffect(applySun, [sun, p.city, p.north]);
   const cam = (k: CameraView) => view.current?.look(k);
 
   // ---------- keys ----------
@@ -184,6 +209,8 @@ function App() {
       if (ev.key === '[') setXray((v) => (v === null ? null : Math.max(1, v - 1)));
       if (ev.key === 'f') cam('fit');
       if (ev.key === 't') cam('top');
+      if (ev.key === 'p') setPlan(!plan);
+      if (ev.key === 'v') setTool(SELECT);
       if (ev.key === 's') cam('street');
       if (ev.key === '\\') setPanel((v) => !v);
       if (ev.key === '?') setDialog('keys');
@@ -194,6 +221,9 @@ function App() {
 
   // ---------- the scripting API: what a script, or an agent, drives (the same functions the panels use) ----------
   const pRef = useRef(p); pRef.current = p;
+  const eRef = useRef(e); eRef.current = e;
+  const stepRef = useRef<string>(step); stepRef.current = step;
+  const pickedRef = useRef<EditPicked>(picked); pickedRef.current = picked;
   useEffect(() => {
     (window as unknown as { urbanplan?: unknown }).urbanplan = {
       /** the project as data */
@@ -210,8 +240,8 @@ function App() {
   }, []);
 
   const cur = STEPS.find((s) => s.key === step)!;
-  const props: StepProps = { p, e, up, rooms, checks, deal, go, openDrawings: () => setDialog('drawings'), toast };
-  const Body = { site: SiteStep, build: BuildStep, design: DesignStep, money: MoneyStep, approve: ApproveStep, explore: ExploreStep }[step];
+  const props: StepProps = { p, e, up, rooms, checks, deal, go, openDrawings: () => setDialog('drawings'), toast, tool, setTool, picked, pick: setPicked };
+  const Body = { site: SiteStep2, build: SchemeStep, design: DesignSystemStep, money: MoneyStep, approve: ApproveStep, explore: ExploreStep }[step];
 
   return (
     <div class={`pro${panel ? '' : ' no-panel'}${readOnly ? ' ro' : ''}`}>
@@ -269,7 +299,13 @@ function App() {
       <main class="stage">
         <canvas ref={canvas} onPointerMove={(ev) => setHover(view.current?.pick(ev.clientX, ev.clientY) ?? null)} onPointerLeave={() => setHover(null)} />
         <ResultBar e={e} deal={deal} sum={sum} go={go} />
+        {hint && <div class="drawhint" role="status"><span>{hint}</span><button type="button" class="linkbtn" onClick={() => setTool(SELECT)}>Done</button></div>}
+        <button type="button" class="compass" aria-label="North (the map from above)" data-tip="North · the plan from above" onClick={() => setPlan(true)}><span ref={needle} class="needle"><Icon n="north" size={22} /><b>N</b></span></button>
         <div class="tools">
+          <Seg<'3d' | 'plan'> class="tgroup" value={plan ? 'plan' : '3d'} set={(v) => setPlan(v === 'plan')} options={[
+            { value: '3d', label: '3D', icon: 'cube', title: 'Orbit round it' },
+            { value: 'plan', label: 'Plan', icon: 'plan', title: 'From straight above, to scale (P)' },
+          ]} ariaLabel="Camera" />
           <Seg<RenderMode> class="tgroup" value={mode} set={setMode} options={[
             { value: 'wire', label: 'Wireframe', icon: 'wire', checked: mode === 'wire' && xr === null, disabled: xr !== null, title: xr !== null ? 'X-ray is always shaded' : 'Wireframe: low-poly lines' },
             { value: 'shaded', label: 'Shaded', icon: 'shade', checked: mode === 'shaded' || xr !== null, title: 'Shaded: materials, windows, sun' },
@@ -491,7 +527,7 @@ function ShareDialog({ p, close, toast }: { p: ProProject; close: () => void; to
 }
 
 function Keys({ close }: { close: () => void }) {
-  const rows: [string, string][] = [['1 – 6', 'Go to a step'], ['\\', 'Show or hide the panel'], ['X', 'X-ray floor on or off'], ['[  ]', 'Floor down / up'], ['F · S · T', 'Camera: whole site, street, from above'], ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · redo'], ['↑ ↓ in a number', 'Step it (Shift: ×10)'], ['Esc', 'Close this']];
+  const rows: [string, string][] = [['1 – 6', 'Go to a step'], ['\\', 'Show or hide the panel'], ['X', 'X-ray floor on or off'], ['[  ]', 'Floor down / up'], ['F · S · T', 'Camera: whole site, street, from above'], ['P', 'The plan from above, or back to 3D'], ['V', 'Back to picking'], ['Enter · Esc · Backspace', 'Drawing: finish, cancel, take back a point'], ['Shift', 'Drawing: keep a line square to the road'], ['Delete', 'Remove what’s picked'], ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · redo'], ['↑ ↓ in a number', 'Step it (Shift: ×10)'], ['Esc', 'Close this']];
   return <Dialog title="Keyboard shortcuts" close={close}><dl class="lines keys">{rows.map(([a, b]) => <div><dt><kbd>{a}</kbd></dt><dd>{b}</dd></div>)}</dl></Dialog>;
 }
 
@@ -510,7 +546,7 @@ function Welcome({ close }: { close: (p?: ProProject) => void }) {
         <Btn kind="primary" onClick={() => close({ ...DEFAULT_PROJECT, city, width: w, depth: dpt, road, dpRoad: road, name: `${w} × ${dpt} m plot` })}>Work it out</Btn>
         <Btn onClick={() => close()}>Look round the sample first</Btn>
       </div>
-      <p class="note">Plot not a rectangle? Draw it or import a GeoJSON / KML in the Site step.</p>
+      <p class="note">Plot not a rectangle? Draw it on the map, find it by survey number or import it in the Site step.</p>
     </Dialog>
   );
 }

@@ -82,7 +82,7 @@ export function schemes(r: PlotReport, design: Design, use: PlotUse, under = 1, 
   // plan the whole site again on every move)
   const fixedEls = (site?.elements ?? []).filter((e) => !e.auto && (e.kind === 'parking' || e.kind === 'road' || e.kind === 'roundabout' || e.kind === 'tank')).map((e) => [e.kind, e.spine, e.ring, e.depth]);
   const fixedB = handPlaced(site).map((b) => [b.spine, b.depth, b.closed, b.floors]);
-  const key = JSON.stringify([r.net, r.edges, r.bua, r.area, r.rules, r.code, r.parts, design, use, under, fixedEls, fixedB]);
+  const key = JSON.stringify([r.net, r.edges, r.bua, r.area, r.rules, r.code, r.parts, design, use, under, fixedEls, fixedB, site?.keepOut ?? null]);
   const hit = SCHEMES.get(key);
   if (hit) return hit;
   const out = schemesOf(r, design, use, under, site);
@@ -114,6 +114,8 @@ function schemesOf(r0: PlotReport, design: Design, use: PlotUse, under: number, 
       .flatMap(elementRings).map((q) => box(F.toL(q), ROAD_SET)),
     // (the buildings placed by hand, with a fire tender's way round them)
     ...hand.flatMap(buildingQuads).map((q) => box(F.toL(q), FIRE_W)),
+    // (no-build zones and obstructions' clearances)
+    ...(site?.keepOut ?? []).filter((k) => k.length >= 6).map((k) => box(F.toL(k), 0)),
   ];
   const prefer: 'slab' | 'tower' = use !== 'industrial' && (design.type === 'tower' || (design.type === 'auto' && r.code !== 'udcpr')) ? 'tower' : 'slab';
   const best: Record<'slab' | 'tower', (Scheme & { score: number }) | null> = { slab: null, tower: null };
@@ -182,7 +184,7 @@ function schemesOf(r0: PlotReport, design: Design, use: PlotUse, under: number, 
   const out = [best.slab, best.tower].filter((x): x is Scheme & { score: number } => !!x).sort((a, b) => b.score - a.score);
   if (!out.length && !hand.length) {
     // too small for rows of blocks: one building filling the envelope
-    const one = fillEnvelope(r, use, under, design.maxFloors);
+    const one = fillEnvelope(r, use, under, design.maxFloors, site?.keepOut);
     return one ? [one] : [];
   }
   return out.map(({ score: _, ...s }) => s);
@@ -191,8 +193,20 @@ function schemesOf(r0: PlotReport, design: Design, use: PlotUse, under: number, 
 /** One building filling the envelope (the biggest rectangle square to the road inside it), as many floors as the
  *  built-up area, the height limit and the margins at that height allow. A plot whose margins leave nothing gets
  *  one on the plot as it is, flagged. */
-export function fillEnvelope(r: PlotReport, use: PlotUse, under: number, maxFloors = 0): Scheme | null {
+export function fillEnvelope(r: PlotReport, use: PlotUse, under: number, maxFloors = 0, keepOut?: number[][]): Scheme | null {
   const R = r.rules, fh = R.floorH, F = roadFrame(r);
+  // (ground kept clear, as boxes square to the road: the rectangle is cut back off them, keeping the biggest piece)
+  const keeps = (keepOut ?? []).filter((k) => k.length >= 6).map((k) => { const L = F.toL(k); let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity; for (let i = 0; i < L.length; i += 2) { a = Math.min(a, L[i]); c = Math.max(c, L[i]); b = Math.min(b, L[i + 1]); d = Math.max(d, L[i + 1]); } return [a, b, c, d] as [number, number, number, number]; });
+  const clear = (q: [number, number, number, number] | null): [number, number, number, number] | null => {
+    if (!q) return null;
+    for (const [a, b, c, d] of keeps) {
+      if (c <= q[0] || a >= q[2] || d <= q[1] || b >= q[3]) continue;
+      const parts: [number, number, number, number][] = [[q[0], q[1], a, q[3]], [c, q[1], q[2], q[3]], [q[0], q[1], q[2], b], [q[0], d, q[2], q[3]]];
+      const ok = parts.filter((x) => x[2] - x[0] > 6 && x[3] - x[1] > 6).map((x) => clear(x)).filter((x): x is [number, number, number, number] => !!x);
+      return ok.sort((x, y) => area(y) - area(x))[0] ?? null;
+    }
+    return q;
+  };
   if (r.net.length < 6) return null;
   let maxN = Math.max(1, Math.floor(R.maxH / fh + 1e-6) - under);
   if (maxFloors > 0) maxN = Math.min(maxN, maxFloors);
@@ -200,7 +214,7 @@ export function fillEnvelope(r: PlotReport, use: PlotUse, under: number, maxFloo
   const cache = new Map<number, [number, number, number, number] | null>();
   for (let n = 1; n <= maxN; n++) {
     const sd = Math.round(sideMargin(R, (n + under) * fh) * 100) / 100;
-    if (!cache.has(sd)) { const e = inset(r.net, r.edges, R.front, sd); cache.set(sd, e.length >= 6 ? bigRect(F.toL(e)) : null); }
+    if (!cache.has(sd)) { const e = inset(r.net, r.edges, R.front, sd); cache.set(sd, e.length >= 6 ? clear(bigRect(F.toL(e))) : null); }
     const rect = cache.get(sd);
     if (!rect) break;
     const plate = area(rect), b = Math.min(r.bua > 0 ? r.bua : plate * n, plate * n);
