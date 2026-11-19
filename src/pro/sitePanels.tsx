@@ -39,7 +39,7 @@ function Tools({ items, tool, setTool, label }: { items: { t: Tool; label: strin
   const same = (a: Tool, b: Tool) => JSON.stringify(a) === JSON.stringify(b);
   return (
     <div class="toolgrid" role="group" aria-label={label}>
-      {items.map((x) => <button type="button" aria-pressed={same(x.t, tool)} onClick={() => setTool(same(x.t, tool) ? { k: 'select' } : x.t)}><Icon n={x.icon} size={18} /><span>{x.label}</span></button>)}
+      {items.map((x) => <button type="button" aria-pressed={same(x.t, tool)} onClick={() => setTool(same(x.t, tool) ? { k: 'select' } : x.t)}><Icon n={x.icon} size={16} /><span>{x.label}</span></button>)}
     </div>
   );
 }

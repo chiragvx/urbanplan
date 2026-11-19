@@ -232,8 +232,9 @@ td { padding: 6px 4px; border-bottom: 1px solid var(--up-line); vertical-align: 
 details.chk { border-radius: 9px; border: 1px solid var(--up-line); }
 details.chk summary { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; padding: 8px 10px; cursor: pointer; list-style: none; font-size: 12.5px; }
 details.chk summary::-webkit-details-marker { display: none; }
-details.chk summary em { font-style: normal; color: var(--up-muted); font-size: 12px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
-details.chk[open] summary em { white-space: normal; }
+details.chk summary em { font-style: normal; color: var(--up-muted); font-size: 12px; text-align: right; line-height: 1.35; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+details.chk summary { grid-template-columns: auto minmax(0, 1fr) minmax(0, max-content); }
+details.chk summary > :nth-child(2) { min-width: 7em; }
 details.chk > .lines, details.chk > .note { padding: 0 10px 8px 33px; }
 details.chk.pass summary .ico { color: var(--up-ink); }
 details.chk.fail { border: 1.5px solid var(--up-ink); }
@@ -485,8 +486,8 @@ textarea.txt { resize: vertical; min-height: 64px; }
 
 /* ---------- drawing on the map (./edit.ts, ./sitePanels.tsx) ---------- */
 /* tools: icon over a word, the one in use inverted */
-.toolgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)); gap: 6px; }
-.toolgrid button { display: grid; justify-items: center; gap: 4px; padding: 9px 4px 8px; border: 1px solid var(--up-line); border-radius: 9px; background: var(--up-surface); color: var(--up-ink-2); font: 500 11.5px/1.2 var(--up-font-body); text-align: center; cursor: pointer; }
+.toolgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 4px; }
+.toolgrid button { display: grid; justify-items: center; gap: 3px; padding: 7px 2px 6px; border: 1px solid var(--up-line); border-radius: 9px; background: var(--up-surface); color: var(--up-ink-2); font: 500 11px/1.2 var(--up-font-body); text-align: center; cursor: pointer; }
 .toolgrid button:hover { border-color: var(--up-line-strong); color: var(--up-ink); }
 .toolgrid button[aria-pressed="true"] { background: var(--up-ink); border-color: var(--up-ink); color: var(--up-paper); }
 .hint-line { display: flex; gap: 6px; align-items: center; margin: 0; color: var(--up-muted); font-size: 12.5px; }

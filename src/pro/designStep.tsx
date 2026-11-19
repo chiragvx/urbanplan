@@ -317,7 +317,7 @@ export function DesignSystemStep({ p, e, up, toast }: StepProps) {
   const setDs = (fn: (d: DesignSystem) => void) => { const d = clone(ds); fn(d); up({ custom: d }); };
   const pick = (slot: FinishSlot) => (id: string) => setDs((d) => setFinish(d, slot, id));
   // one surface's swatches open at a time
-  const [open, setOpen] = useState<string | null>('wall');
+  const [open, setOpen] = useState<string | null>(null);
   const row = (key: string, label: string, value: string, slot: keyof typeof SLOT_CATEGORIES, fs: FinishSlot) => (
     <MaterialRow label={label} value={value} slot={slot} open={open === key} toggle={() => setOpen(open === key ? null : key)} set={pick(fs)} />
   );
@@ -363,11 +363,11 @@ export function DesignSystemStep({ p, e, up, toast }: StepProps) {
         </div>
       </Section>
 
-      <Section title="Flooring">
+      <Section title="Flooring" fold open={false}>
         <div class="dss-mats">{FLOOR_ROOMS.map((r) => row(`floor-${r.key}`, r.label, f.flooring[r.key], 'floor', r.key))}</div>
       </Section>
 
-      <Section title="Roof">
+      <Section title="Roof" fold open={false}>
         <div class="dss-mats">{row('roof', 'Terrace', f.roof, 'roof', 'roof')}</div>
       </Section>
 

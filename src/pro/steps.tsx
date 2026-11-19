@@ -239,12 +239,8 @@ export function ApproveStep({ p, e, up, checks, openDrawings, toast }: StepProps
   const shown = (c: Check) => only === 'all' || c.status === 'fail' || c.status === 'warn';
   return (
     <>
-      <Section title="Permission" sub={PERMISSION_HINT[kind]}>
-        <Select<PermissionKind> label="Applying for" value={kind} onChange={(v) => up({ approval: { ...ex, kind: v } })} options={(Object.keys(PERMISSION_LABEL) as PermissionKind[]).map((k) => ({ value: k, label: PERMISSION_LABEL[k] }))} />
-        <ol class="stages">{steps.map((x) => <li><b>{x.title}</b><small>{x.note}</small></li>)}</ol>
-      </Section>
 
-      <Section title="Scrutiny" sub="Our own check of every rule we model, as an authority's scrutiny would read it. Advisory: the authority's is the one that counts.">
+      <Section title="Scrutiny" sub="Every rule we model, checked as an authority would. Advisory: theirs is the one that counts.">
         <div class="score">
           <span class="s-pass"><Icon n="check" size={14} />{sum.pass} pass</span>
           <span class={`s-fail${sum.fail ? ' on' : ''}`}><Icon n="x" size={14} />{sum.fail} fail</span>
@@ -266,6 +262,11 @@ export function ApproveStep({ p, e, up, checks, openDrawings, toast }: StepProps
         {only === 'issues' && !sum.fail && !sum.warn && <Note tone="ok">No issues in the rules checked.</Note>}
       </Section>
 
+      <Section title="Permission" fold open={false} aside={<span class="sec-meta">{PERMISSION_LABEL[kind]}</span>} sub={PERMISSION_HINT[kind]}>
+        <Select<PermissionKind> label="Applying for" value={kind} onChange={(v) => up({ approval: { ...ex, kind: v } })} options={(Object.keys(PERMISSION_LABEL) as PermissionKind[]).map((k) => ({ value: k, label: PERMISSION_LABEL[k] }))} />
+        <ol class="stages">{steps.map((x) => <li><b>{x.title}</b><small>{x.note}</small></li>)}</ol>
+      </Section>
+
       <Section title="Drawings and files" sub="Generated from the scheme. An architect checks, signs and submits them; we never submit for you.">
         <div class="exports">
           <button type="button" class="export" onClick={openDrawings}><Icon n="print" /><b>Drawing set</b><small>Site plan, floor plan, section, area statement. Print or save as PDF (A3).</small></button>
@@ -273,7 +274,7 @@ export function ApproveStep({ p, e, up, checks, openDrawings, toast }: StepProps
         </div>
       </Section>
 
-      <Section title="NOCs" aside={<span class="sec-meta">{list.filter((n) => n.needed).length} needed</span>}>
+      <Section title="NOCs" fold open={false} aside={<span class="sec-meta">{list.filter((n) => n.needed).length} needed</span>}>
         <Toggle label="Near an airport" hint="Inside the AAI's colour-coded zone" value={!!ex.nearAirport} set={(v) => up({ approval: { ...ex, nearAirport: v } })} />
         <Toggle label="Trees on the plot" value={!!ex.trees} set={(v) => up({ approval: { ...ex, trees: v } })} />
         <Toggle label="Heritage precinct" value={!!ex.heritage} set={(v) => up({ approval: { ...ex, heritage: v } })} />
