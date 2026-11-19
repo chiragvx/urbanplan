@@ -19,7 +19,7 @@ import { DEFAULT_LEVELS, FEATURES, featureOf, INTERNAL_WIDTHS, PLINTH_MIN, roadP
 import { FindPlot, FlatPlan, ImportBox, slug, type StepProps } from './steps';
 import { Btn, download, Icon, Lines, Note, nf, Num, Row, Section, Seg, Select, Slider, sqft, Stat, Toggle } from './ui';
 import { SystemsPanel } from './systemsPanel';
-import { groundAt } from './terrain';
+import { groundAt, plotOverRoad } from './terrain';
 import { mergeSettings, splitSettings } from './systems';
 
 const DIRS = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
@@ -70,20 +70,23 @@ export function SiteStep2({ p, e, up, toast, tool, setTool, picked, pick }: Step
   const fPicked = picked?.k === 'feature' ? fs.find((f) => f.id === picked.id) : undefined;
   // the ground off the city's terrain, where the plot has a real place
   const [reading, setReading] = useState(false);
-  const readGround = async (at: [number, number], ring: number[], quiet = false) => {
+  const readGround = async (at: [number, number], ring: number[], quiet = false, front?: { k: number; w: number } | null) => {
     setReading(true);
     let r0 = 0; for (let i = 0; i < ring.length; i += 2) r0 = Math.max(r0, Math.hypot(ring[i], ring[i + 1]));
     const g = await groundAt(at[0], at[1], Math.max(20, Math.min(80, r0))).catch(() => null);
     setReading(false);
     if (!g) { if (!quiet) toast('No terrain for this place yet: set the levels by hand.'); return; }
-    up({ at, north: 0, levels: { ...L, slope: g.slope < 0.5 ? 0 : g.slope, dir: (Math.round(g.dir / 45) * 45) % 360, asl: g.elevation, terrain: true } });
-    toast(`The ground, off the terrain: ${nf(g.elevation)} m over sea level, ${g.slope < 0.5 ? 'about level' : `${nf(g.slope)}% falling ${DIRS[Math.round(g.dir / 45) % 8]}`}.`);
+    // (the plot's middle over its front road: the road edge is the one with a road, else the longest)
+    const er = outline(p).roads, ek = er.findIndex((x) => !!x), f = front ?? (ek >= 0 ? { k: ek, w: er[ek]!.today || 12 } : null);
+    const over = f ? plotOverRoad(g, ring, f.k, f.w) : L.plot;
+    up({ at, north: 0, levels: { ...L, plot: over, slope: g.slope < 0.5 ? 0 : g.slope, dir: (Math.round(g.dir / 45) * 45) % 360, asl: g.elevation, terrain: true } });
+    toast(`The ground, off the terrain: ${nf(g.elevation)} m over sea level, ${g.slope < 0.5 ? 'about level' : `${nf(g.slope)}% falling ${DIRS[Math.round(g.dir / 45) % 8]}`}, the plot ${over >= 0 ? `${nf(over, 1)} m over` : `${nf(-over, 1)} m under`} its road.`);
   };
   const found = (ring: number[], src: string, name?: string, at?: [number, number] | null) => {
     const k = longestEdge(ring);
     up({ shape: 'poly', ring, at: at ?? undefined, edgeRoads: Array.from({ length: ring.length / 2 }, (_, i) => (i === k ? { today: 12, dp: 0 } : null)), ...(name ? { name } : {}) });
     toast(`${src}. The longest edge has the road: set the real roads below.`);
-    if (at) void readGround(at, ring, true);
+    if (at) void readGround(at, ring, true, { k, w: 12 });
   };
   return (
     <>
@@ -122,7 +125,7 @@ export function SiteStep2({ p, e, up, toast, tool, setTool, picked, pick }: Step
 
       <Section title="Levels and north" fold open={!!(p.levels || p.north)}>
         <Row>
-          <Num label="Plot over the road" value={L.plot} set={(v) => setLv({ plot: v })} min={-10} max={30} step={0.1} unit="m" />
+          <Num label="Plot over the road" value={L.plot} set={(v) => setLv({ plot: v, terrain: false })} min={-10} max={30} step={0.1} unit="m" />
           <Num label="Slope" value={L.slope} set={(v) => setLv({ slope: v, terrain: false })} min={0} max={60} step={0.5} unit="%" />
         </Row>
         {p.at

@@ -311,7 +311,7 @@ function BriefBox({ p, up, toast }: { p: ProProject; up: StepProps['up']; toast:
   const [res, setRes] = useState<(BriefResult & { understood: string[]; ignored: string[] }) | null>(null);
   const run = () => { const b = parseBrief(text); setRes({ ...runBrief(p, b.brief), understood: b.understood, ignored: b.ignored }); };
   return (
-    <Section title="Brief" sub="Write what you want. The planner reads it, tries schemes, checks each against the rules and keeps the best that passes. (Rule-based for now, no AI model.)">
+    <Section title="Brief" sub="Say what you want; the best scheme that passes the rules comes back.">
       <textarea class="brief" rows={3} value={text} onInput={(ev) => setText((ev.target as HTMLTextAreaElement).value)} onKeyDown={(ev) => { if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) run(); }} />
       <Row><Btn kind="primary" icon="play" onClick={run}>Plan it</Btn>{res?.best && <Btn icon="check" onClick={() => { up({ ...res.patch, scheme: undefined }); toast(`Applied: ${res.best!.label}`); }}>Use the best</Btn>}</Row>
       {res && <>
@@ -338,7 +338,7 @@ function OptionsBox({ p, up, toast }: { p: ProProject; up: StepProps['up']; toas
   const [rows, setRows] = useState<OptionRow[] | null>(null), [busy, setBusy] = useState(false);
   const run = () => { setBusy(true); setTimeout(() => { setRows(exploreOptions(p, { limit: 12 })); setBusy(false); }, 30); };
   return (
-    <Section title="Options" sub="Building types, height bands, flat mixes and shops, each worked out in full and ranked by profit.">
+    <Section title="Options" sub="Every building type, height and flat mix, ranked by profit.">
       <Btn kind={rows ? undefined : 'primary'} icon={busy ? undefined : 'layers'} onClick={run} disabled={busy}>{busy ? <><Dither class="dz" cell={2} />Working…</> : rows ? 'Run again' : 'Find options'}</Btn>
       {busy && <div class="working" role="status"><Dither class="working-art" cell={3} /><span>Working out every option…</span></div>}
       {rows && <div class="opts">{rows.map((o, i) => <OptionCard o={o} best={i === 0} apply={() => { up({ ...o.patch, scheme: undefined }); toast(`Applied: ${o.label}`); }} />)}</div>}

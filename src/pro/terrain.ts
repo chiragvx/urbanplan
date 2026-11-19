@@ -25,7 +25,7 @@ const pieces = new Map<string, Promise<Piece | null>>();
 const manifest = (id: string) => { if (!manifests.has(id)) manifests.set(id, loadManifest(BASE + id + '/').catch(() => null)); return manifests.get(id)!; };
 const piece = (id: string, i: number, j: number) => { const k = `${id}:${i}_${j}`; if (!pieces.has(k)) pieces.set(k, loadPiece(BASE + id + '/', i, j).catch(() => null)); return pieces.get(k)!; };
 
-export interface Ground { elevation: number; slope: number; dir: number; region: string }
+export interface Ground { elevation: number; slope: number; dir: number; region: string; /** the ground's rise per metre east (x) and south (z), as fitted */ gx: number; gz: number }
 
 /** The ground round a place, `radius` metres each way: its height over sea level, its slope (%) and the compass
  *  bearing it falls toward. Null where no city's terrain covers it. */
@@ -60,7 +60,20 @@ export async function groundAt(lat: number, lon: number, radius = 25): Promise<G
     const slope = Math.hypot(b, c) * 100;
     // downhill is −(b, c) in x (east), z (south): its bearing from north, clockwise
     const dir = ((Math.atan2(-b, c) * 180) / Math.PI + 360) % 360;
-    return { elevation: Math.round(mh * 10) / 10, slope: Math.round(slope * 10) / 10, dir: Math.round(dir), region: id };
+    return { elevation: Math.round(mh * 10) / 10, slope: Math.round(slope * 10) / 10, dir: Math.round(dir), region: id, gx: b, gz: c };
   }
   return null;
+}
+
+/** The plot's middle over its front road, off the fitted ground: the road's centre line is `roadW / 2` out from the
+ *  middle of the front edge (ring in metres about the plot's middle, x east, z south, as an imported outline is). */
+export function plotOverRoad(g: Ground, ring: number[], front: number, roadW: number): number {
+  const n = ring.length / 2, a = front, b = (front + 1) % n;
+  const ax = ring[2 * a], az = ring[2 * a + 1], bx = ring[2 * b], bz = ring[2 * b + 1];
+  const mx = (ax + bx) / 2, mz = (az + bz) / 2, L = Math.hypot(bx - ax, bz - az) || 1;
+  // the outward normal: away from the plot's middle (the origin)
+  let nx = (bz - az) / L, nz = -(bx - ax) / L;
+  if (nx * mx + nz * mz < 0) { nx = -nx; nz = -nz; }
+  const rx = mx + (nx * roadW) / 2, rz = mz + (nz * roadW) / 2;
+  return Math.round(-(g.gx * rx + g.gz * rz) * 10) / 10;
 }
