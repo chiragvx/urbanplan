@@ -68,7 +68,7 @@ kbd { font: 500 11px/1 var(--up-font-mono); padding: 3px 6px; border-radius: 5px
 .panel-h > div { flex: 1; min-width: 0; }
 .panel-h h2 { margin: 0; font: 600 18px/1.25 var(--up-font-display); letter-spacing: -0.015em; }
 .panel-h p { margin: 4px 0 0; color: var(--up-muted); font-size: 12.5px; }
-.panel-b { flex: 1; overflow-y: auto; padding: 4px 20px 24px; overscroll-behavior: contain; animation: fade .18s ease-out; }
+.panel-b { flex: 1; overflow-y: auto; scrollbar-gutter: stable; padding: 4px 20px 24px; overscroll-behavior: contain; animation: fade .18s ease-out; }
 @keyframes fade { from { opacity: 0; transform: translateY(4px); } }
 .panel-f { display: flex; gap: 8px; padding: 10px 12px 10px 20px; border-top: 1px solid var(--up-line); }
 
@@ -306,7 +306,7 @@ details.chk.info summary .ico { color: var(--up-muted); }
 .tgroup button:hover { background: var(--up-surface-2); color: var(--up-ink); }
 .tgroup button:disabled { opacity: .45; cursor: default; background: none; }
 .tgroup.seg { background: color-mix(in srgb, var(--up-surface) 94%, transparent); }
-.tgroup button[aria-checked="true"], .tgroup button[aria-pressed="true"] { background: var(--up-ink); color: var(--up-paper); }
+.tgroup button[aria-checked="true"], .tgroup button[aria-pressed="true"] { background: var(--up-surface-2); color: var(--up-ink); font-weight: 600; box-shadow: inset 0 0 0 1.5px var(--up-ink); }
 .tgroup.floor b { min-width: 86px; text-align: center; font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .tgroup.floor small { color: var(--up-muted); font-weight: 400; }
 .tgroup.sun .range { width: 120px; margin: 0 4px; }
@@ -355,10 +355,12 @@ details.chk.info summary .ico { color: var(--up-muted); }
   .top { position: sticky; top: 0; height: 52px; padding: 0 8px 0 12px; }
   .hist { display: none; }
   .stage { position: sticky; top: 52px; height: 46vh; height: 46dvh; z-index: 2; flex: none; }
-  .results { top: 8px; left: 8px; right: 8px; display: flex; overflow-x: auto; scrollbar-width: none; grid-template-columns: none; }
-  .results .kpi { flex: 0 0 auto; min-width: 128px; padding: 8px 12px; }
+  .results { top: 8px; left: 8px; right: 8px; display: flex; overflow-x: auto; scrollbar-width: none; grid-template-columns: none; scroll-snap-type: x mandatory; }
+  .results .kpi { flex: 0 0 33.333%; min-width: 0; padding: 8px 10px; scroll-snap-align: start; }
+  .results .kpi small { display: none; }
+  .results .kpi:nth-child(1), .results .kpi:nth-child(2) { order: 2; }
   .results .kpi:nth-child(4) { display: grid; }
-  .kpi b { font-size: 16px; }
+  .kpi b { font-size: 14px; }
   .tools { bottom: 8px; gap: 6px; }
   .tgroup.sun .range { width: 80px; }
   .legend.floating { display: none; }
@@ -492,7 +494,7 @@ textarea.txt { resize: vertical; min-height: 64px; }
 .toolgrid button[aria-pressed="true"] { background: var(--up-ink); border-color: var(--up-ink); color: var(--up-paper); }
 .hint-line { display: flex; gap: 6px; align-items: center; margin: 0; color: var(--up-muted); font-size: 12.5px; }
 /* what's picked: a card under its list */
-.picked { display: grid; gap: 10px; padding: 12px; border: 1.5px solid var(--up-ink); border-radius: 12px; }
+.picked { display: grid; gap: 10px; }
 .picked > header { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
 .picked > header b { font-size: 14px; } .picked > header small { color: var(--up-muted); font-weight: 400; }
 .picked .sec { border: 0; padding: 0; margin: 0; }

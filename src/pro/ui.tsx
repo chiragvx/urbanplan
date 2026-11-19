@@ -85,8 +85,10 @@ export const cr = (rs: number) => `${rs < 0 ? '−' : ''}₹${nf(Math.abs(rs) / 
 export const pct = (v: number | null, d = 1) => (v === null || !Number.isFinite(v) ? '—' : `${nf(v * 100, d)}%`);
 
 // ---------- a number ----------
-export function Num({ label, value, set, step = 1, min = 0, max = 99999, unit, hint, wide }: {
+export function Num({ label, value, set, step = 1, min = 0, max = 99999, unit, hint, wide, zero }: {
   label: string; value: number; set: (v: number) => void; step?: number; min?: number; max?: number; unit?: string; hint?: string; wide?: boolean;
+  /** what 0 means, shown in place of it ("Auto") */
+  zero?: string;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   const t = useRef<number>();
@@ -94,22 +96,23 @@ export function Num({ label, value, set, step = 1, min = 0, max = 99999, unit, h
   const fix = (v: number) => Math.round(v / step) * step;
   const commit = (v: number) => { const c = Math.min(max, Math.max(min, v)); if (c !== value) set(Number(fix(c).toFixed(4))); };
   const bump = (k: number) => { setDraft(null); commit(value + k * step); };
-  const shown = draft ?? String(Number(value.toFixed(4)));
-  const bad = draft !== null && (!Number.isFinite(parseFloat(draft)) || parseFloat(draft) < min || parseFloat(draft) > max);
+  const num = (s: string) => parseFloat(s.replace(/,/g, ''));
+  const shown = draft ?? (zero && value === 0 ? '' : Math.abs(value) >= 1000 && Number.isInteger(value) ? value.toLocaleString('en-IN') : String(Number(value.toFixed(4))));
+  const bad = draft !== null && draft !== '' && (!Number.isFinite(num(draft)) || num(draft) < min || num(draft) > max);
   return (
     <label class={`f${wide ? ' wide' : ''}`}>
       <span class="f-l">{label}</span>
       <span class={`f-num${bad ? ' bad' : ''}`}>
         <button type="button" tabIndex={-1} aria-label={`Less ${label}`} onClick={(e) => { e.preventDefault(); bump(-1); }}><Icon n="minus" size={14} /></button>
-        <input type="text" inputMode="decimal" value={shown} aria-label={label}
+        <input type="text" inputMode="decimal" value={shown} aria-label={label} placeholder={zero}
           onInput={(e) => {
             const s = (e.target as HTMLInputElement).value; setDraft(s);
             clearTimeout(t.current);
-            const v = parseFloat(s);
+            const v = s.trim() === '' && zero ? 0 : num(s);
             if (Number.isFinite(v) && v >= min && v <= max) t.current = window.setTimeout(() => commit(v), 260);
           }}
           onKeyDown={(e) => { if (e.key === 'ArrowUp') { e.preventDefault(); bump(e.shiftKey ? 10 : 1); } if (e.key === 'ArrowDown') { e.preventDefault(); bump(e.shiftKey ? -10 : -1); } if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-          onBlur={() => { if (draft !== null) { const v = parseFloat(draft); if (Number.isFinite(v)) commit(v); } setDraft(null); }} />
+          onBlur={() => { if (draft !== null) { const v = draft.trim() === '' && zero ? 0 : num(draft); if (Number.isFinite(v)) commit(v); } setDraft(null); }} />
         {unit && <i>{unit}</i>}
         <button type="button" tabIndex={-1} aria-label={`More ${label}`} onClick={(e) => { e.preventDefault(); bump(1); }}><Icon n="plus" size={14} /></button>
       </span>

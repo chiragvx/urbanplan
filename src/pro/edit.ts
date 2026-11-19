@@ -37,8 +37,8 @@ export const ELEMENT_TOOLS: { kind: Extract<Tool, { k: 'element' }>['kind']; lab
   { kind: 'garden', label: 'Garden', icon: 'leaf', hint: 'Drag out its area, or click its corners.' },
   { kind: 'play', label: 'Play area', icon: 'play', hint: 'Drag out its area, or click its corners.' },
   { kind: 'trees', label: 'Trees', icon: 'tree', hint: 'Drag out the stand, or click its corners.' },
-  { kind: 'lot', label: 'Parking', icon: 'car', hint: 'Surface bays: drag out the area, or click its corners.' },
-  { kind: 'parking', label: 'Car park', icon: 'layers', hint: 'A multi-storey car park: drag out its area.' },
+  { kind: 'lot', label: 'Car lot', icon: 'car', hint: 'Surface bays: drag out the area, or click its corners.' },
+  { kind: 'parking', label: 'Parking tower', icon: 'layers', hint: 'A multi-storey car park: drag out its area.' },
   { kind: 'road', label: 'Road', icon: 'road', hint: 'Click along it, double-click or Enter to finish.' },
 ];
 

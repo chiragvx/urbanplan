@@ -52,7 +52,7 @@ export function scrutiny(e: Evaluated, rooms?: RoomsLike): Check[] {
   // ---- building: height, margins ----
   if (!hasBuildings) add({ key: 'building', group: 'Building', rule: 'A building', clause: '—', required: 'a building to check', proposed: 'none fits the plot', status: 'fail' });
   d.buildings.forEach((b, i) => {
-    add({ key: `height:${i}`, group: 'Building', rule: `Height${name(i)}`, clause: 'Height limit (fire and aviation clearances, as assumed)', required: `at most ${m(R.maxH)}`, proposed: `${m(b.height)} (${b.floors + d.under} floors)`, status: b.overHeight ? 'fail' : 'pass' });
+    add({ key: `height:${i}`, group: 'Building', rule: `Height${name(i)}`, clause: 'Height limit (fire and aviation clearances, as assumed)', required: `at most ${m(R.maxH)}`, proposed: `${m(b.height)} · ${b.floors} floors${d.under ? ' on a stilt' : ''}`, status: b.overHeight ? 'fail' : 'pass' });
     const side = sideMargin(R, b.height);
     add({ key: `margins:${i}`, group: 'Building', rule: `Margins${name(i)}`, clause: r.code === 'udcpr' ? 'UDCPR 2020 Table 6-D' : 'DCPR 2034 Table 18; Reg. 41(2) Table A', required: `front ${m(R.front)}, sides and rear ${m(side)} at ${m(b.height)}`, proposed: b.clash === 'margins' ? 'past the margins' : b.clash === 'overlap' ? 'overlaps another building' : b.clash === 'zone' ? 'on a no-build zone' : 'inside the margins', status: b.clash ? 'fail' : 'pass' });
   });

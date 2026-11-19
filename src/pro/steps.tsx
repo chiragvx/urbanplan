@@ -53,8 +53,9 @@ async function api<T>(q: Record<string, string>): Promise<T> {
   return j as T;
 }
 type Opt = { code: string; name: string };
-export function FindPlot({ done }: { done: (ring: number[], src: string, at?: [number, number] | null) => void }) {
-  const [open, setOpen] = useState(false);
+export function FindPlot({ done, start = false, cancel }: { done: (ring: number[], src: string, at?: [number, number] | null) => void; start?: boolean; cancel?: () => void }) {
+  const [open, setOpenS] = useState(start);
+  const setOpen = (o: boolean) => { setOpenS(o); if (!o) cancel?.(); };
   const [cat, setCat] = useState<'U' | 'R'>('U');
   const [lists, setLists] = useState<{ d?: Opt[]; t?: Opt[]; v?: Opt[]; n?: string[] }>({});
   const [sel, setSel] = useState<{ d?: string; t?: string; v?: string }>({});
@@ -156,25 +157,17 @@ export function MoneyStep({ p, e, up, deal, go }: StepProps) {
   return (
     <>
       <Section title="Result">
-        <div class="stats">
-          <Stat big label="Profit" value={cr(deal.profit)} sub={`${pct(deal.margin)} of revenue`} tone={deal.profit < 0 ? 'bad' : 'ok'} />
-          <Stat big label="IRR" value={pct(deal.irr)} sub="a year, on the monthly cash" tone={deal.irr !== null && deal.irr < 0.12 ? 'warn' : undefined} />
-          <Stat label="Peak funding" value={cr(deal.peak)} sub="the most cash put in" />
-          <Stat label={deal.owner.label} value={cr(deal.owner.value)} sub={deal.owner.note} />
-        </div>
+        <Lines rows={[['IRR', pct(deal.irr)], ['Margin', pct(deal.margin)], ['Peak funding', cr(deal.peak)], [deal.owner.label, cr(deal.owner.value)]]} />
         <CashChart flow={deal.flow} cum={deal.cum} months={c.months} />
       </Section>
 
       <Section title="Prices">
         <Row>
-          <Num label="Flats, ₹ / sq ft carpet" value={p.sale || c.sale} set={(v) => up({ sale: v })} step={250} min={1000} max={300000} hint={p.sale ? '' : 'The city’s starting figure with the style’s premium'} />
-          <Num label="Land, ₹ / sq ft of plot" value={p.land || c.land} set={(v) => up({ land: v })} step={250} min={0} max={1000000} hint={D.kind === 'outright' ? '' : 'Not paid in this deal'} />
+          <Num label="Sale price" value={p.sale || c.sale} set={(v) => up({ sale: v })} step={250} min={1000} max={300000} unit="₹/ft²" hint="on carpet" />
+          <Num label="Land price" value={p.land || c.land} set={(v) => up({ land: v })} step={250} min={0} max={1000000} unit="₹/ft²" hint={D.kind === 'outright' ? 'of plot' : 'not paid in this deal'} />
         </Row>
-        <Row>
-          <div class="f"><span class="f-l">Construction</span><span class="f-fixed">₹{nf(c.build)} / ft²</span><span class="f-h">With the finishes and systems below</span></div>
-          <Num label="Build time" value={p.costs?.months ?? c.months} set={(v) => up({ costs: { ...(p.costs ?? {}), months: v } })} min={6} max={96} unit="months" />
-        </Row>
-        <Lines rows={[['Finishes and spec', `${e.rate >= 0 ? '+' : '−'}₹${nf(Math.abs(e.rate))} / ft²`], ['Building systems', `${cr(e.sys.cost)} · ₹${nf(e.sys.costPerSqft)} / ft²`]]} />
+        <Lines rows={[['Construction', `₹${nf(c.build)}/ft²`], ['of which finishes and spec', `${e.rate >= 0 ? '+' : '−'}₹${nf(Math.abs(e.rate))}/ft²`], ['Building systems', `${cr(e.sys.cost)} · ₹${nf(e.sys.costPerSqft)}/ft²`]]} />
+        <Num label="Build time" value={p.costs?.months ?? c.months} set={(v) => up({ costs: { ...(p.costs ?? {}), months: v } })} min={6} max={96} unit="months" />
         <Row>
           <Num label="Booked by completion" value={p.costs?.presold ?? c.presold} set={(v) => up({ costs: { ...(p.costs ?? {}), presold: v } })} max={100} step={5} unit="%" />
           <Num label="Soft costs" value={p.costs?.soft ?? c.soft} set={(v) => up({ costs: { ...(p.costs ?? {}), soft: v } })} max={60} unit="% of build" />
@@ -192,7 +185,7 @@ export function MoneyStep({ p, e, up, deal, go }: StepProps) {
           <Row><Num label="Extra carpet for them" value={D.extraPct} set={(v) => setD({ extraPct: v })} max={200} unit="%" /><Num label="Corpus each" value={D.corpus} set={(v) => setD({ corpus: v })} max={500} unit="₹ lakh" /></Row>
           <Num label="Rent each, a month while it’s built" value={D.rent} set={(v) => setD({ rent: v })} step={1000} max={500000} unit="₹" />
         </>}
-        <Row><Num label="GST on sales" value={D.gstPct} set={(v) => setD({ gstPct: v })} max={18} step={1} unit="%" hint="Collected from buyers, paid on" /><Num label="Stamp duty" value={D.stampPct} set={(v) => setD({ stampPct: v })} max={10} step={0.5} unit="%" /></Row>
+        <Row><Num label="GST on sales" value={D.gstPct} set={(v) => setD({ gstPct: v })} max={18} step={1} unit="%" /><Num label="Stamp duty" value={D.stampPct} set={(v) => setD({ stampPct: v })} max={10} step={0.5} unit="%" /></Row>
         {deal.notes.map((n) => <Note>{n}</Note>)}
       </Section>
 
@@ -231,7 +224,7 @@ function CashChart({ flow, cum, months }: { flow: number[]; cum: number[]; month
 const STATUS_ICON: Record<CheckStatus, string> = { pass: 'check', fail: 'x', warn: 'warn', info: 'info' };
 export function ApproveStep({ p, e, up, checks, openDrawings, toast }: StepProps) {
   const sum = scrutinySummary(checks);
-  const [only, setOnly] = useState<'all' | 'issues'>(sum.fail + sum.warn ? 'issues' : 'all');
+  const [only, setOnly] = useState<'all' | 'issues'>('issues');
   const ex = p.approval ?? {};
   const kind = permissionOf(e, ex.kind);
   const list = nocs(e, ex), docs = documents(e, kind), fs = fees(e), steps = stages(e, kind);
@@ -240,14 +233,13 @@ export function ApproveStep({ p, e, up, checks, openDrawings, toast }: StepProps
   return (
     <>
 
-      <Section title="Scrutiny" sub="Every rule we model, checked as an authority would. Advisory: theirs is the one that counts.">
-        <div class="score">
+      <Section title="Scrutiny" sub="Advisory: the authority's check is the one that counts.">
+        {sum.fail + sum.warn > 0 && <div class="score">
           <span class="s-pass"><Icon n="check" size={14} />{sum.pass} pass</span>
-          <span class={`s-fail${sum.fail ? ' on' : ''}`}><Icon n="x" size={14} />{sum.fail} fail</span>
-          <span class={`s-warn${sum.warn ? ' on' : ''}`}><Icon n="warn" size={14} />{sum.warn} to check</span>
-          <span class="s-info"><Icon n="info" size={14} />{sum.info} notes</span>
-        </div>
-        <Seg<'all' | 'issues'> small value={only} set={setOnly} options={[{ value: 'issues', label: 'Issues' }, { value: 'all', label: 'Everything' }]} />
+          {sum.fail > 0 && <span class="s-fail on"><Icon n="x" size={14} />{sum.fail} fail</span>}
+          {sum.warn > 0 && <span class="s-warn on"><Icon n="warn" size={14} />{sum.warn} to check</span>}
+        </div>}
+        {(sum.fail + sum.warn > 0 || only === 'all') && <Seg<'all' | 'issues'> small value={only} set={setOnly} options={[{ value: 'issues', label: 'Issues' }, { value: 'all', label: 'Everything' }]} />}
         {groups.map((g) => {
           const cs = checks.filter((c) => c.group === g && shown(c));
           if (!cs.length) return null;
@@ -259,7 +251,7 @@ export function ApproveStep({ p, e, up, checks, openDrawings, toast }: StepProps
             </details>
           ))}</div>;
         })}
-        {only === 'issues' && !sum.fail && !sum.warn && <Note tone="ok">No issues in the rules checked.</Note>}
+        {only === 'issues' && !sum.fail && !sum.warn && <p class="hint-line"><Icon n="check" size={14} />All {sum.pass} checks pass. <button type="button" class="linkbtn" onClick={() => setOnly('all')}>Show them</button></p>}
       </Section>
 
       <Section title="Permission" fold open={false} aside={<span class="sec-meta">{PERMISSION_LABEL[kind]}</span>} sub={PERMISSION_HINT[kind]}>
@@ -267,10 +259,10 @@ export function ApproveStep({ p, e, up, checks, openDrawings, toast }: StepProps
         <ol class="stages">{steps.map((x) => <li><b>{x.title}</b><small>{x.note}</small></li>)}</ol>
       </Section>
 
-      <Section title="Drawings and files" sub="Generated from the scheme. An architect checks, signs and submits them; we never submit for you.">
+      <Section title="Drawings and files" sub="For an architect to check, sign and submit.">
         <div class="exports">
-          <button type="button" class="export" onClick={openDrawings}><Icon n="print" /><b>Drawing set</b><small>Site plan, floor plan, section, area statement. Print or save as PDF (A3).</small></button>
-          <button type="button" class="export" onClick={() => { download(`${slug(p.name)}-predcr.dxf`, predcrDxf(e), 'application/dxf'); toast('DXF saved on PreDCR layers. Open it in PreDCR, mark stairs, lifts and FSI, then run Verify.'); }}><Icon n="down" /><b>PreDCR DXF</b><small>Laid out as MCGM’s PreDCR manual asks: site plan, every floor plan and the section, on its layers. Mark and Verify in PreDCR.</small></button>
+          <button type="button" class="export" onClick={openDrawings}><Icon n="print" /><b>Drawing set</b><small>Plans, section, area statement · PDF (A3)</small></button>
+          <button type="button" class="export" onClick={() => { download(`${slug(p.name)}-predcr.dxf`, predcrDxf(e), 'application/dxf'); toast('DXF saved on PreDCR layers. Open it in PreDCR, mark stairs, lifts and FSI, then run Verify.'); }}><Icon n="down" /><b>PreDCR DXF</b><small>Site plan, floor plans and section on PreDCR’s layers.</small></button>
         </div>
       </Section>
 
@@ -311,7 +303,7 @@ function BriefBox({ p, up, toast }: { p: ProProject; up: StepProps['up']; toast:
   const [res, setRes] = useState<(BriefResult & { understood: string[]; ignored: string[] }) | null>(null);
   const run = () => { const b = parseBrief(text); setRes({ ...runBrief(p, b.brief), understood: b.understood, ignored: b.ignored }); };
   return (
-    <Section title="Brief" sub="Say what you want; the best scheme that passes the rules comes back.">
+    <Section title="Brief">
       <textarea class="brief" rows={3} value={text} onInput={(ev) => setText((ev.target as HTMLTextAreaElement).value)} onKeyDown={(ev) => { if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) run(); }} />
       <Row><Btn kind="primary" icon="play" onClick={run}>Plan it</Btn>{res?.best && <Btn icon="check" onClick={() => { up({ ...res.patch, scheme: undefined }); toast(`Applied: ${res.best!.label}`); }}>Use the best</Btn>}</Row>
       {res && <>
@@ -338,8 +330,8 @@ function OptionsBox({ p, up, toast }: { p: ProProject; up: StepProps['up']; toas
   const [rows, setRows] = useState<OptionRow[] | null>(null), [busy, setBusy] = useState(false);
   const run = () => { setBusy(true); setTimeout(() => { setRows(exploreOptions(p, { limit: 12 })); setBusy(false); }, 30); };
   return (
-    <Section title="Options" sub="Every building type, height and flat mix, ranked by profit.">
-      <Btn kind={rows ? undefined : 'primary'} icon={busy ? undefined : 'layers'} onClick={run} disabled={busy}>{busy ? <><Dither class="dz" cell={2} />Working…</> : rows ? 'Run again' : 'Find options'}</Btn>
+    <Section title="Options">
+      <Row><Btn icon={busy ? undefined : 'layers'} onClick={run} disabled={busy}>{busy ? <><Dither class="dz" cell={2} />Working…</> : rows ? 'Run again' : 'Find options'}</Btn></Row>
       {busy && <div class="working" role="status"><Dither class="working-art" cell={3} /><span>Working out every option…</span></div>}
       {rows && <div class="opts">{rows.map((o, i) => <OptionCard o={o} best={i === 0} apply={() => { up({ ...o.patch, scheme: undefined }); toast(`Applied: ${o.label}`); }} />)}</div>}
     </Section>

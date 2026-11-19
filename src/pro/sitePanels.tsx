@@ -22,6 +22,7 @@ import { SystemsPanel } from './systemsPanel';
 import { groundAt, groundOpen, plotOverRoad, type Ground } from './terrain';
 import { mergeSettings, splitSettings } from './systems';
 
+type PlotWay = 'size' | 'draw' | 'survey' | 'import';
 const DIRS = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
 /** an edge's outward side as a compass point */
 function edgeFacing(ring: number[], k: number, north: number): string {
@@ -44,16 +45,15 @@ function Tools({ items, tool, setTool, label }: { items: { t: Tool; label: strin
   );
 }
 
-function Picked({ title, children, remove }: { title: ComponentChildren; children?: ComponentChildren; remove?: () => void }) {
-  return <div class="picked"><header><b>{title}</b>{remove && <Btn kind="quiet" icon="trash" title="Remove (Delete)" onClick={remove} />}</header>{children}</div>;
+function Picked({ title, children, remove, copy }: { title: ComponentChildren; children?: ComponentChildren; remove?: () => void; copy?: () => void }) {
+  return <div class="picked"><header><b>{title}</b><span>{copy && <Btn kind="quiet" icon="plus" title="Duplicate" onClick={copy} />}{remove && <Btn kind="quiet" icon="trash" title="Remove (Delete)" onClick={remove} />}</span></header>{children}</div>;
 }
 
 // ================================================================ site
 export function SiteStep2({ p, e, up, toast, tool, setTool, picked, pick }: StepProps) {
   const { r } = e;
   const city = CITIES.find((c) => c.value === p.city)!;
-  const [sizing, setSizing] = useState(p.shape !== 'poly');
-  const [importing, setImporting] = useState(false);
+  const [way, setWay] = useState<PlotWay>(p.shape === 'poly' ? 'draw' : 'size');
   const o = outline(p), north = p.north ?? 0;
   const L: Levels = { ...DEFAULT_LEVELS, ...(p.levels ?? {}) };
   const setLv = (x: Partial<Levels>) => up({ levels: { ...L, ...x } });
@@ -93,21 +93,20 @@ export function SiteStep2({ p, e, up, toast, tool, setTool, picked, pick }: Step
   return (
     <>
       <Section title="Rules">
-        <Select label="Planning authority" value={p.city} onChange={(v) => up({ city: v })} options={CITIES.map((c) => ({ value: c.value, label: c.label }))} />
-        <Note>{city.note}</Note>
+        <Select label="Planning authority" hint={city.note} value={p.city} onChange={(v) => up({ city: v })} options={CITIES.map((c) => ({ value: c.value, label: c.label }))} />
       </Section>
 
       <Section title="Plot" aside={<span class="sec-meta">{nf(r.area)} m² · {sqft(r.area)}</span>}>
-        <Tools label="Plot" tool={tool} setTool={setTool} items={[{ t: { k: 'plot' }, label: 'Draw it', icon: 'edit' }]} />
-        <p class="hint-line"><Icon n="cursor" size={14} />Drag its corners on the map to change it.</p>
-        <button type="button" class="linkbtn" aria-expanded={sizing} onClick={() => setSizing(!sizing)}><Icon n="plan" size={14} /> A rectangle by its size</button>
-        {sizing && <Row><Num label="Frontage" value={p.width} set={(v) => up({ width: v, shape: 'rect' })} min={10} max={600} unit="m" /><Num label="Depth" value={p.depth} set={(v) => up({ depth: v, shape: 'rect' })} min={10} max={600} unit="m" /></Row>}
-        <FindPlot done={(ring, src, at) => found(ring, src, src.split(' · ')[0], at)} />
-        <button type="button" class="linkbtn" aria-expanded={importing} onClick={() => setImporting(!importing)}><Icon n="upload" size={14} /> Import the outline from a file or coordinates</button>
-        {importing && <ImportBox done={(ring, src, at) => { found(ring, `Outline from ${src}`, undefined, at); setImporting(false); }} />}
+        <Seg<PlotWay> value={way} set={(v) => { setWay(v); if (v === 'draw') setTool({ k: 'plot' }); else if (tool.k === 'plot') setTool({ k: 'select' }); }} options={[
+          { value: 'size', label: 'Size' }, { value: 'draw', label: 'Draw' }, { value: 'survey', label: 'Survey no.' }, { value: 'import', label: 'Import' },
+        ]} ariaLabel="Set the plot by" />
+        {way === 'size' && <Row><Num label="Frontage" value={p.width} set={(v) => up({ width: v, shape: 'rect' })} min={10} max={600} unit="m" /><Num label="Depth" value={p.depth} set={(v) => up({ depth: v, shape: 'rect' })} min={10} max={600} unit="m" /></Row>}
+        {way === 'draw' && <p class="hint-line"><Icon n="edit" size={14} />{p.shape === 'poly' ? 'Drag its corners on the map, or click to draw it again.' : 'Click its corners on the map, Enter to finish.'}</p>}
+        {way === 'survey' && <FindPlot start cancel={() => setWay('size')} done={(ring, src, at) => { found(ring, src, src.split(' · ')[0], at); setWay('draw'); }} />}
+        {way === 'import' && <ImportBox done={(ring, src, at) => { found(ring, `Outline from ${src}`, undefined, at); setWay('draw'); }} />}
       </Section>
 
-      <Section title="Roads" sub="The road along each edge, at the widths the plan uses. The DP width sets the rules.">
+      <Section title="Roads">
         <div class="edges">{o.roads.map((rd, k) => {
           const i = 2 * k, j = (i + 2) % o.ring.length, len = Math.hypot(o.ring[j] - o.ring[i], o.ring[j + 1] - o.ring[i + 1]);
           const pr = rd ? roadParts(Math.max(rd.today, rd.dp)) : null;
@@ -143,7 +142,7 @@ export function SiteStep2({ p, e, up, toast, tool, setTool, picked, pick }: Step
         {L.slope >= 15 && <Note tone="warn">A steep plot ({nf(L.slope)}%): expect retaining walls and stepped floors, and a hill-slope check by the authority.</Note>}
       </Section>
 
-      <Section title="On the site" sub="Obstructions and no-build zones. Draw them on the map: the scheme keeps clear of them.">
+      <Section title="On the site" fold open={fs.length > 0 || tool.k === 'feature'} aside={<span class="sec-meta">{fs.length ? `${fs.length} marked` : 'none'}</span>} sub="What to build round. Click a tool, then the map.">
         <Tools label="Draw on the site" tool={tool} setTool={setTool} items={FEATURES.map((f) => ({ t: { k: 'feature', kind: f.kind }, label: f.label, icon: f.icon }))} />
         {fs.length > 0 && <ul class="flist">{fs.map((f, i) => {
           const F = featureOf(f.kind), n = fs.slice(0, i).filter((x) => x.kind === f.kind).length + 1;
@@ -161,7 +160,7 @@ export function SiteStep2({ p, e, up, toast, tool, setTool, picked, pick }: Step
         ); })()}
       </Section>
 
-      <Section title="What the rules give" fold open={false} sub={`On a ${nf(r.roadW)} m road${r.roadW !== (r.road?.today ?? r.roadW) ? ' (the DP width)' : ''}.`}>
+      <Section title="Allowed" fold open={false} sub={`On a ${nf(r.roadW)} m road${r.roadW !== (r.road?.today ?? r.roadW) ? ' (the DP width)' : ''}.`}>
         <div class="stats">
           <Stat label="FSI" value={nf(r.fsi, 2)} sub={`+ ${Math.round(r.rules.ancillary * 100)}% ${r.code === 'udcpr' ? 'ancillary' : 'fungible'}`} />
           <Stat label="Built-up allowed" value={sqft(r.bua)} sub={`${nf(r.bua)} m²`} />
@@ -178,7 +177,7 @@ export function SiteStep2({ p, e, up, toast, tool, setTool, picked, pick }: Step
         ]} />
       </Section>
 
-      <Section title="The site's own limits" fold open={!!(LM.maxH || LM.tod)} sub="Over the code's: an airport or fire height cap, a transit zone near a metro station.">
+      <Section title="Constraints" fold open={!!(LM.maxH || LM.tod)} sub="An airport or fire height cap, a metro transit zone.">
         <Num label="Height cap (0: none)" value={LM.maxH} set={(v) => setLM({ maxH: v })} max={900} unit="m" hint="From the AAI colour-coded zoning map, or a fire or heritage limit" />
         <Toggle label="Transit-oriented zone" hint="Near a metro station: more FSI with premium" value={LM.tod} set={(v) => setLM({ tod: v })} />
         {LM.tod && <Num label="Total FSI in the zone" value={LM.todFsi} set={(v) => setLM({ todFsi: v })} min={1} max={6} step={0.1} />}
@@ -218,11 +217,11 @@ export function SchemeStep({ p, e, up, rooms, toast, tool, setTool, picked, pick
     <>
       <button type="button" class="backlink" onClick={() => pick(null)}><Icon n="chevron" size={14} /> All buildings</button>
         {br && ownB && (
-      <Picked title={<>{nameOf(bi)}<small> · {nf(br.plate)} m² plate</small></>} remove={() => { up(removed(p, e, { k: 'building', id: br.b.id })); pick(null); }}>
+      <Picked title={<>{nameOf(bi)}<small> · {nf(br.plate)} m² plate</small></>} remove={() => { up(removed(p, e, { k: 'building', id: br.b.id })); pick(null); }} copy={() => { const s = own(p, e), src = s.buildings.find((b) => b.id === br.b.id); if (!src) return; const c = { ...src, id: `b${Date.now().toString(36)}`, name: `${src.name ?? 'Building'} copy`, spine: src.spine.map((q, i) => q + (i % 2 ? 0 : src.depth + 6)) }; up({ scheme: { ...s, buildings: [...s.buildings, c] } }); pick({ k: 'building', id: c.id }); }}>
         {deps.map((x) => <Note tone="bad">{x.text}</Note>)}
         <label class="f"><span class="f-l">Name</span><input class="txt" value={ownB.name ?? nameOf(bi)} onChange={(ev) => setB((b) => ({ ...b, name: (ev.target as HTMLInputElement).value }))} /></label>
         <Row>
-          <Num label="Floors" value={br.floors} set={(v) => setB((b) => ({ ...b, floors: Math.max(1, v) }))} min={1} max={300} hint={`${br.maxFloors} fit the margins`} />
+          <Num label="Floors" value={br.floors} set={(v) => setB((b) => ({ ...b, floors: Math.max(1, v) }))} min={1} max={300} hint={`Up to ${br.maxFloors} within the margins`} />
           <Num label="Depth" value={ownB.depth} set={(v) => setB((b) => ({ ...b, depth: v }))} min={6} max={80} step={0.5} unit="m" />
         </Row>
         <Row>
@@ -235,8 +234,7 @@ export function SchemeStep({ p, e, up, rooms, toast, tool, setTool, picked, pick
         </Row>
         <Toggle label="Its own flat mix" value={!!ownB.mix} set={(v) => setB((b) => ({ ...b, mix: v ? [...p.mix] as [number, number, number] : undefined }))} />
         {ownB.mix && <Row n={3}>{[0, 1, 2].map((t) => <Num label={UNIT_LABEL[t]} value={Math.round(ownB.mix![t] * 100)} set={(v) => setB((b) => { const m = [...(b.mix ?? p.mix)] as [number, number, number]; m[t] = v / 100; const s = m[0] + m[1] + m[2] || 1; return { ...b, mix: m.map((x) => x / s) as [number, number, number] }; })} max={100} step={5} unit="%" />)}</Row>}
-        <Select<string> label="Design system" value={ownB.style ?? ''} onChange={(v) => setB((b) => ({ ...b, style: v || undefined }))} options={[{ value: '', label: `The project's (${presetOf(p.style).name})` }, ...PRESETS.map((x) => ({ value: x.id, label: x.name }))]} />
-        <Row><Btn icon="plus" onClick={() => { const s = own(p, e), src = s.buildings.find((b) => b.id === br.b.id); if (!src) return; const c = { ...src, id: `b${Date.now().toString(36)}`, name: `${src.name ?? 'Building'} copy`, spine: src.spine.map((q, i) => q + (i % 2 ? 0 : src.depth + 6)) }; up({ scheme: { ...s, buildings: [...s.buildings, c] } }); pick({ k: 'building', id: c.id }); }}>Duplicate</Btn></Row>
+        <Select<string> label="Design system" value={ownB.style ?? ''} onChange={(v) => setB((b) => ({ ...b, style: v || undefined }))} options={[{ value: '', label: `Project default (${presetOf(p.style).name})` }, ...PRESETS.map((x) => ({ value: x.id, label: x.name }))]} />
         <Section title="Systems" fold open={false} sub="Stairs, lifts, ducts, plumbing, power and fire: sized for it, each one yours to set."><SystemsPanel b={br} settings={mergeSettings(p.systems?.byBuilding?.[br.b.id], p.systems?.site)} under={d.under} floorH={r.rules.floorH} code={r.code} name={nameOf(bi)} basements={d.site.basements} bays={d.parking.have}
           set={(x) => { const { building, plant } = splitSettings(x); up({ systems: { site: plant, byBuilding: { ...(p.systems?.byBuilding ?? {}), [br.b.id]: building } } }); }} /></Section>
         <Section title="Flat plans" fold open={false} sub="Rooms fitted into each flat of a typical floor, checked against the minimum room sizes.">
@@ -255,7 +253,7 @@ export function SchemeStep({ p, e, up, rooms, toast, tool, setTool, picked, pick
   );
   return (
     <>
-      <Section title="Fill the plot" aside={owned ? <span class="sec-meta">shaped by hand</span> : <span class="sec-meta">live</span>}>
+      <Section title="Fill the plot" aside={owned ? <span class="sec-meta">shaped by hand</span> : undefined}>
         {owned
           ? <><Note>The buildings are yours: drag them on the map, set each one below. Filling again replaces them.</Note>
             <Row><Btn icon="spark" onClick={() => { up({ scheme: undefined }); pick(null); toast('Filled again from the settings.'); }}>Fill again</Btn></Row></>
@@ -263,13 +261,13 @@ export function SchemeStep({ p, e, up, rooms, toast, tool, setTool, picked, pick
             <Slider label="How much" value={Math.round(f.amount * 100)} set={(v) => setFill({ amount: v / 100 })} min={30} max={100} step={5} fmt={(v) => (v >= 100 ? 'All the rules allow' : `${v}% of what's allowed`)} />
             <Seg<Typology> value={p.typology} set={(v) => up({ typology: v })} label="Building type" options={TYPOLOGIES} />
             <Row>
-              <Num label="Most floors" value={p.maxFloors} set={(v) => up({ maxFloors: v })} min={0} max={300} hint={p.maxFloors ? undefined : "0: as the rules allow"} />
-              <Num label="Most buildings" value={f.buildings} set={(v) => setFill({ buildings: v })} min={0} max={40} hint={f.buildings ? undefined : "0: as many as fit"} />
+              <Num label="Most floors" value={p.maxFloors} set={(v) => up({ maxFloors: v })} min={0} max={300} zero="Auto" />
+              <Num label="Most buildings" value={f.buildings} set={(v) => setFill({ buildings: v })} min={0} max={40} zero="Auto" />
             </Row>
           </>}
       </Section>
 
-      <Section title="Living" sub="Green, play, roads inside, spacing and parking." fold open={false} aside={<span class="sec-meta">{f.green ? `${f.green}% green` : 'as the rules ask'}</span>}>
+      <Section title="Living" sub="Green, play, roads inside, spacing and parking." fold open={false} aside={<span class="sec-meta">{f.green ? `${f.green}% green` : 'rules minimum'}</span>}>
         <Slider label="Green" value={f.green} set={(v) => setFill({ green: v })} min={0} max={50} step={5} fmt={(v) => (v ? `At least ${v}% of the plot` : 'What the rules ask')} />
         <Toggle label="Play area" hint="In the open space" value={f.play} set={(v) => setFill({ play: v })} />
         <Seg value={f.access} set={(v) => setFill({ access: v })} label="Roads inside" options={ACCESS.map((a) => ({ value: a.value, label: a.label, title: a.title }))} />
@@ -285,8 +283,10 @@ export function SchemeStep({ p, e, up, rooms, toast, tool, setTool, picked, pick
         <Note>{[0, 1, 2].filter((t) => d.count[t]).map((t) => `${d.count[t]} × ${UNIT_LABEL[t]}`).join(' · ') || 'No flats fit.'}</Note>
       </Section>
 
-      <Section title="Add" sub="Pick one, then click or drag on the map.">
+      <Section title="Add a building" sub="Pick a shape, then click on the map.">
         <Tools label="Buildings" tool={tool} setTool={setTool} items={BUILDING_SHAPES.map((s) => ({ t: { k: 'building', shape: s.shape }, label: s.label, icon: s.icon }))} />
+      </Section>
+      <Section title="Add to the grounds" fold open={tool.k === 'element'} aside={<span class="sec-meta">gardens, parking, roads</span>}>
         <Tools label="On the site" tool={tool} setTool={setTool} items={ELEMENT_TOOLS.map((s) => ({ t: { k: 'element', kind: s.kind }, label: s.label, icon: s.icon }))} />
       </Section>
 
@@ -323,7 +323,7 @@ export function SchemeStep({ p, e, up, rooms, toast, tool, setTool, picked, pick
         ]} />
       </Section>
 
-      <Section title="The buildings as data" fold open={false} sub="Every floor, flat, room, window and door: JSON for scripts, IFC for Revit and other BIM tools (spaces only).">
+      <Section title="Export the model" fold open={false} sub="Every floor, flat, room, window and door: JSON for scripts, IFC for Revit and other BIM tools (spaces only).">
         <Row>
           <Btn icon="down" onClick={() => { download(`${slug(p.name)}.model.json`, modelJson(buildModel(e, rooms)), 'application/json'); toast('Model saved as JSON.'); }}>Model JSON</Btn>
           <Btn icon="down" onClick={() => { download(`${slug(p.name)}.ifc`, ifcLite(e, rooms), 'application/x-step'); toast('IFC saved: open it in Revit, ArchiCAD or BIMvision.'); }}>IFC (spaces)</Btn>

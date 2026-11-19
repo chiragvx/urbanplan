@@ -282,7 +282,7 @@ function App() {
       {panel && (
         <aside class="panel" aria-label={cur.title}>
           <header class="panel-h">
-            <div><h2>{cur.title}</h2><p>{cur.sub}</p></div>
+            <div><h2>{cur.title}</h2></div>
             <Btn kind="quiet" icon="x" title="Hide the panel" onClick={() => setPanel(false)} />
           </header>
           <div class="panel-b" key={step}>
@@ -291,11 +291,11 @@ function App() {
             {readOnly && <p class="note">A shared scheme, view only. <button type="button" class="linkbtn" onClick={keepCopy}>Make it your own copy</button> to change it.</p>}
             <fieldset disabled={readOnly || viewer}><Body {...props} /></fieldset>
           </div>
-          <footer class="panel-f">
+          {!(step === 'build' && picked && picked.k !== 'feature') && <footer class="panel-f">
             {STEPS.findIndex((s) => s.key === step) > 0 && <Btn kind="quiet" onClick={() => go(STEPS[STEPS.findIndex((s) => s.key === step) - 1].key)}>Back</Btn>}
             <span class="gap" />
             {STEPS.findIndex((s) => s.key === step) < STEPS.length - 1 && <Btn kind="primary" onClick={() => go(STEPS[STEPS.findIndex((s) => s.key === step) + 1].key)}>Next: {STEPS[STEPS.findIndex((s) => s.key === step) + 1].label}<Icon n="chevron" size={15} /></Btn>}
-          </footer>
+          </footer>}
         </aside>
       )}
 
@@ -313,10 +313,6 @@ function App() {
             { value: 'wire', label: 'Wireframe', icon: 'wire', checked: mode === 'wire' && xr === null, disabled: xr !== null, title: xr !== null ? 'X-ray is always shaded' : 'Wireframe: low-poly lines' },
             { value: 'shaded', label: 'Shaded', icon: 'shade', checked: mode === 'shaded' || xr !== null, title: 'Shaded: materials, windows, sun' },
           ]} ariaLabel="Drawn as" />
-          <Seg<'ext' | 'xray'> class="tgroup" value={xr === null ? 'ext' : 'xray'} set={(v) => (v === 'ext' ? setXray(null) : setXray(Math.max(1, Math.round(maxFloor / 2))))} options={[
-            { value: 'ext', label: 'Exterior', icon: 'cube' },
-            { value: 'xray', label: 'X-ray', icon: 'layers' },
-          ]} ariaLabel="View" />
           {xr !== null && <div class="tgroup floor">
             <button type="button" onClick={() => setXray(Math.max(1, xr - 1))} aria-label="Floor down" data-tip="Floor down ([)"><Icon n="minus" size={14} /></button>
             <b>Floor {xr}<small> of {maxFloor}</small></b>
@@ -326,6 +322,7 @@ function App() {
             <button type="button" aria-label="Whole site" aria-keyshortcuts="F" data-tip="Whole site (F)" onClick={() => cam('fit')}><Icon n="fit" size={16} /></button>
             <button type="button" aria-label="From the street" aria-keyshortcuts="S" data-tip="From the street (S)" onClick={() => cam('street')}><Icon n="street" size={16} /></button>
             <button type="button" aria-label="From above" aria-keyshortcuts="T" data-tip="From above (T)" onClick={() => cam('top')}><Icon n="top" size={16} /></button>
+            <button type="button" aria-label="X-ray, a floor at a time" data-tip="X-ray: a floor at a time" aria-pressed={xr !== null} onClick={() => setXray(xr === null ? Math.max(1, Math.round(maxFloor / 2)) : null)}><Icon n="layers" size={16} /></button>
           </div>
           <div class={`tgroup sun${sun.on ? ' on' : ''}`}>
             <button type="button" aria-label="Sun" data-tip="Sun and shadows on a date and time" aria-pressed={sun.on} onClick={() => { if (!sun.on && mode === 'wire') setMode('shaded'); setSun({ ...sun, on: !sun.on }); }}><Icon n="sun" size={16} />{sun.on ? '' : 'Sun'}</button>
@@ -536,11 +533,10 @@ function Keys({ close }: { close: () => void }) {
 
 /** First visit: start from a plot in three numbers, or look round the sample. */
 function Welcome({ close }: { close: (p?: ProProject) => void }) {
-  const [w, setW] = useState(30), [dpt, setD] = useState(40), [road, setRoad] = useState(12), [city, setCity] = useState<ProProject['city']>('pune');
+  const [w, setW] = useState(40), [dpt, setD] = useState(50), [road, setRoad] = useState(12), [city, setCity] = useState<ProProject['city']>('pune');
   return (
     <Dialog title="Size up a plot in a minute" close={() => close()} wide>
-      <p class="note">Give the plot and its road: you get the most the rules allow, in 3D, with the money and the scrutiny. Then work it through in four steps.</p>
-      <ol class="wsteps"><li><b>Site</b> Draw the plot, roads, trees and no-build zones on the map.</li><li><b>Design</b> The look and the materials.</li><li><b>Scheme</b> Fill the plot, or place and shape each building yourself.</li><li><b>Money · Approval</b> What it earns and what the rules say.</li></ol>
+      <p class="note">The plot and its road: the most the rules allow, in 3D, with the money.</p>
       <div class="row r2">
         <Select<ProProject['city']> label="Planning authority" value={city} onChange={setCity} options={[{ value: 'pune', label: 'Pune (UDCPR)' }, { value: 'pune-congested', label: 'Pune old city' }, { value: 'mumbai-suburbs', label: 'Mumbai suburbs' }, { value: 'mumbai-island', label: 'Mumbai island city' }]} />
         <Num label="Road in front" value={road} set={setRoad} min={3} max={80} unit="m" />
@@ -548,9 +544,8 @@ function Welcome({ close }: { close: (p?: ProProject) => void }) {
       <div class="row r2"><Num label="Frontage" value={w} set={setW} min={10} max={400} unit="m" /><Num label="Depth" value={dpt} set={setD} min={10} max={400} unit="m" /></div>
       <div class="row r2">
         <Btn kind="primary" onClick={() => close({ ...DEFAULT_PROJECT, city, width: w, depth: dpt, road, dpRoad: road, name: `${w} × ${dpt} m plot` })}>Work it out</Btn>
-        <Btn onClick={() => close()}>Look round the sample first</Btn>
+        <Btn onClick={() => close()}>Open the sample</Btn>
       </div>
-      <p class="note">Plot not a rectangle? Draw it on the map, find it by survey number or import it in the Site step.</p>
     </Dialog>
   );
 }
