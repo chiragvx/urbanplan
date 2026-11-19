@@ -536,7 +536,8 @@ function Welcome({ close }: { close: (p?: ProProject) => void }) {
   const [w, setW] = useState(30), [dpt, setD] = useState(40), [road, setRoad] = useState(12), [city, setCity] = useState<ProProject['city']>('pune');
   return (
     <Dialog title="Size up a plot in a minute" close={() => close()} wide>
-      <p class="note">Give the plot and its road. You get the most the rules let you build, a scheme in 3D, the money and our own scrutiny, all at once. Change anything after.</p>
+      <p class="note">Give the plot and its road: you get the most the rules allow, in 3D, with the money and the scrutiny. Then work it through in four steps.</p>
+      <ol class="wsteps"><li><b>Site</b> Draw the plot, roads, trees and no-build zones on the map.</li><li><b>Design</b> The look and the materials.</li><li><b>Scheme</b> Fill the plot, or place and shape each building yourself.</li><li><b>Money · Approval</b> What it earns and what the rules say.</li></ol>
       <div class="row r2">
         <Select<ProProject['city']> label="Planning authority" value={city} onChange={setCity} options={[{ value: 'pune', label: 'Pune (UDCPR)' }, { value: 'pune-congested', label: 'Pune old city' }, { value: 'mumbai-suburbs', label: 'Mumbai suburbs' }, { value: 'mumbai-island', label: 'Mumbai island city' }]} />
         <Num label="Road in front" value={road} set={setRoad} min={3} max={80} unit="m" />

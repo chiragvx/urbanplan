@@ -136,7 +136,7 @@ export function SiteStep2({ p, e, up, toast, tool, setTool, picked, pick }: Step
         ); })()}
       </Section>
 
-      <Section title="What the rules give" sub={`On a ${nf(r.roadW)} m road${r.roadW !== (r.road?.today ?? r.roadW) ? ' (the DP width)' : ''}.`}>
+      <Section title="What the rules give" fold open={false} sub={`On a ${nf(r.roadW)} m road${r.roadW !== (r.road?.today ?? r.roadW) ? ' (the DP width)' : ''}.`}>
         <div class="stats">
           <Stat label="FSI" value={nf(r.fsi, 2)} sub={`+ ${Math.round(r.rules.ancillary * 100)}% ${r.code === 'udcpr' ? 'ancillary' : 'fungible'}`} />
           <Stat label="Built-up allowed" value={sqft(r.bua)} sub={`${nf(r.bua)} m²`} />
@@ -189,6 +189,45 @@ export function SchemeStep({ p, e, up, rooms, toast, tool, setTool, picked, pick
   const setEl = (x: Partial<SiteElement>) => { if (!el) return; const s = own(p, e); up({ scheme: { ...s, elements: s.elements.map((y) => (y.id === el.id ? { ...y, ...x } : y)) } }); };
   const nameOf = (i: number) => (p.scheme?.buildings.find((b) => b.id === d.buildings[i].b.id)?.name) ?? `Building ${String.fromCharCode(65 + i)}`;
   const deps = br ? d.departures.filter((x) => x.ids.includes(br.b.id)) : [];
+  if ((br && ownB) || el) return (
+    <>
+      <button type="button" class="backlink" onClick={() => pick(null)}><Icon n="chevron" size={14} /> All buildings</button>
+        {br && ownB && (
+      <Picked title={<>{nameOf(bi)}<small> · {nf(br.plate)} m² plate</small></>} remove={() => { up(removed(p, e, { k: 'building', id: br.b.id })); pick(null); }}>
+        {deps.map((x) => <Note tone="bad">{x.text}</Note>)}
+        <label class="f"><span class="f-l">Name</span><input class="txt" value={ownB.name ?? nameOf(bi)} onChange={(ev) => setB((b) => ({ ...b, name: (ev.target as HTMLInputElement).value }))} /></label>
+        <Row>
+          <Num label="Floors" value={br.floors} set={(v) => setB((b) => ({ ...b, floors: Math.max(1, v) }))} min={1} max={300} hint={`${br.maxFloors} fit the margins`} />
+          <Num label="Depth" value={ownB.depth} set={(v) => setB((b) => ({ ...b, depth: v }))} min={6} max={80} step={0.5} unit="m" />
+        </Row>
+        <Row>
+          <Num label="Length" value={Math.round(spineLength(ownB) * 10) / 10} set={(v) => setB((b) => stretched(b, v))} min={4} max={600} step={0.5} unit="m" />
+          <div class="f"><span class="f-l">Turn</span><div class="turns">
+            <Btn kind="ghost" title="Turn 15° anticlockwise" onClick={() => setB((b) => turned(b, -15))}>−15°</Btn>
+            <Btn kind="ghost" title="Turn 15° clockwise" onClick={() => setB((b) => turned(b, 15))}>+15°</Btn>
+            <Btn kind="ghost" title="Turn a quarter" onClick={() => setB((b) => turned(b, 90))}>90°</Btn>
+          </div></div>
+        </Row>
+        <Toggle label="Its own flat mix" value={!!ownB.mix} set={(v) => setB((b) => ({ ...b, mix: v ? [...p.mix] as [number, number, number] : undefined }))} />
+        {ownB.mix && <Row n={3}>{[0, 1, 2].map((t) => <Num label={UNIT_LABEL[t]} value={Math.round(ownB.mix![t] * 100)} set={(v) => setB((b) => { const m = [...(b.mix ?? p.mix)] as [number, number, number]; m[t] = v / 100; const s = m[0] + m[1] + m[2] || 1; return { ...b, mix: m.map((x) => x / s) as [number, number, number] }; })} max={100} step={5} unit="%" />)}</Row>}
+        <Select<string> label="Design system" value={ownB.style ?? ''} onChange={(v) => setB((b) => ({ ...b, style: v || undefined }))} options={[{ value: '', label: `The project's (${presetOf(p.style).name})` }, ...PRESETS.map((x) => ({ value: x.id, label: x.name }))]} />
+        <Row><Btn icon="plus" onClick={() => { const s = own(p, e), src = s.buildings.find((b) => b.id === br.b.id); if (!src) return; const c = { ...src, id: `b${Date.now().toString(36)}`, name: `${src.name ?? 'Building'} copy`, spine: src.spine.map((q, i) => q + (i % 2 ? 0 : src.depth + 6)) }; up({ scheme: { ...s, buildings: [...s.buildings, c] } }); pick({ k: 'building', id: c.id }); }}>Duplicate</Btn></Row>
+        <Section title="Systems" fold open={false} sub="Stairs, lifts, ducts, plumbing, power and fire: sized for it, each one yours to set."><SystemsPanel b={br} settings={mergeSettings(p.systems?.byBuilding?.[br.b.id], p.systems?.site)} under={d.under} floorH={r.rules.floorH} code={r.code} name={nameOf(bi)} basements={d.site.basements} bays={d.parking.have}
+          set={(x) => { const { building, plant } = splitSettings(x); up({ systems: { site: plant, byBuilding: { ...(p.systems?.byBuilding ?? {}), [br.b.id]: building } } }); }} /></Section>
+        <Section title="Flat plans" fold open={false} sub="Rooms fitted into each flat of a typical floor, checked against the minimum room sizes.">
+          <div class="flats">{(rooms[bi] ?? []).filter((fr, k, a) => fr.t < 3 && fr.rooms.length && a.findIndex((y) => y.t === fr.t) === k).map((fr) => <FlatPlan t={fr.t} fr={fr} />)}</div>
+        </Section>
+      </Picked>
+    )}
+    {el && (
+      <Picked title={ELEMENT_TOOLS.find((x) => x.kind === el.kind)?.label ?? 'On the site'} remove={() => { up(removed(p, e, { k: 'element', id: el.id })); pick(null); }}>
+        {el.kind === 'road' && <Select<number> label="Width" value={el.depth} onChange={(v) => setEl({ depth: v })} options={INTERNAL_WIDTHS.map((w) => ({ value: w, label: `${w} m` }))} />}
+        {el.kind === 'parking' && <Num label="Levels" value={el.levels ?? 3} set={(v) => setEl({ levels: v })} min={1} max={12} />}
+        <Note>Drag it on the map to move it.</Note>
+      </Picked>
+    )}
+    </>
+  );
   return (
     <>
       <Section title="Fill the plot" aside={owned ? <span class="sec-meta">shaped by hand</span> : <span class="sec-meta">live</span>}>
@@ -205,7 +244,7 @@ export function SchemeStep({ p, e, up, rooms, toast, tool, setTool, picked, pick
           </>}
       </Section>
 
-      <Section title="Living" sub="What the site gives the people in it." fold open={!owned}>
+      <Section title="Living" sub="Green, play, roads inside, spacing and parking." fold open={false} aside={<span class="sec-meta">{f.green ? `${f.green}% green` : 'as the rules ask'}</span>}>
         <Slider label="Green" value={f.green} set={(v) => setFill({ green: v })} min={0} max={50} step={5} fmt={(v) => (v ? `At least ${v}% of the plot` : 'What the rules ask')} />
         <Toggle label="Play area" hint="In the open space" value={f.play} set={(v) => setFill({ play: v })} />
         <Seg value={f.access} set={(v) => setFill({ access: v })} label="Roads inside" options={ACCESS.map((a) => ({ value: a.value, label: a.label, title: a.title }))} />
@@ -215,7 +254,7 @@ export function SchemeStep({ p, e, up, rooms, toast, tool, setTool, picked, pick
         {owned && <Note>These apply when you fill again; parking and basements apply now.</Note>}
       </Section>
 
-      <Section title="Flat mix" aside={<span class="sec-meta">{d.flats} flats</span>} sub="Every building, unless one has its own.">
+      <Section title="Flat mix" fold open={false} aside={<span class="sec-meta">{d.flats} flats</span>} sub="Every building, unless one has its own.">
         <div class="mixbar" aria-hidden="true">{[0, 1, 2].map((i) => <i class={`m${i}`} style={`flex:${p.mix[i] || 0.0001}`}>{mixPct[i] >= 12 ? `${mixPct[i]}%` : ''}</i>)}</div>
         <Row n={3}>{[0, 1, 2].map((i) => <Num label={UNIT_LABEL[i]} value={mixPct[i]} set={(v) => setMix(i, v)} max={100} step={5} unit="%" />)}</Row>
         <Note>{[0, 1, 2].filter((t) => d.count[t]).map((t) => `${d.count[t]} × ${UNIT_LABEL[t]}`).join(' · ') || 'No flats fit.'}</Note>
@@ -237,40 +276,6 @@ export function SchemeStep({ p, e, up, rooms, toast, tool, setTool, picked, pick
           </li>
         ))}</ul>
         {!d.buildings.length && <Note tone="warn">No buildings. Fill the plot, or add one from above.</Note>}
-        {br && ownB && (
-          <Picked title={<>{nameOf(bi)}<small> · {nf(br.plate)} m² plate</small></>} remove={() => { up(removed(p, e, { k: 'building', id: br.b.id })); pick(null); }}>
-            {deps.map((x) => <Note tone="bad">{x.text}</Note>)}
-            <label class="f"><span class="f-l">Name</span><input class="txt" value={ownB.name ?? nameOf(bi)} onChange={(ev) => setB((b) => ({ ...b, name: (ev.target as HTMLInputElement).value }))} /></label>
-            <Row>
-              <Num label="Floors" value={br.floors} set={(v) => setB((b) => ({ ...b, floors: Math.max(1, v) }))} min={1} max={300} hint={`${br.maxFloors} fit the margins`} />
-              <Num label="Depth" value={ownB.depth} set={(v) => setB((b) => ({ ...b, depth: v }))} min={6} max={80} step={0.5} unit="m" />
-            </Row>
-            <Row>
-              <Num label="Length" value={Math.round(spineLength(ownB) * 10) / 10} set={(v) => setB((b) => stretched(b, v))} min={4} max={600} step={0.5} unit="m" />
-              <div class="f"><span class="f-l">Turn</span><div class="turns">
-                <Btn kind="ghost" title="Turn 15° anticlockwise" onClick={() => setB((b) => turned(b, -15))}>−15°</Btn>
-                <Btn kind="ghost" title="Turn 15° clockwise" onClick={() => setB((b) => turned(b, 15))}>+15°</Btn>
-                <Btn kind="ghost" title="Turn a quarter" onClick={() => setB((b) => turned(b, 90))}>90°</Btn>
-              </div></div>
-            </Row>
-            <Toggle label="Its own flat mix" value={!!ownB.mix} set={(v) => setB((b) => ({ ...b, mix: v ? [...p.mix] as [number, number, number] : undefined }))} />
-            {ownB.mix && <Row n={3}>{[0, 1, 2].map((t) => <Num label={UNIT_LABEL[t]} value={Math.round(ownB.mix![t] * 100)} set={(v) => setB((b) => { const m = [...(b.mix ?? p.mix)] as [number, number, number]; m[t] = v / 100; const s = m[0] + m[1] + m[2] || 1; return { ...b, mix: m.map((x) => x / s) as [number, number, number] }; })} max={100} step={5} unit="%" />)}</Row>}
-            <Select<string> label="Design system" value={ownB.style ?? ''} onChange={(v) => setB((b) => ({ ...b, style: v || undefined }))} options={[{ value: '', label: `The project's (${presetOf(p.style).name})` }, ...PRESETS.map((x) => ({ value: x.id, label: x.name }))]} />
-            <Row><Btn icon="plus" onClick={() => { const s = own(p, e), src = s.buildings.find((b) => b.id === br.b.id); if (!src) return; const c = { ...src, id: `b${Date.now().toString(36)}`, name: `${src.name ?? 'Building'} copy`, spine: src.spine.map((q, i) => q + (i % 2 ? 0 : src.depth + 6)) }; up({ scheme: { ...s, buildings: [...s.buildings, c] } }); pick({ k: 'building', id: c.id }); }}>Duplicate</Btn></Row>
-            <SystemsPanel b={br} settings={mergeSettings(p.systems?.byBuilding?.[br.b.id], p.systems?.site)} under={d.under} floorH={r.rules.floorH} code={r.code} name={nameOf(bi)} basements={d.site.basements} bays={d.parking.have}
-              set={(x) => { const { building, plant } = splitSettings(x); up({ systems: { site: plant, byBuilding: { ...(p.systems?.byBuilding ?? {}), [br.b.id]: building } } }); }} />
-            <Section title="Flat plans" fold open={false} sub="Rooms fitted into each flat of a typical floor, checked against the minimum room sizes.">
-              <div class="flats">{(rooms[bi] ?? []).filter((fr, k, a) => fr.t < 3 && fr.rooms.length && a.findIndex((y) => y.t === fr.t) === k).map((fr) => <FlatPlan t={fr.t} fr={fr} />)}</div>
-            </Section>
-          </Picked>
-        )}
-        {el && (
-          <Picked title={ELEMENT_TOOLS.find((x) => x.kind === el.kind)?.label ?? 'On the site'} remove={() => { up(removed(p, e, { k: 'element', id: el.id })); pick(null); }}>
-            {el.kind === 'road' && <Select<number> label="Width" value={el.depth} onChange={(v) => setEl({ depth: v })} options={INTERNAL_WIDTHS.map((w) => ({ value: w, label: `${w} m` }))} />}
-            {el.kind === 'parking' && <Num label="Levels" value={el.levels ?? 3} set={(v) => setEl({ levels: v })} min={1} max={12} />}
-            <Note>Drag it on the map to move it.</Note>
-          </Picked>
-        )}
       </Section>
 
       <Section title="Shops at the front" fold open={sh.floors > 0} aside={shops ? <span class="sec-meta">{shops.count} shops</span> : undefined}>

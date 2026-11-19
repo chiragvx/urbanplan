@@ -13,9 +13,9 @@ const DP = href('pune/dp-report/');
 const REPORT = href('site/sample-report.html');
 
 const STEPS = [
-  { key: 'site', label: 'Site', title: 'Find the plot', body: 'By survey or CTS number, or draw it. Its roads, the DP widening and the rules it falls under.' },
-  { key: 'scheme', label: 'Scheme', title: 'The most it can hold', body: 'Towers or slabs, the flat mix, shops at the front, parking. Checked against the rules as you go.' },
-  { key: 'design', label: 'Design', title: 'Flats, room by room', body: 'Every flat planned and checked for room sizes and light. Facades, windows and the specification.' },
+  { key: 'site', label: 'Site', title: 'Draw the site', body: 'The plot, its roads at the city’s widths, levels and north. Trees, power lines and no-build zones, on the map.' },
+  { key: 'design', label: 'Design', title: 'A design system', body: 'Facade, windows, floors and finishes from a library of materials. Save it, change it, use it on any building.' },
+  { key: 'scheme', label: 'Scheme', title: 'Every building yours', body: 'Fill the plot to your settings, or place, turn and size each building. Its own flat mix, lifts, stairs and services.' },
   { key: 'money', label: 'Money', title: 'Is it worth it', body: 'Price, cost and the land deal. Profit, IRR and the cash, month by month.' },
   { key: 'approval', label: 'Approval', title: 'Ready for the authority', body: 'The scrutiny, NOCs, fees and documents. Drawings, IFC and a PreDCR DXF.' },
   { key: 'explore', label: 'Explore', title: 'Every option', body: 'Many schemes at once, a written brief, plots screened side by side.' },
@@ -23,8 +23,8 @@ const STEPS = [
 
 const FEATURES: { icon: keyof typeof Icon; title: string; body: string }[] = [
   { icon: 'check', title: 'The rules, live', body: 'UDCPR and Mumbai’s DCPR 2034, checked clause by clause every time you change something.' },
-  { icon: 'building', title: 'The most it can hold', body: 'Built-up, height, margins and parking worked out for the plot and its roads, DP widening included.' },
-  { icon: 'cube', title: 'In 3D as you go', body: 'The scheme as a wireframe that updates with every change, or shaded with the sun on any date.' },
+  { icon: 'building', title: 'Shape it your way', body: 'Fill the plot to the most it can hold, or draw each building yourself. The rules flag, never block.' },
+  { icon: 'cube', title: 'On the map, in 3D or plan', body: 'Draw and drag on a wireframe that updates with every change, or shade it with the sun on any date.' },
   { icon: 'sheet', title: 'Numbers you can take to a meeting', body: 'Revenue, cost, profit and IRR, the land deal and the cash month by month.' },
   { icon: 'section', title: 'Drawings for the authority', body: 'Plans, sections and the area statement; IFC, and a DXF on PreDCR’s layers.' },
   { icon: 'people', title: 'Work on it together', body: 'Share a link, invite the team, leave comments on any step.' },
@@ -101,7 +101,7 @@ export function Landing() {
         <div class="wrap">
           <div class="section-head center reveal">
             <h2>Six steps, plot to approval.</h2>
-            <p>One project, every number live. Change the flat mix and the profit, the parking and the fees follow.</p>
+            <p>Draw the site, set the look, shape the buildings. Every number follows as you go.</p>
           </div>
           <Steps />
         </div>
