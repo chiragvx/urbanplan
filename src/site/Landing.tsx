@@ -1,157 +1,143 @@
-// The landing page: the product in pictures, a caption each.
-import type { ComponentChildren } from 'preact';
-import { useEffect, useRef, useState } from 'preact/hooks';
+// The landing page, kept short: what UrbanPlan is, the three ways in (check a plot, plan a project, explore the
+// city), Pro's six steps with a picture of each, the report, and one call to start. Sections ease in as they
+// scroll into view (not when motion is reduced, and never hidden without JavaScript).
+import { useEffect, useState } from 'preact/hooks';
 import { APP, href, Icon, Page } from './ui';
-import { ChecksArt, SectionArt, TerrainArt, TodayPlanned } from './art';
 import { authReady, session } from '../auth/auth';
 
 const img = (name: string) => href(`site/${name}`);
+const PRO = href('pro/');
+const DP = href('pune/dp-report/');
+const REPORT = href('site/sample-report.html');
 
-function Tile({ w, media, title, sub }: { w?: 'w3' | 'w4'; media: ComponentChildren; title: string; sub: string }) {
-  return (
-    <article class={`tile ${w ?? ''}`}>
-      <div class="tile-media">{media}</div>
-      <div class="tile-cap"><h3>{title}</h3><p>{sub}</p></div>
-    </article>
-  );
-}
-
-/** A card in the features bento: a line of copy over a picture that bleeds to its edges. */
-function Card({ w, dark, wide, eyebrow, head, more, media, link }: { w: 2 | 3 | 4 | 6; dark?: boolean; wide?: boolean; eyebrow: string; head: string; more: string; media: ComponentChildren; link?: [string, string] }) {
-  return (
-    <article class={`ab-card ab-${w}${dark ? ' ab-dark' : ''}${wide ? ' ab-wide' : ''}`}>
-      <div class="ab-copy">
-        <span class="ab-eyebrow">{eyebrow}</span>
-        <h3><b>{head}</b> {more}</h3>
-        {link && <a class="ab-link" href={link[0]}>{link[1]} <Icon.arrow /></a>}
-      </div>
-      <div class="ab-media">{media}</div>
-    </article>
-  );
-}
-
-// what Site Studio does, a line each
-const STUDIO = [
-  { icon: Icon.road, title: 'Internal roads', body: 'A drive round the edge, a spine, a grid or none. Roundabouts too.' },
-  { icon: Icon.pin, title: 'More than one gate', body: 'Entrances on every road a large plot touches.' },
-  { icon: Icon.building, title: 'Car parks, lots, gardens', body: 'Place them, size them; the buildings make room.' },
-  { icon: Icon.check, title: 'Checked as you go', body: 'FSI, height, margins, fire access, open space, parking.' },
-  { icon: Icon.sheet, title: 'Costs and returns', body: 'Land to sales: profit, IRR, peak funding, cash flow.' },
-  { icon: Icon.share, title: 'Hand it on', body: 'Report as PDF; area statement and unit schedule as CSV; DXF.' },
+const PATHS = [
+  { to: DP, img: 'dp-satellite.webp', w: 1503, h: 812, pos: '38% 70%', eyebrow: 'Free', title: 'Check a plot', body: 'Its zone, reservations and DP roads, on satellite. A report in a click.', cta: 'Check a plot', alt: 'The Pune Development Plan over satellite imagery, a plot clicked and its report beside it.' },
+  { to: PRO, img: 'pro-scheme.webp', w: 1440, h: 900, pos: '70% 40%', eyebrow: 'Pro', title: 'Plan a project', body: 'From the plot to the approval: the scheme, the flats, the money and the drawings.', cta: 'Start a project', alt: 'UrbanPlan Pro: a ten-storey residential building on its plot, with the scheme panel and the results bar.' },
+  { to: APP, img: 'city-3d.webp', w: 1600, h: 900, pos: 'center', eyebrow: 'Free', title: 'Explore the city', body: 'Every building and road of Pune and Mumbai in 3D. Redraw a junction, widen a road.', cta: 'Open the editor', alt: 'A Pune neighbourhood by the river in 3D: streets, buildings and terrain.' },
 ];
 
-const STUDIO_CLIP = {
-  src: 'studio-procedural.mp4', poster: 'studio-video.webp',
-  label: 'Site Studio at work: a garden drawn in, then a car park, then a building moved and the garden reshaped; the parking bays, paths, trees and paving lay themselves out again each time, in the plan and in 3D.',
-};
-/** the hero: a montage rendered from the editor (npm run film -- intro-01) */
-const INTRO = {
-  src: 'intro.mp4', poster: 'intro.webp',
-  label: 'The editor at work, in three shots: a signal junction inspected and swapped for a roundabout; the Development Plan’s 30 m road line laid over an 18 m road, and the road widened to it; a plot drawn on the land beside the widened road and built up, floor by floor, to the rules.',
-};
+const STEPS = [
+  { key: 'site', label: 'Site', title: 'Find the plot', body: 'By survey or CTS number, or draw it. Its roads, the DP widening and the rules it falls under.' },
+  { key: 'scheme', label: 'Scheme', title: 'The most it can hold', body: 'Towers or slabs, the flat mix, shops at the front, parking. Checked against the rules as you go.' },
+  { key: 'design', label: 'Design', title: 'Flats, room by room', body: 'Every flat planned and checked for room sizes and light. Facades, windows and the specification.' },
+  { key: 'money', label: 'Money', title: 'Is it worth it', body: 'Price, cost and the land deal. Profit, IRR and the cash, month by month.' },
+  { key: 'approval', label: 'Approval', title: 'Ready for the authority', body: 'The scrutiny, NOCs, fees and documents. Drawings, IFC and a PreDCR DXF.' },
+  { key: 'explore', label: 'Explore', title: 'Every option', body: 'Many schemes at once, a written brief, plots screened side by side.' },
+];
 
-/** A clip recorded from the app: plays while it's on screen, muted, round and round. */
-function StudioVideo({ hero, clip = STUDIO_CLIP }: { hero?: boolean; clip?: typeof STUDIO_CLIP }) {
-  const ref = useRef<HTMLVideoElement>(null);
-  const [still, setStill] = useState(false);
-  useEffect(() => {
-    const v = ref.current;
-    if (!v) return;
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { setStill(true); return; }
-    const io = new IntersectionObserver(([e]) => { if (e.isIntersecting) void v.play().catch(() => setStill(true)); else v.pause(); }, { threshold: 0.3 });
-    io.observe(v);
-    return () => io.disconnect();
-  }, []);
-  return (
-    <video ref={ref} class="studio-video" muted loop playsInline preload={hero ? 'metadata' : 'none'} controls={still} poster={img(clip.poster)} width="1600" height="900" aria-label={clip.label}>
-      <source src={img(clip.src)} type="video/mp4" />
-    </video>
-  );
-}
-
-const REPORT = href('site/sample-report.html');
-// what's in the report, a line each
 const REPORT_HAS = [
   'The scheme in 3D, with the figures that matter',
-  'Site plan, floor plans and parking decks to scale',
+  'Site plan, floor plans and parking to scale',
   'Every rule with its clause: met or not',
-  'Unit mix, area statement, the optimiser’s alternatives',
-  'Costs, profit, IRR and the month-by-month cash flow',
-  'What a 10 % swing in price or cost does',
+  'Costs, profit, IRR and the cash flow',
 ];
 
-const SOON = [
-  { icon: Icon.pin, title: 'More cities', body: 'Their roads, terrain and Development Plans.' },
-  { icon: Icon.share, title: 'Export the city', body: 'glTF, OBJ and STL.' },
-  { icon: Icon.terrain, title: 'Analysis', body: 'Flood, sun, noise and earthworks.' },
-];
+/** Sections ease in once, as they come into view. Whatever is already on screen shows at once. */
+function useReveal() {
+  useEffect(() => {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches || !('IntersectionObserver' in window)) return;
+    const els = [...document.querySelectorAll<HTMLElement>('.reveal')];
+    for (const el of els) if (el.getBoundingClientRect().top < innerHeight) el.classList.add('in');
+    document.documentElement.classList.add('rv');
+    const io = new IntersectionObserver((es) => { for (const e of es) if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }, { rootMargin: '0px 0px -8% 0px' });
+    els.forEach((el) => !el.classList.contains('in') && io.observe(el));
+    return () => io.disconnect();
+  }, []);
+}
+
+function Steps() {
+  const [i, setI] = useState(1);
+  const s = STEPS[i];
+  return (
+    <div class="steps reveal">
+      <div class="steps-tabs" role="tablist" aria-label="Pro, step by step">
+        {STEPS.map((x, k) => (
+          <button key={x.key} type="button" role="tab" id={`st-${x.key}`} aria-selected={k === i} aria-controls="st-panel" class={k === i ? 'on' : ''} onClick={() => setI(k)}>
+            <span class="n">{k + 1}</span>
+            <span class="t"><b>{x.label}</b><small>{x.title}</small></span>
+          </button>
+        ))}
+      </div>
+      <div class="steps-view" id="st-panel" role="tabpanel" aria-labelledby={`st-${s.key}`}>
+        <div class="steps-shot">
+          {STEPS.map((x, k) => <img key={x.key} class={k === i ? 'on' : ''} width={1440} height={900} src={img(`pro-${x.key}.webp`)} alt={k === i ? `UrbanPlan Pro, the ${x.label} step: ${x.body}` : ''} loading={k === 1 ? 'eager' : 'lazy'} />)}
+        </div>
+        <p class="steps-cap"><b>{s.title}.</b> {s.body}</p>
+      </div>
+    </div>
+  );
+}
 
 export function Landing() {
+  useReveal();
   const signedIn = !!session.value;
   return (
     <Page current="landing">
       <section class="hero">
         <div class="wrap">
-          <a class="pill" href={APP}><i />Beta · Pune and Mumbai · New: Site Studio</a>
-          <h1 class="grad">The city, editable.</h1>
-          <p class="lede">Roads, flyovers, terrain and the Development Plan. Draw a plot and see the most it can hold. In 2D and 3D, in your browser.</p>
+          <a class="pill" href={PRO}><i />Beta · Pune and Mumbai · New: UrbanPlan Pro</a>
+          <h1 class="grad">From a plot to a project.</h1>
+          <p class="lede">See what a plot can hold under the rules, what it’s worth, and what the authority will ask for. In your browser.</p>
           <div class="cta-row">
-            <a class="btn btn-primary btn-lg" href={APP}>Open the editor <Icon.arrow /></a>
-            {authReady && !signedIn && <a class="btn btn-lg" href={href('signup/')}>Create an account</a>}
+            <a class="btn btn-primary btn-lg" href={PRO}>Start a project <Icon.arrow /></a>
+            <a class="btn btn-lg" href={DP}>Check a plot</a>
           </div>
-          <div class="frame">
-            <StudioVideo hero clip={INTRO} />
-            <span class="float" style="left:-18px;top:18%"><span class="dot" style="background:var(--up-ok)" /><span><b>Signal → roundabout</b><small>junctions, redrawn live</small></span></span>
-            <span class="float" style="right:-18px;top:42%"><span class="dot" style="background:var(--up-reserve)" /><span><b>DP road lines</b><small>over today’s roads</small></span></span>
-            <span class="float" style="left:12%;bottom:-18px"><span class="dot" style="background:var(--up-blue)" /><span><b>Plot to tower</b><small>built to the rules</small></span></span>
-          </div>
+          <a class="frame hero-shot" href={PRO} aria-label="Open UrbanPlan Pro">
+            <img width={1440} height={900} src={img('pro-money.webp')} alt="UrbanPlan Pro: a ten-storey building in Baner, Pune, its profit and IRR in the results bar and the cash flow in the Money panel." fetchpriority="high" />
+          </a>
         </div>
       </section>
 
-      <div class="wrap">
+      <div class="wrap reveal">
         <div class="stats">
           <div><b>2,390 km²</b><span>of city</span></div>
           <div><b>411k</b><span>buildings</span></div>
-          <div><b>268k</b><span>road sections</span></div>
-          <div><b>21</b><span>DP sheets</span></div>
+          <div><b>2</b><span>rulebooks: UDCPR and DCPR</span></div>
+          <div><b>6</b><span>steps, plot to approval</span></div>
         </div>
       </div>
 
-      <section class="section" id="studio">
+      <section class="section" id="start">
         <div class="wrap">
-          <div class="section-head center">
-            <span class="tag tag-now">New</span>
-            <h2>Site Studio.</h2>
-            <p>Draw a plot. It plans the most built-up scheme the rules allow, with roads, parking and open space, and tells you what it's worth.</p>
+          <div class="section-head center reveal">
+            <h2>Three ways in.</h2>
+            <p>Start where you are: a plot you’re looking at, a project you’re planning, or the city itself.</p>
           </div>
-          <div class="bento">
-            <Tile w="w4" media={<img width={720} height={540} src={img('studio-towers.webp')} alt="Three residential towers on a plot with an internal road and a roundabout, over satellite imagery." loading="lazy" />} title="The most it can hold" sub="Towers or slabs. FSI by road width, as built or as the DP widens it." />
-            <Tile media={<img width={720} height={540} src={img('studio-dp.webp')} alt="The Development Plan sheet draped over the 3D terrain around a plot." loading="lazy" />} title="On satellite or the DP" sub="Lay either under the 3D." />
-            <Tile w="w3" media={<img width={720} height={540} src={img('studio-offices.webp')} alt="Glass office towers on the same plot." loading="lazy" />} title="Offices" sub="Curtain walls, deeper plates, parking by floor area." />
-            <Tile w="w3" media={<img width={720} height={540} src={img('studio-sheds.webp')} alt="Two industrial sheds with loading docks." loading="lazy" />} title="Industrial sheds" sub="Wide spans, loading bays, truck parking." />
-            <Tile w="w4" media={<a href={REPORT} target="_blank" rel="noopener"><img width={979} height={600} src={img('report.webp')} alt="The cover of a feasibility report: the scheme in 3D and its headline figures." loading="lazy" style="object-position:top center" /></a>} title="A report for the meeting" sub="Plans to scale, rules with clauses, compliance, costs and cash flow. Print or PDF." />
-            <Tile media={<SectionArt />} title="Roads, what if" sub="Widen a road in the study; see the FSI move." />
-          </div>
-          <div class="soon" style="margin-top:var(--up-space-3)">
-            {STUDIO.map((s) => (
-              <article key={s.title}>
-                <span class="ic"><s.icon /></span>
-                <h3>{s.title}</h3>
-                <p>{s.body}</p>
-              </article>
+          <div class="paths">
+            {PATHS.map((x) => (
+              <a key={x.title} class="path reveal" href={x.to}>
+                <span class="path-media"><img width={x.w} height={x.h} src={img(x.img)} style={`object-position:${x.pos}`} alt={x.alt} loading="lazy" /></span>
+                <span class="path-copy">
+                  <span class={`tag ${x.eyebrow === 'Pro' ? 'tag-now' : ''}`}>{x.eyebrow}</span>
+                  <b>{x.title}</b>
+                  <span>{x.body}</span>
+                  <span class="path-cta">{x.cta} <Icon.arrow /></span>
+                </span>
+              </a>
             ))}
           </div>
         </div>
       </section>
 
+      <section class="section" id="pro">
+        <div class="wrap">
+          <div class="section-head center reveal">
+            <span class="tag tag-now">Pro</span>
+            <h2>Six steps, plot to approval.</h2>
+            <p>One project, every number live. Change the flat mix and the profit, the parking and the fees follow.</p>
+          </div>
+          <Steps />
+        </div>
+      </section>
+
       <section class="section" id="report">
-        <div class="wrap report">
+        <div class="wrap report reveal">
           <div class="report-copy">
             <span class="tag tag-now">Sample</span>
-            <h2>A report you can take to the meeting.</h2>
-            <p>One click in Site Studio. Eight pages, dark or light, to print or save as PDF. This one is a real plot on Mangaldas Road, Pune.</p>
+            <h2>A report for the meeting.</h2>
+            <p>Eight pages to print or save as PDF. This one is a real plot on Mangaldas Road, Pune.</p>
             <ul>{REPORT_HAS.map((x) => <li key={x}><Icon.check />{x}</li>)}</ul>
-            <a class="btn btn-primary btn-lg" href={REPORT} target="_blank" rel="noopener">Open the sample report <Icon.arrow /></a>
+            <a class="btn btn-lg" href={REPORT} target="_blank" rel="noopener">Open the sample report <Icon.arrow /></a>
           </div>
           <a class="report-stack" href={REPORT} target="_blank" rel="noopener" aria-label="Open the sample report in a new tab">
             <img width={1000} height={1294} class="rp rp-c" src={img('report-money.webp')} alt="The report's money page: costs, profit and the cash flow." loading="lazy" />
@@ -162,84 +148,16 @@ export function Landing() {
         </div>
       </section>
 
-      <section class="section" id="features">
-        <div class="wrap">
-          <div class="section-head center">
-            <h2>Everything in one editor.</h2>
-            <p>The city as it is, the plan it's meant to follow, and what a plot can become.</p>
-          </div>
-          <div class="ab">
-            <Card w={4} dark eyebrow="Site Studio" head="Draw a plot. See the most it can hold." more="Towers or slabs, FSI by road width, as built or as the DP widens it."
-              media={<img width={720} height={540} src={img('studio-towers.webp')} alt="Three residential towers on a plot with an internal road and a roundabout, over satellite imagery." loading="lazy" />} />
-            <Card w={2} eyebrow="DP plan" head="Pune’s Development Plan, on satellite." more="Click a plot: its zone, reservations and DP roads." link={[href('pune/dp-report/'), 'Check a plot']}
-              media={<img width={1503} height={812} src={img('dp-satellite.webp')} style="object-position:38% 70%" alt="The Pune DP plan in Aundh: zones coloured over satellite imagery, a plot clicked and its report beside it." loading="lazy" />} />
-            <Card w={3} eyebrow="3D editor" head="Every building, every road." more="2,390 km² of Pune and Mumbai in 3D. Tab flips to the plan."
-              media={<img width={1600} height={900} src={img('city-3d.webp')} alt="A Pune neighbourhood by the river in 3D: streets, buildings and terrain." loading="lazy" />} />
-            <Card w={3} eyebrow="Structures" head="Flyovers, bridges and tunnels." more="Ramps at your grade, headroom checked."
-              media={<img width={1100} height={505} src={img('flyover-3d.webp')} alt="An elevated deck on piers beside a river, in 3D." loading="lazy" />} />
-            <Card w={2} eyebrow="Roads" head="Real cross-sections." more="Lanes, medians, footpaths. IRC and UDCPR presets." media={<SectionArt />} />
-            <Card w={2} eyebrow="Terrain" head="Cut and fill." more="Slopes and earthworks on real elevation." media={<TerrainArt />} />
-            <Card w={2} eyebrow="Checks" head="Flagged, never blocked." more="DP lines, buffers, headroom, junctions." media={<ChecksArt />} />
-            <Card w={6} dark wide eyebrow="Site Studio" head="The plan and the 3D, side by side." more="Place a tower, drag out a garden or a car park. Paths, trees and bays lay themselves out; flats, FSI and profit update as you go." link={[APP, 'Open the editor']}
-              media={<StudioVideo />} />
-          </div>
-        </div>
-      </section>
-
-      <section class="section" id="plan">
-        <div class="wrap tp">
-          <div class="section-head center" style="margin-bottom:var(--up-space-5)">
-            <h2>Today vs. the plan.</h2>
-            <p>See what a street is, and what it's meant to become.</p>
-          </div>
-          <TodayPlanned />
-          <div class="legend">
-            <span><i class="legend-swatch" style="background:var(--up-today)" />Today</span>
-            <span><i class="legend-swatch" style="background:var(--up-verge)" />DP road line</span>
-            <span><i class="legend-swatch" style="background:var(--up-blue)" />Your plot</span>
-          </div>
-        </div>
-      </section>
-
-      <section class="section">
-        <div class="wrap">
-          <div class="section-head center" style="margin-bottom:var(--up-space-5)"><h2>Made for</h2></div>
-          <div class="chips">
-            <span><Icon.building />Developers</span>
-            <span><Icon.cube />Architects</span>
-            <span><Icon.road />Planners</span>
-            <span><Icon.pin />Buyers and brokers</span>
-            <span><Icon.people />Civic groups</span>
-          </div>
-        </div>
-      </section>
-
-      <section class="section" id="roadmap">
-        <div class="wrap">
-          <div class="section-head center"><span class="tag tag-soon">Coming next</span><h2>What's next.</h2></div>
-          <div class="soon">
-            {SOON.map((s) => (
-              <article key={s.title}>
-                <span class="ic"><s.icon /></span>
-                <h3>{s.title}</h3>
-                <p>{s.body}</p>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
-
       <section class="wrap">
-        <div class="cta-panel">
-          <img width={1200} height={584} src={img('dp-2d.webp')} alt="" loading="lazy" />
+        <div class="end reveal">
           <h2>Start with your plot.</h2>
-          <p>Free in beta. No install.</p>
+          <p>Free in beta. Nothing to install.</p>
           <div class="cta-row">
-            <a class="btn btn-primary btn-lg" href={APP}>Open the editor <Icon.arrow /></a>
+            <a class="btn btn-primary btn-lg" href={PRO}>Start a project <Icon.arrow /></a>
             {authReady && !signedIn && <a class="btn btn-lg" href={href('signup/')}>Create an account</a>}
           </div>
         </div>
-        <p class="beta-line">Beta: some flyovers and main roads are still rough. A survey aid, not a legal document.</p>
+        <p class="beta-line">Beta: a planning aid, not a legal document. Check every figure with the authority.</p>
       </section>
     </Page>
   );

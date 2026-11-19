@@ -111,15 +111,15 @@ const STATIC: Route[] = [
   {
     path: '', priority: 1, updated: SITE_UPDATED,
     head: {
-      title: `${SITE_NAME}: edit the real city, see what it becomes`,
-      description: 'A map editor for Pune and Mumbai. Draw roads, flyovers and tunnels, lay the Development Plan over today’s city, and see what a plot can hold, in 2D and 3D.',
-      image: IMG.studio, imageAlt: ALT.studio, preload: 'site/intro.webp',
+      title: `${SITE_NAME}: from a plot to a project`,
+      description: 'See what a plot in Pune or Mumbai can hold under UDCPR or DCPR, what it’s worth and what the authority will ask for. Check a plot’s DP free.',
+      image: IMG.studio, imageAlt: ALT.studio, preload: 'site/pro-money.webp',
       ld: (url) => [
         { '@type': 'WebSite', '@id': url('#site'), name: SITE_NAME, url: url(''), inLanguage: 'en-IN', publisher: { '@id': url('#org') } },
         org(url), app(url),
       ],
     },
-    images: ['site/intro.webp', 'site/studio-video.webp', 'site/studio-towers.webp', 'site/dp-2d.webp', 'site/city-detail.webp'],
+    images: ['site/pro-money.webp', 'site/pro-scheme.webp', 'site/pro-design.webp', 'site/dp-satellite.webp', 'site/city-3d.webp'],
   },
   {
     path: 'app/', priority: 0.9, updated: SITE_UPDATED,

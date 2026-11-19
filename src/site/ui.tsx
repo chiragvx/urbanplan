@@ -76,7 +76,7 @@ export function AccountLink() {
   return <a class="chip-account" href={href('account/')} title={s.user.email ?? ''}><span class="avatar">{name[0]?.toUpperCase()}</span><span class="hide-sm">{name}</span></a>;
 }
 
-const NAV: [string, string][] = [['#studio', 'Site Studio'], ['#features', 'Product'], ['#plan', 'Today vs. plan'], ['pune/dp-report/', 'Pune DP plan'], ['guides/', 'Guides'], ['pricing/', 'Pricing']];
+const NAV: [string, string][] = [['pro/', 'Pro'], ['pune/dp-report/', 'Check a plot'], ['app/', 'City editor'], ['guides/', 'Guides'], ['pricing/', 'Pricing']];
 
 export function Header({ current, lang }: { current?: string; lang?: string }) {
   const [open, setOpen] = useState(false);
@@ -90,13 +90,13 @@ export function Header({ current, lang }: { current?: string; lang?: string }) {
             const url = to.startsWith('#') ? (onHome ? to : href('') + to) : href(to);
             return <a key={to} href={url} aria-current={current === to ? 'page' : undefined} onClick={() => setOpen(false)}>{label}</a>;
           })}
-          <a class="show-xs" href={APP}>Open the editor</a>
+          <a class="show-xs" href={href('pro/')}>Start a project</a>
           {authReady && !session.value && <a class="show-xs" href={href('login/')}>Sign in</a>}
         </nav>
         <div class="head-actions">
           <ThemeToggle />
           <AccountLink />
-          <a class="btn btn-ink hide-xs" href={APP}>Open editor</a>
+          <a class="btn btn-ink hide-xs" href={href('pro/')}>Start a project</a>
           <button class="icon-btn menu-btn" aria-label={open ? 'Close the menu' : 'Open the menu'} aria-expanded={open} onClick={() => setOpen(!open)}>{open ? <Icon.close /> : <Icon.menu />}</button>
         </div>
       </div>
