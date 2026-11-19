@@ -96,7 +96,7 @@ export function PlotEditor({ ring, roads, set }: Props) {
             {l.road.dp > l.road.today && [-1, 1].map((sg) => { const L = Math.hypot(bx - ax, bz - az), ox = (-(bz - az) / L) * (l.road.dp / 2) * sg, oz = ((bx - ax) / L) * (l.road.dp / 2) * sg; return <line x1={ax + ox} y1={az + oz} x2={bx + ox} y2={bz + oz} stroke="#e5484d" stroke-width={px * 1.5} stroke-dasharray={`${px * 6} ${px * 4}`} />; })}
           </g>;
         })}
-        <polygon points={pts.map((p) => p.join(',')).join(' ')} fill="rgba(47,91,255,0.08)" stroke="#2f5bff" stroke-width={px * 2} stroke-linejoin="round" />
+        <polygon points={pts.map((p) => p.join(',')).join(' ')} class="ped-plot" stroke-width={px * 2} stroke-linejoin="round" />
         {pts.map((p, k) => {
           const q = pts[(k + 1) % n], mx = (p[0] + q[0]) / 2, mz = (p[1] + q[1]) / 2;
           // the length reads outside the edge, clear of its + handle

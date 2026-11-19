@@ -3,6 +3,9 @@
 // thousands), balconies, bands and fins. "X-ray" cuts the building at a floor: the floors above go, and that floor
 // shows its flats, walls, cores and entrance doors like a doll's house. Pointing at a window or a door reads out its
 // tag and size.
+//
+// Two ways to draw it: the wireframe (the default: ./wire.ts, low-poly lines in the page's ink that grow and retract
+// as the scheme changes) and shaded (the materials, the sun, the windows). X-ray is always shaded.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { PlotReport } from '../doc/plot';
@@ -12,6 +15,7 @@ import type { FloorPlan, Opening } from './openings';
 
 import { SHOP_W, type Shops } from './mixed';
 import { roadFrame } from '../doc/site';
+import { Wire } from './wire';
 
 /** a flat's rooms for the X-ray floor (./rooms.ts), by building, by flat of the typical floor */
 export interface RoomsLike { rooms: { kind: string; ring: number[] }[]; walls: number[][] }
@@ -23,6 +27,7 @@ export interface ViewData {
   rooms?: RoomsLike[][]; roomColor?: Record<string, string>;
 }
 export type CameraView = 'fit' | 'street' | 'top';
+export type RenderMode = 'wire' | 'shaded';
 export interface Picked { tag: string; label: string; size: string; floor: number; x: number; y: number }
 
 const box = new THREE.BoxGeometry(1, 1, 1);
@@ -95,6 +100,13 @@ export class ProView {
   pickables: THREE.InstancedMesh[] = [];
   raf = 0;
   fitted = '';
+  wire = new Wire();
+  mode: RenderMode = 'wire';
+  private xrayOn = false;
+  private ground: THREE.Mesh;
+  private fog = new THREE.Fog('#e4e4e2', 400, 1400);
+  private sky = new THREE.Color('#e4e4e2');
+  private paper = new THREE.Color('#fafaf9');
 
   constructor(public canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
@@ -103,8 +115,8 @@ export class ProView {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
-    this.scene.background = new THREE.Color('#dfe6ec');
-    this.scene.fog = new THREE.Fog('#dfe6ec', 400, 1400);
+    this.scene.background = this.sky.clone();
+    this.scene.fog = this.fog;
     this.scene.add(new THREE.HemisphereLight('#f4f7fb', '#b9ae9a', 1.3));
     this.sun.position.set(-120, 180, -90);
     this.sun.castShadow = true;
@@ -112,9 +124,10 @@ export class ProView {
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.04;
     this.scene.add(this.sun, this.sun.target, this.root);
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), new THREE.MeshStandardMaterial({ color: '#e7e3da', roughness: 1 }));
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), new THREE.MeshStandardMaterial({ color: '#e6e5e1', roughness: 1 }));
     ground.rotation.x = -Math.PI / 2; ground.position.y = -0.02; ground.receiveShadow = true;
-    this.scene.add(ground);
+    this.ground = ground;
+    this.scene.add(ground, this.wire.group);
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = true;
     this.controls.maxPolarAngle = Math.PI / 2 - 0.03;
@@ -129,8 +142,27 @@ export class ProView {
     this.camera.updateProjectionMatrix();
     this.frame();
   }
-  frame() { if (!this.raf) this.raf = requestAnimationFrame(() => { this.raf = 0; if (this.controls.update()) this.frame(); this.renderer.render(this.scene, this.camera); }); }
-  dispose() { cancelAnimationFrame(this.raf); this.clear(); this.controls.dispose(); this.renderer.dispose(); }
+  frame() {
+    if (!this.raf) this.raf = requestAnimationFrame(() => {
+      this.raf = 0;
+      if (this.controls.update()) this.frame();
+      // (the wireframe keeps drawing while edges grow or retract)
+      if (this.wired && this.wire.write()) this.frame();
+      this.renderer.render(this.scene, this.camera);
+    });
+  }
+  dispose() { cancelAnimationFrame(this.raf); this.clear(); this.wire.dispose(); this.controls.dispose(); this.renderer.dispose(); }
+
+  /** drawn as the wireframe just now (X-ray is always shaded) */
+  get wired() { return this.mode === 'wire' && !this.xrayOn; }
+  setMode(m: RenderMode) { this.mode = m; this.apply(); }
+  private apply() {
+    const w = this.wired;
+    this.root.visible = !w; this.ground.visible = !w; this.wire.group.visible = w;
+    this.scene.background = w ? this.paper : this.sky;
+    this.scene.fog = w ? null : this.fog;
+    this.frame();
+  }
 
   /** the plot's middle, its size and the tallest building: for the camera and the sun */
   box = { cx: 0, cz: 0, s: 30, h: 30 };
@@ -155,12 +187,21 @@ export class ProView {
   }
   /** a darker sky for the dark theme */
   setTheme(dark: boolean) {
-    const c = new THREE.Color(dark ? '#1b1f26' : '#dfe6ec');
-    this.scene.background = c; (this.scene.fog as THREE.Fog).color = c;
-    this.frame();
+    this.sky.set(dark ? '#18181b' : '#e4e4e2'); this.fog.color.copy(this.sky);
+    (this.ground.material as THREE.MeshStandardMaterial).color.set(dark ? '#3a3a3c' : '#e6e5e1');
+    const css = getComputedStyle(document.documentElement), paper = css.getPropertyValue('--up-paper').trim() || (dark ? '#09090b' : '#fafaf9'), ink = css.getPropertyValue('--up-ink').trim() || (dark ? '#fafafa' : '#0c0c0d');
+    this.paper.set(paper); this.wire.colours(paper, ink);
+    this.apply();
   }
   /** the view as a PNG (for the drawings and a share) */
-  snapshot(): string { this.renderer.render(this.scene, this.camera); return this.canvas.toDataURL('image/png'); }
+  snapshot(): string {
+    // (always the shaded view: it goes into reports and drawings)
+    const m = this.mode; if (m !== 'shaded') { this.mode = 'shaded'; this.apply(); }
+    this.renderer.render(this.scene, this.camera);
+    const url = this.canvas.toDataURL('image/png');
+    if (m !== 'shaded') { this.mode = m; this.apply(); }
+    return url;
+  }
 
   clear() {
     this.root.traverse((o) => { const m = o as THREE.Mesh; if (m.geometry && m.geometry !== box) m.geometry.dispose(); });
@@ -170,6 +211,7 @@ export class ProView {
 
   /** what's under the pointer: a window or a door */
   pick(px: number, py: number): Picked | null {
+    if (this.wired) return null;
     const r = this.canvas.getBoundingClientRect();
     this.ray.setFromCamera(new THREE.Vector2(((px - r.left) / r.width) * 2 - 1, -((py - r.top) / r.height) * 2 + 1), this.camera);
     const hit = this.ray.intersectObjects(this.pickables, false)[0];
@@ -211,7 +253,7 @@ export class ProView {
     if (r.footprint.length >= 6) {
       const p = r.footprint, pts: THREE.Vector3[] = [];
       for (let i = 0; i <= p.length; i += 2) pts.push(new THREE.Vector3(p[i % p.length], 0.08, p[(i + 1) % p.length]));
-      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineDashedMaterial({ color: '#2f5bff', dashSize: 1.2, gapSize: 0.8 }));
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineDashedMaterial({ color: '#3f3f46', dashSize: 1.2, gapSize: 0.8 }));
       line.computeLineDistances(); add(line);
     }
 
@@ -371,6 +413,8 @@ export class ProView {
       sc.left = -R; sc.right = R; sc.top = R; sc.bottom = -R; sc.near = 1; sc.far = 800; sc.updateProjectionMatrix();
       this.sun.position.set(cx - 120, 220, cz - 90);
     }
-    this.frame();
+    this.wire.set({ r, d, roads: v.roads, shops: v.shops });
+    this.xrayOn = v.xray !== null;
+    this.apply();
   }
 }

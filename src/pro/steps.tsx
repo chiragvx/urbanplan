@@ -2,6 +2,7 @@
 // scheme, its design, the money, the approval, then exploring (options, a brief, screening, layouts). Each panel
 // opens on what most people change; the rest folds away. Every figure here comes from the one evaluation in
 // main.tsx (./evaluate.ts), so a panel never shows a number another disagrees with.
+import { Dither } from '../theme/Dither';
 import { useMemo, useState } from 'preact/hooks';
 import { UNIT_LABEL } from '../doc/site';
 import { TYPOLOGIES, type Typology } from '../doc/optimise';
@@ -157,7 +158,7 @@ function FindPlot({ done }: { done: (ring: number[], src: string) => void }) {
         <input class="txt" list="plotnos" value={no} disabled={!g} placeholder={g ? 'e.g. 1000' : 'Choose the village first'} onInput={(ev) => setNo((ev.target as HTMLInputElement).value)} onKeyDown={(ev) => { if (ev.key === 'Enter' && no.trim()) void find(); }} />
         <datalist id="plotnos">{lists.n?.slice(0, 3000).map((x) => <option value={x} />)}</datalist>
       </label>
-      {busy && <Note>Loading {busy}…</Note>}
+      {busy && <p class="note loading" role="status"><Dither class="dz" cell={2} />Loading {busy}…</p>}
       {err && <Note tone="bad">{err}</Note>}
       <Row><Btn kind="primary" disabled={!g || !no.trim() || !!busy} onClick={() => void find()}>Use this plot</Btn><Btn kind="quiet" onClick={() => setOpen(false)}>Cancel</Btn></Row>
       <Note>From MahaBhunakasha, Maharashtra's land records map. Only the outline comes through: owner details are dropped on our server, never stored or shown. Check it against the survey before relying on it.</Note>
@@ -477,8 +478,8 @@ export function ApproveStep({ p, e, up, checks, openDrawings, toast }: StepProps
       <Section title="Scrutiny" sub="Our own check of every rule we model, as an authority's scrutiny would read it. Advisory: the authority's is the one that counts.">
         <div class="score">
           <span class="s-pass"><Icon n="check" size={14} />{sum.pass} pass</span>
-          <span class="s-fail"><Icon n="x" size={14} />{sum.fail} fail</span>
-          <span class="s-warn"><Icon n="warn" size={14} />{sum.warn} to check</span>
+          <span class={`s-fail${sum.fail ? ' on' : ''}`}><Icon n="x" size={14} />{sum.fail} fail</span>
+          <span class={`s-warn${sum.warn ? ' on' : ''}`}><Icon n="warn" size={14} />{sum.warn} to check</span>
           <span class="s-info"><Icon n="info" size={14} />{sum.info} notes</span>
         </div>
         <Seg<'all' | 'issues'> small value={only} set={setOnly} options={[{ value: 'issues', label: 'Issues' }, { value: 'all', label: 'Everything' }]} />
@@ -568,7 +569,8 @@ function OptionsBox({ p, up, toast }: { p: ProProject; up: StepProps['up']; toas
   const run = () => { setBusy(true); setTimeout(() => { setRows(exploreOptions(p, { limit: 12 })); setBusy(false); }, 30); };
   return (
     <Section title="Options" sub="Building types, height bands, flat mixes and shops, each worked out in full and ranked by profit.">
-      <Btn kind={rows ? undefined : 'primary'} icon="layers" onClick={run} disabled={busy}>{busy ? 'Working…' : rows ? 'Run again' : 'Find options'}</Btn>
+      <Btn kind={rows ? undefined : 'primary'} icon={busy ? undefined : 'layers'} onClick={run} disabled={busy}>{busy ? <><Dither class="dz" cell={2} />Working…</> : rows ? 'Run again' : 'Find options'}</Btn>
+      {busy && <div class="working" role="status"><Dither class="working-art" cell={3} /><span>Working out every option…</span></div>}
       {rows && <div class="opts">{rows.map((o, i) => <OptionCard o={o} best={i === 0} apply={() => { up(o.patch); toast(`Applied: ${o.label}`); }} />)}</div>}
     </Section>
   );

@@ -18,7 +18,8 @@ import { addComment, addMember, comments as listComments, deleteComment, EMAIL, 
 import { authReady, explain, peekSession, session, startAuth } from '../auth/auth';
 import type { Project } from '../app/cloud';
 import { evaluate, dsOfBuilding } from './evaluate';
-import { ProView, type CameraView, type Picked } from './scene';
+import { ProView, type CameraView, type Picked, type RenderMode } from './scene';
+import { Dither } from '../theme/Dither';
 import { UNIT_COLOR, UNIT_LABEL } from '../doc/site';
 import { fitRooms } from './rooms';
 import { ROOM_COLOR } from './rooms';
@@ -132,9 +133,14 @@ function App() {
   const [xray, setXray] = useState<number | null>(null);
   const [hover, setHover] = useState<Picked | null>(null);
   const [sun, setSun] = useState<{ on: boolean; month: number; hour: number }>({ on: false, month: 12, hour: 15 });
+  // wireframe by default; shaded is one button away (and the sun needs it)
+  const [mode, setModeState] = useState<RenderMode>(() => store.get<RenderMode>('urbanplan:pro:render', 'wire'));
+  const setMode = (m: RenderMode) => { setModeState(m); store.set('urbanplan:pro:render', m); };
+  useEffect(() => { view.current?.setMode(mode); }, [mode]);
   useEffect(() => {
     const v = new ProView(canvas.current!);
     view.current = v;
+    v.mode = store.get<RenderMode>('urbanplan:pro:render', 'wire');
     (window as unknown as { proView?: ProView }).proView = v; // (for the console)
     const ro = new ResizeObserver(() => v.resize());
     ro.observe(canvas.current!.parentElement!);
@@ -209,7 +215,7 @@ function App() {
   return (
     <div class={`pro${panel ? '' : ' no-panel'}${readOnly ? ' ro' : ''}`}>
       <header class="top">
-        <a class="logo" href={BASE} aria-label="UrbanPlan home">Urban<span>Plan</span></a>
+        <a class="logo" href={BASE} aria-label="UrbanPlan home"><Dither field="mark" cell={2} class="mark" />UrbanPlan</a>
         <b class="chip">Pro</b>
         <label class="pname"><input value={p.name} aria-label="Project name" readOnly={readOnly} onChange={(ev) => up({ name: (ev.target as HTMLInputElement).value.trim() || 'Untitled project' })} /><Icon n="edit" size={14} /></label>
         <SaveState cloud={cloud} user={!!user} readOnly={readOnly} />
@@ -263,6 +269,10 @@ function App() {
         <canvas ref={canvas} onPointerMove={(ev) => setHover(view.current?.pick(ev.clientX, ev.clientY) ?? null)} onPointerLeave={() => setHover(null)} />
         <ResultBar e={e} deal={deal} sum={sum} go={go} />
         <div class="tools">
+          <div class="tgroup seg" role="radiogroup" aria-label="Drawn as">
+            <button type="button" role="radio" aria-checked={mode === 'wire' && xr === null} disabled={xr !== null} onClick={() => setMode('wire')} title={xr !== null ? 'X-ray is always shaded' : 'Wireframe: low-poly lines'}><Icon n="wire" size={15} />Wireframe</button>
+            <button type="button" role="radio" aria-checked={mode === 'shaded' || xr !== null} onClick={() => setMode('shaded')} title="Shaded: materials, windows, sun"><Icon n="shade" size={15} />Shaded</button>
+          </div>
           <div class="tgroup seg" role="radiogroup" aria-label="View">
             <button type="button" role="radio" aria-checked={xr === null} onClick={() => setXray(null)}><Icon n="cube" size={15} />Exterior</button>
             <button type="button" role="radio" aria-checked={xr !== null} onClick={() => setXray(Math.max(1, Math.round(maxFloor / 2)))}><Icon n="layers" size={15} />X-ray</button>
@@ -278,7 +288,7 @@ function App() {
             <button type="button" title="From above (T)" onClick={() => cam('top')}><Icon n="top" size={16} /></button>
           </div>
           <div class={`tgroup sun${sun.on ? ' on' : ''}`}>
-            <button type="button" title="Sun and shadows on a date and time" aria-pressed={sun.on} onClick={() => setSun({ ...sun, on: !sun.on })}><Icon n="sun" size={16} />{sun.on ? '' : 'Sun'}</button>
+            <button type="button" title="Sun and shadows on a date and time" aria-pressed={sun.on} onClick={() => { if (!sun.on && mode === 'wire') setMode('shaded'); setSun({ ...sun, on: !sun.on }); }}><Icon n="sun" size={16} />{sun.on ? '' : 'Sun'}</button>
             {sun.on && <>
               <select aria-label="Month" value={sun.month} onChange={(ev) => setSun({ ...sun, month: +(ev.target as HTMLSelectElement).value })}>{MONTHS.map((m, i) => <option value={i + 1}>21 {m}</option>)}</select>
               <input type="range" min={6} max={19} step={0.25} value={sun.hour} aria-label="Time of day" onInput={(ev) => setSun({ ...sun, hour: +(ev.target as HTMLInputElement).value })} />
@@ -355,7 +365,7 @@ function SaveState({ cloud, user, readOnly }: { cloud: { s: string; msg?: string
   if (readOnly) return <span class="save ro"><Icon n="link" size={13} />Shared view</span>;
   if (!user) return <span class="save" title="Kept in this browser. Sign in to keep it in your account.">Saved in this browser</span>;
   const t = cloud.s === 'saving' ? (cloud.msg ?? 'Saving…') : cloud.s === 'saved' ? (cloud.msg ?? 'Saved') : cloud.s === 'error' ? 'Not saved' : 'Saved';
-  return <span class={`save ${cloud.s}`} title={cloud.msg}><i />{t}</span>;
+  return <span class={`save ${cloud.s}`} title={cloud.msg} role="status">{cloud.s === 'saving' ? <Dither class="dz" cell={2} /> : <i />}{t}</span>;
 }
 
 function More({ openKeys, newProject }: { openKeys: () => void; newProject: () => void }) {
