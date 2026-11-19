@@ -1,0 +1,66 @@
+// The ground under a plot from the city's terrain (the regions baked for the city editor): where a plot has a real
+// place (found by its survey number, or imported with coordinates), its slope and the way it falls are read off the
+// terrain grid round it, as a plane fitted through the heights. The grid is about 8 m and the source elevation data
+// coarser still, so this is a fair first figure for a plot, not a survey: a contour survey overrides it.
+import { loadManifest, loadPiece, type Piece, type RegionManifest } from '../data/region';
+
+const BASE = `${import.meta.env.BASE_URL}regions/`;
+const REGIONS = ['pune', 'mumbai'];
+
+/** UTM (WGS84) easting / northing in a northern zone to latitude / longitude. Zone 43 covers Pune and Mumbai. */
+export function utmToLatLon(E: number, N: number, zone = 43): [number, number] {
+  const a = 6378137, f = 1 / 298.257223563, k0 = 0.9996, e2 = f * (2 - f), ep2 = e2 / (1 - e2);
+  const x = E - 500000, y = N, m = y / k0, mu = m / (a * (1 - e2 / 4 - (3 * e2 * e2) / 64 - (5 * e2 ** 3) / 256));
+  const e1 = (1 - Math.sqrt(1 - e2)) / (1 + Math.sqrt(1 - e2));
+  const p1 = mu + ((3 * e1) / 2 - (27 * e1 ** 3) / 32) * Math.sin(2 * mu) + ((21 * e1 * e1) / 16 - (55 * e1 ** 4) / 32) * Math.sin(4 * mu) + ((151 * e1 ** 3) / 96) * Math.sin(6 * mu);
+  const s = Math.sin(p1), c = Math.cos(p1), t = Math.tan(p1);
+  const n1 = a / Math.sqrt(1 - e2 * s * s), t1 = t * t, c1 = ep2 * c * c, r1 = (a * (1 - e2)) / (1 - e2 * s * s) ** 1.5, d = x / (n1 * k0);
+  const lat = p1 - ((n1 * t) / r1) * (d * d / 2 - ((5 + 3 * t1 + 10 * c1 - 4 * c1 * c1 - 9 * ep2) * d ** 4) / 24 + ((61 + 90 * t1 + 298 * c1 + 45 * t1 * t1 - 252 * ep2 - 3 * c1 * c1) * d ** 6) / 720);
+  const lon = (d - ((1 + 2 * t1 + c1) * d ** 3) / 6 + ((5 - 2 * c1 + 28 * t1 - 3 * c1 * c1 + 8 * ep2 + 24 * t1 * t1) * d ** 5) / 120) / c;
+  return [(lat * 180) / Math.PI, (zone - 1) * 6 - 180 + 3 + (lon * 180) / Math.PI];
+}
+
+const manifests = new Map<string, Promise<RegionManifest | null>>();
+const pieces = new Map<string, Promise<Piece | null>>();
+const manifest = (id: string) => { if (!manifests.has(id)) manifests.set(id, loadManifest(BASE + id + '/').catch(() => null)); return manifests.get(id)!; };
+const piece = (id: string, i: number, j: number) => { const k = `${id}:${i}_${j}`; if (!pieces.has(k)) pieces.set(k, loadPiece(BASE + id + '/', i, j).catch(() => null)); return pieces.get(k)!; };
+
+export interface Ground { elevation: number; slope: number; dir: number; region: string }
+
+/** The ground round a place, `radius` metres each way: its height over sea level, its slope (%) and the compass
+ *  bearing it falls toward. Null where no city's terrain covers it. */
+export async function groundAt(lat: number, lon: number, radius = 25): Promise<Ground | null> {
+  for (const id of REGIONS) {
+    const M = await manifest(id);
+    if (!M) continue;
+    const F = M.frame, x = (lon - F.lon0) * F.kx, z = -(lat - F.lat0) * F.kz, [bx0, bz0, bx1, bz1] = M.bounds;
+    if (x < bx0 || x > bx1 || z < bz0 || z > bz1) continue;
+    const P = M.piece;
+    const h = async (px: number, pz: number): Promise<number | null> => {
+      const p = await piece(id, Math.floor(px / P), Math.floor(pz / P));
+      if (!p) return null;
+      const [x0, z0, x1] = p.rect, cell = (x1 - x0) / (p.n - 1);
+      const fi = (px - x0) / cell, fj = (pz - z0) / cell, i = Math.min(p.n - 2, Math.floor(fi)), j = Math.min(p.n - 2, Math.floor(fj)), u = fi - i, v = fj - j;
+      const H = (a: number, b: number) => p.heights[b * p.n + a];
+      return (H(i, j) * (1 - u) + H(i + 1, j) * u) * (1 - v) + (H(i, j + 1) * (1 - u) + H(i + 1, j + 1) * u) * v;
+    };
+    // a plane through a 7 × 7 grid of heights: h = a + b·dx + c·dz
+    const S: [number, number, number][] = [];
+    for (let j = -3; j <= 3; j++) for (let i = -3; i <= 3; i++) {
+      const dx = (i / 3) * radius, dz = (j / 3) * radius, v = await h(x + dx, z + dz);
+      if (v !== null && Number.isFinite(v)) S.push([dx, dz, v]);
+    }
+    if (S.length < 9) return null;
+    const n = S.length, mh = S.reduce((s, q) => s + q[2], 0) / n;
+    let sxx = 0, szz = 0, sxz = 0, sxh = 0, szh = 0;
+    for (const [dx, dz, v] of S) { sxx += dx * dx; szz += dz * dz; sxz += dx * dz; sxh += dx * (v - mh); szh += dz * (v - mh); }
+    const det = sxx * szz - sxz * sxz;
+    if (Math.abs(det) < 1e-9) return null;
+    const b = (sxh * szz - szh * sxz) / det, c = (szh * sxx - sxh * sxz) / det;
+    const slope = Math.hypot(b, c) * 100;
+    // downhill is −(b, c) in x (east), z (south): its bearing from north, clockwise
+    const dir = ((Math.atan2(-b, c) * 180) / Math.PI + 360) % 360;
+    return { elevation: Math.round(mh * 10) / 10, slope: Math.round(slope * 10) / 10, dir: Math.round(dir), region: id };
+  }
+  return null;
+}

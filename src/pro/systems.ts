@@ -180,13 +180,17 @@ export const TX_RATINGS = [250, 315, 400, 500, 630, 800, 1000, 1250, 1600, 2000]
 const DG_RATINGS = [62.5, 82.5, 125, 160, 200, 250, 320, 380, 500, 625, 750, 1010, 1250, 1500, 2000];
 /** Maharashtra EV Policy 2021: 20% of bays with charging in new residential */
 const EV_SHARE = 0.2, EV_KW = 3.3;
-/** NBC 2016 Part 4 Table 7, A-4 apartments, as we read it: by height band */
+/** NBC 2016 Part 4 Table 7, A-4 apartment houses, by height band (checked against the printed table, 2026-11-19).
+ *  Sprinklers marked R "see Note 4" are required in a basement over 200 m² (to 45 m); throughout above 45 m. Tanks
+ *  in kL: underground (riser, hydrants, sprinklers, one set of pumps) and terrace; pump in lpm at the underground
+ *  tank (Notes 10–12: one set of 2 280 to 45 m, two sets of 2 280 to 60 m, two of 2 850 above). Automatic detection
+ *  only above 60 m. */
 function fireBand(h: number) {
-  if (h <= 15) return { band: 'up to 15 m', riser: 'none' as Riser, sprinklers: 'none' as Sprinklers, hydrant: false, tank: 0, terrace: 5, pump: 0, alarm: false };
-  if (h <= 35) return { band: '15–35 m', riser: 'wet' as Riser, sprinklers: 'basement' as Sprinklers, hydrant: false, tank: 75, terrace: 10, pump: 2280, alarm: true };
-  if (h <= 45) return { band: '35–45 m', riser: 'wet' as Riser, sprinklers: 'basement' as Sprinklers, hydrant: true, tank: 100, terrace: 20, pump: 2280, alarm: true };
-  if (h <= 60) return { band: '45–60 m', riser: 'wet' as Riser, sprinklers: 'all' as Sprinklers, hydrant: true, tank: 150, terrace: 25, pump: 2280, alarm: true };
-  return { band: 'above 60 m', riser: 'wet' as Riser, sprinklers: 'all' as Sprinklers, hydrant: true, tank: 200, terrace: 25, pump: 2850, alarm: true };
+  if (h <= 15) return { band: 'up to 15 m', riser: 'none' as Riser, sprinklers: 'basement' as Sprinklers, hydrant: false, tank: 0, terrace: 5, pump: 0, alarm: false, detect: false };
+  if (h <= 35) return { band: '15–35 m', riser: 'downcomer' as Riser, sprinklers: 'basement' as Sprinklers, hydrant: false, tank: 0, terrace: 25, pump: 0, alarm: true, detect: false };
+  if (h <= 45) return { band: '35–45 m', riser: 'wet' as Riser, sprinklers: 'basement' as Sprinklers, hydrant: false, tank: 75, terrace: 5, pump: 2280, alarm: true, detect: false };
+  if (h <= 60) return { band: '45–60 m', riser: 'wet' as Riser, sprinklers: 'all' as Sprinklers, hydrant: true, tank: 150, terrace: 10, pump: 2280, alarm: true, detect: false };
+  return { band: 'above 60 m', riser: 'wet' as Riser, sprinklers: 'all' as Sprinklers, hydrant: true, tank: 200, terrace: 10, pump: 2850, alarm: true, detect: true };
 }
 const SPRINKLER_RANK: Record<Sprinklers, number> = { none: 0, basement: 1, all: 2 };
 const RISER_RANK: Record<Riser, number> = { none: 0, downcomer: 1, wet: 2 };
@@ -316,26 +320,26 @@ function plant({ d, code, settings: s, bays, dgAuto, fireH }: PlantIn): PlantOut
   const band = fireBand(fireH);
   const tank = pick(F.tank, band.tank);
   L('Plumbing', 'Underground tank (domestic)', kl(ugt), `${fmt(UGT_DAYS)} day of ${kl(water / 1000)} a day`);
-  L('Fire', 'Underground fire tank', tank ? kl(tank) : 'none', `NBC 2016 Part 4 Table 7, ${band.band} (as assumed)`);
+  L('Fire', 'Underground fire tank', tank ? kl(tank) : 'none', `NBC 2016 Part 4 Table 7, ${band.band}`);
   cost.Plumbing += ugt * 1000 * RATE.tankL;
   cost.Fire += tank * 1000 * RATE.tankL;
   if (ugt + tank > 0) spaces.push({ label: 'Underground tanks (footprint, 3 m deep)', area: Math.round((ugt + tank) / 3), site: true });
   if (ugt < ugtAuto - 0.5) C({ key: 'ugt', group: 'Plumbing', rule: 'Domestic storage (underground)', required: `${kl(ugtAuto)} (a day)`, proposed: kl(ugt), status: 'warn', clause: 'NBC 2016 Part 9 (as assumed: a day)' });
-  if (tank < band.tank) C({ key: 'fire-tank', group: 'Fire', rule: 'Fire tank', required: kl(band.tank), proposed: tank ? kl(tank) : 'none', status: 'fail', clause: 'NBC 2016 Part 4 Table 7 (as assumed)' });
+  if (tank < band.tank) C({ key: 'fire-tank', group: 'Fire', rule: 'Fire tank', required: kl(band.tank), proposed: tank ? kl(tank) : 'none', status: 'fail', clause: 'NBC 2016 Part 4 Table 7' });
 
   const pumpAuto = fireH > FIRE_LIFT_H || nFlats > 0;
   const pumpRoom = pick(F.pumpRoom, pumpAuto);
   if (pumpRoom) {
     spaces.push({ label: 'Pump room (fire and domestic)', area: band.pump >= 2850 ? 60 : band.pump ? 45 : 15, site: true });
     cost.Plumbing += RATE.pumpsBase;
-    if (band.pump) { cost.Fire += RATE.firePumps(band.pump); L('Fire', 'Fire pumps', `${fmt(band.pump)} lpm electric, diesel standby, jockey`, 'NBC 2016 Part 4 Table 7 (as assumed)'); }
+    if (band.pump) { cost.Fire += RATE.firePumps(band.pump); L('Fire', 'Fire pumps', `${fmt(band.pump)} lpm electric, diesel standby, jockey`, 'NBC 2016 Part 4 Table 7'); }
   }
-  if (band.pump && !pumpRoom) C({ key: 'pump-room', group: 'Fire', rule: 'Fire pump room', required: `pumps of ${fmt(band.pump)} lpm above 15 m`, proposed: 'none', status: 'fail', clause: 'NBC 2016 Part 4 Table 7 (as assumed)' });
+  if (band.pump && !pumpRoom) C({ key: 'pump-room', group: 'Fire', rule: 'Fire pump room', required: `pumps of ${fmt(band.pump)} lpm above 15 m`, proposed: 'none', status: 'fail', clause: 'NBC 2016 Part 4 Table 7' });
 
   const hydrant = pick(F.hydrant, band.hydrant);
   L('Fire', 'Yard hydrants', yes(hydrant));
   if (hydrant) cost.Fire += RATE.hydrant;
-  if (band.hydrant && !hydrant) C({ key: 'hydrant', group: 'Fire', rule: 'Yard hydrants', required: `needed ${band.band}`, proposed: 'none', status: 'fail', clause: 'NBC 2016 Part 4 Table 7 (as assumed)' });
+  if (band.hydrant && !hydrant) C({ key: 'hydrant', group: 'Fire', rule: 'Yard hydrants', required: `needed ${band.band}`, proposed: 'none', status: 'fail', clause: 'NBC 2016 Part 4 Table 7' });
 
   // STP
   const stpNeeded = nFlats >= STP_FLATS || bua >= STP_BUA;
@@ -490,17 +494,18 @@ function building(b: BuildingReport, o: SystemsOpts): BuildingOut {
 
   // ---- fire, in the building
   const riser = pick(F.riser, band.riser), sprinklers = pick(F.sprinklers, band.sprinklers), alarm = pick(F.alarm, band.alarm);
-  L('Fire', 'Height band', band.band, 'NBC 2016 Part 4 Table 7, A-4 apartments (as we read it)');
+  L('Fire', 'Height band', band.band, 'NBC 2016 Part 4 Table 7, A-4 apartment houses');
   L('Fire', 'Riser', riser === 'wet' ? `wet riser ×${cores}, hose reels each floor` : riser === 'downcomer' ? `downcomer ×${cores}` : 'none (extinguishers and a hose reel)');
   L('Fire', 'Sprinklers', sprinklers === 'all' ? 'throughout' : sprinklers === 'basement' ? ((o.basements ?? 0) > 0 ? 'basements' : 'basements (none here)') : 'none');
-  L('Fire', 'Detection and alarm', alarm ? 'manual call points, detection in common areas' : 'none');
+  L('Fire', 'Detection and alarm', alarm ? (band.detect ? 'manual call points, automatic detection' : 'manual call points, talk-back') : 'none');
   cost.Fire += b.floors * cores * (riser === 'wet' ? RATE.riserFloor : riser === 'downcomer' ? RATE.downcomerFloor : 0) + b.floors * cores * RATE.extFloor;
   const sprArea = sprinklers === 'all' ? d.bua + basementArea : sprinklers === 'basement' ? basementArea : 0;
   cost.Fire += sprArea * RATE.sprinklerM2 + (alarm ? d.bua * RATE.alarmM2 : 0);
-  if (RISER_RANK[riser] < RISER_RANK[band.riser]) C({ key: 'riser', group: 'Fire', rule: 'Riser', required: band.riser === 'wet' ? 'a wet riser' : 'a downcomer', proposed: riser, status: 'fail', clause: 'NBC 2016 Part 4 Table 7 (as assumed)' });
-  const sprNeed: Sprinklers = band.sprinklers === 'basement' && !(o.basements ?? 0) ? 'none' : band.sprinklers;
-  if (SPRINKLER_RANK[sprinklers] < SPRINKLER_RANK[sprNeed]) C({ key: 'sprinklers', group: 'Fire', rule: 'Sprinklers', required: sprNeed === 'all' ? `throughout (${band.band})` : 'in the basements', proposed: sprinklers, status: 'fail', clause: 'NBC 2016 Part 4 Table 7 (as assumed)' });
-  if (band.alarm && !alarm) C({ key: 'alarm', group: 'Fire', rule: 'Fire alarm', required: `manual call points and detection (${band.band})`, proposed: 'none', status: 'fail', clause: 'NBC 2016 Part 4 Table 7 (as assumed)' });
+  if (RISER_RANK[riser] < RISER_RANK[band.riser]) C({ key: 'riser', group: 'Fire', rule: 'Riser', required: band.riser === 'wet' ? 'a wet riser' : 'a downcomer', proposed: riser, status: 'fail', clause: 'NBC 2016 Part 4 Table 7' });
+  // (Note 4: in the basement only where it is over 200 m²)
+  const sprNeed: Sprinklers = band.sprinklers === 'basement' && !((o.basements ?? 0) > 0 && basementArea > 200) ? 'none' : band.sprinklers;
+  if (SPRINKLER_RANK[sprinklers] < SPRINKLER_RANK[sprNeed]) C({ key: 'sprinklers', group: 'Fire', rule: 'Sprinklers', required: sprNeed === 'all' ? `throughout (${band.band})` : 'in the basements', proposed: sprinklers, status: 'fail', clause: 'NBC 2016 Part 4 Table 7' });
+  if (band.alarm && !alarm) C({ key: 'alarm', group: 'Fire', rule: 'Fire alarm', required: `${band.detect ? 'manual call points and automatic detection' : 'a manual fire alarm'} (${band.band})`, proposed: 'none', status: 'fail', clause: 'NBC 2016 Part 4 Table 7' });
 
   // ---- HVAC
   const hvacAuto: Hvac = d.officeCarpet > 0 && !d.nFlats ? 'vrv' : 'none';

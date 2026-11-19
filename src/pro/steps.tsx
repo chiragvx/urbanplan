@@ -8,6 +8,7 @@ import { useMemo, useState } from 'preact/hooks';
 import { UNIT_LABEL } from '../doc/site';
 import { outline, type ProProject } from './project';
 import { fromMetres, importPlot } from './importPlot';
+import { utmToLatLon } from './terrain';
 import { useEffect } from 'preact/hooks';
 import type { Evaluated } from './evaluate';
 import { DEAL_LABEL, DEFAULT_DEAL, type Deal, type DealKind, type DealResult } from './deal';
@@ -52,7 +53,7 @@ async function api<T>(q: Record<string, string>): Promise<T> {
   return j as T;
 }
 type Opt = { code: string; name: string };
-export function FindPlot({ done }: { done: (ring: number[], src: string) => void }) {
+export function FindPlot({ done }: { done: (ring: number[], src: string, at?: [number, number] | null) => void }) {
   const [open, setOpen] = useState(false);
   const [cat, setCat] = useState<'U' | 'R'>('U');
   const [lists, setLists] = useState<{ d?: Opt[]; t?: Opt[]; v?: Opt[]; n?: string[] }>({});
@@ -67,7 +68,9 @@ export function FindPlot({ done }: { done: (ring: number[], src: string) => void
   const find = () => run('the outline', () => api<{ ring: number[]; plotno: string; area: number | null }>({ op: 'plot', g, n: no.trim() })).then((x) => {
     if (!x) return;
     const vName = lists.v?.find((o) => o.code === sel.v)?.name ?? '';
-    done(fromMetres(x.ring, '').ring, `${cat === 'U' ? 'CTS' : 'Survey'} ${x.plotno}, ${vName} · from the land records map`);
+    // (the land records map is in UTM zone 43: its middle, as a place)
+    let ex = 0, ny = 0; const m = x.ring.length / 2; for (let i = 0; i < x.ring.length; i += 2) { ex += x.ring[i] / m; ny += x.ring[i + 1] / m; }
+    done(fromMetres(x.ring, '').ring, `${cat === 'U' ? 'CTS' : 'Survey'} ${x.plotno}, ${vName} · from the land records map`, ex > 1e5 && ny > 1e6 ? utmToLatLon(ex, ny) : null);
     setOpen(false);
   });
   const S = ({ label, list, value, set }: { label: string; list?: Opt[]; value?: string; set: (v: string) => void }) => (
@@ -92,9 +95,9 @@ export function FindPlot({ done }: { done: (ring: number[], src: string) => void
   );
 }
 
-export function ImportBox({ done }: { done: (ring: number[], src: string) => void }) {
+export function ImportBox({ done }: { done: (ring: number[], src: string, at?: [number, number] | null) => void }) {
   const [text, setText] = useState(''), [err, setErr] = useState('');
-  const use = (t: string, name?: string) => { try { const x = importPlot(t, name); done(x.ring, x.source); } catch (e) { setErr((e as Error).message); } };
+  const use = (t: string, name?: string) => { try { const x = importPlot(t, name); done(x.ring, x.source, x.latlon); } catch (e) { setErr((e as Error).message); } };
   return (
     <div class="card">
       <label class="drop">

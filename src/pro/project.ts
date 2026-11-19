@@ -91,6 +91,8 @@ export interface ProProject {
   approval?: { nearAirport?: boolean; trees?: boolean; heritage?: boolean; kind?: import('./approvals').PermissionKind };
   /** what's on and round the plot: obstructions and no-build zones (./siteObjects.ts) */
   features?: SiteFeature[];
+  /** where the plot is (latitude, longitude), when it was found or imported with a real place */
+  at?: [number, number];
   /** the plot's levels */
   levels?: Levels;
   /** where north is: degrees the plot is turned clockwise (0: north is straight back from the front road) */

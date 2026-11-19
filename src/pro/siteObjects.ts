@@ -59,7 +59,7 @@ export function keepOutOf(fs: SiteFeature[] | undefined): number[][] {
 
 /** The plot's levels: its mean ground over the road's (m: positive above), and a fall across it (% and the
  *  direction it falls toward, degrees clockwise from north). */
-export interface Levels { plot: number; slope: number; dir: number }
+export interface Levels { plot: number; slope: number; dir: number; /** the ground over sea level (m), and whether slope and fall came off the city's terrain */ asl?: number; terrain?: boolean }
 export const DEFAULT_LEVELS: Levels = { plot: 0.3, slope: 0, dir: 180 };
 /** the ground's height at x, z (m over the road), about the plot's middle cx, cz; north is -z turned by `north` */
 export function levelAt(L: Levels, x: number, z: number, cx: number, cz: number, north = 0): number {

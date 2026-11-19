@@ -19,6 +19,7 @@ import { DEFAULT_LEVELS, FEATURES, featureOf, INTERNAL_WIDTHS, PLINTH_MIN, roadP
 import { FindPlot, FlatPlan, ImportBox, slug, type StepProps } from './steps';
 import { Btn, download, Icon, Lines, Note, nf, Num, Row, Section, Seg, Select, Slider, sqft, Stat, Toggle } from './ui';
 import { SystemsPanel } from './systemsPanel';
+import { groundAt } from './terrain';
 import { mergeSettings, splitSettings } from './systems';
 
 const DIRS = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
@@ -67,10 +68,22 @@ export function SiteStep2({ p, e, up, toast, tool, setTool, picked, pick }: Step
   const fs = p.features ?? [];
   const setF = (id: string, x: Partial<SiteFeature>) => up({ features: fs.map((f) => (f.id === id ? { ...f, ...x } : f)) });
   const fPicked = picked?.k === 'feature' ? fs.find((f) => f.id === picked.id) : undefined;
-  const found = (ring: number[], src: string, name?: string) => {
+  // the ground off the city's terrain, where the plot has a real place
+  const [reading, setReading] = useState(false);
+  const readGround = async (at: [number, number], ring: number[], quiet = false) => {
+    setReading(true);
+    let r0 = 0; for (let i = 0; i < ring.length; i += 2) r0 = Math.max(r0, Math.hypot(ring[i], ring[i + 1]));
+    const g = await groundAt(at[0], at[1], Math.max(20, Math.min(80, r0))).catch(() => null);
+    setReading(false);
+    if (!g) { if (!quiet) toast('No terrain for this place yet: set the levels by hand.'); return; }
+    up({ at, north: 0, levels: { ...L, slope: g.slope < 0.5 ? 0 : g.slope, dir: (Math.round(g.dir / 45) * 45) % 360, asl: g.elevation, terrain: true } });
+    toast(`The ground, off the terrain: ${nf(g.elevation)} m over sea level, ${g.slope < 0.5 ? 'about level' : `${nf(g.slope)}% falling ${DIRS[Math.round(g.dir / 45) % 8]}`}.`);
+  };
+  const found = (ring: number[], src: string, name?: string, at?: [number, number] | null) => {
     const k = longestEdge(ring);
-    up({ shape: 'poly', ring, edgeRoads: Array.from({ length: ring.length / 2 }, (_, i) => (i === k ? { today: 12, dp: 0 } : null)), ...(name ? { name } : {}) });
+    up({ shape: 'poly', ring, at: at ?? undefined, edgeRoads: Array.from({ length: ring.length / 2 }, (_, i) => (i === k ? { today: 12, dp: 0 } : null)), ...(name ? { name } : {}) });
     toast(`${src}. The longest edge has the road: set the real roads below.`);
+    if (at) void readGround(at, ring, true);
   };
   return (
     <>
@@ -84,9 +97,9 @@ export function SiteStep2({ p, e, up, toast, tool, setTool, picked, pick }: Step
         <p class="hint-line"><Icon n="cursor" size={14} />Drag its corners on the map to change it.</p>
         <button type="button" class="linkbtn" aria-expanded={sizing} onClick={() => setSizing(!sizing)}><Icon n="plan" size={14} /> A rectangle by its size</button>
         {sizing && <Row><Num label="Frontage" value={p.width} set={(v) => up({ width: v, shape: 'rect' })} min={10} max={600} unit="m" /><Num label="Depth" value={p.depth} set={(v) => up({ depth: v, shape: 'rect' })} min={10} max={600} unit="m" /></Row>}
-        <FindPlot done={(ring, src) => found(ring, src, src.split(' · ')[0])} />
+        <FindPlot done={(ring, src, at) => found(ring, src, src.split(' · ')[0], at)} />
         <button type="button" class="linkbtn" aria-expanded={importing} onClick={() => setImporting(!importing)}><Icon n="upload" size={14} /> Import the outline from a file or coordinates</button>
-        {importing && <ImportBox done={(ring, src) => { found(ring, `Outline from ${src}`); setImporting(false); }} />}
+        {importing && <ImportBox done={(ring, src, at) => { found(ring, `Outline from ${src}`, undefined, at); setImporting(false); }} />}
       </Section>
 
       <Section title="Roads" sub="The road along each edge, at the widths the plan uses. The DP width sets the rules.">
@@ -110,10 +123,14 @@ export function SiteStep2({ p, e, up, toast, tool, setTool, picked, pick }: Step
       <Section title="Levels and north" fold open={!!(p.levels || p.north)}>
         <Row>
           <Num label="Plot over the road" value={L.plot} set={(v) => setLv({ plot: v })} min={-10} max={30} step={0.1} unit="m" />
-          <Num label="Slope" value={L.slope} set={(v) => setLv({ slope: v })} min={0} max={60} step={0.5} unit="%" />
+          <Num label="Slope" value={L.slope} set={(v) => setLv({ slope: v, terrain: false })} min={0} max={60} step={0.5} unit="%" />
         </Row>
-        {L.slope > 0 && <Select<number> label="Falls toward" value={L.dir} onChange={(v) => setLv({ dir: v })} options={DIRS.map((d, i) => ({ value: i * 45, label: cap(d) }))} />}
-        <Num label="North, turned clockwise" value={north} set={(v) => up({ north: ((v % 360) + 360) % 360 })} min={-360} max={360} step={5} unit="°" hint="The compass on the map follows. 0: north is straight back from the front road." />
+        {p.at
+          ? <><Note>{L.terrain ? `Off the city's terrain${L.asl !== undefined ? `, ${nf(L.asl)} m over sea level` : ''}. A first figure: a contour survey beats it.` : 'Set by hand.'}</Note>
+            <Row><Btn icon="level" disabled={reading} onClick={() => readGround(p.at!, outline(p).ring)}>{reading ? 'Reading…' : L.terrain ? 'Read it again' : 'Read the terrain'}</Btn></Row></>
+          : <Note>Find or import the plot to read its slope off the terrain.</Note>}
+        {L.slope > 0 && <Select<number> label="Falls toward" value={L.dir} onChange={(v) => setLv({ dir: v, terrain: false })} options={DIRS.map((d, i) => ({ value: i * 45, label: cap(d) }))} />}
+        <Num label="North, turned clockwise" value={north} set={(v) => up({ north: ((v % 360) + 360) % 360 })} min={-360} max={360} step={5} unit="°" hint={p.at ? "Set from where the plot is. The compass on the map follows." : "0: the front road is on the north side. The compass on the map follows."} />
         {L.plot < PLINTH_MIN && <Note tone="warn">The plinth must stand at least {PLINTH_MIN} m over the road: {L.plot < 0 ? 'the plot is below it, so plan the drainage and fill' : `about ${nf(PLINTH_MIN - L.plot, 2)} m of fill or a raised plinth`}.</Note>}
         {L.slope >= 15 && <Note tone="warn">A steep plot ({nf(L.slope)}%): expect retaining walls and stepped floors, and a hill-slope check by the authority.</Note>}
       </Section>

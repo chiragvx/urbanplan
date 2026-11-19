@@ -35,6 +35,7 @@ import { Sheets, SHEET_CSS } from './drawings';
 import { ApproveStep, ExploreStep, MoneyStep, STEPS, type Step, type StepProps } from './steps';
 import { SchemeStep, SiteStep2 } from './sitePanels';
 import { DesignSystemStep } from './designStep';
+import { groundAt } from './terrain';
 import { CanvasEdit, SELECT, type Picked as EditPicked, type Tool } from './edit';
 import { Btn, cr, Dialog, Icon, Menu, nf, Num, pct, Range, Seg, Select, sqft, TooltipLayer } from './ui';
 
@@ -236,6 +237,8 @@ function App() {
       options: (q?: ProProject) => exploreOptions(q ?? pRef.current),
       brief: (text: string) => runBrief(pRef.current, parseBrief(text).brief),
       deal: (q?: ProProject) => { const x = evaluate(q ?? pRef.current); return applyDeal(x, x.p.deal ?? DEFAULT_DEAL); },
+      /** the ground round a place, off the city's terrain */
+      ground: (lat: number, lon: number, r?: number) => groundAt(lat, lon, r),
     };
   }, []);
 
