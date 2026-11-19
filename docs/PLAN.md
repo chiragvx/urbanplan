@@ -115,6 +115,7 @@ The first cut of the platform, in `src/pro/`:
   - Type an edge's exact length, and put a road on any edge (width today and in the DP).
   - Or paste the corners as x, y in metres.
 - **`cloud.ts`:** signed in, the project saves to the account a few seconds after each change, with versions, through the editor's own project storage. Pro projects sit in the same table, marked `region` `pro:<city>`, so no database change was needed. The Projects menu opens, starts and deletes them, and `/pro/?p=<id>` links straight to one.
+- **`mixed.ts`:** shops along the front road under the flats: the ground floor, G + 1 or G + 2, at a depth set from the front. The ground-floor shops count in the FSI, so floors of flats come off the top; above the ground, flats in the strip become shops. The shops' parking is added, and basements too if needed. Shops sell at their own rate, 1.8× the flats' until a price is put in, in the same cash flow. The road-width tiers for shop floors are flagged, never enforced, and still need checking against UDCPR's mixed-use clauses: 9 m allows the ground floor, 18 m two floors, 24 m three, 30 m all.
 - **`design.ts`:** the design system. Five presets (Pune Contemporary, Mumbai Glass Tower, Warm Earth, Value Housing, Signature Luxury), with every token editable. The spec adds to construction cost; each preset's price premium sets the sale price until one is typed in.
 - **`openings.ts`:** windows and doors placed from the catalog on each flat's outside walls (living, bedrooms, kitchen, toilet ventilators), entrance doors on the corridor. Produces the door and window schedule and a light and ventilation check per flat.
 - **`scene.ts`:** three.js 3D with instanced windows, doors, balconies, bands and fins in the design system's materials. An X-ray floor shows a level as a plan cut at 1.5 m (flats by type, walls, entrance doors). Pointing at a window or door shows its tag and size.
@@ -122,6 +123,7 @@ The first cut of the platform, in `src/pro/`:
 Not yet:
 - picking a plot from data (survey or CTS number, Bhunaksha)
 - rooms inside flats
+- more mixed use: offices over shops, a podium of shops, a separate commercial block
 - drawings and exports
 
 ## Open questions

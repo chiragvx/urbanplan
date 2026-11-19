@@ -137,7 +137,7 @@ editor for the account pages saves the map in the browser first.
 
 ## Pro (`/pro/`, beta)
 
-The full planning workspace beside the simple editor: set up a plot (a rectangle, or an outline drawn or pasted corner by corner with a road on any edge), pick the builder's **design system** (facade, glazing, the window and door catalog, balconies, floor height, the spec sold), and the scheme is generated at once. Pro shows:
+The full planning workspace beside the simple editor: set up a plot (a rectangle, or an outline drawn or pasted corner by corner with a road on any edge), add shops along the front if wanted, pick the builder's **design system** (facade, glazing, the window and door catalog, balconies, floor height, the spec sold), and the scheme is generated at once. Pro shows:
 
 - the scheme in 3D, every window and door at its catalog size; point at one to read it
 - an X-ray floor plan

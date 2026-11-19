@@ -10,7 +10,10 @@ import { UNIT_COLOR, type SiteReport } from '../doc/site';
 import type { DesignSystem } from './design';
 import type { FloorPlan, Opening } from './openings';
 
-export interface ViewData { r: PlotReport; d: SiteReport; plans: FloorPlan[]; ds: DesignSystem; xray: number | null; roads: { pts: [number, number, number, number]; today: number }[] }
+import { SHOP_W, type Shops } from './mixed';
+import { roadFrame } from '../doc/site';
+
+export interface ViewData { r: PlotReport; d: SiteReport; plans: FloorPlan[]; ds: DesignSystem; xray: number | null; roads: { pts: [number, number, number, number]; today: number }[]; shops?: Shops | null }
 export interface Picked { tag: string; label: string; size: string; floor: number; x: number; y: number }
 
 const box = new THREE.BoxGeometry(1, 1, 1);
@@ -147,6 +150,7 @@ export class ProView {
       frame: mat(ds.glazing.frame, { roughness: 0.45, metalness: 0.3 }), glass: mat(ds.glazing.glass, { roughness: 0.08, metalness: 0.55, envMapIntensity: 1 }),
       rail: ds.balcony.railing === 'glass' ? mat('#cfe3ee', { transparent: true, opacity: 0.38, roughness: 0.05 }) : ds.balcony.railing === 'ms' ? mat('#2b2b2e', { roughness: 0.5, metalness: 0.5 }) : mat(ds.facade.wall),
       slab: mat('#d8d4cc'), road: mat('#5b5e66', { roughness: 0.95 }), dp: mat('#e5484d', { transparent: true, opacity: 0.28 }), paving: mat('#d3cfc5'),
+      shop: mat('#efe2c8', { emissive: '#ffd9a0', emissiveIntensity: 0.25 }), sign: mat('#1d1f24', { roughness: 0.4 }),
       core: mat('#a7a39b'), door: mat('#8a5a3b', { roughness: 0.6 }), partition: mat('#f5f3ef'),
     };
     const add = (o: THREE.Object3D | null) => { if (o) this.root.add(o); return o; };
@@ -172,6 +176,40 @@ export class ProView {
 
     const bands = new Boxes(), fins = new Boxes(), frames = new Boxes(), panes = new Boxes(), slabs = new Boxes(), rails = new Boxes(), cols = new Boxes(), parts = new Boxes(), doors = new Boxes(), parapets = new Boxes();
     const under = d.under, y0 = under * fh;
+    // shops at the front: the road-facing edges of each strip, and which flats are shops on the floors above
+    const F = roadFrame(r), signs = new Boxes();
+    const shopFronts = (ring: number[]) => {
+      const out: { x: number; z: number; ux: number; uz: number; nx: number; nz: number; L: number }[] = [];
+      let sa = 0;
+      for (let i = 0; i < ring.length; i += 2) { const j = (i + 2) % ring.length; sa += ring[i] * ring[j + 1] - ring[j] * ring[i + 1]; }
+      for (let i = 0; i < ring.length; i += 2) {
+        const j = (i + 2) % ring.length, L = Math.hypot(ring[j] - ring[i], ring[j + 1] - ring[i + 1]);
+        if (L < 1) continue;
+        const ux = (ring[j] - ring[i]) / L, uz = (ring[j + 1] - ring[i + 1]) / L, sg = sa > 0 ? 1 : -1, nx = uz * sg, nz = -ux * sg;
+        // facing the road (against v), or a side face
+        if (nx * -F.vx + nz * -F.vz > 0.5 || Math.abs(nx * F.ux + nz * F.uz) > 0.9) out.push({ x: (ring[i] + ring[j]) / 2, z: (ring[i + 1] + ring[j + 1]) / 2, ux, uz, nx, nz, L });
+      }
+      return out;
+    };
+    const glazeRun = (e: { x: number; z: number; ux: number; uz: number; nx: number; nz: number; L: number }, yb: number, h: number, sign: boolean) => {
+      const n = Math.max(1, Math.round(e.L / SHOP_W)), w = e.L / n;
+      for (let k = 0; k < n; k++) {
+        const t = -e.L / 2 + w * (k + 0.5), cx = e.x + e.ux * t + e.nx * 0.05, cz = e.z + e.uz * t + e.nz * 0.05;
+        const gh = sign ? h - 0.9 : h - 0.5;
+        frames.add(cx, yb + 0.05 + gh / 2, cz, e.ux, e.uz, w - 0.3, gh + 0.1, 0.1);
+        panes.add(cx + e.nx * 0.04, yb + 0.05 + gh / 2, cz + e.nz * 0.04, e.ux, e.uz, w - 0.42, gh - 0.04, 0.04);
+        if (sign) signs.add(cx + e.nx * 0.12, yb + h - 0.45, cz + e.nz * 0.12, e.ux, e.uz, w - 0.5, 0.6, 0.12);
+      }
+      for (let k = 0; k <= n; k++) { const t = -e.L / 2 + w * k; cols.add(e.x + e.ux * t + e.nx * 0.1, yb + h / 2, e.z + e.uz * t + e.nz * 0.1, e.ux, e.uz, 0.3, h, 0.3); }
+    };
+    if (v.shops && under) for (const st of v.shops.strips) {
+      mesh(prism(st.ring, 0, y0 - 0.02), M.shop);
+      for (const e of shopFronts(st.ring)) {
+        glazeRun(e, 0, y0, true);
+        // a canopy over the shopfronts facing the road
+        if (e.nx * -F.vx + e.nz * -F.vz > 0.5) slabs.add(e.x + e.nx * 0.9, y0 - 0.1, e.z + e.nz * 0.9, e.ux, e.uz, e.L, 0.14, 1.8);
+      }
+    }
     d.buildings.forEach((b, bi) => {
       const plan = plans[bi];
       const all = b.floors, show = v.xray === null ? all : Math.min(all, Math.max(1, v.xray));
@@ -196,7 +234,10 @@ export class ProView {
           bands.add((q[i] + q[j]) / 2, fy, (q[i + 1] + q[j + 1]) / 2, ux, uz, L + 0.24, 0.22, 0.24);
         }
         const cut = v.xray !== null && f === show - 1;
+        const shopHere = !!v.shops && f < v.shops.upperOf[bi], gone = shopHere ? v.shops!.removed.get(bi) : undefined;
+        if (shopHere && !cut) for (const st of v.shops!.strips) if (st.b === bi) for (const e of shopFronts(st.ring)) glazeRun(e, fy, fh, false);
         for (const o of plan.openings) {
+          if (gone?.has(o.unit)) continue;
           if (!o.outside && !cut) continue;
           const s = o.tag === 'SD' || o.tag === 'D1' ? ds.doors[o.tag] : ds.windows[o.tag];
           const cy = fy + o.sill + o.h / 2, off = o.outside ? 0.07 : 0;
@@ -254,7 +295,7 @@ export class ProView {
         }
       }
     });
-    for (const [B, m, cast] of [[bands, M.accent, true], [fins, M.accent, true], [frames, M.frame, true], [panes, M.glass, false], [slabs, M.slab, true], [rails, M.rail, false], [cols, M.base, true], [parts, M.partition, true], [doors, M.door, true], [parapets, M.wall, true]] as [Boxes, THREE.Material, boolean][]) {
+    for (const [B, m, cast] of [[bands, M.accent, true], [fins, M.accent, true], [frames, M.frame, true], [panes, M.glass, false], [slabs, M.slab, true], [rails, M.rail, false], [cols, M.base, true], [parts, M.partition, true], [doors, M.door, true], [parapets, M.wall, true], [signs, M.sign, true]] as [Boxes, THREE.Material, boolean][]) {
       const im = B.mesh(m, cast);
       if (!im) continue;
       add(im);

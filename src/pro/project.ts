@@ -7,6 +7,7 @@ import { DEFAULT_DESIGN, optimise, siteDefaults, type Typology } from '../doc/op
 import type { CityDoc } from '../doc/doc';
 import type { Compiler } from '../doc/compile';
 import type { PlotObj } from '../doc/types';
+import { withShops, type Shops } from './mixed';
 
 export type ProCity = 'pune' | 'pune-congested' | 'mumbai-island' | 'mumbai-suburbs';
 export const CITIES: { value: ProCity; label: string; code: PlotCode; note: string }[] = [
@@ -44,7 +45,12 @@ export interface ProProject {
   sale: number;
   /** land, ₹ per sq ft of plot (0: the city's starting figure) */
   land?: number;
+  /** shops along the front road: floors of them (0: none), how deep, and their sale price (₹/sq ft carpet; 0: the starting figure) */
+  shops?: { floors: number; depth: number; sale: number };
 }
+
+/** shops sell at about this many times the flats' rate until a price is put in */
+export const SHOP_PREMIUM = 1.8;
 
 export const DEFAULT_PROJECT: ProProject = {
   v: 1, name: 'Untitled project', city: 'pune', width: 40, depth: 50, road: 12, dpRoad: 18, corner: false, sideRoad: 9,
@@ -114,11 +120,13 @@ export function plotReport(p: ProProject, floorH = 3): PlotReport {
   return analysePlot(doc, C, () => ids, plot, cfg.code);
 }
 
-/** The generated scheme on it. */
-export function generate(p: ProProject, r: PlotReport, specRate = 0, premium = 0): SiteReport {
+/** The generated scheme on it, with shops along the front if asked for (./mixed.ts). */
+export function generate(p: ProProject, r: PlotReport, specRate = 0, premium = 0): { d: SiteReport; shops: Shops | null } {
   const c = defaultCosts(r.code, 'residential');
   const cost = { build: c.build + specRate, ...(p.land ? { land: p.land } : {}), sale: p.sale > 0 ? p.sale : Math.round((c.sale * (1 + premium)) / 50) * 50 };
   const base = { ...siteDefaults('residential'), mix: p.mix, cost, design: { ...DEFAULT_DESIGN, type: p.typology, maxFloors: p.maxFloors } };
   const site = optimise(r, base, 'residential');
-  return solveSite(r, site, 'residential');
+  const sh = p.shops;
+  if (!sh || sh.floors <= 0) return { d: solveSite(r, site, 'residential'), shops: null };
+  return withShops(r, site, 'residential', sh, sh.sale > 0 ? sh.sale : Math.round((cost.sale * SHOP_PREMIUM) / 50) * 50);
 }

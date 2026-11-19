@@ -9,6 +9,7 @@ import '../theme/tokens.css';
 import './pro.css';
 import { CITIES, DEFAULT_PROJECT, generate, outline, plotReport, roadLines, type ProProject } from './project';
 import { PlotEditor } from './PlotEditor';
+import { shopFloorsAllowed } from './mixed';
 import { deletePro, listPro, openPro, savePro, toText, type CloudRef } from './cloud';
 import { authReady, explain, peekSession, session, startAuth } from '../auth/auth';
 import type { Project } from '../app/cloud';
@@ -147,11 +148,11 @@ function App() {
   const out = useMemo(() => {
     const r = plotReport(p, ds.floorH);
     const rate = specRate(ds);
-    const d = generate(p, r, rate, ds.premium);
+    const { d, shops } = generate(p, r, rate, ds.premium);
     const plans = d.buildings.map((b) => planFloor(b, ds));
-    const rows = schedule(d, plans, ds);
+    const rows = schedule(d, plans, ds, (bi, ui) => (shops?.removed.get(bi)?.has(ui) ? shops.upperOf[bi] : 0));
     const checks = plans.flatMap((pl, i) => pl.checks.map((c) => ({ ...c, floors: d.buildings[i].floors })));
-    return { r, d, plans, rows, checks, rate };
+    return { r, d, plans, rows, checks, rate, shops };
   }, [JSON.stringify(p)]);
 
   const canvas = useRef<HTMLCanvasElement>(null), view = useRef<ProView | null>(null);
@@ -168,10 +169,13 @@ function App() {
   useEffect(() => {
     setHover(null);
     const o = outline(p);
-    view.current?.set({ r: out.r, d: out.d, plans: out.plans, ds, xray: xr, roads: roadLines(o.ring, o.roads).map((l) => ({ pts: l.pts, today: l.road.today })) });
+    view.current?.set({ r: out.r, d: out.d, plans: out.plans, ds, xray: xr, shops: out.shops, roads: roadLines(o.ring, o.roads).map((l) => ({ pts: l.pts, today: l.road.today })) });
   }, [out, xr]);
 
-  const { r, d } = out;
+  const { r, d, shops } = out;
+  const sh = p.shops ?? { floors: 0, depth: 9, sale: 0 };
+  const setShops = (o: Partial<typeof sh>) => up({ shops: { ...sh, ...o } });
+  const allowed = shopFloorsAllowed(r.roadW);
   // drawing starts from the rectangle as it stands (once; after that the drawn outline is kept)
   const setShape = (v: 'rect' | 'poly') => {
     if (v === 'rect') { up({ shape: 'rect' }); return; }
@@ -228,6 +232,17 @@ function App() {
             <div class="pf-row three">
               {[0, 1, 2].map((i) => <Num label={UNIT_LABEL[i]} value={Math.round(p.mix[i] * 100)} unit="%" max={100} set={(v) => { const m = [...p.mix] as [number, number, number]; m[i] = v / 100; const s = m[0] + m[1] + m[2] || 1; up({ mix: m.map((x) => x / s) as [number, number, number] }); }} />)}
             </div>
+            <h3>Shops at the front</h3>
+            <Seg<string> value={String(sh.floors)} set={(v) => setShops({ floors: +v })}
+              options={[{ value: '0', label: 'None' }, { value: '1', label: 'Ground' }, { value: '2', label: 'G + 1' }, { value: '3', label: 'G + 2' }]} />
+            {sh.floors > 0 && <>
+              <div class="pf-row">
+                <Num label="Depth from the front" value={sh.depth} set={(v) => setShops({ depth: v })} min={4} max={30} unit="m" />
+                <Num label={`Price${sh.sale ? '' : ' (0: starting)'}`} value={sh.sale} set={(v) => setShops({ sale: v })} step={500} max={200000} unit="₹/ft²" />
+              </div>
+              <p class={`chk ${allowed >= sh.floors ? 'ok' : 'warn'}`}>{allowed === 0 ? `A ${nf(r.roadW)} m road allows no shops (9 m and wider).` : `A ${nf(r.roadW)} m road allows shops on ${allowed >= 99 ? 'every floor' : allowed === 1 ? 'the ground floor' : `${allowed} floors`}.`} Check the zone and the authority's mixed-use rules.</p>
+              <p class="pro-note">The ground floor counts in the FSI, so floors of flats come off the top; the shops' parking is added. {sh.floors > 1 ? 'Above the ground, flats in the strip become shops.' : ''}</p>
+            </>}
           </div>
         )}
 
@@ -320,6 +335,7 @@ function App() {
             <div><dt>Built-up area</dt><dd>{sqft(d.bua)} <small>of {sqft(r.bua)}</small></dd></div>
             <div><dt>Buildings</dt><dd>{d.buildings.length} · {nf(d.height, 1)} m tall · {d.buildings.map((b) => b.floors).join(' + ')} floors{d.under ? ' over a stilt' : ''}</dd></div>
             <div><dt>Flats</dt><dd>{d.flats} <small>{[0, 1, 2].filter((t) => d.count[t]).map((t) => `${d.count[t]} × ${UNIT_LABEL[t]}`).join(', ')}</small></dd></div>
+            {shops && <div><dt>Shops</dt><dd>{shops.count} <small>{sqft(shops.carpet)} carpet · {cr(shops.revenue)}</small></dd></div>}
             <div><dt>Carpet (RERA)</dt><dd>{sqft(d.carpet)}</dd></div>
             <div><dt>Parking</dt><dd>{d.parking.have} car bays <small>{d.parking.need} needed</small></dd></div>
           </dl>
@@ -337,6 +353,7 @@ function App() {
           <h2>Checks</h2>
           <p class={`chk ${flatsOk === flatsAll ? 'ok' : 'warn'}`}>Light and air: {flatsOk} of {flatsAll} flats have openings of 1/10 of their floor area (half of it opening).</p>
           {failing.length > 0 && <ul class="chk-list">{failing.slice(0, 4).map((c) => <li>{UNIT_LABEL[c.t]} of {nf(c.carpet)} m²: {nf(c.glazed, 1)} m² of openings, needs {nf(c.carpet / 10, 1)}</li>)}</ul>}
+          {shops && <p class={`chk ${shops.over ? 'warn' : 'ok'}`}>Shops: {shops.over ? `${shops.floors} floors asked, the ${nf(r.roadW)} m road allows ${shops.allowed}. ` : ''}{shops.trimmed ? `${shops.trimmed} floor${shops.trimmed > 1 ? 's' : ''} of flats came off the top to stay in the FSI` : 'Within the FSI'}{shops.removedFlats ? `, ${shops.removedFlats} flats became shops` : ''}; {shops.cars} cars for them{shops.basementsAdded ? `, ${shops.basementsAdded} more basement${shops.basementsAdded > 1 ? 's' : ''}` : ''}.</p>}
           {d.departures.length ? <ul class="chk-list">{d.departures.map((x) => <li class="warn">{x.rule}: {x.value} (allowed {x.allowed}) <small>{x.clause}</small></li>)}</ul> : <p class="chk ok">No departures from {r.code === 'udcpr' ? 'UDCPR' : 'DCPR'} in the rules checked.</p>}
         </section>
         <section>

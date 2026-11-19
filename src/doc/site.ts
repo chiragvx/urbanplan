@@ -915,7 +915,7 @@ function openGround(net: number[], taken: number[][]): number {
 /** Month by month. Month 0: the land and the FSI bought. Construction (with parking and soft costs) along an
  *  S-curve over the build. Flats are booked steadily from month 3 (the presold share by completion, the rest over
  *  the year after) and buyers pay as the building goes up (RERA stage payments), the balance on possession. */
-function cashflow(upfront: number, build: number, revenue: number, c: Costs) {
+export function cashflow(upfront: number, build: number, revenue: number, c: Costs) {
   const T = Math.max(6, Math.round(c.months)), pre = Math.max(0, Math.min(100, c.presold)) / 100, end = T + 12;
   const progress = (t: number) => (t >= T ? 1 : t <= 0 ? 0 : Math.sin((Math.PI / 2) * (t / T)) ** 2);
   const booked = (t: number) => (t < 3 ? 0 : t <= T ? (pre * (t - 3)) / (T - 3) : pre + ((1 - pre) * Math.min(t - T, 12)) / 12);
