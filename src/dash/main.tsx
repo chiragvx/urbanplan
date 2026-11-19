@@ -107,7 +107,8 @@ function App() {
               <span><b>{name.split('@')[0]}</b><small>{(data.profile?.plan ?? 'free') === 'free' ? 'Free plan' : `${data.profile!.plan} plan`}</small></span>
               <Menu label="Account" icon="more" items={[
                 { label: 'Profile', icon: 'user', onSelect: () => go('#/settings/profile') },
-                { label: 'Settings', icon: 'key', onSelect: () => go('#/settings/preferences') },
+                { label: 'Preferences', icon: 'palette', onSelect: () => go('#/settings/preferences') },
+                { label: 'Plan and usage', icon: 'shield', onSelect: () => go('#/settings/plan') },
                 { label: 'Sign out', icon: 'x', onSelect: () => void signOut().then(() => location.reload()) },
               ]} />
             </div>
