@@ -72,9 +72,9 @@ function mapsPlugin(): Plugin {
 
 /** The HTML entries: the landing page, the editor at /app/, and the template every other page of the website is
  *  built from (src/site/routes.ts lists them). */
-const ENTRIES: Record<string, string> = { index: 'index.html', app: 'app/index.html', page: 'src/site/page.html' };
+const ENTRIES: Record<string, string> = { index: 'index.html', app: 'app/index.html', pro: 'pro/index.html', page: 'src/site/page.html' };
 /** routes with an HTML entry of their own */
-const OWN: Record<string, string> = { '': 'index.html', 'app/': 'app/index.html' };
+const OWN: Record<string, string> = { '': 'index.html', 'app/': 'app/index.html', 'pro/': 'pro/index.html' };
 const TEMPLATE = 'src/site/page.html';
 
 type Prerender = typeof import('./src/site/prerender');

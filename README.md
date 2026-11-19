@@ -135,6 +135,18 @@ To switch them on:
 The editor shows a *Sign in* button (top right of the map, and on the start menu) once accounts are on; leaving the
 editor for the account pages saves the map in the browser first.
 
+## Pro (`/pro/`, beta)
+
+The full planning workspace beside the simple editor: set up a plot and its roads, pick the builder's **design system** (facade, glazing, the window and door catalog, balconies, floor height, the spec sold), and the scheme is generated at once. Pro shows:
+
+- the scheme in 3D, every window and door at its catalog size; point at one to read it
+- an X-ray floor plan
+- the door and window schedule
+- the light and ventilation check and departures from the rules
+- the money
+
+It runs on the same engine as Site Studio. Code: `src/pro/`. Where it is going: [docs/PLAN.md](docs/PLAN.md).
+
 ## The editor
 
 - **Layout** (Cities: Skylines style): the map edge to edge, and the **bottom bar**: the map (its menu — new, open,

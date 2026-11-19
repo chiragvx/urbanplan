@@ -131,6 +131,11 @@ const STATIC: Route[] = [
     },
   },
   {
+    // the full planning workspace (beta): out of search until it's ready
+    path: 'pro/', priority: 0, updated: SITE_UPDATED,
+    head: { title: 'Pro: plan a whole project', description: `${SITE_NAME} Pro: set up a plot, pick a builder design system, and get the scheme in 3D with its windows, doors, schedule, checks and returns.`, noindex: true },
+  },
+  {
     path: 'pricing/', priority: 0.6, updated: SITE_UPDATED,
     head: { title: 'Pricing', description: `${SITE_NAME} is free during the beta. Pro and Firm will add maps saved to your account, exports and analysis.`, image: IMG.city, imageAlt: ALT.city, ld: (url) => [app(url)] },
   },
