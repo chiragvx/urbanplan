@@ -88,7 +88,12 @@ export interface DesignSystem {
   finish?: Finish;
   /** a saved design system's id (./designLibrary.ts) when this one came from it, so the UI can say "changed from" */
   origin?: string;
+  /** its design language for formed buildings (./form): the skin laid over every face, the roof it likes, how
+   *  round it likes its corners (0 sharp … 1 fully smooth). Unset: read through `languageOf`, which derives one. */
+  language?: Language;
 }
+
+export interface Language { skin: import('./form/types').Skin; roof: import('./form/types').RoofKind; round: number }
 
 /** Room kinds that get a floor material of their own. */
 export type FloorRoom = 'living' | 'bed' | 'kitchen' | 'toilet' | 'balcony' | 'common';
