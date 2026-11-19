@@ -176,6 +176,8 @@ export const TRAVEL = 30;
 const CORRIDOR = 2, BAY_W = 2.5, BAY_L = 5, AISLE = 6;
 /** how far over its size a flat may stretch to fill a stretch and still count as fitting */
 const STRETCH = 1.4;
+/** the narrowest a full-depth flat round a lobby may be (m) */
+const LOBBY_W = 4.5;
 /** decks reached by ramp (basements, podiums): a column (0.6 m) after every three bays, 0.6 m clear of the retaining
  *  wall, a two-way ramp 6 m wide at 1 in 8 with 3 m level landings each end (a car lift on a deck too short for it), and an exit stair (4 × 6 m) wherever a
  *  car is more than 45 m from one (or a building's core coming down through the deck); two ways out from a deck over
@@ -636,8 +638,26 @@ export function basementsToFit(r: PlotReport, site: PlotSite, use: PlotUse, max 
   return max;
 }
 
-/** A typical floor of a building: cores spaced for the escape distance, the corridor, flats filling each wing. */
+/** A typical floor of a building: cores spaced for the escape distance, the corridor, flats filling each wing.
+ *  A short straight block with one core can instead be planned round a lobby: no corridor, the flats either side
+ *  of the core the block's full depth, entered off the core, open on three sides. A double-loaded floor's shallow
+ *  flats can be too small for anything but 1 BHKs there; the lobby plan is kept when it comes clearly nearer the
+ *  flat mix asked for. */
 function layFloor(b: SiteBuilding, site: PlotSite, use: PlotUse, height: number, placed: number[]) {
+  const segs = segments(b), total = segs.reduce((s, g) => s + g.len, 0);
+  const oneCore = use === 'residential' && !b.closed && segs.length === 1 && Math.ceil(total / (2 * TRAVEL)) <= 1 && b.depth >= 14;
+  if (!oneCore) return layFloorAs(b, site, use, height, placed, false);
+  const shares = site.mix[0] + site.mix[1] + site.mix[2] || 1;
+  const miss = (f: number[]) => {
+    const all = f[0] + f[1] + f[2] + placed[0] + placed[1] + placed[2] || 1;
+    return [0, 1, 2].reduce((e, t) => e + Math.abs((f[t] + placed[t]) / all - site.mix[t] / shares), 0);
+  };
+  const plain = layFloorAs(b, site, use, height, [...placed], false), lobby = layFloorAs(b, site, use, height, [...placed], true);
+  const useLobby = lobby.units.length > 0 && miss(lobby.perFloor) < miss(plain.perFloor) - 0.15;
+  return layFloorAs(b, site, use, height, placed, useLobby);
+}
+
+function layFloorAs(b: SiteBuilding, site: PlotSite, use: PlotUse, height: number, placed: number[], lobby: boolean) {
   const units: Unit[] = [], cores: number[][] = [], corridors: number[][] = [];
   const perFloor: [number, number, number, number] = [0, 0, 0, 0];
   const segs = segments(b), n = b.spine.length / 2, d = b.depth, closed = !!b.closed;
@@ -667,13 +687,13 @@ function layFloor(b: SiteBuilding, site: PlotSite, use: PlotUse, height: number,
   const pt = (g: (typeof segs)[number], s: number, o: number) => [g.ax + g.tx * s + g.nx * o, g.az + g.tz * s + g.nz * o];
   for (const c of coreAt) { const g = segs[c.seg]; cores.push([...pt(g, c.s0, d / 2), ...pt(g, c.s1, d / 2), ...pt(g, c.s1, -d / 2), ...pt(g, c.s0, -d / 2)]); }
 
-  // corridor down the middle (flats both sides) or along one face (one side)
+  // corridor down the middle (flats both sides) or along one face (one side); none round a lobby
   const dbl = d >= 14, c = CORRIDOR / 2;
   const cor: [number, number] = dbl ? [-c, c] : [-d / 2, -d / 2 + CORRIDOR];
-  const strips: [number, number][] = dbl ? [[c, d / 2], [-d / 2, -c]] : [[-d / 2 + CORRIDOR, d / 2]];
+  const strips: [number, number][] = lobby ? [[-d / 2, d / 2]] : dbl ? [[c, d / 2], [-d / 2, -c]] : [[-d / 2 + CORRIDOR, d / 2]];
   const off = (o: number) => offsetSpine(b.spine, closed, o);
   const corL = off(cor[0]), corR = off(cor[1]);
-  for (const g of segs) { const j = (g.k + 1) % n; corridors.push([corL[g.k * 2], corL[g.k * 2 + 1], corL[j * 2], corL[j * 2 + 1], corR[j * 2], corR[j * 2 + 1], corR[g.k * 2], corR[g.k * 2 + 1]]); }
+  if (!lobby) for (const g of segs) { const j = (g.k + 1) % n; corridors.push([corL[g.k * 2], corL[g.k * 2 + 1], corL[j * 2], corL[j * 2 + 1], corR[j * 2], corR[j * 2 + 1], corR[g.k * 2], corR[g.k * 2 + 1]]); }
 
   const width = site.sizes.map((a) => a / CARPET);
   for (const [oa, ob] of strips) {
@@ -713,11 +733,14 @@ function layFloor(b: SiteBuilding, site: PlotSite, use: PlotUse, height: number,
         // closest to the one asked for, with flats near their size (15 % under to 25 % over; else the nearest)
         const w = width.map((a) => a / depth);
         const S = g1 - g0, shares = site.mix[0] + site.mix[1] + site.mix[2] || 1;
-        const most = [0, 1, 2].map((t) => (site.mix[t] > 0 ? Math.floor(S / (w[t] * 0.85) + 1e-6) : 0));
+        // (round a lobby, at most two flats a side: a third would have no outside wall but its ends)
+        const most = [0, 1, 2].map((t) => (site.mix[t] > 0 ? Math.min(lobby ? 2 : Infinity, Math.floor(S / (w[t] * 0.85) + 1e-6)) : 0));
         let pickN: [number, number, number] | null = null, pickScore = Infinity, pickK = Infinity;
         for (let a = 0; a <= most[0]; a++) for (let b = 0; b <= most[1]; b++) for (let c = 0; c <= most[2]; c++) {
           const N = a + b + c, tot = a * w[0] + b * w[1] + c * w[2];
-          if (!N || tot * 0.85 > S + 0.01) continue;
+          if (!N || tot * 0.85 > S + 0.01 || (lobby && N > 2)) continue;
+          // (round a lobby every flat is the block's full depth: none narrower than LOBBY_W, or its rooms don't fit)
+          if (lobby && [0, 1, 2].some((t) => [a, b, c][t] > 0 && (S / tot) * w[t] < LOBBY_W)) continue;
           const k = S / tot, all = placed[0] + placed[1] + placed[2] + N, n = [a, b, c];
           let err = 0;
           for (let t = 0; t < 3; t++) err += Math.abs(placed[t] + n[t] - (site.mix[t] / shares) * all);

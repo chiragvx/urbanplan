@@ -228,7 +228,7 @@ function App() {
 
       <nav class="rail" aria-label="Steps">
         {STEPS.map((s, i) => (
-          <button type="button" class="step" aria-current={step === s.key ? 'step' : undefined} onClick={() => (step === s.key ? setPanel(!panel) : go(s.key))} title={`${s.title} (${i + 1})`}>
+          <button type="button" class="step" aria-current={step === s.key ? 'step' : undefined} onClick={() => { if (step !== s.key) go(s.key); else if (matchMedia('(max-width: 900px)').matches) { setPanel(true); document.querySelector('.panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); } else setPanel(!panel); }} title={`${s.title} (${i + 1})`}>
             <Icon n={s.icon} size={20} />
             <span>{s.label}</span>
             {s.key === 'approve' && sum.fail + sum.warn > 0 && <i class={`dot ${sum.fail ? 'bad' : 'warn'}`} />}

@@ -110,6 +110,12 @@ export function fees(e: Evaluated): Fee[] {
     { label: 'Labour welfare cess', amount: M.build * 0.01, basis: '1% of construction cost (BOCW Cess Act)' },
     { label: 'Security deposit', amount: bua * 25, basis: '₹25 per m² of built-up area, refundable (rough)' },
   ];
-  if (d.height > FIRE_H) list.push({ label: 'Fire service fee', amount: bua * 30, basis: '₹30 per m² of built-up area, over 15 m (rough: the Government sets it, UDCPR 2.2.14)' });
+  if (e.r.code !== 'udcpr') {
+    // Mumbai Fire Brigade circular 155 (28 Mar 2018), for 2018-19: ₹48 / m² of gross built-up area from 24 m (at least
+    // ₹2.4 lakh a building), ₹27 / m² below (at least ₹1.35 lakh). Revised yearly: check the current schedule.
+    const high = d.height >= 24, rate = high ? 48 : 27, floor = high ? 240000 : 135000;
+    const n = Math.max(1, d.buildings.length), amount = d.buildings.length ? d.buildings.reduce((sum, b) => sum + Math.max(floor, (bua / n) * rate), 0) : 0;
+    list.push({ label: 'Fire scrutiny fee (MFB)', amount, basis: `₹${rate} per m² of built-up area, at least ₹${(floor / 1e5).toFixed(2)} lakh a building (MFB circular 155, 2018-19 rates)` });
+  } else if (d.height > FIRE_H) list.push({ label: 'Fire service fee', amount: bua * 30, basis: '₹30 per m² of built-up area, over 15 m (rough: the Government sets it, UDCPR 2.2.14)' });
   return list.filter((f) => f.amount > 0);
 }

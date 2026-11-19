@@ -118,7 +118,9 @@ export function planFloor(b: SiteReport['buildings'][number], ds: DesignSystem, 
       }
     });
     // the entrance on the corridor, a gap in its wall
-    const ce = edges.filter((e) => e.corr).sort((a, c) => c.L - a.L)[0];
+    // (round a lobby there is no corridor: the door is on the wall against the core)
+    const atCore = (e: (typeof edges)[number]) => b.cores.some((q) => pointIn(q, e.x0 + e.ux * e.L / 2 + e.nx * 0.4, e.z0 + e.uz * e.L / 2 + e.nz * 0.4, 0.05));
+    const ce = edges.filter((e) => e.corr).sort((a, c) => c.L - a.L)[0] ?? edges.filter((e) => !e.out && atCore(e)).sort((a, c) => c.L - a.L)[0];
     for (const e of edges) {
       if (e === ce && u.t !== 3) {
         const d = ds.doors.D1, m = Math.min(e.L - d.w / 2 - 0.3, Math.max(d.w / 2 + 0.3, 1.2));

@@ -163,8 +163,8 @@ Every phase has a first cut in `src/pro/`; each one gets deeper from here. All o
 **Still to do, or to do properly:**
 - run `0004_project_team.sql` on the live Supabase project (teams and comments show "not switched on" until then); invite emails;
 - PreDCR layer names checked against SoftTech's manual, and a real submission tested;
-- MCGM's own fee rates (UDCPR's are read from 2.2.12; development-charge and fire-infrastructure rates are the Government's and stay rough);
-- the floor plans: on a small footprint only 1 BHKs fit beside a core (the Scheme step says so); flats around a lobby, without a corridor, would fit bigger ones.
+- MCGM's building-proposal fee schedule (the Mumbai Fire Brigade's scrutiny fee is from circular 155, 2018-19 rates; UDCPR's scrutiny fee is read from 2.2.12; development-charge and fire-infrastructure rates are the Government's and stay rough);
+- the floor plans: short one-core blocks are now also planned round a lobby (no corridor, full-depth flats open on three sides, at most two a side, none under 4.5 m wide), kept when it comes clearly nearer the asked mix; a 30x40 Pune plot now gets 3 BHKs instead of only 1 BHKs, but the mix is still not matched exactly on small plots.
 
 ## Open questions
 - What exactly to charge for, and when.
