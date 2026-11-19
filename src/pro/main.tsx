@@ -14,7 +14,7 @@ import '../theme/tokens.css';
 import './pro.css';
 import { DEFAULT_PROJECT, outline, roadLines, type ProProject } from './project';
 import { deletePro, listPro, listSharedPro, openPro, savePro, toText, type CloudRef } from './cloud';
-import { addComment, addMember, comments as listComments, deleteComment, EMAIL, members as listMembers, NotSetUp, removeMember, resolveComment, type Comment, type Member } from './team';
+import { addComment, addMember, comments as listComments, deleteComment, EMAIL, joinProject, members as listMembers, NotSetUp, projectLink, removeMember, resolveComment, sendInvite, type Comment, type Member } from './team';
 import { authReady, explain, peekSession, session, startAuth } from '../auth/auth';
 import type { Project } from '../app/cloud';
 import { evaluate, dsOfBuilding } from './evaluate';
@@ -69,7 +69,7 @@ function App() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const toastT = useRef<number>();
   const toast = (s: string) => { setToastMsg(s); clearTimeout(toastT.current); toastT.current = window.setTimeout(() => setToastMsg(null), 4200); };
-  const [dialog, setDialog] = useState<null | 'projects' | 'share' | 'drawings' | 'keys' | 'welcome' | 'team'>(() => (store.get(SEEN, false) || location.hash.startsWith('#s=') ? null : 'welcome'));
+  const [dialog, setDialog] = useState<null | 'projects' | 'share' | 'drawings' | 'keys' | 'welcome' | 'team'>(() => (store.get(SEEN, false) || location.hash.startsWith('#s=') || new URLSearchParams(location.search).has('p') ? null : 'welcome'));
 
   // ---------- a shared link: /pro/#s=<the project> opens read-only ----------
   useEffect(() => {
@@ -99,6 +99,7 @@ function App() {
       const o = await openPro(id);
       lastSaved.current = toText(o.p);
       replace(o.p); setRef(o.ref); setDialog(null);
+      if (o.ref?.role && o.ref.role !== 'owner') void joinProject(id);
       history.replaceState(null, '', `?p=${id}`);
       setCloud({ s: 'saved', msg: `Opened ${hhmm()}` });
     } catch (err) { setCloud({ s: 'error', msg: explain(err) }); }
@@ -222,7 +223,7 @@ function App() {
           : <Btn icon="share" onClick={() => setDialog('share')}>Share</Btn>}
         {authReady && user && ref && !readOnly && <Btn icon="team" title="People on this project, and comments" onClick={() => setDialog(dialog === 'team' ? null : 'team')}>Team</Btn>}
         {authReady && user && <Btn icon="folder" onClick={() => setDialog(dialog === 'projects' ? null : 'projects')}>Projects</Btn>}
-        {authReady && session.value === null && <Btn icon="user" href={`${BASE}login/?next=${encodeURIComponent(location.pathname)}`} title="Keep your projects in your account">Sign in</Btn>}
+        {authReady && session.value === null && <Btn icon="user" href={`${BASE}login/?next=${encodeURIComponent(location.pathname + location.search)}`} title="Keep your projects in your account">Sign in</Btn>}
         <More openKeys={() => setDialog('keys')} newProject={() => fresh()} />
       </header>
 
@@ -245,6 +246,7 @@ function App() {
             <Btn kind="quiet" icon="x" title="Hide the panel" onClick={() => setPanel(false)} />
           </header>
           <div class="panel-b" key={step}>
+            {authReady && session.value === null && new URLSearchParams(location.search).has('p') && <p class="note">A project shared with you. <a href={`${BASE}login/?next=${encodeURIComponent(location.pathname + location.search)}`}>Sign in</a> with the email it was shared to and it opens here.</p>}
             {viewer && !readOnly && <p class="note">Shared with you to view and comment. <button type="button" class="linkbtn" onClick={() => setDialog('team')}>Comments</button></p>}
             {readOnly && <p class="note">A shared scheme, view only. <button type="button" class="linkbtn" onClick={keepCopy}>Make it your own copy</button> to change it.</p>}
             <fieldset disabled={readOnly || viewer}><Body {...props} /></fieldset>
@@ -412,7 +414,10 @@ function Team({ pid, role, step, go, close }: { pid: string; role: 'owner' | 'ed
   const [err, setErr] = useState(''), [off, setOff] = useState('');
   const [email, setEmail] = useState(''), [as, setAs] = useState<Member['role']>('editor');
   const [text, setText] = useState(''), [busy, setBusy] = useState(false), [showDone, setShowDone] = useState(false);
-  const me = session.value?.user.id;
+  const [sent, setSent] = useState('');
+  const me = session.value?.user.id, link = projectLink(pid);
+  const copyLink = async () => { try { await navigator.clipboard.writeText(link); setSent('Link copied. Send it to them: it opens the project once they sign in with the email you added.'); } catch { setSent(`Copy this link and send it: ${link}`); } };
+  const invite = (who: string) => run(async () => { const r = await sendInvite(pid, who); setSent(r === 'sent' ? `Invite emailed to ${who}.` : `Added. Email invites aren’t set up on this site yet, so send them the link: it opens the project once they sign in as ${who}.`); });
   const fail = (x: unknown) => { if (x instanceof NotSetUp) setOff(x.message); else setErr(explain(x)); };
   const reload = () => Promise.all([listMembers(pid).then(setPeople), listComments(pid).then(setNotes)]).catch(fail);
   useEffect(() => { void reload(); const t = setInterval(() => void listComments(pid).then(setNotes).catch(() => {}), 20000); return () => clearInterval(t); }, [pid]);
@@ -437,16 +442,19 @@ function Team({ pid, role, step, go, close }: { pid: string; role: 'owner' | 'ed
       <ul class="people">
         <li><Icon n="user" size={15} /><span>{role === 'owner' ? 'You' : 'The owner'}</span><em>owner</em></li>
         {people?.map((m) => (
-          <li><Icon n="user" size={15} /><span>{m.email}</span><em>{m.role}</em>
+          <li><Icon n="user" size={15} /><span>{m.email}<small class={m.joined_at ? 'ok' : ''}>{m.joined_at ? 'joined' : m.invited_at ? `invited ${ago(m.invited_at)}` : 'not joined yet'}</small></span><em>{m.role === 'viewer' ? 'can view' : 'can edit'}</em>
+            {role === 'owner' && !m.joined_at && <button type="button" class="linkbtn" disabled={busy} onClick={() => void invite(m.email)}>{m.invited_at ? 'Resend' : 'Email invite'}</button>}
             {role === 'owner' && <Btn kind="quiet" icon="x" title={`Remove ${m.email}`} disabled={busy} onClick={() => void run(() => removeMember(pid, m.email))} />}</li>
         ))}
       </ul>
-      {role === 'owner' && <form class="invite" onSubmit={(ev) => { ev.preventDefault(); if (EMAIL.test(email.trim())) void run(async () => { await addMember(pid, email, as); setEmail(''); }); }}>
+      {role === 'owner' && <form class="invite" onSubmit={(ev) => { ev.preventDefault(); if (EMAIL.test(email.trim())) void run(async () => { const who = email.trim().toLowerCase(); await addMember(pid, who, as); setEmail(''); const r = await sendInvite(pid, who).catch(() => 'off' as const); setSent(r === 'sent' ? `Added, and an invite emailed to ${who}.` : `Added ${who}. Send them the project link: it opens once they sign in with that email.`); }); }}>
         <input type="email" class="txt" placeholder="Their email" value={email} onInput={(ev) => setEmail((ev.target as HTMLInputElement).value)} aria-label="Email to add" />
         <select value={as} onChange={(ev) => setAs((ev.target as HTMLSelectElement).value as Member['role'])} aria-label="Their role"><option value="editor">Can edit</option><option value="viewer">Can view and comment</option></select>
         <Btn kind="primary" submit disabled={busy || !EMAIL.test(email.trim())}>Add</Btn>
       </form>}
-      {role === 'owner' && <p class="note">They sign in with that email and find it under Projects, shared with them. No email is sent: tell them.</p>}
+      {sent && <p class="note ok" role="status">{sent}</p>}
+      {role !== 'viewer' && <div class="plink"><input class="txt" readOnly value={link} aria-label="Link to this project" onFocus={(ev) => (ev.target as HTMLInputElement).select()} /><Btn icon="link" onClick={() => void copyLink()}>Copy link</Btn></div>}
+      {role === 'owner' && <p class="note">The link only works for people you’ve added, signed in with that email. New to UrbanPlan? They make an account with it.</p>}
 
       <h3 class="mh">Comments{open.length ? ` (${open.length})` : ''}</h3>
       <form class="cmt-new" onSubmit={(ev) => { ev.preventDefault(); if (text.trim()) void run(async () => { await addComment(pid, text, step); setText(''); }); }}>

@@ -4,7 +4,7 @@
 import { session, shortName, supabase } from '../auth/auth';
 import type { Role } from './cloud';
 
-export interface Member { project: string; email: string; role: Exclude<Role, 'owner'>; created_at: string }
+export interface Member { project: string; email: string; role: Exclude<Role, 'owner'>; created_at: string; joined_at?: string | null; invited_at?: string | null }
 export interface Comment { id: number; project: string; author: string; author_name: string | null; body: string; step: string | null; resolved: boolean; created_at: string }
 
 /** The tables aren't there yet (the migration hasn't been run on this Supabase project). */
@@ -31,6 +31,26 @@ export async function addMember(project: string, email: string, role: Member['ro
 }
 export async function removeMember(project: string, email: string) {
   check(await sb().from('project_members').delete().eq('project', project).eq('email', email));
+}
+
+/** The project's address: anyone on its team opens it with this once signed in with their email. */
+export const projectLink = (project: string) => new URL(`${import.meta.env.BASE_URL}pro/?p=${project}`, location.origin).href;
+
+/** Mark the signed-in person as joined (0005_project_invites.sql). Best effort: no table, no matter. */
+export async function joinProject(project: string) {
+  try { await supabase?.rpc('join_project', { pid: project }); } catch { /* not set up */ }
+}
+
+/** Email them the invite (api/invite.js). 'off' when the site has no email set up: then the link is the way. */
+export async function sendInvite(project: string, email: string): Promise<'sent' | 'off'> {
+  const token = session.value?.access_token;
+  if (!token) throw new Error('Sign in first.');
+  let r: Response;
+  try { r = await fetch(`${import.meta.env.BASE_URL}api/invite`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ project, email }) }); } catch { return 'off'; }
+  if (r.status === 501 || r.status === 404 && !(r.headers.get('content-type') ?? '').includes('json')) return 'off';
+  if (r.ok) return 'sent';
+  const j = await r.json().catch(() => ({}));
+  throw new Error(j.error || 'The invite didn’t send.');
 }
 
 export async function comments(project: string): Promise<Comment[]> {
