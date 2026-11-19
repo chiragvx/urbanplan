@@ -19,7 +19,9 @@ const BAY = 6;
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 const ease = (u: number) => (u < 0.5 ? 4 * u * u * u : 1 - (-2 * u + 2) ** 3 / 2);
 const hash = (x: number, y: number, z: number) => { const v = Math.sin(x * 12.99 + y * 78.23 + z * 37.72) * 43758.55; return v - Math.floor(v); };
-const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+/** grow and retract edges on a change: off for now (changes are simply made), kept for later */
+const ANIMATE = false;
+const reduced = () => !ANIMATE || matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /** every edge of the scheme, keyed by its ends */
 function edges(v: WireData): { k: string; a: V3; b: V3; w: number }[] {
