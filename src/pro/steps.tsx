@@ -499,7 +499,7 @@ export function ApproveStep({ p, e, up, checks, openDrawings, toast }: StepProps
       <Section title="Drawings and files" sub="Generated from the scheme. An architect checks, signs and submits them; we never submit for you.">
         <div class="exports">
           <button type="button" class="export" onClick={openDrawings}><Icon n="print" /><b>Drawing set</b><small>Site plan, floor plan, section, area statement. Print or save as PDF (A3).</small></button>
-          <button type="button" class="export" onClick={() => { download(`${slug(p.name)}-predcr.dxf`, predcrDxf(e), 'application/dxf'); toast('DXF saved, on PreDCR-style layers. Check it in the PreDCR add-on before submitting.'); }}><Icon n="down" /><b>PreDCR-style DXF</b><small>Closed polylines on named layers: plot, proposed work, buildings, margins, roads, parking.</small></button>
+          <button type="button" class="export" onClick={() => { download(`${slug(p.name)}-predcr.dxf`, predcrDxf(e), 'application/dxf'); toast('DXF saved on PreDCR layers. Open it in PreDCR, mark stairs, lifts and FSI, then run Verify.'); }}><Icon n="down" /><b>PreDCR DXF</b><small>Laid out as MCGM’s PreDCR manual asks: site plan, every floor plan and the section, on its layers. Mark and Verify in PreDCR.</small></button>
         </div>
       </Section>
 

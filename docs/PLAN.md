@@ -144,7 +144,7 @@ Every phase has a first cut in `src/pro/`; each one gets deeper from here. All o
 - `scrutiny.ts`: our own scrutiny, pass / fail / to check, each with its clause. It covers FSI, height, margins, fire tender access, lifts, refuge areas, stairs, parking, open and amenity space, inclusive housing, light and ventilation, room sizes, shop floors and environment clearance.
 - `approvals.ts`: the permission applied for (a new building, a redevelopment, revised plans, additions) and its stages (IOD or building permission, CC, plinth checking, OC), the NOCs the scheme needs, the documents to file, and rough fees and charges.
 - `drawings.tsx`: the drawing set as A3 sheets (site plan, typical floor, elevation, area statement), printed to PDF.
-- `dxf.ts`: a PreDCR-style DXF (R12, closed polylines on named layers).
+- `dxf.ts`: a PreDCR DXF laid out per MCGM's PreDCR help manual (AutoCAD 2000, LWPOLYLINE): site plan (_Plot, _MainRoad, _RoadWidening, _PropWork "A1 (Name)"), per building a _Building with each floor drawn separately in a named _Floor (_ResiFSI/_CommFSI, _CarpetArea, _Staircase, _Liftwell, _Passage, _Parking, _Chowk) and a _Section with matching _FloorInSection names and _GroundLevel; reference circles on _Floor and _ResiFSI in every floor and proposed work.
 
 **5. More options, more plots, sharing**
 - `options.ts`: options ranked by profit.
@@ -162,7 +162,7 @@ Every phase has a first cut in `src/pro/`; each one gets deeper from here. All o
 
 **Still to do, or to do properly:**
 - run `0004_project_team.sql` on the live Supabase project (teams and comments show "not switched on" until then); invite emails;
-- PreDCR layer names checked against SoftTech's manual, and a real submission tested;
+- PreDCR: the layout and layer names now follow MCGM's PreDCR help manual; still to do in PreDCR itself: its Mark menu (paid/free of FSI, fire lift, stair flights and landings), and a real Verify and submission. `_CarpetArea` and `_GroundLevel` are spelt as the manual's prose gives them; PreDCR's layer list shows an older `_CarpetFSI`;
 - MCGM's building-proposal fee schedule (the Mumbai Fire Brigade's scrutiny fee is from circular 155, 2018-19 rates; UDCPR's scrutiny fee is read from 2.2.12; development-charge and fire-infrastructure rates are the Government's and stay rough);
 - the floor plans: short one-core blocks are now also planned round a lobby (no corridor, full-depth flats open on three sides, at most two a side, none under 4.5 m wide), kept when it comes clearly nearer the asked mix; a 30x40 Pune plot now gets 3 BHKs instead of only 1 BHKs, but the mix is still not matched exactly on small plots.
 
