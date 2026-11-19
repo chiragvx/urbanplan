@@ -98,17 +98,18 @@ export function documents(e: Evaluated, kind: PermissionKind = 'new'): DocItem[]
 /** Fees and charges paid before the permission, roughly. Premium, TDR and ancillary come from the scheme's own money. */
 export function fees(e: Evaluated): Fee[] {
   const { d } = e, M = d.money, c = M.costs, bua = d.bua, ft = bua * SQFT;
-  const scrutinyRate = 10; // ₹ per m² of built-up area (rough)
-  const dcPct = 2; // development charges: % of the ASR land rate on the built-up area (MRTP Act s.124B, as assumed)
+  // UDCPR 2.2.12: ₹5 per m² in Pune, Pimpri-Chinchwad, Nagpur, Nashik and the MMR corporations; MCGM sets its own
+  const scrutinyRate = 5;
+  const dcPct = 2; // development charges (UDCPR 2.2.13, MRTP Act s.124A): the rate is the Act's; 2 % of ASR as assumed
   const list: Fee[] = [
-    { label: 'Scrutiny fee', amount: bua * scrutinyRate, basis: `₹${scrutinyRate} per m² of built-up area (rough)` },
-    { label: 'Development charges', amount: ft * c.asr * dcPct / 100, basis: `${dcPct}% of the ASR rate (₹${c.asr.toLocaleString('en-IN')}/sq ft) on ${Math.round(ft).toLocaleString('en-IN')} sq ft (MRTP Act s.124B, as assumed)` },
+    { label: 'Scrutiny fee', amount: bua * scrutinyRate, basis: e.r.code === 'udcpr' ? `₹${scrutinyRate} per m² of built-up area (UDCPR 2.2.12, A-class corporations)` : `₹${scrutinyRate} per m² of built-up area (rough: MCGM sets its own)` },
+    { label: 'Development charges', amount: ft * c.asr * dcPct / 100, basis: `${dcPct}% of the ASR rate (₹${c.asr.toLocaleString('en-IN')}/sq ft) on ${Math.round(ft).toLocaleString('en-IN')} sq ft (MRTP Act s.124A; the 2 % as assumed)` },
     { label: 'Premium FSI', amount: M.premium, basis: `${c.premiumPct}% of the ASR rate on the premium FSI used` },
     { label: 'TDR (bought)', amount: M.tdr, basis: `${c.tdrPct}% of the ASR rate on the TDR loaded (market rates vary)` },
     { label: e.r.code === 'udcpr' ? 'Ancillary FSI premium' : 'Fungible FSI premium', amount: M.ancillary, basis: `${c.ancillaryPct}% of the ASR rate on it` },
     { label: 'Labour welfare cess', amount: M.build * 0.01, basis: '1% of construction cost (BOCW Cess Act)' },
     { label: 'Security deposit', amount: bua * 25, basis: '₹25 per m² of built-up area, refundable (rough)' },
   ];
-  if (d.height > FIRE_H) list.push({ label: 'Fire service fee', amount: bua * 30, basis: '₹30 per m² of built-up area, over 15 m (rough)' });
+  if (d.height > FIRE_H) list.push({ label: 'Fire service fee', amount: bua * 30, basis: '₹30 per m² of built-up area, over 15 m (rough: the Government sets it, UDCPR 2.2.14)' });
   return list.filter((f) => f.amount > 0);
 }

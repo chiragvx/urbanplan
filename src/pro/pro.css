@@ -126,7 +126,7 @@ textarea.brief { font-family: var(--up-font-body); font-size: 13.5px; }
 .seg button[aria-checked="true"] { background: var(--up-surface); color: var(--up-ink); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.03); }
 .seg.small { width: fit-content; } .seg.small button { padding: 4px 10px; min-height: 24px; }
 
-.tog { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.tog { position: relative; display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
 .tog input { position: absolute; opacity: 0; pointer-events: none; }
 .tog-sw { flex: none; position: relative; width: 32px; height: 18px; border-radius: 999px; background: var(--up-line-strong); transition: background .15s; margin-top: 1px; }
 .tog-sw::after { content: ""; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .2); transition: transform .15s; }

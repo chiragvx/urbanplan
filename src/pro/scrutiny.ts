@@ -14,19 +14,19 @@ export interface Check { key: string; group: CheckGroup; rule: string; clause: s
 /** the rooms of each flat of the typical floor, per building (from ./rooms.ts; only what's read here) */
 export type RoomsLike = { unit: number; t: number; rooms: { kind: string; name: string; area: number; minArea: number; width: number; minWidth: number; ok: boolean }[]; ok: boolean }[][];
 
-// thresholds, as assumed (NBC 2016 Part 4 and UDCPR 2020 Chapter 9 as commonly summarised)
-/** a lift is required over this height (m) */
-const LIFT_H = 15;
-/** a fire lift, and refuge areas, over this height (m); refuge areas then every this many metres */
-const FIRE_LIFT_H = 24, REFUGE_H = 24, REFUGE_EVERY = 15;
+// thresholds read from UDCPR 2020 chapter 9 (DCPR and NBC where they differ are noted)
+/** 9.27.1: a lift over 15 m, two over 24 m */
+const LIFT_H = 15, TWO_LIFTS_H = 24;
+/** 9.29.8: a fire lift from 15 m; 9.29.6: a refuge area on the floor above 24 m, above 39 m, then every 15 m */
+const FIRE_LIFT_H = 15, REFUGE_H = 24, REFUGE_EVERY = 15;
 /** amenity space: plots this big (m²) give this share */
 const AMENITY_FROM = 20000, AMENITY_SHARE = 0.05;
 /** inclusive housing: plots this big (m²) give this share of the basic FSI as EWS / LIG tenements */
 const IH_FROM = 4000, IH_SHARE = 0.2;
 /** environment clearance (SEIAA) from this built-up area (m²) */
 const EC_FROM = 20000;
-/** the stair width the cores are sized for: residential up to the fire height, and above it (m) */
-const STAIR_LOW = 1.2, STAIR_HIGH = 1.5;
+/** Table 9G: residential stairs 1.0 m up to 15 m, 1.2 m up to 24 m, 1.5 m above */
+const stairFor = (h: number) => (h <= 15 ? 1.0 : h <= 24 ? 1.2 : 1.5);
 
 const m = (v: number, d = 1) => `${(Math.round(v * 10 ** d) / 10 ** d).toLocaleString('en-IN')} m`;
 const m2 = (v: number) => `${Math.round(v).toLocaleString('en-IN')} m²`;
@@ -66,11 +66,12 @@ export function scrutiny(e: Evaluated, rooms?: RoomsLike): Check[] {
       add({ key: `fire-access:${i}`, group: 'Fire & safety', rule: `Fire tender access${name(i)}`, clause: 'NBC 2016 Part 4', required: `${FIRE_W} m clear round it above ${FIRE_H} m`, proposed: b.fireOk ? 'clear way round' : 'way round blocked', status: b.fireOk ? 'pass' : 'fail' });
     });
     add({ key: 'fire-noc', group: 'Fire & safety', rule: 'Fire NOC', clause: 'Maharashtra Fire Prevention Act 2006; NBC 2016 Part 4', required: `needed over ${FIRE_H} m`, proposed: m(H), status: H > FIRE_H ? 'info' : 'pass', note: H > FIRE_H ? 'Provisional fire NOC with the plans, final before occupation.' : undefined });
-    add({ key: 'lift', group: 'Fire & safety', rule: 'Lifts', clause: `${code} Chapter 9 (as assumed)`, required: `a lift over ${LIFT_H} m${H > FIRE_LIFT_H ? `; a fire lift over ${FIRE_LIFT_H} m` : ''}`, proposed: H > LIFT_H ? `${d.buildings.reduce((s, b) => s + b.cores.length, 0)} core${d.buildings.reduce((s, b) => s + b.cores.length, 0) > 1 ? 's' : ''} with lifts${H > FIRE_LIFT_H ? ', one fire lift each (as laid)' : ''}` : 'not needed', status: 'pass', note: 'Each core is laid out with a stair and lifts (as assumed: one of them a fire lift over 24 m).' });
+    const cores = d.buildings.reduce((s, b) => s + b.cores.length, 0);
+    add({ key: 'lift', group: 'Fire & safety', rule: 'Lifts', clause: 'UDCPR 2020 9.27.1, 9.29.8', required: H > TWO_LIFTS_H ? 'two lifts (over 24 m), one a fire lift (from 15 m)' : H >= FIRE_LIFT_H ? 'a lift, which is a fire lift (from 15 m)' : 'none up to 15 m', proposed: H > LIFT_H ? `${cores} core${cores > 1 ? 's' : ''}, each with ${H > TWO_LIFTS_H ? 'two lifts' : 'a lift'}, one a fire lift (as laid)` : 'not needed', status: 'pass', note: 'Each core is laid out with a stair and its lifts.' });
     const refuges = H > REFUGE_H ? Math.floor((H - REFUGE_H) / REFUGE_EVERY) + 1 : 0;
-    add({ key: 'refuge', group: 'Fire & safety', rule: 'Refuge areas', clause: 'NBC 2016 Part 4 (as assumed: at 24 m, then every 15 m)', required: H > REFUGE_H ? `${refuges} refuge level${refuges > 1 ? 's' : ''}` : `none up to ${REFUGE_H} m`, proposed: H > REFUGE_H ? 'not laid out yet' : m(H), status: H > REFUGE_H ? 'warn' : 'pass', note: H > REFUGE_H ? 'Refuge areas are free of FSI up to a share of the floor (as assumed); not modelled yet.' : undefined });
-    const stair = H > FIRE_H ? STAIR_HIGH : STAIR_LOW;
-    add({ key: 'stair', group: 'Fire & safety', rule: 'Staircase width', clause: `${code} Chapter 9; NBC 2016 Part 4 (as assumed)`, required: `at least ${m(stair)} clear`, proposed: `cores sized for ${m(stair)}`, status: 'pass', note: 'From the core size, until stairs are drawn.' });
+    add({ key: 'refuge', group: 'Fire & safety', rule: 'Refuge areas', clause: 'UDCPR 2020 9.29.6 (the floor above 24 m, above 39 m, then every 15 m)', required: H > REFUGE_H ? `${refuges} refuge level${refuges > 1 ? 's' : ''}` : `none up to ${REFUGE_H} m`, proposed: H > REFUGE_H ? 'not laid out yet' : m(H), status: H > REFUGE_H ? 'warn' : 'pass', note: H > REFUGE_H ? 'Each 15 m² or 0.3 m² per person of two floors, whichever is more, open on one side; free of FSI. Not laid out yet.' : undefined });
+    const stair = stairFor(H);
+    add({ key: 'stair', group: 'Fire & safety', rule: 'Staircase width', clause: 'UDCPR 2020 Table 9G', required: `at least ${m(stair)} clear`, proposed: `cores sized for ${m(stair)}`, status: 'pass', note: 'From the core size, until stairs are drawn.' });
     add({ key: 'travel', group: 'Fire & safety', rule: 'Travel distance to a stair', clause: 'NBC 2016 Part 4 (as assumed: 30 m)', required: 'at most 30 m along the corridor', proposed: 'cores spaced for it', status: 'pass' });
   }
 
@@ -93,14 +94,15 @@ export function scrutiny(e: Evaluated, rooms?: RoomsLike): Check[] {
     rooms.forEach((bl, bi) => bl.forEach((f) => {
       const floors = d.buildings[bi]?.floors ?? 1;
       for (const x of f.rooms) {
-        const k = x.kind, cur = by.get(k) ?? { n: 0, bad: 0, min: `${m2(x.minArea).replace(' m²', '')} m², ${m(x.minWidth)} wide`, worst: '' };
+        const k = x.kind, cur = by.get(k) ?? { n: 0, bad: 0, min: [x.minArea > 0 ? `${x.minArea.toLocaleString('en-IN')} m²` : '', x.minWidth > 0 ? `${m(x.minWidth)} wide` : ''].filter(Boolean).join(', '), worst: '' };
         cur.n += floors;
         if (!x.ok) { cur.bad += floors; if (!cur.worst) cur.worst = `${x.name} in a ${UNIT_LABEL[f.t] ?? 'flat'}: ${(Math.round(x.area * 10) / 10).toFixed(1)} m², ${m(x.width)} wide`; }
         by.set(k, cur);
       }
     }));
     for (const [k, v] of by) {
-      add({ key: `room:${k}`, group: 'Flats & rooms', rule: `Room size: ${k}`, clause: r.code === 'udcpr' ? `${code} Chapter 9 (sizes as assumed: habitable 9.5 m² / 2.4 m, kitchen 5.5 m² / 1.8 m, bath 1.8 m², WC 1.1 m²)` : 'DCPR 2034 Reg. 37(2) Table 14 (habitable 2.4 m wide, kitchen 1.8 m, bath 1.5 m² / 1.1 m, bath and WC 2.2 m²)', required: `at least ${v.min}`, proposed: v.bad ? `${v.n - v.bad} of ${v.n} meet it` : `all ${v.n}`, status: v.bad ? 'fail' : 'pass', note: v.worst || undefined });
+      if (!v.min) continue; // (no legal minimum for this room)
+      add({ key: `room:${k}`, group: 'Flats & rooms', rule: `Room size: ${k}`, clause: r.code === 'udcpr' ? 'UDCPR 2020 9.4.1 (rooms and kitchens at the owner’s choice; bath 1.0 × 1.2 m, bath and WC 1.5 m² and 1.0 m wide)' : 'DCPR 2034 Reg. 37(2) Table 14 (habitable 2.4 m wide, kitchen 1.8 m, bath 1.5 m² / 1.1 m, bath and WC 2.2 m²)', required: `at least ${v.min}`, proposed: v.bad ? `${v.n - v.bad} of ${v.n} meet it` : `all ${v.n}`, status: v.bad ? 'fail' : 'pass', note: v.worst || undefined });
     }
   } else if (flats.length) {
     add({ key: 'rooms', group: 'Flats & rooms', rule: 'Room sizes', clause: `${code} Chapter 9`, required: 'every room at its minimum size and width', proposed: 'rooms not laid out', status: 'warn', note: 'Checked by flat until rooms are modelled.' });

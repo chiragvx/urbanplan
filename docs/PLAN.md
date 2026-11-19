@@ -156,12 +156,14 @@ Every phase has a first cut in `src/pro/`; each one gets deeper from here. All o
 **6. Agent**
 - `brief.ts`: a written brief turned into constraints. It searches the generator, checks each scheme against the rules and keeps the best that passes, showing its steps. It is rule-based for now; a language model can drive the same functions through the API.
 
+**Read from the regulations:** UDCPR 2020 room sizes (9.2–9.4: rooms and kitchens are the owner's choice; bath 1.0 × 1.2 m, WC 0.9 × 0.9 m, bath and WC 1.5 m²), light (9.20.1: 1/10 of the habitable floor), lifts (9.27.1), fire lift from 15 m (9.29.8), refuge areas (9.29.6), stair widths (Table 9G) and the scrutiny fee (2.2.12); DCPR 2034 as above.
+
 **Checked:** the DXF opens in ezdxf (R12, no audit errors, every polyline closed); the IFC passes IfcOpenShell's IFC4 schema validation and its spaces build as geometry; the team and comment rules were run against the migrations on Postgres (29 cases: who sees, saves, comments, resolves, and who can't).
 
 **Still to do, or to do properly:**
 - run `0004_project_team.sql` on the live Supabase project (teams and comments show "not switched on" until then); invite emails;
 - PreDCR layer names checked against SoftTech's manual, and a real submission tested;
-- UDCPR's room minimums, light rule, fee rates and fire rules checked against the official text (marked "as assumed" in the code);
+- MCGM's own fee rates (UDCPR's are read from 2.2.12; development-charge and fire-infrastructure rates are the Government's and stay rough);
 - the floor plans: on a small footprint only 1 BHKs fit beside a core (the Scheme step says so); flats around a lobby, without a corridor, would fit bigger ones.
 
 ## Open questions

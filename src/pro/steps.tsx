@@ -345,11 +345,15 @@ function FlatPlan({ t, fr }: { t: number; fr: FlatRooms }) {
       <svg viewBox={`${x0 - pad} ${z0 - pad} ${w + 2 * pad} ${h + 2 * pad}`} role="img" aria-label={`${UNIT_LABEL[t]} plan`}>
         {fr.rooms.map((r) => {
           const pts = []; for (let i = 0; i < r.ring.length; i += 2) pts.push(`${r.ring[i]},${r.ring[i + 1]}`);
-          let cx = 0, cz = 0; for (let i = 0; i < r.ring.length; i += 2) { cx += r.ring[i]; cz += r.ring[i + 1]; } cx /= r.ring.length / 2; cz /= r.ring.length / 2;
-          const fs = Math.max(0.32, Math.min(0.6, Math.sqrt(r.area) / 5));
+          let bx0 = Infinity, bz0 = Infinity, bx1 = -Infinity, bz1 = -Infinity;
+          for (let i = 0; i < r.ring.length; i += 2) { bx0 = Math.min(bx0, r.ring[i]); bx1 = Math.max(bx1, r.ring[i]); bz0 = Math.min(bz0, r.ring[i + 1]); bz1 = Math.max(bz1, r.ring[i + 1]); }
+          const cx = (bx0 + bx1) / 2, cz = (bz0 + bz1) / 2, bw = bx1 - bx0, bh = bz1 - bz0;
+          // the label fits its room: along the long side of a narrow one, small enough for the name, or left off
+          const name = shortRoom(r.name), up = bh > bw * 1.4, along = up ? bh : bw, across = up ? bw : bh;
+          const fs = Math.min(0.6, (along * 0.85) / (name.length * 0.56), across / 2.6);
           return <g>
             <polygon points={pts.join(' ')} fill={ROOM_COLOR[r.kind]} stroke={r.ok ? '#3f3f46' : '#e5484d'} stroke-width={r.ok ? 0.06 : 0.14} />
-            {r.area >= 2 && <text x={cx} y={cz} font-size={fs} text-anchor="middle" dominant-baseline="middle">{shortRoom(r.name)}<tspan x={cx} dy={fs * 1.1} font-size={fs * 0.85} opacity="0.7">{nf(r.area, 1)}</tspan></text>}
+            {r.area >= 2 && fs >= 0.24 && <text x={cx} y={cz - fs * 0.45} font-size={fs} text-anchor="middle" dominant-baseline="middle" transform={up ? `rotate(-90 ${cx} ${cz})` : undefined}>{name}<tspan x={cx} dy={fs * 1.1} font-size={fs * 0.85} opacity="0.7">{nf(r.area, 1)}</tspan></text>}
           </g>;
         })}
       </svg>
@@ -357,7 +361,7 @@ function FlatPlan({ t, fr }: { t: number; fr: FlatRooms }) {
     </figure>
   );
 }
-const shortRoom = (n: string) => n.replace('Bedroom', 'Bed').replace('Living / dining', 'Living').replace('Toilet', 'WC');
+const shortRoom = (n: string) => n.replace('Master bedroom', 'Master bed').replace('Bedroom', 'Bed').replace('Living / dining', 'Living').replace('Toilet', 'WC').replace('Foyer & passage', 'Foyer');
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'project';
 
 function CatRow<T extends WindowType | DoorType>({ t, x, set, kinds, sill }: { t: string; x: T; set: (f: (x: T) => void) => void; kinds: string[]; sill?: boolean }) {
@@ -445,7 +449,7 @@ function CashChart({ flow, cum, months }: { flow: number[]; cum: number[]; month
         <polyline points={cum.map((v, i) => `${x(i)},${y(v)}`).join(' ')} class="cum" />
         <circle cx={x(minAt)} cy={y(cum[minAt])} r="2.6" class="cum-pt" />
         <line x1={x(months)} x2={x(months)} y1="4" y2={H - 12} class="done" />
-        <text x={x(months) + 3} y="11" class="lbl">Built</text>
+        <text x={x(months) - 3} y={H - 16} class="lbl" text-anchor="end">Built</text>
         <text x="4" y={H - 2} class="lbl">Month 0</text><text x={W - 4} y={H - 2} class="lbl" text-anchor="end">{n - 1}</text>
       </svg>
       <figcaption><i class="k-bar" />net cash a month <i class="k-line" />running total</figcaption>

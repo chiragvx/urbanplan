@@ -30,9 +30,8 @@ export interface FlatRooms {
   walls: number[][];
 }
 
-/** Minimum carpet area (m²) and width (m) by room, as assumed from UDCPR 2020 chapter 9 (one habitable room at
- *  9.5 m², the others 7.5 m², both 2.4 m wide; kitchen 5.5 m² and 1.8 m; a toilet with bath and WC 2.8 m² and
- *  1.2 m; a bath alone 1.8 m²; a passage 1.0 m wide). */
+/** The sizes the fitter lays rooms out to: a practical floor for a saleable flat (living and bedrooms 2.4 m wide,
+ *  kitchen 1.8 m, a toilet 1.2 m, a passage 1.0 m). Not the law: that is `roomMin` below. */
 export const ROOM_MIN: Record<RoomKind, { area: number; width: number }> = {
   living: { area: 9.5, width: 2.4 },
   bed: { area: 7.5, width: 2.4 },
@@ -143,14 +142,22 @@ function template(t: number): { front: Item[]; wet: Item[] } {
 }
 
 /** Fit the rooms into every flat on a building's typical floor. */
-/** DCPR 2034 Table 14 (Reg. 37(2)), read from the regulation: habitable rooms and the kitchen by width only (2.4 m,
- *  1.8 m), a bathroom 1.5 m² and 1.1 m, a combined bath and WC 2.2 m² and 1.1 m. */
+const NONE = { area: 0, width: 0 };
+/** The legal minimums, read from the regulations. UDCPR 2020 9.2.1 and 9.3.1 leave habitable rooms and kitchens to
+ *  "the requirement and convenience of the owner"; 9.4.1: a bath 1.0 × 1.2 m, a WC 0.9 × 0.9 m, a combined bath and
+ *  WC 1.5 m² and 1.0 m wide. */
+export const ROOM_MIN_UDCPR: Record<RoomKind, { area: number; width: number }> = {
+  living: NONE, bed: NONE, kitchen: NONE, foyer: NONE, passage: NONE, utility: NONE, balcony: NONE,
+  toilet: { area: 1.5, width: 1.0 }, bath: { area: 1.2, width: 1.0 },
+};
+/** DCPR 2034 Reg. 37(2) Table 14: habitable rooms 2.4 m wide, a kitchen 1.8 m, a bathroom 1.5 m² and 1.1 m, a
+ *  combined bath and WC 2.2 m² and 1.1 m. */
 export const ROOM_MIN_DCPR: Record<RoomKind, { area: number; width: number }> = {
-  ...ROOM_MIN,
+  ...ROOM_MIN_UDCPR,
   living: { area: 0, width: 2.4 }, bed: { area: 0, width: 2.4 }, kitchen: { area: 0, width: 1.8 },
   toilet: { area: 2.2, width: 1.1 }, bath: { area: 1.5, width: 1.1 },
 };
-export const roomMin = (code?: string) => (code && code !== 'udcpr' ? ROOM_MIN_DCPR : ROOM_MIN);
+export const roomMin = (code?: string) => (code && code !== 'udcpr' ? ROOM_MIN_DCPR : ROOM_MIN_UDCPR);
 
 export function fitRooms(b: BuildingReport, plan: FloorPlan, code?: string): FlatRooms[] {
   const MIN = roomMin(code);

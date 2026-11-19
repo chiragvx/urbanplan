@@ -59,7 +59,7 @@ export function Icon({ n, size = 18, stroke = 1.75 }: { n: string; size?: number
 export const nf = (v: number, d = 0) => v.toLocaleString('en-IN', { maximumFractionDigits: d, minimumFractionDigits: d });
 export const SQFT_PER_M2 = 10.7639;
 export const sqft = (m2: number) => `${nf(m2 * SQFT_PER_M2)} sq ft`;
-export const cr = (rs: number) => `₹${nf(rs / 1e7, 2)} cr`;
+export const cr = (rs: number) => `${rs < 0 ? '−' : ''}₹${nf(Math.abs(rs) / 1e7, 2)} cr`;
 export const pct = (v: number | null, d = 1) => (v === null || !Number.isFinite(v) ? '—' : `${nf(v * 100, d)}%`);
 
 // ---------- a number ----------
