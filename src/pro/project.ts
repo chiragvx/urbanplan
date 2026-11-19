@@ -27,6 +27,8 @@ export interface ProBuilding extends SiteBuilding {
   name?: string;
   /** a design system preset id (unset: the project's) */
   style?: string;
+  /** its form, made by hand or from a template (./form): unset, the engine's straight building of spine and depth */
+  form?: import('./form/types').Form;
 }
 
 /** What "Fill the plot" is asked for: how much of what the rules allow, how many buildings, how they're reached and
