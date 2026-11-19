@@ -168,10 +168,10 @@ export function MoneyStep({ p, e, up, deal, go }: StepProps) {
           <Num label="Land, ₹ / sq ft of plot" value={p.land || c.land} set={(v) => up({ land: v })} step={250} min={0} max={1000000} hint={D.kind === 'outright' ? '' : 'Not paid in this deal'} />
         </Row>
         <Row>
-          <div class="f"><span class="f-l">Construction</span><span class="f-fixed">₹{nf(c.build)} / ft²</span><span class="f-h">With the finishes (<button type="button" class="linkbtn" onClick={() => go('design')}>Design</button>) and the building systems (<button type="button" class="linkbtn" onClick={() => go('build')}>Scheme</button>)</span></div>
+          <div class="f"><span class="f-l">Construction</span><span class="f-fixed">₹{nf(c.build)} / ft²</span><span class="f-h">With the finishes and systems below</span></div>
           <Num label="Build time" value={p.costs?.months ?? c.months} set={(v) => up({ costs: { ...(p.costs ?? {}), months: v } })} min={6} max={96} unit="months" />
         </Row>
-        <Lines rows={[['Finishes and spec over plain', `${e.rate >= 0 ? '+' : '−'}₹${nf(Math.abs(e.rate))} / ft²`], ['Building systems (lifts, MEP, fire, plant)', `${cr(e.sys.cost)} · ₹${nf(e.sys.costPerSqft)} / ft²`]]} />
+        <Lines rows={[['Finishes and spec', `${e.rate >= 0 ? '+' : '−'}₹${nf(Math.abs(e.rate))} / ft²`], ['Building systems', `${cr(e.sys.cost)} · ₹${nf(e.sys.costPerSqft)} / ft²`]]} />
         <Row>
           <Num label="Booked by completion" value={p.costs?.presold ?? c.presold} set={(v) => up({ costs: { ...(p.costs ?? {}), presold: v } })} max={100} step={5} unit="%" />
           <Num label="Soft costs" value={p.costs?.soft ?? c.soft} set={(v) => up({ costs: { ...(p.costs ?? {}), soft: v } })} max={60} unit="% of build" />

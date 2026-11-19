@@ -8,6 +8,7 @@
 // Each sheet has a title block, a scale (the largest standard scale that fits), a scale bar and a north arrow.
 // Printed with the browser (SHEET_CSS puts one sheet on each A3 page), it saves as a PDF. For discussion: check
 // everything before it goes in for approval.
+import { featureOf } from './siteObjects';
 import type { ComponentChildren, JSX } from 'preact';
 import { SQFT, UNIT_COLOR, UNIT_LABEL } from '../doc/site';
 import type { Evaluated } from './evaluate';
@@ -134,6 +135,13 @@ function SitePlan({ e }: { e: Evaluated }) {
         <polygon points={pts(ring, T)} fill="#fbfaf6" stroke="#111" stroke-width="0.6" />
         {r.lostRings.map((lr) => <polygon points={pts(lr, T)} fill="url(#hatch-dp)" stroke="#d33" stroke-width="0.3" />)}
         {d.ground.gardens.map((g) => <polygon points={pts(g, T)} fill="url(#hatch-open)" stroke="#3a8f5a" stroke-width="0.2" />)}
+        {/* what is on the site already: trees kept, structures, lines, ground kept clear */}
+        {(p.features ?? []).map((f) => {
+          const sh = featureOf(f.kind).shape;
+          if (sh === 'point') { const [x, y] = T(f.pts[0], f.pts[1]), rr = (f.r ?? 1) * (T(f.pts[0] + 1, f.pts[1])[0] - x); return <g><circle cx={x} cy={y} r={Math.max(0.6, rr)} fill="none" stroke={f.kind === 'tree' ? '#3a8f5a' : '#555'} stroke-width="0.25" /><circle cx={x} cy={y} r="0.3" fill="#111" /></g>; }
+          if (sh === 'line') return <polyline points={pts(f.pts, T)} fill="none" stroke="#555" stroke-width="0.35" stroke-dasharray="3 1 0.6 1" />;
+          return <polygon points={pts(f.pts, T)} fill={f.kind === 'nobuild' ? 'url(#hatch-dp)' : '#eee'} stroke="#555" stroke-width="0.3" stroke-dasharray={f.kind === 'nobuild' ? '1.5 1' : undefined} />;
+        })}
         {fp.length >= 6 && <polygon points={pts(fp, T)} fill="none" stroke="#1b4fd8" stroke-width="0.3" stroke-dasharray="2 1" />}
         {surface.flatMap((l) => l.bays).map((b) => <polygon points={pts(b, T)} fill="none" stroke="#999" stroke-width="0.15" />)}
         {d.buildings.map((b, i) => b.quads.map((q) => <polygon points={pts(q, T)} fill="#d9d4c8" stroke="#111" stroke-width="0.5" />).concat([

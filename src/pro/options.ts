@@ -31,7 +31,8 @@ export const floorsUnder = (h: number, floorH: number) => Math.max(1, Math.floor
 
 /** Evaluate one variant of the project and summarise it as a row. */
 export function optionRow(p: ProProject, patch: Partial<ProProject>, label: string): OptionRow {
-  const e = evaluate({ ...p, ...patch });
+  // (an option is the plot filled again to its settings: buildings shaped by hand are set aside)
+  const e = evaluate({ ...p, ...patch, scheme: undefined });
   const d = e.d;
   return {
     id: JSON.stringify(patch), label, patch,

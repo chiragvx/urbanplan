@@ -92,7 +92,7 @@ export function Landing() {
             <a class="btn btn-lg" href={REPORT} target="_blank" rel="noopener">See a sample report</a>
           </div>
           <a class="frame hero-shot" href={PRO} aria-label="Open UrbanPlan Pro">
-            <img width={1440} height={900} src={img('pro-scheme.webp')} alt="UrbanPlan Pro: a ten-storey building on its plot in Baner, Pune, drawn as a wireframe, with the scheme panel and the results bar." fetchpriority="high" />
+            <img width={1440} height={900} src={img('pro-scheme.webp')} alt="UrbanPlan Pro: two seventeen-storey towers on a plot in Baner, Pune, drawn as a wireframe, with the scheme panel and the results bar." fetchpriority="high" />
           </a>
         </div>
       </section>
