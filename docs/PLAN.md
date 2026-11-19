@@ -118,12 +118,14 @@ Every phase has a first cut in `src/pro/`; each one gets deeper from here. All o
 - View tools: exterior or an X-ray floor; camera for the whole site, the street or from above; a sun study for any month and hour.
 - A first-visit card that starts from three numbers.
 - A share link that carries the whole project and opens read-only.
-- Projects in the account.
+- Projects in the account, shared with a team by email (editors save, viewers read), with comments tagged by step (`team.ts`, `supabase/migrations/0004_project_team.sql`).
 - On a phone, the 3D stays at the top and the steps sit in a bar along the bottom.
 
 **1. Plot and an instant answer**
 - `PlotEditor.tsx`: a rectangle, or an outline drawn corner by corner with a road on any edge.
 - `importPlot.ts`: GeoJSON or KML, or pasted latitude / longitude or metres (UTM). Only the outline is read.
+- Find a plot by its survey or CTS number (district, taluka, village, number): `api/plot.js` asks MahaBhunakasha for the outline and passes back nothing about the owners.
+- DCPR 2034 read from the regulation: front set-backs (Table 18: 3 m in the island city, 4.5 m elsewhere), side and rear margins (Reg. 41(2) Table A: H/5, H/4 on plots over 1,000 m², at most 12 / 16 / 20 m), the height limit (Reg. 43: three times the road plus the front space), room sizes (Table 14) and light (Reg. 40: windows 1/6 of the habitable floor).
 - `project.ts`: the site's own limits (a height cap from airport, fire or heritage rules; a transit zone's FSI), on top of UDCPR or DCPR. Concave plots get a true inset.
 - `deal.ts`: the Indian deal model. Outright purchase, a JDA on revenue share or area share (with a refundable deposit), or a society's redevelopment (rehab carpet, corpus, rent). GST and stamp duty included. Everything runs in one monthly cash flow, so the IRR and the peak cash are real.
 
@@ -140,7 +142,7 @@ Every phase has a first cut in `src/pro/`; each one gets deeper from here. All o
 
 **4. Approval suite**
 - `scrutiny.ts`: our own scrutiny, pass / fail / to check, each with its clause. It covers FSI, height, margins, fire tender access, lifts, refuge areas, stairs, parking, open and amenity space, inclusive housing, light and ventilation, room sizes, shop floors and environment clearance.
-- `approvals.ts`: the NOCs the scheme needs, the documents to file, and rough fees and charges.
+- `approvals.ts`: the permission applied for (a new building, a redevelopment, revised plans, additions) and its stages (IOD or building permission, CC, plinth checking, OC), the NOCs the scheme needs, the documents to file, and rough fees and charges.
 - `drawings.tsx`: the drawing set as A3 sheets (site plan, typical floor, elevation, area statement), printed to PDF.
 - `dxf.ts`: a PreDCR-style DXF (R12, closed polylines on named layers).
 
@@ -154,13 +156,13 @@ Every phase has a first cut in `src/pro/`; each one gets deeper from here. All o
 **6. Agent**
 - `brief.ts`: a written brief turned into constraints. It searches the generator, checks each scheme against the rules and keeps the best that passes, showing its steps. It is rule-based for now; a language model can drive the same functions through the API.
 
+**Checked:** the DXF opens in ezdxf (R12, no audit errors, every polyline closed); the IFC passes IfcOpenShell's IFC4 schema validation and its spaces build as geometry; the team and comment rules were run against the migrations on Postgres (29 cases: who sees, saves, comments, resolves, and who can't).
+
 **Still to do, or to do properly:**
-- picking a plot by survey or CTS number (the Bhunaksha harvest);
-- DCPR's own margins and Mumbai's island-city line;
-- permission types in project setup;
-- teams and comments (they need the server);
+- run `0004_project_team.sql` on the live Supabase project (teams and comments show "not switched on" until then); invite emails;
 - PreDCR layer names checked against SoftTech's manual, and a real submission tested;
-- the room minimums, fee rates and fire rules checked against the official texts (all marked "as assumed" in the code).
+- UDCPR's room minimums, light rule, fee rates and fire rules checked against the official text (marked "as assumed" in the code);
+- the floor plans: on a small footprint only 1 BHKs fit beside a core (the Scheme step says so); flats around a lobby, without a corridor, would fit bigger ones.
 
 ## Open questions
 - What exactly to charge for, and when.

@@ -273,7 +273,8 @@ export interface MapMeta {
   /** fingerprint of the base network the edits were made on */
   base?: string;
   /** the project in the signed-in user's account this map saves to, and the revision this copy is at */
-  cloud?: { id: string; rev: number } | null;
+  /** where it's saved; `owner` when it is someone else's project shared with this user (saved into their file) */
+  cloud?: { id: string; rev: number; owner?: string } | null;
   /** the street design standard roads are matched against (irc, pune, mumbai); unset = from the city */
   standard?: string;
 }

@@ -14,7 +14,7 @@ const BUCKET = 'projects';
 const VERSION_EVERY = 10 * 60e3;
 const MAX_VERSIONS = 50;
 
-export interface Project { id: string; name: string; region: string; edits: number; bytes: number; revision: number; visibility: string; created_at: string; updated_at: string }
+export interface Project { id: string; owner?: string; name: string; region: string; edits: number; bytes: number; revision: number; visibility: string; created_at: string; updated_at: string }
 export interface Version { id: number; project: string; path: string; edits: number; bytes: number; label: string | null; created_at: string }
 
 /** Where the cloud copy stands: off (signed out / no accounts), saving, saved (when), offline, error. */
@@ -48,9 +48,10 @@ async function upload(path: string, blob: Blob) {
 // ---------------- projects ----------------
 
 /** The signed-in user's projects: the editor's maps, or Pro's projects (kept in the same table, `region` 'pro:…'). */
-export async function listProjects(kind: 'map' | 'pro' = 'map'): Promise<Project[]> {
+export async function listProjects(kind: 'map' | 'pro' = 'map', shared = false): Promise<Project[]> {
   if (!cloudOn()) return [];
-  const q = sb().from('projects').select('*').eq('owner', uid());
+  // (shared: other people's projects this user was added to: RLS lets those through, 0004_project_team.sql)
+  const q = shared ? sb().from('projects').select('*').neq('owner', uid()).neq('visibility', 'public') : sb().from('projects').select('*').eq('owner', uid());
   const { data, error } = await (kind === 'pro' ? q.like('region', 'pro:%') : q.not('region', 'like', 'pro:%')).order('updated_at', { ascending: false });
   if (error) throw error;
   return data as Project[];
@@ -84,7 +85,7 @@ export async function deleteProject(id: string) {
 
 // ---------------- saving ----------------
 
-export interface Saved { id: string; revision: number; copied?: boolean }
+export interface Saved { id: string; revision: number; copied?: boolean; owner: string }
 /** when each project last kept a version (this session) */
 const lastVersion = new Map<string, number>();
 
@@ -95,7 +96,7 @@ const lastVersion = new Map<string, number>();
 export async function saveProject(meta: MapMeta, text: string, edits: number, opts: { version?: boolean; label?: string } = {}): Promise<Saved> {
   const blob = await gzip(text);
   const facts = { name: meta.name || 'Untitled map', region: meta.tile, edits, bytes: blob.size };
-  let id = meta.cloud?.id, revision = meta.cloud?.rev ?? 0, copied = false;
+  let id = meta.cloud?.id, revision = meta.cloud?.rev ?? 0, copied = false, owner = meta.cloud?.owner ?? uid();
   if (id) {
     // claim the next revision, only if nobody saved since we last did
     const { data, error } = await sb().from('projects').update({ ...facts, revision: revision + 1 }).eq('id', id).eq('revision', revision).select('revision');
@@ -105,7 +106,7 @@ export async function saveProject(meta: MapMeta, text: string, edits: number, op
       // newer work in the cloud (or the project is gone, or not ours): keep this as a copy beside it
       const { data: there } = await sb().from('projects').select('id').eq('id', id).maybeSingle();
       copied = !!there;
-      id = undefined;
+      id = undefined; owner = uid();
       if (copied) facts.name = `${facts.name} (copy)`;
     }
   }
@@ -114,13 +115,14 @@ export async function saveProject(meta: MapMeta, text: string, edits: number, op
     if (error) throw error;
     id = data.id as string; revision = data.revision as number;
   }
-  await upload(fileOf(uid(), id), blob);
+  await upload(fileOf(owner, id), blob);
   const now = Date.now();
-  if (opts.version || now - (lastVersion.get(id) ?? 0) > VERSION_EVERY) {
+  // (versions are the owner's: an editor on a shared project saves its current file only)
+  if (owner === uid() && (opts.version || now - (lastVersion.get(id) ?? 0) > VERSION_EVERY)) {
     lastVersion.set(id, now);
     try { await keepVersion(id, blob, edits, opts.label); } catch (e) { console.warn('version not kept', e); }
   }
-  return { id, revision, copied };
+  return { id, revision, copied, owner };
 }
 
 async function keepVersion(project: string, blob: Blob, edits: number, label?: string) {

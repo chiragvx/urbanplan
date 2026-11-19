@@ -43,7 +43,12 @@ function wants(u: Unit, ds: DesignSystem): Tag[] {
 
 const sizeOf = (tag: Tag, ds: DesignSystem) => (tag === 'SD' || tag === 'D1' ? { ...ds.doors[tag], sill: 0 } : ds.windows[tag]);
 
-export function planFloor(b: SiteReport['buildings'][number], ds: DesignSystem): FloorPlan {
+/** the habitable rooms' share of a flat's carpet (living, bedrooms, kitchen: not the toilets, foyer and passages),
+ *  which the light rules are a share of; roughly, until the check reads the fitted rooms */
+const HABITABLE = 0.8;
+/** `light`: the glazing a flat needs, as a share of its habitable floor area (UDCPR 1/10 as assumed; DCPR 2034
+ *  Reg. 40(1)(a) 1/6), half of it opening. */
+export function planFloor(b: SiteReport['buildings'][number], ds: DesignSystem, light = 1 / 10): FloorPlan {
   const openings: Opening[] = [], walls: number[][] = [], checks: UnitCheck[] = [];
   const inside = (x: number, z: number) => b.quads.some((q) => pointIn(q, x, z, 0.01)) || b.cores.some((q) => pointIn(q, x, z, 0.01));
   const inCorridor = (x: number, z: number) => b.corridors.some((q) => pointIn(q, x, z, 0.05));
@@ -87,6 +92,18 @@ export function planFloor(b: SiteReport['buildings'][number], ds: DesignSystem):
         if (need([...per[k], tag]) <= outs[k].L) { per[k].push(tag); break; }
       }
     }
+    // short of the glazing the rules ask (a share of the habitable rooms' floor): more windows where the walls
+    // have room, the bigger first, as an architect would size them up
+    const hab = u.carpet * HABITABLE, glass = (t: Tag) => { const z = sizeOf(t, ds); return z.w * z.h; };
+    let have = per.reduce((s, l) => s + l.reduce((q, t) => q + glass(t), 0), 0);
+    if (u.t !== 3) for (let guard = 0; have < hab * light - 1e-6 && guard < 12; guard++) {
+      let added = false;
+      for (const tag of ['W1', 'W2'] as Tag[]) {
+        const i = outs.findIndex((e, ei) => need([...per[ei], tag]) <= e.L);
+        if (i >= 0) { per[i].push(tag); have += glass(tag); added = true; break; }
+      }
+      if (!added) break;
+    }
     let glazed = 0, open = 0;
     outs.forEach((e, ei) => {
       const tags = per[ei];
@@ -110,7 +127,7 @@ export function planFloor(b: SiteReport['buildings'][number], ds: DesignSystem):
         wall(e.x0 + e.ux * (m + d.w / 2), e.z0 + e.uz * (m + d.w / 2), e.x0 + e.ux * e.L, e.z0 + e.uz * e.L);
       } else wall(e.x0, e.z0, e.x0 + e.ux * e.L, e.z0 + e.uz * e.L);
     }
-    checks.push({ t: u.t, carpet: u.carpet, glazed, open, light: glazed >= u.carpet / 10 - 1e-6, air: open >= u.carpet / 20 - 1e-6, toShaft });
+    checks.push({ t: u.t, carpet: u.carpet, glazed, open, light: glazed >= hab * light - 1e-6, air: open >= (hab * light) / 2 - 1e-6, toShaft });
   });
   for (const q of b.cores) for (let i = 0; i < q.length; i += 2) { const j = (i + 2) % q.length; wall(q[i], q[i + 1], q[j], q[j + 1]); }
   return { openings, walls, checks };

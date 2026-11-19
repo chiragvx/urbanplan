@@ -143,7 +143,17 @@ function template(t: number): { front: Item[]; wet: Item[] } {
 }
 
 /** Fit the rooms into every flat on a building's typical floor. */
-export function fitRooms(b: BuildingReport, plan: FloorPlan): FlatRooms[] {
+/** DCPR 2034 Table 14 (Reg. 37(2)), read from the regulation: habitable rooms and the kitchen by width only (2.4 m,
+ *  1.8 m), a bathroom 1.5 m² and 1.1 m, a combined bath and WC 2.2 m² and 1.1 m. */
+export const ROOM_MIN_DCPR: Record<RoomKind, { area: number; width: number }> = {
+  ...ROOM_MIN,
+  living: { area: 0, width: 2.4 }, bed: { area: 0, width: 2.4 }, kitchen: { area: 0, width: 1.8 },
+  toilet: { area: 2.2, width: 1.1 }, bath: { area: 1.5, width: 1.1 },
+};
+export const roomMin = (code?: string) => (code && code !== 'udcpr' ? ROOM_MIN_DCPR : ROOM_MIN);
+
+export function fitRooms(b: BuildingReport, plan: FloorPlan, code?: string): FlatRooms[] {
+  const MIN = roomMin(code);
   return b.units.map((u, ui): FlatRooms => {
     if (u.t === 3) return { unit: ui, t: u.t, rooms: [], ok: true, walls: [] };
     const F = frameOf(u.ring, ui, plan);
@@ -190,7 +200,7 @@ export function fitRooms(b: BuildingReport, plan: FloorPlan): FlatRooms[] {
       if (area < 0.3) continue;
       let ua = Infinity, ub = -Infinity, va = Infinity, vb = -Infinity;
       for (let i = 0; i < ring.length; i += 2) { const [uu, vv] = F.toL(ring[i], ring[i + 1]); ua = Math.min(ua, uu); ub = Math.max(ub, uu); va = Math.min(va, vv); vb = Math.max(vb, vv); }
-      const width = Math.min(ub - ua, vb - va), m = ROOM_MIN[c.kind];
+      const width = Math.min(ub - ua, vb - va), m = MIN[c.kind];
       // (the dining space is whatever's left: never a failing room of its own)
       const minArea = c.name === 'Dining' ? 0 : m.area, minWidth = c.name === 'Dining' ? 0 : m.width;
       rooms.push({ kind: c.kind, name: c.name, ring, area, width, minArea, minWidth, ok: area >= minArea - 0.05 && width >= minWidth - 0.02 });

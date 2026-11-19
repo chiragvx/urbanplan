@@ -54,7 +54,7 @@ export function scrutiny(e: Evaluated, rooms?: RoomsLike): Check[] {
   d.buildings.forEach((b, i) => {
     add({ key: `height:${i}`, group: 'Building', rule: `Height${name(i)}`, clause: 'Height limit (fire and aviation clearances, as assumed)', required: `at most ${m(R.maxH)}`, proposed: `${m(b.height)} (${b.floors + d.under} floors)`, status: b.overHeight ? 'fail' : 'pass' });
     const side = sideMargin(R, b.height);
-    add({ key: `margins:${i}`, group: 'Building', rule: `Margins${name(i)}`, clause: r.code === 'udcpr' ? 'UDCPR 2020 Table 6-D' : 'DCPR 2034 (UDCPR margins as placeholders)', required: `front ${m(R.front)}, sides and rear ${m(side)} at ${m(b.height)}`, proposed: b.clash === 'margins' ? 'past the margins' : b.clash === 'overlap' ? 'overlaps another building' : 'inside the margins', status: b.clash ? 'fail' : 'pass' });
+    add({ key: `margins:${i}`, group: 'Building', rule: `Margins${name(i)}`, clause: r.code === 'udcpr' ? 'UDCPR 2020 Table 6-D' : 'DCPR 2034 Table 18; Reg. 41(2) Table A', required: `front ${m(R.front)}, sides and rear ${m(side)} at ${m(b.height)}`, proposed: b.clash === 'margins' ? 'past the margins' : b.clash === 'overlap' ? 'overlaps another building' : 'inside the margins', status: b.clash ? 'fail' : 'pass' });
   });
   if (hasBuildings) add({ key: 'coverage', group: 'Building', rule: 'Ground coverage', clause: `${code} (no separate cap for residential in this table, as assumed)`, required: 'inside the margins', proposed: `${Math.round(d.coverage * 100)}% of the plot`, status: 'info' });
 
@@ -86,7 +86,7 @@ export function scrutiny(e: Evaluated, rooms?: RoomsLike): Check[] {
   const flats = e.checks.filter((c) => c.t !== 3);
   if (flats.length) {
     const all = flats.reduce((s, c) => s + c.floors, 0), ok = flats.filter((c) => c.light && c.air).reduce((s, c) => s + c.floors, 0);
-    add({ key: 'light', group: 'Flats & rooms', rule: 'Light and ventilation', clause: `${code} Chapter 9 (openings 1/10 of the floor area, half of it opening)`, required: 'every flat', proposed: `${ok} of ${all} flats`, status: ok === all ? 'pass' : 'fail' });
+    add({ key: 'light', group: 'Flats & rooms', rule: 'Light and ventilation', clause: r.code === 'udcpr' ? `${code} Chapter 9 (windows 1/10 of the habitable floor, half of it opening; as assumed)` : 'DCPR 2034 Reg. 40(1) (windows 1/6 of the habitable floor)', required: 'every flat', proposed: `${ok} of ${all} flats`, status: ok === all ? 'pass' : 'fail' });
   }
   if (rooms) {
     const by = new Map<string, { n: number; bad: number; min: string; worst: string }>();
@@ -100,7 +100,7 @@ export function scrutiny(e: Evaluated, rooms?: RoomsLike): Check[] {
       }
     }));
     for (const [k, v] of by) {
-      add({ key: `room:${k}`, group: 'Flats & rooms', rule: `Room size: ${k}`, clause: `${code} Chapter 9 (sizes as assumed: habitable 9.5 m² / 2.4 m, kitchen 5.5 m² / 1.8 m, bath 1.8 m², WC 1.1 m²)`, required: `at least ${v.min}`, proposed: v.bad ? `${v.n - v.bad} of ${v.n} meet it` : `all ${v.n}`, status: v.bad ? 'fail' : 'pass', note: v.worst || undefined });
+      add({ key: `room:${k}`, group: 'Flats & rooms', rule: `Room size: ${k}`, clause: r.code === 'udcpr' ? `${code} Chapter 9 (sizes as assumed: habitable 9.5 m² / 2.4 m, kitchen 5.5 m² / 1.8 m, bath 1.8 m², WC 1.1 m²)` : 'DCPR 2034 Reg. 37(2) Table 14 (habitable 2.4 m wide, kitchen 1.8 m, bath 1.5 m² / 1.1 m, bath and WC 2.2 m²)', required: `at least ${v.min}`, proposed: v.bad ? `${v.n - v.bad} of ${v.n} meet it` : `all ${v.n}`, status: v.bad ? 'fail' : 'pass', note: v.worst || undefined });
     }
   } else if (flats.length) {
     add({ key: 'rooms', group: 'Flats & rooms', rule: 'Room sizes', clause: `${code} Chapter 9`, required: 'every room at its minimum size and width', proposed: 'rooms not laid out', status: 'warn', note: 'Checked by flat until rooms are modelled.' });

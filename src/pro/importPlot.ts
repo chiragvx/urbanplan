@@ -77,3 +77,11 @@ export function longestEdge(ring: number[]): number {
   for (let k = 0; k < ring.length / 2; k++) { const i = 2 * k, j = (i + 2) % ring.length, l = Math.hypot(ring[j] - ring[i], ring[j + 1] - ring[i + 1]); if (l > L) { L = l; best = k; } }
   return best;
 }
+
+/** A ring already in metres (UTM, a survey: x east, y north, x, y, …) as the project's outline around its middle. */
+export function fromMetres(xy: number[], source: string): Imported {
+  const pts: [number, number][] = [];
+  for (let i = 0; i + 1 < xy.length; i += 2) pts.push([xy[i], xy[i + 1]]);
+  const { ring } = toRing(pts, false);
+  return { ring, source, area: areaOf(ring), latlon: null };
+}

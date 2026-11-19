@@ -92,7 +92,7 @@ export function PlotPanel(p: { id: string }) {
         <Section title="Rules" open={false} right={o.rules && Object.keys(o.rules).length ? <button class="link small" disabled={ro} onClick={() => set({ rules: undefined })}>Reset</button> : undefined}>
           <div class="grid2">
             {RULES.map((x) => {
-              const v = r.rules[x.k], own = o.rules?.[x.k] !== undefined;
+              const v = r.rules[x.k] ?? 0, own = o.rules?.[x.k] !== undefined;
               return (
                 <NumberField key={x.k} label={x.label} unit={x.unit} digits={x.digits} title={x.title} step={x.step} min={x.min ?? 0} disabled={ro}
                   value={x.pct ? Math.round(v * 100) : v} state={own ? 'own' : 'base'}

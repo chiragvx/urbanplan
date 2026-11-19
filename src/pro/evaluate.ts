@@ -30,7 +30,7 @@ export function evaluate(p: ProProject): Evaluated {
   const rate = specRate(ds);
   const { d, shops } = generate(p, r, rate, ds.premium);
   // (a building with a style of its own takes that one's windows and doors)
-  const plans = d.buildings.map((b, i) => planFloor(b, dsOfBuilding(p, i, ds)));
+  const plans = d.buildings.map((b, i) => planFloor(b, dsOfBuilding(p, i, ds), r.code === 'udcpr' ? 1 / 10 : 1 / 6));
   const rows = schedule(d, plans, ds, (bi, ui) => (shops?.removed.get(bi)?.has(ui) ? shops.upperOf[bi] : 0));
   const checks = plans.flatMap((pl, i) => pl.checks.map((c) => ({ ...c, floors: d.buildings[i].floors })));
   return { p, ds, r, d, shops, plans, rows, checks, rate };

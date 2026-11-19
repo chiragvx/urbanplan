@@ -42,6 +42,8 @@ const P: Record<string, string> = {
   top: 'M12 3a9 9 0 100 18 9 9 0 000-18zM12 8v8M8 12h8',
   undo: 'M9 14L4 9l5-5M4 9h11a5 5 0 010 10h-3',
   redo: 'M15 14l5-5-5-5M20 9H9a5 5 0 000 10h3',
+  team: 'M9 11a4 4 0 100-8 4 4 0 000 8zM2 21a7 7 0 0114 0M16 3.5a4 4 0 010 7.5M18 14a6 6 0 014 7',
+  chat: 'M4 5h16v11H9l-5 4z',
   key: 'M3 7h18v10H3zM7 11h0M11 11h0M15 11h0M7 14h10',
 };
 export type IconName = keyof typeof P;
@@ -170,11 +172,11 @@ export function Lines({ rows }: { rows: [ComponentChildren, ComponentChildren, s
   return <dl class="lines">{rows.map(([k, v, c]) => <div class={c}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>;
 }
 
-export function Btn({ children, onClick, kind, icon, title, disabled, href, download }: { children?: ComponentChildren; onClick?: (e: MouseEvent) => void; kind?: 'primary' | 'ghost' | 'quiet'; icon?: string; title?: string; disabled?: boolean; href?: string; download?: string }) {
+export function Btn({ children, onClick, kind, icon, title, disabled, href, download, submit }: { children?: ComponentChildren; onClick?: (e: MouseEvent) => void; kind?: 'primary' | 'ghost' | 'quiet'; icon?: string; title?: string; disabled?: boolean; href?: string; download?: string; submit?: boolean }) {
   const cls = `btn${kind ? ` ${kind}` : ''}${children ? '' : ' icon-only'}`;
   const inner = <>{icon && <Icon n={icon} size={16} />}{children}</>;
   if (href) return <a class={cls} href={href} title={title} download={download}>{inner}</a>;
-  return <button type="button" class={cls} onClick={onClick} title={title} aria-label={children ? undefined : title} disabled={disabled}>{inner}</button>;
+  return <button type={submit ? 'submit' : 'button'} class={cls} onClick={onClick} title={title} aria-label={children ? undefined : title} disabled={disabled}>{inner}</button>;
 }
 
 /** Download text as a file. */

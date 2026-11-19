@@ -12,10 +12,39 @@ export interface Fee { label: string; amount: number; basis: string }
 
 const EC_FROM = 20000;
 
+/** What is being asked for: a new building on open land, a redevelopment (an existing building pulled down, often a
+ *  society's), revised plans for a permission already granted, or more floors / a wing on a standing building. */
+export type PermissionKind = 'new' | 'redevelopment' | 'revised' | 'addition';
+export const PERMISSION_LABEL: Record<PermissionKind, string> = { new: 'New building', redevelopment: 'Redevelopment', revised: 'Revised plans', addition: 'Additions' };
+export const PERMISSION_HINT: Record<PermissionKind, string> = {
+  new: 'A building on open land.',
+  redevelopment: "An existing building pulled down and rebuilt, often a housing society's.",
+  revised: 'Changes to plans already approved, before the occupancy certificate.',
+  addition: 'More floors or a wing on a building that stands.',
+};
+export const permissionOf = (e: Evaluated, kind?: PermissionKind): PermissionKind => kind ?? (e.p.deal?.kind === 'redevelopment' ? 'redevelopment' : 'new');
+
+/** The permission's stages, in order: what the authority issues, and when. */
+export function stages(e: Evaluated, kind: PermissionKind): { title: string; note: string }[] {
+  const mumbai = e.r.code !== 'udcpr';
+  const list = [
+    ...(kind === 'redevelopment' ? [{ title: 'Demolition permission', note: 'For the standing building, once the occupants have moved out.' }] : []),
+    mumbai
+      ? { title: kind === 'revised' ? 'Amended plans approval' : 'Intimation of Disapproval (IOD)', note: kind === 'revised' ? 'The changed plans, against the IOD and CC already issued.' : 'The plans approved, with the conditions to meet before work starts.' }
+      : { title: kind === 'revised' ? 'Revised building permission' : 'Building permission', note: kind === 'revised' ? 'The changed plans, against the permission already granted.' : 'The plans approved under UDCPR, through BPMS.' },
+    { title: 'Commencement certificate (CC)', note: mumbai ? 'Up to the plinth first, then further CCs floor by floor.' : 'Work may start; valid for a year, renewable.' },
+    { title: 'Plinth checking', note: 'The plinth inspected against the plans before going up.' },
+    { title: 'Occupancy certificate (OC)', note: 'After the completion notice, the fire NOC (final) and the structural certificate.' },
+  ];
+  if (kind === 'addition') list.unshift({ title: 'Structural audit', note: 'That the standing building can take the new floors.' });
+  return list;
+}
+
 /** The NOCs and clearances the scheme triggers. `extra` covers what the plot doesn't tell us yet. */
-export function nocs(e: Evaluated, extra: { nearAirport?: boolean; trees?: boolean; heritage?: boolean } = {}): NocItem[] {
-  const { r, d } = e, H = d.height, mumbai = r.code !== 'udcpr';
+export function nocs(e: Evaluated, extra: { nearAirport?: boolean; trees?: boolean; heritage?: boolean; kind?: PermissionKind } = {}): NocItem[] {
+  const { r, d } = e, H = d.height, mumbai = r.code !== 'udcpr', kind = permissionOf(e, extra.kind);
   return [
+    ...(kind === 'redevelopment' ? [{ key: 'tenants', title: "Occupants' and tenants' consent", authority: mumbai ? 'MHADA or the Corporation, by the scheme' : 'The Corporation', why: "A redevelopment needs the occupants' consent, at the share its scheme asks.", needed: true }] : []),
     { key: 'fire', title: 'Fire NOC (provisional, then final)', authority: 'Chief Fire Officer of the corporation', why: H > FIRE_H ? `The building is ${H.toFixed(1)} m tall, over ${FIRE_H} m.` : `Not needed up to ${FIRE_H} m (as assumed).`, needed: H > FIRE_H },
     { key: 'aai', title: 'Height clearance (NOCAS)', authority: 'Airports Authority of India', why: extra.nearAirport ? 'The plot is in an airport\'s colour-coded zone: the height needs clearing.' : 'Needed in an airport\'s colour-coded zoning map; check the plot on the AAI NOCAS site.', needed: !!extra.nearAirport },
     { key: 'ec', title: 'Environment clearance', authority: 'State Environment Impact Assessment Authority (SEIAA)', why: d.bua >= EC_FROM ? `Built-up area ${Math.round(d.bua).toLocaleString('en-IN')} m², from ${EC_FROM.toLocaleString('en-IN')} m².` : `Under ${EC_FROM.toLocaleString('en-IN')} m² of built-up area.`, needed: d.bua >= EC_FROM },
@@ -28,7 +57,7 @@ export function nocs(e: Evaluated, extra: { nearAirport?: boolean; trees?: boole
 }
 
 /** What goes with the building permission application. */
-export function documents(e: Evaluated): DocItem[] {
+export function documents(e: Evaluated, kind: PermissionKind = 'new'): DocItem[] {
   const { r, d } = e, mumbai = r.code !== 'udcpr';
   const list: DocItem[] = [
     { title: 'Application form (Appendix / Form A)', note: 'Filled in from the project: we prefill the plot, the areas and the use.', from: 'us' },
@@ -45,6 +74,21 @@ export function documents(e: Evaluated): DocItem[] {
     { title: 'Site photographs', note: 'Of the plot as it stands.', from: 'owner' },
     { title: 'Indemnity and undertakings', note: 'On stamp paper, in the authority\'s formats.', from: 'owner' },
   ];
+  if (kind === 'redevelopment') list.push(
+    { title: 'Approved plans of the standing building', note: 'Or proof that it stood before the cut-off date, for its built-up area.', from: 'owner' },
+    { title: "Society's resolution and consent", note: "The general body's resolution and the members' consent (Section 79A directions, for a housing society).", from: 'owner' },
+    { title: 'Structural audit of the standing building', note: 'From a licensed structural engineer, if it is being called unsafe.', from: 'architect' },
+    { title: 'Rehab and sale area statement', note: "Each member's existing and new carpet, and what is left for sale.", from: 'us' },
+  );
+  if (kind === 'revised') list.push(
+    { title: 'The permission and plans already approved', note: 'The building permission or IOD, and the CC issued so far.', from: 'owner' },
+    { title: 'Statement of the changes', note: 'What changed from the approved plans, floor by floor.', from: 'us' },
+  );
+  if (kind === 'addition') list.push(
+    { title: 'Approved plans and OC of the standing building', note: 'The building the floors go on.', from: 'owner' },
+    { title: 'Structural stability certificate for the additions', note: 'That the foundations and frame take the extra floors.', from: 'architect' },
+    { title: "Occupants' consent", note: 'Of the flat owners, where the building is already sold.', from: 'owner' },
+  );
   if (r.lost > 0.5) list.push({ title: 'Road widening handover', note: 'The strip in the DP road line, handed over for the FSI credit.', from: 'owner' });
   if (d.height > FIRE_H) list.push({ title: 'Fire NOC (provisional)', note: 'Over 15 m.', from: 'authority' });
   if (d.bua >= EC_FROM) list.push({ title: 'Environment clearance', note: 'SEIAA, from 20,000 m² of built-up area.', from: 'authority' });

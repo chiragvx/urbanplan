@@ -13,7 +13,8 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import '../theme/tokens.css';
 import './pro.css';
 import { DEFAULT_PROJECT, outline, roadLines, type ProProject } from './project';
-import { deletePro, listPro, openPro, savePro, toText, type CloudRef } from './cloud';
+import { deletePro, listPro, listSharedPro, openPro, savePro, toText, type CloudRef } from './cloud';
+import { addComment, addMember, comments as listComments, deleteComment, EMAIL, members as listMembers, NotSetUp, removeMember, resolveComment, type Comment, type Member } from './team';
 import { authReady, explain, peekSession, session, startAuth } from '../auth/auth';
 import type { Project } from '../app/cloud';
 import { evaluate, dsOfBuilding } from './evaluate';
@@ -68,7 +69,7 @@ function App() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const toastT = useRef<number>();
   const toast = (s: string) => { setToastMsg(s); clearTimeout(toastT.current); toastT.current = window.setTimeout(() => setToastMsg(null), 4200); };
-  const [dialog, setDialog] = useState<null | 'projects' | 'share' | 'drawings' | 'keys' | 'welcome'>(() => (store.get(SEEN, false) || location.hash.startsWith('#s=') ? null : 'welcome'));
+  const [dialog, setDialog] = useState<null | 'projects' | 'share' | 'drawings' | 'keys' | 'welcome' | 'team'>(() => (store.get(SEEN, false) || location.hash.startsWith('#s=') ? null : 'welcome'));
 
   // ---------- a shared link: /pro/#s=<the project> opens read-only ----------
   useEffect(() => {
@@ -80,7 +81,7 @@ function App() {
 
   // ---------- everything worked out from it ----------
   const e = useMemo(() => evaluate(p), [JSON.stringify(p)]);
-  const rooms = useMemo(() => e.d.buildings.map((b, i) => fitRooms(b, e.plans[i])), [e]);
+  const rooms = useMemo(() => e.d.buildings.map((b, i) => fitRooms(b, e.plans[i], e.r.code)), [e]);
   const checks = useMemo(() => scrutiny(e, rooms), [e, rooms]);
   const deal = useMemo(() => applyDeal(e, p.deal ?? DEFAULT_DEAL), [e]);
   const sum = scrutinySummary(checks);
@@ -106,9 +107,10 @@ function App() {
     const id = new URLSearchParams(location.search).get('p');
     if (user && id && id !== ref?.id) void openId(id);
   }, [user?.id]);
+  const viewer = ref?.role === 'viewer';
   const fresh = (n: ProProject = { ...DEFAULT_PROJECT }) => { replace(n); setRef(null); lastSaved.current = ''; setDialog(null); history.replaceState(null, '', location.pathname); };
   useEffect(() => {
-    if (!user || readOnly) { setCloud({ s: 'local' }); return; }
+    if (!user || readOnly || viewer) { setCloud({ s: 'local' }); return; }
     const text = toText(p);
     if (text === lastSaved.current) return;
     const t = setTimeout(async () => {
@@ -116,7 +118,7 @@ function App() {
       try {
         const r = await savePro(p, ref);
         lastSaved.current = text;
-        setRef({ id: r.id, rev: r.revision });
+        setRef({ id: r.id, rev: r.revision, owner: r.owner, role: r.copied ? 'owner' : ref?.role });
         history.replaceState(null, '', `?p=${r.id}`);
         setCloud({ s: 'saved', msg: r.copied ? 'Newer work was in the cloud: saved this as a copy' : `Saved ${hhmm()}` });
       } catch (err) { setCloud({ s: 'error', msg: explain(err) }); }
@@ -192,7 +194,7 @@ function App() {
       set: (o: Partial<ProProject>) => up(o),
       /** everything worked out from a project (this one unless given) */
       evaluate: (q?: ProProject) => evaluate(q ?? pRef.current),
-      scrutiny: (q?: ProProject) => { const x = evaluate(q ?? pRef.current); return scrutiny(x, x.d.buildings.map((b, i) => fitRooms(b, x.plans[i]))); },
+      scrutiny: (q?: ProProject) => { const x = evaluate(q ?? pRef.current); return scrutiny(x, x.d.buildings.map((b, i) => fitRooms(b, x.plans[i], x.r.code))); },
       options: (q?: ProProject) => exploreOptions(q ?? pRef.current),
       brief: (text: string) => runBrief(pRef.current, parseBrief(text).brief),
       deal: (q?: ProProject) => { const x = evaluate(q ?? pRef.current); return applyDeal(x, x.p.deal ?? DEFAULT_DEAL); },
@@ -218,6 +220,7 @@ function App() {
         {readOnly
           ? <Btn kind="primary" icon="check" onClick={keepCopy}>Make it my copy</Btn>
           : <Btn icon="share" onClick={() => setDialog('share')}>Share</Btn>}
+        {authReady && user && ref && !readOnly && <Btn icon="team" title="People on this project, and comments" onClick={() => setDialog(dialog === 'team' ? null : 'team')}>Team</Btn>}
         {authReady && user && <Btn icon="folder" onClick={() => setDialog(dialog === 'projects' ? null : 'projects')}>Projects</Btn>}
         {authReady && session.value === null && <Btn icon="user" href={`${BASE}login/?next=${encodeURIComponent(location.pathname)}`} title="Keep your projects in your account">Sign in</Btn>}
         <More openKeys={() => setDialog('keys')} newProject={() => fresh()} />
@@ -242,8 +245,9 @@ function App() {
             <Btn kind="quiet" icon="x" title="Hide the panel" onClick={() => setPanel(false)} />
           </header>
           <div class="panel-b" key={step}>
+            {viewer && !readOnly && <p class="note">Shared with you to view and comment. <button type="button" class="linkbtn" onClick={() => setDialog('team')}>Comments</button></p>}
             {readOnly && <p class="note">A shared scheme, view only. <button type="button" class="linkbtn" onClick={keepCopy}>Make it your own copy</button> to change it.</p>}
-            <fieldset disabled={readOnly}><Body {...props} /></fieldset>
+            <fieldset disabled={readOnly || viewer}><Body {...props} /></fieldset>
           </div>
           <footer class="panel-f">
             {STEPS.findIndex((s) => s.key === step) > 0 && <Btn kind="quiet" onClick={() => go(STEPS[STEPS.findIndex((s) => s.key === step) - 1].key)}>Back</Btn>}
@@ -286,6 +290,7 @@ function App() {
 
       {toastMsg && <div class="toast" role="status">{toastMsg}</div>}
       {dialog === 'projects' && user && <Projects current={ref?.id ?? null} open={(id) => void openId(id)} fresh={() => fresh()} close={() => setDialog(null)} />}
+      {dialog === 'team' && user && ref && <Team pid={ref.id} role={ref.role ?? 'owner'} step={step} go={(s) => { go(s); }} close={() => setDialog(null)} />}
       {dialog === 'share' && <ShareDialog p={p} close={() => setDialog(null)} toast={toast} />}
       {dialog === 'keys' && <Keys close={() => setDialog(null)} />}
       {dialog === 'welcome' && <Welcome close={(n) => { store.set(SEEN, true); setDialog(null); if (n) { fresh(n); go('site'); } }} />}
@@ -367,9 +372,9 @@ function More({ openKeys, newProject }: { openKeys: () => void; newProject: () =
 
 /** The account's Pro projects: open one, start a new one, delete (two clicks). */
 function Projects({ current, open, fresh, close }: { current: string | null; open: (id: string) => void; fresh: () => void; close: () => void }) {
-  const [list, setList] = useState<Project[] | null>(null);
+  const [list, setList] = useState<Project[] | null>(null), [shared, setShared] = useState<Project[]>([]);
   const [err, setErr] = useState(''), [sure, setSure] = useState('');
-  const reload = () => listPro().then(setList, (x) => setErr(explain(x)));
+  const reload = () => { void listSharedPro().then(setShared); return listPro().then(setList, (x) => setErr(explain(x))); };
   useEffect(() => { void reload(); }, []);
   const del = async (id: string) => {
     if (sure !== id) { setSure(id); return; }
@@ -387,6 +392,73 @@ function Projects({ current, open, fresh, close }: { current: string | null; ope
           <Btn kind="quiet" onClick={() => void del(x.id)}>{sure === x.id ? 'Delete?' : 'Delete'}</Btn>
         </li>
       ))}</ul>}
+      {shared.length > 0 && <>
+        <h3 class="mh">Shared with you</h3>
+        <ul class="plist">{shared.map((x) => (
+          <li class={x.id === current ? 'on' : ''}>
+            <button type="button" class="pitem" onClick={() => open(x.id)}><b>{x.name}</b><span>{x.region.replace('pro:', '').replace('-', ' ')} · {ago(x.updated_at)}</span></button>
+          </li>
+        ))}</ul>
+      </>}
+    </Modal>
+  );
+}
+
+const STEP_NAME: Record<string, string> = Object.fromEntries(STEPS.map((s) => [s.key, s.label]));
+
+/** The people on the project (the owner adds and removes them) and its comments, each tagged with its step. */
+function Team({ pid, role, step, go, close }: { pid: string; role: 'owner' | 'editor' | 'viewer'; step: Step; go: (s: Step) => void; close: () => void }) {
+  const [people, setPeople] = useState<Member[] | null>(null), [notes, setNotes] = useState<Comment[] | null>(null);
+  const [err, setErr] = useState(''), [off, setOff] = useState('');
+  const [email, setEmail] = useState(''), [as, setAs] = useState<Member['role']>('editor');
+  const [text, setText] = useState(''), [busy, setBusy] = useState(false), [showDone, setShowDone] = useState(false);
+  const me = session.value?.user.id;
+  const fail = (x: unknown) => { if (x instanceof NotSetUp) setOff(x.message); else setErr(explain(x)); };
+  const reload = () => Promise.all([listMembers(pid).then(setPeople), listComments(pid).then(setNotes)]).catch(fail);
+  useEffect(() => { void reload(); const t = setInterval(() => void listComments(pid).then(setNotes).catch(() => {}), 20000); return () => clearInterval(t); }, [pid]);
+  const run = async (f: () => Promise<unknown>) => { setBusy(true); setErr(''); try { await f(); await reload(); } catch (x) { fail(x); } finally { setBusy(false); } };
+  const open = (notes ?? []).filter((c) => !c.resolved), done = (notes ?? []).filter((c) => c.resolved);
+  const Item = ({ c }: { c: Comment }) => (
+    <li class={`cmt${c.resolved ? ' done' : ''}`}>
+      <div class="cmt-h"><b>{c.author === me ? 'You' : c.author_name || 'Someone'}</b><span>{ago(c.created_at)}</span>
+        {c.step && STEP_NAME[c.step] && <button type="button" class="chip-step" onClick={() => go(c.step as Step)}>{STEP_NAME[c.step]}</button>}</div>
+      <p>{c.body}</p>
+      <div class="cmt-a">
+        {(c.author === me || role !== 'viewer') && <button type="button" class="linkbtn" disabled={busy} onClick={() => void run(() => resolveComment(c.id, !c.resolved))}>{c.resolved ? 'Reopen' : 'Resolve'}</button>}
+        {(c.author === me || role === 'owner') && <button type="button" class="linkbtn" disabled={busy} onClick={() => void run(() => deleteComment(c.id))}>Delete</button>}
+      </div>
+    </li>
+  );
+  if (off) return <Modal title="Team" close={close} side><p class="note">{off} The site's owner turns them on by running <code>supabase/migrations/0004_project_team.sql</code> once in Supabase.</p></Modal>;
+  return (
+    <Modal title="Team" close={close} side>
+      {err && <p class="note bad">{err}</p>}
+      <h3 class="mh">People</h3>
+      <ul class="people">
+        <li><Icon n="user" size={15} /><span>{role === 'owner' ? 'You' : 'The owner'}</span><em>owner</em></li>
+        {people?.map((m) => (
+          <li><Icon n="user" size={15} /><span>{m.email}</span><em>{m.role}</em>
+            {role === 'owner' && <Btn kind="quiet" icon="x" title={`Remove ${m.email}`} disabled={busy} onClick={() => void run(() => removeMember(pid, m.email))} />}</li>
+        ))}
+      </ul>
+      {role === 'owner' && <form class="invite" onSubmit={(ev) => { ev.preventDefault(); if (EMAIL.test(email.trim())) void run(async () => { await addMember(pid, email, as); setEmail(''); }); }}>
+        <input type="email" class="txt" placeholder="Their email" value={email} onInput={(ev) => setEmail((ev.target as HTMLInputElement).value)} aria-label="Email to add" />
+        <select value={as} onChange={(ev) => setAs((ev.target as HTMLSelectElement).value as Member['role'])} aria-label="Their role"><option value="editor">Can edit</option><option value="viewer">Can view and comment</option></select>
+        <Btn kind="primary" submit disabled={busy || !EMAIL.test(email.trim())}>Add</Btn>
+      </form>}
+      {role === 'owner' && <p class="note">They sign in with that email and find it under Projects, shared with them. No email is sent: tell them.</p>}
+
+      <h3 class="mh">Comments{open.length ? ` (${open.length})` : ''}</h3>
+      <form class="cmt-new" onSubmit={(ev) => { ev.preventDefault(); if (text.trim()) void run(async () => { await addComment(pid, text, step); setText(''); }); }}>
+        <textarea class="txt" rows={3} maxLength={2000} placeholder={`A comment on ${STEP_NAME[step]}…`} value={text} onInput={(ev) => setText((ev.target as HTMLTextAreaElement).value)}
+          onKeyDown={(ev) => { if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey) && text.trim()) { ev.preventDefault(); void run(async () => { await addComment(pid, text, step); setText(''); }); } }} />
+        <Btn kind="primary" submit disabled={busy || !text.trim()}>Comment</Btn>
+      </form>
+      {!notes && !err && <p class="note">Loading…</p>}
+      {notes && !open.length && <p class="note">No open comments.</p>}
+      <ul class="cmts">{[...open].reverse().map((c) => <Item c={c} />)}</ul>
+      {done.length > 0 && <button type="button" class="linkbtn" onClick={() => setShowDone(!showDone)}>{showDone ? 'Hide' : 'Show'} {done.length} resolved</button>}
+      {showDone && <ul class="cmts">{[...done].reverse().map((c) => <Item c={c} />)}</ul>}
     </Modal>
   );
 }

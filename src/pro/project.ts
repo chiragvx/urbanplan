@@ -57,7 +57,7 @@ export interface ProProject {
   /** the money model's timing and overheads, over the city's starting figures */
   costs?: { months?: number; presold?: number; soft?: number };
   /** what the plot sits in, for the NOCs */
-  approval?: { nearAirport?: boolean; trees?: boolean; heritage?: boolean };
+  approval?: { nearAirport?: boolean; trees?: boolean; heritage?: boolean; kind?: import('./approvals').PermissionKind };
 }
 
 /** shops sell at about this many times the flats' rate until a price is put in */
@@ -144,7 +144,17 @@ export function generate(p: ProProject, r: PlotReport, specRate = 0, premium = 0
   const c = defaultCosts(r.code, 'residential');
   const cost = { ...(p.costs ?? {}), build: c.build + specRate, ...(p.land ? { land: p.land } : {}), sale: p.sale > 0 ? p.sale : Math.round((c.sale * (1 + premium)) / 50) * 50 };
   const base = { ...siteDefaults('residential'), mix: p.mix, cost, design: { ...DEFAULT_DESIGN, type: p.typology, maxFloors: p.maxFloors } };
-  const site = optimise(r, base, 'residential');
+  let site = optimise(r, base, 'residential');
+  // 'auto' picks the layout that builds the most, which on a small plot can be a block too short for a flat beside
+  // its core: then whichever building type houses the most
+  if (p.typology === 'auto') {
+    const carpet = (x: typeof site) => solveSite(r, x, 'residential').carpet;
+    if (carpet(site) < 1) {
+      const alt = (['tower', 'slab'] as const).map((type) => optimise(r, { ...base, design: { ...base.design, type } }, 'residential'));
+      const best = alt.map((x) => ({ x, c: carpet(x) })).sort((a, b) => b.c - a.c)[0];
+      if (best && best.c >= 1) site = best.x;
+    }
+  }
   const sh = p.shops;
   if (!sh || sh.floors <= 0) return { d: solveSite(r, site, 'residential'), shops: null };
   return withShops(r, site, 'residential', sh, sh.sale > 0 ? sh.sale : Math.round((cost.sale * SHOP_PREMIUM) / 50) * 50);

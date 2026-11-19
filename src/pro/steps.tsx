@@ -7,13 +7,14 @@ import { UNIT_LABEL } from '../doc/site';
 import { TYPOLOGIES, type Typology } from '../doc/optimise';
 import { CITIES, outline, type EdgeRoad, type ProProject } from './project';
 import { PlotEditor } from './PlotEditor';
-import { importPlot, longestEdge } from './importPlot';
+import { fromMetres, importPlot, longestEdge } from './importPlot';
+import { useEffect } from 'preact/hooks';
 import { shopFloorsAllowed } from './mixed';
 import { clone, presetOf, PRESETS, SPEC, type BalconyKind, type DesignSystem, type DoorType, type Railing, type WindowType } from './design';
 import type { Evaluated } from './evaluate';
 import { applyDeal, DEAL_LABEL, DEFAULT_DEAL, type Deal, type DealKind, type DealResult } from './deal';
 import { scrutinySummary, type Check, type CheckStatus } from './scrutiny';
-import { documents, fees, nocs } from './approvals';
+import { documents, fees, nocs, permissionOf, stages, PERMISSION_LABEL, PERMISSION_HINT, type PermissionKind } from './approvals';
 import { predcrDxf } from './dxf';
 import { ROOM_COLOR, type FlatRooms } from './rooms';
 import { buildModel, ifcLite, modelJson } from './model';
@@ -69,6 +70,11 @@ export function SiteStep({ p, e, up, toast }: StepProps) {
             <Toggle label="Corner plot" hint="A road down the left side too" value={p.corner} set={(v) => up({ corner: v })} />
             {p.corner && <Num label="Side road" value={p.sideRoad} set={(v) => up({ sideRoad: v })} min={3} max={80} unit="m" />}
           </>}
+        <FindPlot done={(ring, src) => {
+          const k = longestEdge(ring);
+          up({ shape: 'poly', ring, edgeRoads: Array.from({ length: ring.length / 2 }, (_, i) => (i === k ? { today: 12, dp: 0 } : null)), name: src.split(' · ')[0] });
+          toast(`${src}. The longest edge has the road: click any edge to set the real roads.`);
+        }} />
         <button type="button" class="linkbtn" onClick={() => setImporting(!importing)}><Icon n="upload" size={14} /> Import the outline from a file or coordinates</button>
         {importing && <ImportBox done={(ring, src) => {
           const k = longestEdge(ring);
@@ -102,6 +108,60 @@ export function SiteStep({ p, e, up, toast }: StepProps) {
         {L.tod && r.roadW < 9 && <Note tone="warn">Transit-zone FSI is taken only on roads 9 m and wider.</Note>}
       </Section>
     </>
+  );
+}
+
+/** A plot by its survey or CTS number, from Maharashtra's land records map (through /api/plot, which passes back the
+ *  outline and nothing about the owners). District, taluka, village, then the number. */
+const API = `${import.meta.env.BASE_URL}api/plot`;
+async function api<T>(q: Record<string, string>): Promise<T> {
+  const r = await fetch(`${API}?${new URLSearchParams(q)}`);
+  const ct = r.headers.get('content-type') ?? '';
+  if (!ct.includes('json')) throw new Error('The land records lookup only runs on the live site.');
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error ?? 'Lookup failed');
+  return j as T;
+}
+type Opt = { code: string; name: string };
+function FindPlot({ done }: { done: (ring: number[], src: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [cat, setCat] = useState<'U' | 'R'>('U');
+  const [lists, setLists] = useState<{ d?: Opt[]; t?: Opt[]; v?: Opt[]; n?: string[] }>({});
+  const [sel, setSel] = useState<{ d?: string; t?: string; v?: string }>({});
+  const [no, setNo] = useState(''), [busy, setBusy] = useState(''), [err, setErr] = useState('');
+  const run = async <T,>(what: string, f: () => Promise<T>) => { setBusy(what); setErr(''); try { return await f(); } catch (x) { setErr((x as Error).message); return undefined; } finally { setBusy(''); } };
+  useEffect(() => { if (!open) return; setLists({}); setSel({}); void run('districts', () => api<Opt[]>({ op: 'list', level: '1', codes: `${cat},` })).then((d) => d && setLists({ d })); }, [open, cat]);
+  const g = sel.d && sel.t && sel.v ? `${cat}${cat === 'U' ? 'CM' : 'VM'}${sel.d}${sel.t}${sel.v}` : '';
+  const pickD = (d: string) => { setSel({ d }); setLists((l) => ({ d: l.d })); void run('talukas', () => api<Opt[]>({ op: 'list', level: '2', codes: `${cat},${d},` })).then((t) => t && setLists((l) => ({ ...l, t }))); };
+  const pickT = (t: string) => { setSel((x) => ({ d: x.d, t })); setLists((l) => ({ d: l.d, t: l.t })); void run('villages', () => api<Opt[]>({ op: 'list', level: '3', codes: `${cat},${sel.d},${t},` })).then((v) => v && setLists((l) => ({ ...l, v }))); };
+  const pickV = (v: string) => { setSel((x) => ({ ...x, v })); const gg = `${cat}${cat === 'U' ? 'CM' : 'VM'}${sel.d}${sel.t}${v}`; void run('plot numbers', () => api<string[]>({ op: 'plots', g: gg })).then((n) => n && setLists((l) => ({ ...l, n }))); };
+  const find = () => run('the outline', () => api<{ ring: number[]; plotno: string; area: number | null }>({ op: 'plot', g, n: no.trim() })).then((x) => {
+    if (!x) return;
+    const vName = lists.v?.find((o) => o.code === sel.v)?.name ?? '';
+    done(fromMetres(x.ring, '').ring, `${cat === 'U' ? 'CTS' : 'Survey'} ${x.plotno}, ${vName} · from the land records map`);
+    setOpen(false);
+  });
+  const S = ({ label, list, value, set }: { label: string; list?: Opt[]; value?: string; set: (v: string) => void }) => (
+    <label class="f"><span class="f-l">{label}</span>
+      <select value={value ?? ''} disabled={!list?.length} onChange={(ev) => set((ev.target as HTMLSelectElement).value)}>
+        <option value="">{list ? 'Choose…' : '…'}</option>{list?.map((o) => <option value={o.code}>{o.name}</option>)}
+      </select></label>
+  );
+  if (!open) return <button type="button" class="linkbtn" onClick={() => setOpen(true)}><Icon n="site" size={14} /> Find the plot by survey or CTS number</button>;
+  return (
+    <div class="card">
+      <Seg<'U' | 'R'> small value={cat} set={setCat} options={[{ value: 'U', label: 'City survey (CTS)' }, { value: 'R', label: 'Survey / gat (rural)' }]} />
+      <Row><S label="District" list={lists.d} value={sel.d} set={pickD} /><S label="Taluka / office" list={lists.t} value={sel.t} set={pickT} /></Row>
+      <S label="Village" list={lists.v} value={sel.v} set={pickV} />
+      <label class="f"><span class="f-l">{cat === 'U' ? 'CTS' : 'Survey / gat'} number{lists.n ? ` (${nf(lists.n.length)} in this village)` : ''}</span>
+        <input class="txt" list="plotnos" value={no} disabled={!g} placeholder={g ? 'e.g. 1000' : 'Choose the village first'} onInput={(ev) => setNo((ev.target as HTMLInputElement).value)} onKeyDown={(ev) => { if (ev.key === 'Enter' && no.trim()) void find(); }} />
+        <datalist id="plotnos">{lists.n?.slice(0, 3000).map((x) => <option value={x} />)}</datalist>
+      </label>
+      {busy && <Note>Loading {busy}…</Note>}
+      {err && <Note tone="bad">{err}</Note>}
+      <Row><Btn kind="primary" disabled={!g || !no.trim() || !!busy} onClick={() => void find()}>Use this plot</Btn><Btn kind="quiet" onClick={() => setOpen(false)}>Cancel</Btn></Row>
+      <Note>From MahaBhunakasha, Maharashtra's land records map. Only the outline comes through: owner details are dropped on our server, never stored or shown. Check it against the survey before relying on it.</Note>
+    </div>
   );
 }
 
@@ -143,6 +203,11 @@ export function BuildStep({ p, e, up }: StepProps) {
         <div class="mixbar" aria-hidden="true">{[0, 1, 2].map((i) => <i class={`m${i}`} style={`flex:${p.mix[i] || 0.0001}`}>{mixPct[i] >= 12 ? `${mixPct[i]}%` : ''}</i>)}</div>
         <Row n={3}>{[0, 1, 2].map((i) => <Num label={UNIT_LABEL[i]} value={mixPct[i]} set={(v) => setMix(i, v)} max={100} step={5} unit="%" />)}</Row>
         <Note>{[0, 1, 2].filter((t) => d.count[t]).map((t) => `${d.count[t]} × ${UNIT_LABEL[t]}`).join(' · ') || 'No flats fit.'}</Note>
+        {(() => {
+          const got = d.count[0] + d.count[1] + d.count[2], want = p.mix[0] + p.mix[1] + p.mix[2] || 1;
+          const off = got ? [0, 1, 2].reduce((s, t) => s + Math.abs(d.count[t] / got - p.mix[t] / want), 0) : 0;
+          return off > 0.4 ? <Note tone="warn">The floors are too small for this mix: the bigger flats don't fit beside the core. Try the other building type, a wider plot, or more of the smaller flats.</Note> : null;
+        })()}
       </Section>
 
       <Section title="Shops at the front" aside={shops ? <span class="sec-meta">{shops.count} shops</span> : undefined}>
@@ -394,11 +459,17 @@ export function ApproveStep({ p, e, up, checks, openDrawings, toast }: StepProps
   const sum = scrutinySummary(checks);
   const [only, setOnly] = useState<'all' | 'issues'>(sum.fail + sum.warn ? 'issues' : 'all');
   const ex = p.approval ?? {};
-  const list = nocs(e, ex), docs = documents(e), fs = fees(e);
+  const kind = permissionOf(e, ex.kind);
+  const list = nocs(e, ex), docs = documents(e, kind), fs = fees(e), steps = stages(e, kind);
   const groups = [...new Set(checks.map((c) => c.group))];
   const shown = (c: Check) => only === 'all' || c.status === 'fail' || c.status === 'warn';
   return (
     <>
+      <Section title="Permission" sub={PERMISSION_HINT[kind]}>
+        <Select<PermissionKind> label="Applying for" value={kind} set={(v) => up({ approval: { ...ex, kind: v } })} options={(Object.keys(PERMISSION_LABEL) as PermissionKind[]).map((k) => ({ value: k, label: PERMISSION_LABEL[k] }))} />
+        <ol class="stages">{steps.map((x) => <li><b>{x.title}</b><small>{x.note}</small></li>)}</ol>
+      </Section>
+
       <Section title="Scrutiny" sub="Our own check of every rule we model, as an authority's scrutiny would read it. Advisory: the authority's is the one that counts.">
         <div class="score">
           <span class="s-pass"><Icon n="check" size={14} />{sum.pass} pass</span>

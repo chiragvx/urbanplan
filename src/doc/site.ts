@@ -174,6 +174,8 @@ export const SQFT = 10.7639;
 /** fire escape travel distance to a staircase, residential (NBC 2016 Part 4, Table 22): cores at most twice this apart */
 export const TRAVEL = 30;
 const CORRIDOR = 2, BAY_W = 2.5, BAY_L = 5, AISLE = 6;
+/** how far over its size a flat may stretch to fill a stretch and still count as fitting */
+const STRETCH = 1.4;
 /** decks reached by ramp (basements, podiums): a column (0.6 m) after every three bays, 0.6 m clear of the retaining
  *  wall, a two-way ramp 6 m wide at 1 in 8 with 3 m level landings each end (a car lift on a deck too short for it), and an exit stair (4 × 6 m) wherever a
  *  car is more than 45 m from one (or a building's core coming down through the deck); two ways out from a deck over
@@ -607,7 +609,7 @@ export function departuresOf(r: PlotReport, d: SiteReport): Departure[] {
     }
     if (b.clash === 'margins') {
       const side = sideMargin(R, b.height);
-      out.push({ key: `margins:${b.b.id}`, rule: `Margins${name(i)}`, value: 'past the margins', allowed: `front ${fm(R.front)} m · sides ${fm(side)} m at ${fm(b.height)} m`, clause: 'UDCPR 2020 Table 6-D',
+      out.push({ key: `margins:${b.b.id}`, rule: `Margins${name(i)}`, value: 'past the margins', allowed: `front ${fm(R.front)} m · sides ${fm(side)} m at ${fm(b.height)} m`, clause: r.code === 'udcpr' ? 'UDCPR 2020 Table 6-D' : 'DCPR 2034 Table 18, Reg. 41(2)',
         text: `Past the margins: front ${fm(R.front)} m, sides ${fm(side)} m at its height`, ids: [b.b.id] });
     }
     if (!b.fireOk) out.push({ key: `fire:${b.b.id}`, rule: `Fire tender access${name(i)}`, value: 'way round blocked', allowed: `${FIRE_W} m clear round it above ${FIRE_H} m`, clause: 'NBC 2016 Part 4',
@@ -720,8 +722,9 @@ function layFloor(b: SiteBuilding, site: PlotSite, use: PlotUse, height: number,
           let err = 0;
           for (let t = 0; t < 3; t++) err += Math.abs(placed[t] + n[t] - (site.mix[t] / shares) * all);
           const score = (err / all) * 3 + Math.abs(k - 1) * 0.8;
-          // within a quarter over size beats anything more stretched; the least stretched otherwise
-          const ok = k <= 1.25, pickOk = pickK <= 1.25;
+          // within 40 % over size beats anything more stretched (a big 2 BHK where only a 3 BHK or two 1 BHKs fit
+          // keeps the mix: the size penalty in the score keeps it from winning otherwise); the least stretched otherwise
+          const ok = k <= STRETCH, pickOk = pickK <= STRETCH;
           if (pickN && pickOk && !ok) continue;
           if (!pickN || (ok && !pickOk) || (ok ? score < pickScore : Math.abs(k - 1) < Math.abs(pickK - 1))) { pickN = [a, b, c]; pickScore = score; pickK = k; }
         }

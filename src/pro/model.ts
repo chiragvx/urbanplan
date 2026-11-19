@@ -107,7 +107,9 @@ function guid(seed: string): string {
   for (let i = 2; i < 128; i += 6) s += B64[parseInt(bits.slice(i, i + 6), 2)];
   return s;
 }
-const str = (s: string) => `'${s.replace(/\\/g, '\\\\').replace(/'/g, "''").replace(/[^\x20-\x7e]/g, '?')}'`;
+// (ISO 10303-21: past ASCII, each UTF-16 unit as four hex digits between \X2\ and \X0\)
+const x2 = (m: string) => `\\X2\\${Array.from({ length: m.length }, (_, i) => m.charCodeAt(i).toString(16).toUpperCase().padStart(4, '0')).join('')}\\X0\\`;
+const str = (s: string) => `'${s.replace(/\\/g, '\\\\').replace(/'/g, "''").replace(/[^\x20-\x7e]+/g, x2)}'`;
 const num = (v: number) => { const t = (Math.round(v * 1000) / 1000).toString(); return t.includes('.') || t.includes('e') ? t : `${t}.`; };
 
 /** A minimal IFC4 file: project, site, building per building, a storey per level, a space per room (or per shop),

@@ -33,6 +33,9 @@ export interface PlotRules {
   side: number; sideTo: number;
   /** floor-to-floor height and the most the building may rise (m) */
   floorH: number; maxH: number;
+  /** DCPR 2034 Reg. 41(2) Table A: side / rear margin H / sideDiv (5, or 4 on plots over 1,000 m² and 20 m wide),
+   *  never under `side`; at most 12 m up to 70 m, 16 m up to 120 m, 20 m above. Unset: UDCPR's H/5 above `sideTo`. */
+  sideDiv?: number;
 }
 
 /** A road-width table: [at least this wide (m), basic, premium, TDR]. */
@@ -59,8 +62,8 @@ export const CODE_LABEL: Record<PlotCode, string> = {
 };
 export const CODE_NOTE: Record<PlotCode, string> = {
   udcpr: 'UDCPR 2020 Tables 6-G / 6-A and 6-D. Check them with your architect: authorities differ (amendments, TOD zones, special schemes).',
-  'dcpr-island': 'DCPR 2034 Table 12 from published summaries; the margins are UDCPR’s as placeholders. Check both with your architect.',
-  'dcpr-suburbs': 'DCPR 2034 Table 12 from published summaries; the margins are UDCPR’s as placeholders. Check both with your architect.',
+  'dcpr-island': 'DCPR 2034 Table 12 (FSI, from published summaries), Table 18 (front 3 m) and Reg. 41(2) Table A (sides H/5, H/4 on big plots), height at most 3 × (road + front space) by Reg. 43. Check with your architect.',
+  'dcpr-suburbs': 'DCPR 2034 Table 12 (FSI, from published summaries), Table 18 (front 4.5 m) and Reg. 41(2) Table A (sides H/5, H/4 on big plots), height at most 3 × (road + front space) by Reg. 43. Check with your architect.',
 };
 
 export interface UseInfo {
@@ -102,15 +105,29 @@ export function defaultRules(roadW: number, use: PlotUse, code: PlotCode = 'udcp
   // offices a taller storey (shops, wards and halls taller still); no fixed height limit in either code: a
   // placeholder for fire and airport limits
   const floorH = home || use === 'carpark' ? 3 : use === 'shops' || use === 'hospital' ? 4.2 : use === 'worship' ? 6 : 3.6;
+  if (code !== 'udcpr') {
+    // DCPR 2034 Table 18 (front set-back, residential: 3.0 m in the island city, 4.5 m elsewhere, commercial 4.5 m,
+    // 6.0 m on roads over 52 m) and Reg. 41(2) Table A (side and rear: H/5 at least 3.6 m residential, 4.5 m
+    // commercial; the plot-size step to H/4 is applied in analysePlot, which knows the plot)
+    const fr = roadW > 52 ? 6 : code === 'dcpr-island' && home ? 3 : 4.5;
+    return { basic, premium, tdr, ancillary: 0.35, front: fr, side: home ? 3.6 : 4.5, sideTo: 0, sideDiv: 5, floorH, maxH: 120 };
+  }
   return {
     basic, premium, tdr,
-    ancillary: code === 'udcpr' ? (home ? 0.6 : 0.8) : 0.35,
-    front, side, sideTo, floorH, maxH: code === 'udcpr' ? 70 : 120,
+    ancillary: home ? 0.6 : 0.8,
+    front, side, sideTo, floorH, maxH: 70,
   };
 }
 
 /** Side / rear margin for a building this tall. */
-export const sideMargin = (r: PlotRules, h: number) => (h <= r.sideTo ? r.side : Math.min(12, Math.max(r.side, h / 5)));
+export const sideMargin = (r: PlotRules, h: number) => {
+  if (r.sideDiv) {
+    if (h > 120) return 20;
+    const m = Math.max(r.side, h / r.sideDiv);
+    return h > 70 ? Math.min(16, Math.max(m, h / 4)) : Math.min(12, m);
+  }
+  return h <= r.sideTo ? r.side : Math.min(12, Math.max(r.side, h / 5));
+};
 
 export interface PlotRoad {
   id: Id; name: string;
@@ -166,6 +183,15 @@ export function analysePlot(doc: CityDoc, C: Compiler, near: Near, p: PlotObj, c
   const today = road?.today ?? 0, dp = road?.dp;
   const roadW = road ? widthOf(road) : 0;
   const rules: PlotRules = { ...defaultRules(roadW, p.use, code, p.congested), ...p.rules };
+  if (code !== 'udcpr' && rules.sideDiv) {
+    // DCPR 2034 Reg. 41(2) Table A: plots over 1,000 m² whose average width and depth are 20 m or more take H/4;
+    // Reg. 43(1): no higher than three times the road's width plus the front open space
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (let i = 0; i < ring.length; i += 2) { x0 = Math.min(x0, ring[i]); x1 = Math.max(x1, ring[i]); z0 = Math.min(z0, ring[i + 1]); z1 = Math.max(z1, ring[i + 1]); }
+    const avg = area / Math.max(x1 - x0, z1 - z0, 1);
+    if (p.rules?.sideDiv === undefined) rules.sideDiv = area > 1000 && avg >= 20 ? 4 : 5;
+    if (p.rules?.maxH === undefined && roadW > 0) rules.maxH = Math.min(rules.maxH, 3 * (roadW + rules.front));
+  }
 
   // each road's DP line: the reserve's edge, parallel to the road's nearest stretch
   let net = ring;
