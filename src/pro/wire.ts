@@ -2,9 +2,8 @@
 // triangle across each bay; the plot is triangulated; roads, the buildable line and the DP widening are outlined.
 // Edges in front are drawn in ink, edges behind faint (an invisible copy of the masses hides them from the ink pass).
 //
-// The edges are kept between changes: a change adds only the new ones (they grow up from the lowest change, a little
-// warped, then settle true) and retracts the gone ones (from the top down). Nothing else moves. With reduced motion
-// the change is simply made.
+// The edges are kept between changes: a change fades only the new ones in and the gone ones out (a soft cross-fade,
+// under a second; nothing moves). Edges that stay are untouched. With reduced motion the change is simply made.
 import * as THREE from 'three';
 import type { PlotReport } from '../doc/plot';
 import type { SiteReport } from '../doc/site';
@@ -19,8 +18,8 @@ const BAY = 6;
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 const ease = (u: number) => (u < 0.5 ? 4 * u * u * u : 1 - (-2 * u + 2) ** 3 / 2);
 const hash = (x: number, y: number, z: number) => { const v = Math.sin(x * 12.99 + y * 78.23 + z * 37.72) * 43758.55; return v - Math.floor(v); };
-/** grow and retract edges on a change: off for now (changes are simply made), kept for later */
-const ANIMATE = false;
+/** fade edges in and out on a change (a soft cross-fade into the new geometry; nothing moves) */
+const ANIMATE = true;
 const reduced = () => !ANIMATE || matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /** every edge of the scheme, keyed by its ends */
@@ -133,11 +132,11 @@ export class Wire {
     const [blo, bsp] = span(born);
     for (const s of born) {
       const r = (low(s) - blo) / bsp, ground = s.a[1] === 0 && s.b[1] === 0;
-      s.dur = first ? 900 : 650;
-      s.delay = red ? -1e9 : first ? (ground ? h(s) * 200 : 200 + r * 1500 + h(s) * 200) : r * 500 + h(s) * 120;
+      s.dur = first ? 900 : 700;
+      s.delay = red ? -1e9 : first ? (ground ? 0 : 120 + r * 280) : 120 + r * 120; void h;
     }
     const [dlo, dsp] = span(dying);
-    for (const s of dying) { s.out = 450; s.ddelay = red ? -1e9 : (1 - (low(s) - dlo) / dsp) * 250 + h(s) * 80; }
+    for (const s of dying) { s.out = 550; s.ddelay = red ? -1e9 : 0; void dlo; void dsp; }
     this.segs = red ? out.filter((s) => !s.dead) : out;
     this.end = now;
     for (const s of this.segs) this.end = Math.max(this.end, s.dead ? s.dead + s.ddelay + s.out : s.born + s.delay + s.dur);
@@ -162,13 +161,11 @@ export class Wire {
     for (const s of this.segs) {
       const u = s.dead ? 1 - clamp01((now - s.dead - s.ddelay) / s.out) : clamp01((now - s.born - s.delay) / s.dur);
       if (u <= 0) continue;
-      const e = ease(u), wv = (1 - e) * (1 - e);
-      const wp = (p: V3): V3 => wv ? [p[0] + Math.sin(p[1] * 0.4 + p[2] * 0.3 + T * 1.7) * 3 * wv, p[1] + Math.sin(p[0] * 0.3 + T * 2.1) * 1.5 * wv - (1 - e) * 2.5, p[2] + Math.cos(p[0] * 0.35 + p[1] * 0.2 - T * 1.4) * 3 * wv] : p;
-      const a = wp(s.a), b = wp(s.b), mid: V3 = [a[0] + (b[0] - a[0]) * e, a[1] + (b[1] - a[1]) * e, a[2] + (b[2] - a[2]) * e];
-      c.copy(this.paper).lerp(this.inkC, 0.15 + 0.85 * s.w);
-      pos.set(a, m * 6); pos.set(mid, m * 6 + 3);
+      // (a fade: the edge's colour eases from the paper to its ink, or back; on the page's paper that reads as opacity)
+      const e = ease(u);
+      c.copy(this.paper).lerp(this.inkC, (0.15 + 0.85 * s.w) * e);
+      pos.set(s.a, m * 6); pos.set(s.b, m * 6 + 3);
       col.set([c.r, c.g, c.b, c.r, c.g, c.b], m * 6);
-      if (u < 1) dots.push(...mid);
       m++;
     }
     this.geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));

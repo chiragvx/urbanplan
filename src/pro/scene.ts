@@ -4,7 +4,7 @@
 // shows its flats, walls, cores and entrance doors like a doll's house. Pointing at a window or a door reads out its
 // tag and size.
 //
-// Two ways to draw it: the wireframe (the default: ./wire.ts, low-poly lines in the page's ink that grow and retract
+// Two ways to draw it: the wireframe (the default: ./wire.ts, low-poly lines in the page's ink that fade in and out
 // as the scheme changes) and shaded (the materials, the sun, the windows). X-ray is always shaded.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -146,7 +146,7 @@ export class ProView {
     if (!this.raf) this.raf = requestAnimationFrame(() => {
       this.raf = 0;
       if (this.controls.update()) this.frame();
-      // (the wireframe keeps drawing while edges grow or retract)
+      // (the wireframe keeps drawing while edges fade in or out)
       if (this.wired && this.wire.write()) this.frame();
       this.renderer.render(this.scene, this.camera);
     });
