@@ -19,7 +19,7 @@ import { DEFAULT_LEVELS, FEATURES, featureOf, INTERNAL_WIDTHS, PLINTH_MIN, roadP
 import { FindPlot, FlatPlan, ImportBox, slug, type StepProps } from './steps';
 import { Btn, download, Icon, Lines, Note, nf, Num, Row, Section, Seg, Select, Slider, sqft, Stat, Toggle } from './ui';
 import { SystemsPanel } from './systemsPanel';
-import { groundAt, plotOverRoad } from './terrain';
+import { groundAt, groundOpen, plotOverRoad, type Ground } from './terrain';
 import { mergeSettings, splitSettings } from './systems';
 
 const DIRS = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
@@ -70,17 +70,19 @@ export function SiteStep2({ p, e, up, toast, tool, setTool, picked, pick }: Step
   const fPicked = picked?.k === 'feature' ? fs.find((f) => f.id === picked.id) : undefined;
   // the ground off the city's terrain, where the plot has a real place
   const [reading, setReading] = useState(false);
-  const readGround = async (at: [number, number], ring: number[], quiet = false, front?: { k: number; w: number } | null) => {
+  const [noTerrain, setNoTerrain] = useState(false);
+  const readGround = async (at: [number, number], ring: number[], quiet = false, front?: { k: number; w: number } | null, open = false) => {
     setReading(true);
     let r0 = 0; for (let i = 0; i < ring.length; i += 2) r0 = Math.max(r0, Math.hypot(ring[i], ring[i + 1]));
-    const g = await groundAt(at[0], at[1], Math.max(20, Math.min(80, r0))).catch(() => null);
+    const g: Ground | null = open ? await groundOpen(at[0], at[1], r0).catch(() => null) : await groundAt(at[0], at[1], Math.max(20, Math.min(80, r0))).catch(() => null);
     setReading(false);
-    if (!g) { if (!quiet) toast('No terrain for this place yet: set the levels by hand.'); return; }
+    setNoTerrain(!g && !open);
+    if (!g) { if (!quiet) toast(open ? 'The elevation service didn’t answer: set the levels by hand.' : 'No city terrain here: use open elevation data, or set the levels by hand.'); return; }
     // (the plot's middle over its front road: the road edge is the one with a road, else the longest)
     const er = outline(p).roads, ek = er.findIndex((x) => !!x), f = front ?? (ek >= 0 ? { k: ek, w: er[ek]!.today || 12 } : null);
     const over = f ? plotOverRoad(g, ring, f.k, f.w) : L.plot;
-    up({ at, north: 0, levels: { ...L, plot: over, slope: g.slope < 0.5 ? 0 : g.slope, dir: (Math.round(g.dir / 45) * 45) % 360, asl: g.elevation, terrain: true } });
-    toast(`The ground, off the terrain: ${nf(g.elevation)} m over sea level, ${g.slope < 0.5 ? 'about level' : `${nf(g.slope)}% falling ${DIRS[Math.round(g.dir / 45) % 8]}`}, the plot ${over >= 0 ? `${nf(over, 1)} m over` : `${nf(-over, 1)} m under`} its road.`);
+    up({ at, north: 0, levels: { ...L, src: g.region === 'open' ? 'open' : 'city', plot: over, slope: g.slope < 0.5 ? 0 : g.slope, dir: (Math.round(g.dir / 45) * 45) % 360, asl: g.elevation, terrain: true } });
+    toast(`The ground: ${nf(g.elevation)} m over sea level, ${g.slope < 0.5 ? 'about level' : `${nf(g.slope)}% falling ${DIRS[Math.round(g.dir / 45) % 8]}`}, the plot ${over >= 0 ? `${nf(over, 1)} m over` : `${nf(-over, 1)} m under`} its road.`);
   };
   const found = (ring: number[], src: string, name?: string, at?: [number, number] | null) => {
     const k = longestEdge(ring);
@@ -129,8 +131,11 @@ export function SiteStep2({ p, e, up, toast, tool, setTool, picked, pick }: Step
           <Num label="Slope" value={L.slope} set={(v) => setLv({ slope: v, terrain: false })} min={0} max={60} step={0.5} unit="%" />
         </Row>
         {p.at
-          ? <><Note>{L.terrain ? `Off the city's terrain${L.asl !== undefined ? `, ${nf(L.asl)} m over sea level` : ''}. A first figure: a contour survey beats it.` : 'Set by hand.'}</Note>
-            <Row><Btn icon="level" disabled={reading} onClick={() => readGround(p.at!, outline(p).ring)}>{reading ? 'Reading…' : L.terrain ? 'Read it again' : 'Read the terrain'}</Btn></Row></>
+          ? <><Note>{L.terrain ? `Off ${L.src === 'open' ? 'open elevation data (90 m)' : 'the city’s terrain'}${L.asl !== undefined ? `, ${nf(L.asl)} m over sea level` : ''}. A first figure: a contour survey beats it.` : 'Set by hand.'}</Note>
+            {noTerrain || L.src === 'open'
+              ? <><Row><Btn icon="level" disabled={reading} onClick={() => readGround(p.at!, outline(p).ring, false, null, true)}>{reading ? 'Reading…' : L.src === 'open' ? 'Read it again' : 'Use open elevation data'}</Btn></Row>
+                <p class="hint-line">No city terrain here: this sends the plot’s location to Open-Meteo (free, Copernicus 90 m data).</p></>
+              : <Row><Btn icon="level" disabled={reading} onClick={() => readGround(p.at!, outline(p).ring)}>{reading ? 'Reading…' : L.terrain ? 'Read it again' : 'Read the terrain'}</Btn></Row>}</>
           : <Note>Find or import the plot to read its slope off the terrain.</Note>}
         {L.slope > 0 && <Select<number> label="Falls toward" value={L.dir} onChange={(v) => setLv({ dir: v, terrain: false })} options={DIRS.map((d, i) => ({ value: i * 45, label: cap(d) }))} />}
         <Num label="North, turned clockwise" value={north} set={(v) => up({ north: ((v % 360) + 360) % 360 })} min={-360} max={360} step={5} unit="°" hint={p.at ? "Set from where the plot is. The compass on the map follows." : "0: the front road is on the north side. The compass on the map follows."} />

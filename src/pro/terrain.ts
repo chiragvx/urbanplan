@@ -29,6 +29,32 @@ export interface Ground { elevation: number; slope: number; dir: number; region:
 
 /** The ground round a place, `radius` metres each way: its height over sea level, its slope (%) and the compass
  *  bearing it falls toward. Null where no city's terrain covers it. */
+/** A plane through heights at offsets (dx east, dz south, h): the ground's middle, slope and fall. */
+function fitPlane(S: [number, number, number][], region: string): Ground | null {
+  if (S.length < 5) return null;
+  const n = S.length, mh = S.reduce((s, q) => s + q[2], 0) / n;
+  let sxx = 0, szz = 0, sxz = 0, sxh = 0, szh = 0;
+  for (const [dx, dz, v] of S) { sxx += dx * dx; szz += dz * dz; sxz += dx * dz; sxh += dx * (v - mh); szh += dz * (v - mh); }
+  const det = sxx * szz - sxz * sxz;
+  if (Math.abs(det) < 1e-9) return null;
+  const b = (sxh * szz - szh * sxz) / det, c = (szh * sxx - sxh * sxz) / det;
+  return { elevation: Math.round(mh * 10) / 10, slope: Math.round(Math.hypot(b, c) * 1000) / 10, dir: Math.round(((Math.atan2(-b, c) * 180) / Math.PI + 360) % 360), region, gx: b, gz: c };
+}
+
+/** Anywhere else, only when asked: Open-Meteo's free elevation service (Copernicus DEM, 90 m), which is sent the
+ *  plot's location. At 90 m it sees the lie of the land round a plot, not the plot itself. */
+export async function groundOpen(lat: number, lon: number, radius = 45): Promise<Ground | null> {
+  const r = Math.max(45, radius), kx = 111_320 * Math.cos((lat * Math.PI) / 180), kz = 110_540;
+  const off: [number, number][] = [];
+  for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) off.push([i * r, j * r]);
+  const la = off.map(([, dz]) => (lat - dz / kz).toFixed(6)).join(','), lo = off.map(([dx]) => (lon + dx / kx).toFixed(6)).join(',');
+  const res = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${la}&longitude=${lo}`);
+  if (!res.ok) return null;
+  const h = ((await res.json()) as { elevation?: number[] }).elevation;
+  if (!h || h.length !== off.length) return null;
+  return fitPlane(off.map(([dx, dz], k) => [dx, dz, h[k]]), 'open');
+}
+
 export async function groundAt(lat: number, lon: number, radius = 25): Promise<Ground | null> {
   for (const id of REGIONS) {
     const M = await manifest(id);
