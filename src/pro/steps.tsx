@@ -57,7 +57,7 @@ export function SiteStep({ p, e, up, toast }: StepProps) {
   return (
     <>
       <Section title="Rules">
-        <Select label="Planning authority" value={p.city} set={(v) => up({ city: v })} options={CITIES.map((c) => ({ value: c.value, label: c.label }))} />
+        <Select label="Planning authority" value={p.city} onChange={(v) => up({ city: v })} options={CITIES.map((c) => ({ value: c.value, label: c.label }))} />
         <Note>{city.note}</Note>
       </Section>
 
@@ -143,10 +143,8 @@ function FindPlot({ done }: { done: (ring: number[], src: string) => void }) {
     setOpen(false);
   });
   const S = ({ label, list, value, set }: { label: string; list?: Opt[]; value?: string; set: (v: string) => void }) => (
-    <label class="f"><span class="f-l">{label}</span>
-      <select value={value ?? ''} disabled={!list?.length} onChange={(ev) => set((ev.target as HTMLSelectElement).value)}>
-        <option value="">{list ? 'Choose…' : '…'}</option>{list?.map((o) => <option value={o.code}>{o.name}</option>)}
-      </select></label>
+    <Select<string> label={label} value={value ?? ''} disabled={!list?.length} onChange={set}
+      options={[{ value: '', label: list ? 'Choose…' : '…' }, ...(list ?? []).map((o) => ({ value: o.code, label: o.name }))]} />
   );
   if (!open) return <button type="button" class="linkbtn" onClick={() => setOpen(true)}><Icon n="site" size={14} /> Find the plot by survey or CTS number</button>;
   return (
@@ -228,10 +226,8 @@ export function BuildStep({ p, e, up }: StepProps) {
           <div class="bitem">
             <b class="bname">{String.fromCharCode(65 + i)}</b>
             <span><b>{b.floors} floors · {nf(b.height, 1)} m</b><small>{b.perFloor.slice(0, 3).reduce((s, x) => s + x, 0)} flats a floor · {nf(b.plate)} m² plate</small></span>
-            <select aria-label={`Design system of building ${String.fromCharCode(65 + i)}`} value={styleOf(i)} onChange={(ev) => { const v = (ev.target as HTMLSelectElement).value; const m = { ...(p.buildingStyle ?? {}) }; if (v) m[i] = v; else delete m[i]; up({ buildingStyle: m }); }}>
-              <option value="">Project style</option>
-              {PRESETS.map((x) => <option value={x.id}>{x.name}</option>)}
-            </select>
+            <Select<string> size="sm" aria-label={`Design system of building ${String.fromCharCode(65 + i)}`} value={styleOf(i)} onChange={(v) => { const m = { ...(p.buildingStyle ?? {}) }; if (v) m[i] = v; else delete m[i]; up({ buildingStyle: m }); }}
+              options={[{ value: '', label: 'Project style' }, ...PRESETS.map((x) => ({ value: x.id, label: x.name }))]} />
           </div>
         ))}{!d.buildings.length && <Note tone="warn">Nothing fits inside the margins. Try a bigger plot, a wider road or the other building type.</Note>}</div>
       </Section>
@@ -297,7 +293,7 @@ export function DesignStep({ p, e, up, rooms, toast }: StepProps) {
         <Seg<BalconyKind> value={ds.balcony.kind} set={(v) => setDs((d) => { d.balcony.kind = v; })} options={[{ value: 'cantilever', label: 'Cantilever' }, { value: 'recessed', label: 'Recessed' }, { value: 'french', label: 'French' }, { value: 'none', label: 'None' }]} />
         <Row>
           <Num label="Depth" value={ds.balcony.depth} step={0.1} min={0.3} max={4} unit="m" set={(v) => setDs((d) => { d.balcony.depth = v; })} />
-          <Select<Railing> label="Railing" value={ds.balcony.railing} set={(v) => setDs((d) => { d.balcony.railing = v; })} options={[{ value: 'glass', label: 'Glass' }, { value: 'ms', label: 'MS steel' }, { value: 'solid', label: 'Solid parapet' }]} />
+          <Select<Railing> label="Railing" value={ds.balcony.railing} onChange={(v) => setDs((d) => { d.balcony.railing = v; })} options={[{ value: 'glass', label: 'Glass' }, { value: 'ms', label: 'MS steel' }, { value: 'solid', label: 'Solid parapet' }]} />
         </Row>
       </Section>
 
@@ -320,7 +316,7 @@ export function DesignStep({ p, e, up, rooms, toast }: StepProps) {
 
       <Section title="Specification" fold open={false} sub="What the flats are sold with. Each choice adds to construction, ₹ per sq ft of built-up area (rough figures: put in your own)." aside={<span class="sec-meta">+₹{nf(e.rate)}/ft²</span>}>
         {SPEC.map((c) => (
-          <Select<number> label={c.label} value={ds.spec[c.key] ?? 0} set={(v) => setDs((d) => { d.spec[c.key] = v; })} options={c.options.map((o, i) => ({ value: i, label: `${o.label}${o.rate ? ` (+₹${o.rate})` : ''}` }))} />
+          <Select<number> label={c.label} value={ds.spec[c.key] ?? 0} onChange={(v) => setDs((d) => { d.spec[c.key] = v; })} options={c.options.map((o, i) => ({ value: i, label: `${o.label}${o.rate ? ` (+₹${o.rate})` : ''}` }))} />
         ))}
       </Section>
 
@@ -373,7 +369,7 @@ function CatRow<T extends WindowType | DoorType>({ t, x, set, kinds, sill }: { t
       <td><input type="number" step="0.05" value={x.w} onChange={(ev) => n('w', (ev.target as HTMLInputElement).value)} aria-label={`${t} width`} /></td>
       <td><input type="number" step="0.05" value={x.h} onChange={(ev) => n('h', (ev.target as HTMLInputElement).value)} aria-label={`${t} height`} /></td>
       <td>{sill ? <input type="number" step="0.05" value={(x as WindowType).sill} onChange={(ev) => n('sill', (ev.target as HTMLInputElement).value)} aria-label={`${t} sill`} /> : null}</td>
-      <td><select value={x.kind} onChange={(ev) => set((y) => { (y as { kind: string }).kind = (ev.target as HTMLSelectElement).value; })}>{kinds.map((k) => <option value={k}>{k.replace('-', ' ')}</option>)}</select></td>
+      <td><Select<string> size="sm" aria-label={`${t} kind`} value={x.kind} onChange={(v) => set((y) => { (y as { kind: string }).kind = v; })} options={kinds.map((k) => ({ value: k, label: k.replace('-', ' ') }))} /></td>
     </tr>
   );
 }
@@ -413,7 +409,7 @@ export function MoneyStep({ p, e, up, deal, go }: StepProps) {
       </Section>
 
       <Section title="The deal on the land">
-        <Select<DealKind> label="Deal" value={D.kind} set={(v) => setD({ kind: v })} options={(Object.keys(DEAL_LABEL) as DealKind[]).map((k) => ({ value: k, label: DEAL_LABEL[k] }))} />
+        <Select<DealKind> label="Deal" value={D.kind} onChange={(v) => setD({ kind: v })} options={(Object.keys(DEAL_LABEL) as DealKind[]).map((k) => ({ value: k, label: DEAL_LABEL[k] }))} />
         {(D.kind === 'jda-revenue' || D.kind === 'jda-area') && <Row>
           <Num label={D.kind === 'jda-revenue' ? 'Owner’s share of revenue' : 'Owner’s share of the flats'} value={D.ownerShare} set={(v) => setD({ ownerShare: v })} max={80} unit="%" />
           <Num label="Refundable deposit" value={D.deposit} set={(v) => setD({ deposit: v })} step={0.25} max={500} unit="₹ cr" />
@@ -471,7 +467,7 @@ export function ApproveStep({ p, e, up, checks, openDrawings, toast }: StepProps
   return (
     <>
       <Section title="Permission" sub={PERMISSION_HINT[kind]}>
-        <Select<PermissionKind> label="Applying for" value={kind} set={(v) => up({ approval: { ...ex, kind: v } })} options={(Object.keys(PERMISSION_LABEL) as PermissionKind[]).map((k) => ({ value: k, label: PERMISSION_LABEL[k] }))} />
+        <Select<PermissionKind> label="Applying for" value={kind} onChange={(v) => up({ approval: { ...ex, kind: v } })} options={(Object.keys(PERMISSION_LABEL) as PermissionKind[]).map((k) => ({ value: k, label: PERMISSION_LABEL[k] }))} />
         <ol class="stages">{steps.map((x) => <li><b>{x.title}</b><small>{x.note}</small></li>)}</ol>
       </Section>
 

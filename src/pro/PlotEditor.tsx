@@ -5,6 +5,7 @@
 // worked out once per move, not on every mouse step.
 import { useRef, useState } from 'preact/hooks';
 import { crosses, roadLines, type EdgeRoad } from './project';
+import { Check } from './ui';
 
 interface Props { ring: number[]; roads: (EdgeRoad | null)[]; set: (ring: number[], roads: (EdgeRoad | null)[]) => void }
 
@@ -118,7 +119,7 @@ export function PlotEditor({ ring, roads, set }: Props) {
         <div class="ped-box">
           <b>Edge {e + 1}</b>
           <label class="pf"><span>Length</span><span class="pf-in"><input type="number" step="0.1" value={f1(edgeLen(e))} onChange={(ev) => setLen(e, parseFloat((ev.target as HTMLInputElement).value))} /><i>m</i></span></label>
-          <label class="pcheck"><input type="checkbox" checked={!!roads[e]} onChange={(ev) => setRoad(e, (ev.target as HTMLInputElement).checked ? { today: 9, dp: 0 } : null)} /> A road along this edge</label>
+          <Check label="A road along this edge" value={!!roads[e]} set={(on) => setRoad(e, on ? { today: 9, dp: 0 } : null)} />
           {roads[e] && <div class="pf-row">
             <label class="pf"><span>Width today</span><span class="pf-in"><input type="number" min="3" max="80" value={roads[e]!.today} onChange={(ev) => { const v = parseFloat((ev.target as HTMLInputElement).value); if (v >= 3) setRoad(e, { ...roads[e]!, today: v }); }} /><i>m</i></span></label>
             <label class="pf"><span>In the DP</span><span class="pf-in"><input type="number" min="0" max="80" value={roads[e]!.dp} onChange={(ev) => { const v = parseFloat((ev.target as HTMLInputElement).value); if (v >= 0) setRoad(e, { ...roads[e]!, dp: v }); }} /><i>m</i></span></label>

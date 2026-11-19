@@ -113,13 +113,13 @@ const STATIC: Route[] = [
     head: {
       title: `${SITE_NAME}: from a plot to a project`,
       description: 'See what a plot in Pune or Mumbai can hold under UDCPR or DCPR, what it’s worth and what the authority will ask for. Check a plot’s DP free.',
-      image: IMG.studio, imageAlt: ALT.studio, preload: 'site/pro-money.webp',
+      image: IMG.studio, imageAlt: ALT.studio, preload: 'site/pro-scheme.webp',
       ld: (url) => [
         { '@type': 'WebSite', '@id': url('#site'), name: SITE_NAME, url: url(''), inLanguage: 'en-IN', publisher: { '@id': url('#org') } },
         org(url), app(url),
       ],
     },
-    images: ['site/pro-money.webp', 'site/pro-scheme.webp', 'site/pro-design.webp', 'site/dp-satellite.webp', 'site/city-3d.webp'],
+    images: ['site/pro-scheme.webp', 'site/pro-design.webp', 'site/pro-money.webp', 'site/pro-approval.webp', 'site/report-cover.webp'],
   },
   {
     path: 'app/', priority: 0.9, updated: SITE_UPDATED,

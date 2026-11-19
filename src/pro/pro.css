@@ -2,23 +2,9 @@
    along its foot. One type scale (12 / 13 / 14 / 16 / 20), one spacing scale (4 / 8 / 12 / 16 / 24), the site's
    tokens for colour so the dark theme comes free. On a phone: the 3D on top (it stays in view), the panel under it,
    the steps in a bar along the bottom. */
-/* Black and white. Pro's own reading of the site's tokens: no blue, no orange, no green or red. Selection and
+/* Black and white (the site's tokens, ../theme/tokens.css): no blue, no orange, no green or red. Selection and
    failures invert (ink on paper becomes paper on ink); every state also carries an icon or a word. Animated dither
    (../theme/ditherEngine.ts) only for the brand mark and for things being loaded or worked out. */
-:root, :root[data-theme="light"] {
-  --up-paper: #ffffff; --up-surface: #ffffff; --up-surface-2: #f4f4f4; --up-line: #e5e5e5; --up-line-strong: #d4d4d4;
-  --up-ink: #0a0a0a; --up-ink-2: #262626; --up-muted: #525252;
-}
-:root[data-theme="dark"] {
-  --up-paper: #000000; --up-surface: #0a0a0a; --up-surface-2: #161616; --up-line: #262626; --up-line-strong: #3a3a3a;
-  --up-ink: #fafafa; --up-ink-2: #e5e5e5; --up-muted: #a3a3a3;
-}
-:root, :root[data-theme="light"], :root[data-theme="dark"] {
-  --up-blue: var(--up-ink); --up-blue-hover: var(--up-ink-2); --up-blue-soft: var(--up-surface-2);
-  --up-orange: var(--up-ink); --up-orange-ink: var(--up-ink); --up-orange-soft: var(--up-surface-2);
-  --up-ok: var(--up-ink); --up-warn: var(--up-ink-2); --up-danger: var(--up-ink);
-  --up-focus: 0 0 0 2px var(--up-paper), 0 0 0 4px var(--up-ink);
-}
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
 body { background: var(--up-paper); color: var(--up-ink); font: 400 13px/1.45 var(--up-font-body); -webkit-font-smoothing: antialiased; }
@@ -64,7 +50,8 @@ kbd { font: 500 11px/1 var(--up-font-mono); padding: 3px 6px; border-radius: 5px
 .more { position: relative; }
 .menu { position: absolute; right: 0; top: 40px; z-index: 30; min-width: 220px; padding: 6px; border-radius: 12px; background: var(--up-surface); border: 1px solid var(--up-line-strong); box-shadow: var(--up-shadow); display: grid; }
 .menu > * { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; border: 0; background: none; text-align: left; font-size: 13px; color: var(--up-ink); text-decoration: none; }
-.menu > *:hover { background: var(--up-surface-2); }
+.menu > *:hover, .menu > *:focus-visible { background: var(--up-surface-2); }
+.menu > *:focus-visible { outline: 2px solid var(--up-ink); outline-offset: -2px; }
 
 /* ------------------------------------------------------------ rail */
 .rail { grid-area: rail; display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 8px 6px; border-right: 1px solid var(--up-line); background: var(--up-surface); z-index: 4; }
@@ -137,7 +124,7 @@ kbd { font: 500 11px/1 var(--up-font-mono); padding: 3px 6px; border-radius: 5px
 textarea { resize: vertical; font-family: var(--up-font-mono); font-size: 12px; line-height: 1.5; }
 textarea.brief { font-family: var(--up-font-body); font-size: 13.5px; }
 .f select:focus, textarea:focus { border-color: var(--up-blue); box-shadow: var(--up-focus); outline: none; }
-.slider input { width: 100%; accent-color: var(--up-blue); }
+.slider .range { width: 100%; }
 .color-in { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 8px; border: 1px solid var(--up-line-strong); border-radius: 9px; }
 .color-in input { width: 22px; height: 22px; border: 0; padding: 0; background: none; cursor: pointer; }
 .color-in code { font: 11px var(--up-font-mono); color: var(--up-muted); }
@@ -186,7 +173,7 @@ textarea.brief { font-family: var(--up-font-body); font-size: 13.5px; }
 .bitem { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--up-line); }
 .bname { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; background: var(--up-ink); color: var(--up-paper); font-size: 12px; }
 .bitem > span { display: grid; font-size: 13px; min-width: 0; } .bitem > span b { white-space: nowrap; } .bitem small { color: var(--up-muted); font-size: 11.5px; }
-.bitem select { max-width: 130px; height: 30px; border: 1px solid var(--up-line-strong); border-radius: 8px; background: var(--up-surface); font-size: 12px; }
+.bitem .sel { max-width: 140px; }
 
 .presets { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .preset { display: grid; gap: 4px; text-align: left; border: 1px solid var(--up-line-strong); background: var(--up-surface); border-radius: 12px; padding: 10px; }
@@ -210,7 +197,8 @@ textarea.brief { font-family: var(--up-font-body); font-size: 13.5px; }
 table { border-collapse: collapse; width: 100%; font-size: 12px; }
 th { text-align: left; font-weight: 500; color: var(--up-muted); padding: 6px 4px; border-bottom: 1px solid var(--up-line); white-space: nowrap; }
 td { padding: 6px 4px; border-bottom: 1px solid var(--up-line); vertical-align: middle; }
-.cat input, .cat select { width: 100%; min-width: 0; height: 28px; border: 1px solid var(--up-line-strong); border-radius: 7px; padding: 0 5px; background: var(--up-surface); font-size: 12px; font-variant-numeric: tabular-nums; }
+.cat .sel { width: 100%; min-width: 0; }
+.cat input { width: 100%; min-width: 0; height: 28px; border: 1px solid var(--up-line-strong); border-radius: 7px; padding: 0 5px; background: var(--up-surface); font-size: 12px; font-variant-numeric: tabular-nums; }
 .cat td:nth-child(2), .cat td:nth-child(3), .cat td:nth-child(4) { width: 56px; }
 .sched td:last-child, .sched th:last-child { text-align: right; font-variant-numeric: tabular-nums; }
 .sched td { font-variant-numeric: tabular-nums; }
@@ -341,8 +329,7 @@ details.chk.info summary .ico { color: var(--up-muted); }
 .tgroup button[aria-checked="true"], .tgroup button[aria-pressed="true"] { background: var(--up-ink); color: var(--up-paper); }
 .tgroup.floor b { min-width: 86px; text-align: center; font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .tgroup.floor small { color: var(--up-muted); font-weight: 400; }
-.tgroup.sun select { height: 30px; border: 0; background: none; font-size: 12.5px; }
-.tgroup.sun input { width: 120px; accent-color: var(--up-ink); }
+.tgroup.sun .range { width: 120px; margin: 0 4px; }
 .tgroup.sun .time { font: 600 12px var(--up-font-mono); min-width: 40px; padding-right: 6px; }
 .legend.floating { position: absolute; left: 12px; bottom: 66px; padding: 6px 10px; border-radius: 8px; background: color-mix(in srgb, var(--up-surface) 92%, transparent); max-width: 60%; }
 .tip { position: absolute; pointer-events: none; display: grid; gap: 1px; background: rgba(12, 12, 13, 0.92); color: #fafafa; padding: 8px 10px; border-radius: 8px; font-size: 12px; white-space: nowrap; z-index: 3; }
@@ -393,7 +380,7 @@ details.chk.info summary .ico { color: var(--up-muted); }
   .results .kpi:nth-child(4) { display: grid; }
   .kpi b { font-size: 16px; }
   .tools { bottom: 8px; gap: 6px; }
-  .tgroup.sun input { width: 80px; }
+  .tgroup.sun .range { width: 80px; }
   .legend.floating { display: none; }
   .panel { border: 0; }
   .panel-h { padding: 14px 12px 10px 16px; }
@@ -428,7 +415,7 @@ details.chk.info summary .ico { color: var(--up-muted); }
 .people li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .people em { font-style: normal; font-size: 11.5px; color: var(--up-muted); }
 .invite { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; margin-top: 8px; }
-.invite select { height: 34px; border: 1px solid var(--up-line-strong); border-radius: 9px; background: var(--up-surface); padding: 0 6px; font-size: 12.5px; max-width: 150px; }
+.invite .sel { max-width: 170px; font-size: 12.5px; }
 .txt { border: 1px solid var(--up-line-strong); border-radius: 9px; background: var(--up-surface); padding: 7px 10px; font: inherit; font-size: 13px; width: 100%; color: inherit; }
 input.txt { height: 34px; padding: 0 10px; }
 textarea.txt { resize: vertical; min-height: 64px; }
@@ -452,3 +439,67 @@ textarea.txt { resize: vertical; min-height: 64px; }
 .plink { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; margin-top: 10px; }
 .plink input { font-size: 12px; color: var(--up-muted); }
 .note.ok { color: inherit; }
+
+/* ------------------------------------------------------------ components (ui.tsx)
+   Select, Range, Check, Tooltip; the Dialog and Menu reuse .modal and .menu above. Same metrics as the fields:
+   34 px high, 9 px radius, a strong hairline; 'sm' is 28 px / 7 px for tables, the building list and toolbars.
+   Black and white only: the chosen option inverts (paper on ink) and carries a check; the active one (keyboard or
+   pointer) is a grey wash with an ink edge. Focus is the two-ring --up-focus. */
+
+/* select: the button */
+.sel { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; height: 34px; padding: 0 8px 0 10px; border: 1px solid var(--up-line-strong); border-radius: 9px; background: var(--up-surface); color: var(--up-ink); font-size: 13px; text-align: left; transition: border-color .12s, box-shadow .12s; }
+.sel:hover:not(:disabled) { border-color: var(--up-muted); }
+.sel:focus-visible, .sel[aria-expanded="true"] { border-color: var(--up-ink); box-shadow: var(--up-focus); outline: none; }
+.sel:disabled { opacity: .45; cursor: default; }
+.sel-v { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sel-v.ph { color: var(--up-muted); }
+.sel > .ico { color: var(--up-muted); transform: rotate(90deg); transition: transform .12s; }
+.sel[aria-expanded="true"] > .ico { transform: rotate(-90deg); color: var(--up-ink); }
+.sel.sm { height: 28px; padding: 0 5px 0 8px; border-radius: 7px; font-size: 12px; gap: 4px; }
+.sel.quiet { border-color: transparent; background: none; width: auto; }
+.sel.quiet:hover:not(:disabled) { border-color: transparent; background: var(--up-surface-2); }
+.tgroup .sel.quiet { height: 32px; border-radius: 8px; font-size: 12.5px; font-weight: 500; color: var(--up-ink-2); }
+.tgroup .sel.quiet:focus-visible, .tgroup .sel.quiet[aria-expanded="true"] { box-shadow: none; outline: 2px solid var(--up-ink); outline-offset: -2px; }
+
+/* select: the list (portalled to <body>, position: fixed from the button) */
+.sel-pop { position: fixed; z-index: 80; margin: 0; padding: 4px; list-style: none; overflow-y: auto; overscroll-behavior: contain; border-radius: 11px; background: var(--up-surface); border: 1px solid var(--up-line-strong); box-shadow: var(--up-shadow); color: var(--up-ink); font: 400 13px/1.35 var(--up-font-body); -webkit-tap-highlight-color: transparent; }
+.sel-pop li { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 6px 10px 6px 6px; border-radius: 7px; cursor: pointer; user-select: none; }
+.sel-pop li.on { background: var(--up-surface-2); box-shadow: inset 0 0 0 1px var(--up-line-strong); }
+.sel-pop li.sel-cur { background: var(--up-ink); color: var(--up-paper); font-weight: 500; box-shadow: none; }
+.sel-pop li.sel-cur.on { background: var(--up-ink-2); box-shadow: inset 0 0 0 2px var(--up-paper), 0 0 0 1px var(--up-ink); }
+.sel-pop li[aria-disabled="true"] { color: var(--up-muted); cursor: default; text-decoration: line-through; }
+.sel-ck { flex: none; display: grid; place-items: center; width: 16px; height: 16px; }
+.sel-t { display: grid; min-width: 0; }
+.sel-t small { font-size: 11.5px; opacity: .7; }
+.sel-pop.sm { font-size: 12px; }
+.sel-pop.sm li { min-height: 30px; padding: 4px 8px 4px 4px; }
+@media (pointer: coarse) { .sel-pop li, .sel-pop.sm li { min-height: 44px; } }
+
+/* range: a hairline track filled with ink up to the thumb (--fill set by <Range>) */
+.range { -webkit-appearance: none; appearance: none; height: 20px; margin: 0; padding: 0; background: none; cursor: pointer; --fill: 50%; }
+.range::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(to right, var(--up-ink) var(--fill), var(--up-line-strong) var(--fill)); }
+.range::-moz-range-track { height: 4px; border-radius: 2px; background: var(--up-line-strong); }
+.range::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--up-ink); }
+.range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; margin-top: -6px; border-radius: 50%; background: var(--up-paper); border: 2px solid var(--up-ink); }
+.range::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--up-paper); border: 2px solid var(--up-ink); }
+.range:active::-webkit-slider-thumb { background: var(--up-ink); }
+.range:active::-moz-range-thumb { background: var(--up-ink); }
+.range:focus-visible { outline: none; }
+.range:focus-visible::-webkit-slider-thumb { box-shadow: var(--up-focus); }
+.range:focus-visible::-moz-range-thumb { box-shadow: var(--up-focus); }
+.range:disabled { opacity: .45; cursor: default; }
+@media (pointer: coarse) { .range { height: 32px; } .range::-webkit-slider-thumb { width: 22px; height: 22px; margin-top: -9px; } }
+
+/* check: a box that fills with ink and shows a check */
+.check { position: relative; display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; min-height: 28px; }
+.check input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.check-b { flex: none; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 5px; background: var(--up-surface); box-shadow: inset 0 0 0 1.5px var(--up-ink); color: transparent; }
+.check input:checked + .check-b { background: var(--up-ink); color: var(--up-paper); }
+.check input:focus-visible + .check-b { box-shadow: inset 0 0 0 1.5px var(--up-ink), var(--up-focus); }
+.check input:disabled + .check-b, .check input:disabled ~ .check-l { opacity: .45; }
+
+/* tooltip: one for the page (TooltipLayer), paper on ink */
+.tooltip { position: fixed; z-index: 90; pointer-events: none; max-width: min(280px, calc(100vw - 16px)); padding: 5px 8px; border-radius: 6px; background: var(--up-ink); color: var(--up-paper); font: 500 11.5px/1.35 var(--up-font-body); white-space: normal; box-shadow: var(--up-shadow-sm); }
+
+/* dialog: the box takes focus on open; its ring would only be noise */
+.modal:focus { outline: none; }

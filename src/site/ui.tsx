@@ -3,6 +3,7 @@ import { useEffect, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { authReady, BASE, peekSession, session, shortName } from '../auth/auth';
 import { LOGO_PARTS, SITE_NAME } from './brand';
+import { Dither } from '../theme/Dither';
 
 export const href = (p: string) => `${BASE}${p}`;
 export const APP = href('app/');
@@ -12,13 +13,13 @@ export function Mark({ size = 30 }: { size?: number }) {
   return (
     <svg viewBox="0 0 32 32" width={size} height={size} aria-hidden="true">
       <rect x="0.5" y="0.5" width="31" height="31" rx="8.5" fill="#0c0c0d" stroke="#fff" stroke-opacity="0.14" />
-      <path d="M9 26L14 6M23 26L18 6" stroke="#ff6a2b" stroke-width="3" stroke-linecap="round" />
+      <path d="M9 26L14 6M23 26L18 6" stroke="#fff" stroke-width="3" stroke-linecap="round" />
       <path d="M16 8v3M16 15v3M16 22v3" stroke="#fff" stroke-width="2" />
     </svg>
   );
 }
 
-export const Logo = () => <a class="brand" href={href('')} aria-label={`${SITE_NAME} home`}><Mark /><span>{LOGO_PARTS[0]}{LOGO_PARTS[1] && <b>{LOGO_PARTS[1]}</b>}</span></a>;
+export const Logo = () => <a class="brand" href={href('')} aria-label={`${SITE_NAME} home`}><Dither field="mark" cell={2} class="brand-mark" /><span>{LOGO_PARTS[0]}{LOGO_PARTS[1] && <b>{LOGO_PARTS[1]}</b>}</span></a>;
 
 const I = (d: string, size = 18) => () => (
   <svg viewBox="0 0 20 20" width={size} height={size} fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={d} /></svg>

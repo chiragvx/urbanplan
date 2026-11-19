@@ -1,41 +1,43 @@
-/* UrbanPlan design theme — the tokens the website, the account pages and the editor share (the editor mirrors these
- * values in src/style.css under its own names).
+/* UrbanPlan design theme — the tokens the website, the account pages and Pro share (the city editor mirrors an older
+ * set in src/style.css under its own names).
  *
- * Monochrome and quiet, so the city is the colour: near-white paper and near-black ink, hairline borders, large soft
- * radii, pill buttons. One accent, cobalt, for actions and selection; the logo's orange only for the brand mark and the
- * odd highlight. Two colours borrowed from the Development Plan sheets for graphics: red for a DP road line
- * ("planned") and green for a reserved open space. Type: Geist throughout, set tight; Geist Mono for figures.
+ * Black and white. Paper and ink, greys between, hairline borders. No accent colour: selection and failures invert
+ * (paper on ink), and every state also carries an icon or a word, so nothing depends on colour. The old role names
+ * (--up-blue, --up-orange, --up-ok…) stay so existing styles keep working; they all read as ink now. Animated dither
+ * (ditherEngine.ts) is the one texture, kept for the brand mark and for things loading or being worked out.
+ * Two colours stay, for data only, borrowed from the Development Plan sheets: red for a DP road line ("planned") and
+ * green for a reserved open space. Type: Geist throughout, set tight; Geist Mono for figures.
  *
  * Light by default; dark under [data-theme="dark"] (set before first paint from the same setting the editor uses,
  * localStorage 'pune-remix:settings'.theme), so the site and the app always agree.
  */
 :root {
   /* colour: neutrals */
-  --up-paper: #fafaf9;
+  --up-paper: #ffffff;
   --up-surface: #ffffff;
-  --up-surface-2: #f4f4f3;
-  --up-line: #ebebea;
-  --up-line-strong: #dcdcda;
-  --up-ink: #0c0c0d;
-  --up-ink-2: #3f3f46;
-  --up-muted: #71717a;
-  /* colour: brand and roles */
-  --up-orange: #ff6a2b;          /* the brand mark */
-  --up-orange-ink: #d9480f;
-  --up-orange-soft: #fff1ea;
-  --up-blue: #2f5bff;            /* actions, links, selection */
-  --up-blue-hover: #1f47e6;
-  --up-blue-soft: #eef1ff;
+  --up-surface-2: #f4f4f4;
+  --up-line: #e5e5e5;
+  --up-line-strong: #d4d4d4;
+  --up-ink: #0a0a0a;
+  --up-ink-2: #262626;
+  --up-muted: #525252;
+  /* colour: roles, all ink now (the names stay for the styles that use them) */
+  --up-orange: var(--up-ink);
+  --up-orange-ink: var(--up-ink);
+  --up-orange-soft: var(--up-surface-2);
+  --up-blue: var(--up-ink);
+  --up-blue-hover: var(--up-ink-2);
+  --up-blue-soft: var(--up-surface-2);
   --up-verge: #e5484d;           /* DP road line: "planned" */
   --up-reserve: #30a46c;         /* DP reserved open space */
   --up-today: #a1a1aa;           /* existing conditions */
   --up-asphalt: #3f3f46;         /* roads in illustrations */
   --up-night: #0c0c0d;           /* dark panels in both themes */
   --up-on-night: #fafafa;
-  --up-ok: #30a46c;
-  --up-warn: #f5a524;
-  --up-danger: #e5484d;
-  --up-focus: 0 0 0 3px rgba(47, 91, 255, 0.3);
+  --up-ok: var(--up-ink);
+  --up-warn: var(--up-ink-2);
+  --up-danger: var(--up-ink);
+  --up-focus: 0 0 0 2px var(--up-paper), 0 0 0 4px var(--up-ink);
 
   /* type */
   --up-font-display: "Geist", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -72,30 +74,30 @@
 }
 
 :root[data-theme="dark"] {
-  --up-paper: #09090b;
-  --up-surface: #111113;
-  --up-surface-2: #18181b;
-  --up-line: #232326;
-  --up-line-strong: #2e2e33;
+  --up-paper: #000000;
+  --up-surface: #0a0a0a;
+  --up-surface-2: #161616;
+  --up-line: #262626;
+  --up-line-strong: #3a3a3a;
   --up-ink: #fafafa;
-  --up-ink-2: #d4d4d8;
-  --up-muted: #a1a1aa;
-  --up-orange: #ff7a3d;
-  --up-orange-ink: #ff9a66;
-  --up-orange-soft: rgba(255, 122, 61, 0.12);
-  --up-blue: #5b7cff;
-  --up-blue-hover: #7a95ff;
-  --up-blue-soft: rgba(91, 124, 255, 0.14);
+  --up-ink-2: #e5e5e5;
+  --up-muted: #a3a3a3;
+  --up-orange: var(--up-ink);
+  --up-orange-ink: var(--up-ink);
+  --up-orange-soft: var(--up-surface-2);
+  --up-blue: var(--up-ink);
+  --up-blue-hover: var(--up-ink-2);
+  --up-blue-soft: var(--up-surface-2);
   --up-verge: #f2555a;
   --up-reserve: #3dd68c;
   --up-today: #71717a;
   --up-asphalt: #3a3a40;
   --up-night: #000000;
   --up-on-night: #fafafa;
-  --up-ok: #3dd68c;
-  --up-warn: #f5b13d;
-  --up-danger: #f2555a;
-  --up-focus: 0 0 0 3px rgba(91, 124, 255, 0.4);
+  --up-ok: var(--up-ink);
+  --up-warn: var(--up-ink-2);
+  --up-danger: var(--up-ink);
+  --up-focus: 0 0 0 2px var(--up-paper), 0 0 0 4px var(--up-ink);
   --up-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
   --up-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.06);
   color-scheme: dark;

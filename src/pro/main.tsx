@@ -31,7 +31,7 @@ import { exploreOptions } from './options';
 import { parseBrief, runBrief } from './brief';
 import { Sheets, SHEET_CSS } from './drawings';
 import { ApproveStep, BuildStep, DesignStep, ExploreStep, MoneyStep, SiteStep, STEPS, type Step, type StepProps } from './steps';
-import { Btn, cr, Icon, nf, Num, pct, sqft } from './ui';
+import { Btn, cr, Dialog, Icon, Menu, nf, Num, pct, Range, Seg, Select, sqft, TooltipLayer } from './ui';
 
 const KEY = 'urbanplan:pro:project', REF = 'urbanplan:pro:cloud', SEEN = 'urbanplan:pro:seen';
 const store = {
@@ -42,8 +42,9 @@ const loadP = (): ProProject => { const p = store.get<ProProject | null>(KEY, nu
 const BASE = import.meta.env.BASE_URL;
 const hhmm = (d = new Date()) => d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 const ago = (iso: string) => `${new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}, ${hhmm(new Date(iso))}`;
+const hm = (h: number) => `${Math.floor(h)}:${String(Math.round((h % 1) * 60)).padStart(2, '0')}`;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable || !!t.closest('[role="combobox"]'));
 
 function App() {
   // ---------- the project, with undo ----------
@@ -235,14 +236,14 @@ function App() {
 
       <nav class="rail" aria-label="Steps">
         {STEPS.map((s, i) => (
-          <button type="button" class="step" aria-current={step === s.key ? 'step' : undefined} onClick={() => { if (step !== s.key) go(s.key); else if (matchMedia('(max-width: 900px)').matches) { setPanel(true); document.querySelector('.panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); } else setPanel(!panel); }} title={`${s.title} (${i + 1})`}>
+          <button type="button" class="step" aria-current={step === s.key ? 'step' : undefined} onClick={() => { if (step !== s.key) go(s.key); else if (matchMedia('(max-width: 900px)').matches) { setPanel(true); document.querySelector('.panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); } else setPanel(!panel); }} data-tip={`${s.title} (${i + 1})`} data-tip-side="right">
             <Icon n={s.icon} size={20} />
             <span>{s.label}</span>
             {s.key === 'approve' && sum.fail + sum.warn > 0 && <i class={`dot ${sum.fail ? 'bad' : 'warn'}`} />}
           </button>
         ))}
         <span class="gap" />
-        <button type="button" class="step small" onClick={() => setPanel(!panel)} title="Show or hide the panel (\)"><Icon n="panel" size={18} /></button>
+        <button type="button" class="step small" onClick={() => setPanel(!panel)} aria-label="Show or hide the panel" aria-expanded={panel} data-tip="Show or hide the panel (\)" data-tip-side="right"><Icon n="panel" size={18} /></button>
       </nav>
 
       {panel && (
@@ -269,30 +270,30 @@ function App() {
         <canvas ref={canvas} onPointerMove={(ev) => setHover(view.current?.pick(ev.clientX, ev.clientY) ?? null)} onPointerLeave={() => setHover(null)} />
         <ResultBar e={e} deal={deal} sum={sum} go={go} />
         <div class="tools">
-          <div class="tgroup seg" role="radiogroup" aria-label="Drawn as">
-            <button type="button" role="radio" aria-checked={mode === 'wire' && xr === null} disabled={xr !== null} onClick={() => setMode('wire')} title={xr !== null ? 'X-ray is always shaded' : 'Wireframe: low-poly lines'}><Icon n="wire" size={15} />Wireframe</button>
-            <button type="button" role="radio" aria-checked={mode === 'shaded' || xr !== null} onClick={() => setMode('shaded')} title="Shaded: materials, windows, sun"><Icon n="shade" size={15} />Shaded</button>
-          </div>
-          <div class="tgroup seg" role="radiogroup" aria-label="View">
-            <button type="button" role="radio" aria-checked={xr === null} onClick={() => setXray(null)}><Icon n="cube" size={15} />Exterior</button>
-            <button type="button" role="radio" aria-checked={xr !== null} onClick={() => setXray(Math.max(1, Math.round(maxFloor / 2)))}><Icon n="layers" size={15} />X-ray</button>
-          </div>
+          <Seg<RenderMode> class="tgroup" value={mode} set={setMode} options={[
+            { value: 'wire', label: 'Wireframe', icon: 'wire', checked: mode === 'wire' && xr === null, disabled: xr !== null, title: xr !== null ? 'X-ray is always shaded' : 'Wireframe: low-poly lines' },
+            { value: 'shaded', label: 'Shaded', icon: 'shade', checked: mode === 'shaded' || xr !== null, title: 'Shaded: materials, windows, sun' },
+          ]} ariaLabel="Drawn as" />
+          <Seg<'ext' | 'xray'> class="tgroup" value={xr === null ? 'ext' : 'xray'} set={(v) => (v === 'ext' ? setXray(null) : setXray(Math.max(1, Math.round(maxFloor / 2))))} options={[
+            { value: 'ext', label: 'Exterior', icon: 'cube' },
+            { value: 'xray', label: 'X-ray', icon: 'layers' },
+          ]} ariaLabel="View" />
           {xr !== null && <div class="tgroup floor">
-            <button type="button" onClick={() => setXray(Math.max(1, xr - 1))} aria-label="Floor down ([)"><Icon n="minus" size={14} /></button>
+            <button type="button" onClick={() => setXray(Math.max(1, xr - 1))} aria-label="Floor down" data-tip="Floor down ([)"><Icon n="minus" size={14} /></button>
             <b>Floor {xr}<small> of {maxFloor}</small></b>
-            <button type="button" onClick={() => setXray(Math.min(maxFloor, xr + 1))} aria-label="Floor up (])"><Icon n="plus" size={14} /></button>
+            <button type="button" onClick={() => setXray(Math.min(maxFloor, xr + 1))} aria-label="Floor up" data-tip="Floor up (])"><Icon n="plus" size={14} /></button>
           </div>}
           <div class="tgroup">
-            <button type="button" title="Whole site (F)" onClick={() => cam('fit')}><Icon n="fit" size={16} /></button>
-            <button type="button" title="From the street (S)" onClick={() => cam('street')}><Icon n="street" size={16} /></button>
-            <button type="button" title="From above (T)" onClick={() => cam('top')}><Icon n="top" size={16} /></button>
+            <button type="button" aria-label="Whole site" aria-keyshortcuts="F" data-tip="Whole site (F)" onClick={() => cam('fit')}><Icon n="fit" size={16} /></button>
+            <button type="button" aria-label="From the street" aria-keyshortcuts="S" data-tip="From the street (S)" onClick={() => cam('street')}><Icon n="street" size={16} /></button>
+            <button type="button" aria-label="From above" aria-keyshortcuts="T" data-tip="From above (T)" onClick={() => cam('top')}><Icon n="top" size={16} /></button>
           </div>
           <div class={`tgroup sun${sun.on ? ' on' : ''}`}>
-            <button type="button" title="Sun and shadows on a date and time" aria-pressed={sun.on} onClick={() => { if (!sun.on && mode === 'wire') setMode('shaded'); setSun({ ...sun, on: !sun.on }); }}><Icon n="sun" size={16} />{sun.on ? '' : 'Sun'}</button>
+            <button type="button" aria-label="Sun" data-tip="Sun and shadows on a date and time" aria-pressed={sun.on} onClick={() => { if (!sun.on && mode === 'wire') setMode('shaded'); setSun({ ...sun, on: !sun.on }); }}><Icon n="sun" size={16} />{sun.on ? '' : 'Sun'}</button>
             {sun.on && <>
-              <select aria-label="Month" value={sun.month} onChange={(ev) => setSun({ ...sun, month: +(ev.target as HTMLSelectElement).value })}>{MONTHS.map((m, i) => <option value={i + 1}>21 {m}</option>)}</select>
-              <input type="range" min={6} max={19} step={0.25} value={sun.hour} aria-label="Time of day" onInput={(ev) => setSun({ ...sun, hour: +(ev.target as HTMLInputElement).value })} />
-              <b class="time">{`${Math.floor(sun.hour)}:${String(Math.round((sun.hour % 1) * 60)).padStart(2, '0')}`}</b>
+              <Select<number> size="sm" quiet aria-label="Month" value={sun.month} onChange={(v) => setSun({ ...sun, month: v })} options={MONTHS.map((m, i) => ({ value: i + 1, label: `21 ${m}` }))} />
+              <Range min={6} max={19} step={0.25} value={sun.hour} label="Time of day" valueText={hm(sun.hour)} onInput={(v) => setSun({ ...sun, hour: v })} />
+              <b class="time" aria-hidden="true">{hm(sun.hour)}</b>
             </>}
           </div>
         </div>
@@ -301,6 +302,7 @@ function App() {
       </main>
 
       {toastMsg && <div class="toast" role="status">{toastMsg}</div>}
+      <TooltipLayer />
       {dialog === 'projects' && user && <Projects current={ref?.id ?? null} open={(id) => void openId(id)} fresh={() => fresh()} close={() => setDialog(null)} />}
       {dialog === 'team' && user && ref && <Team pid={ref.id} role={ref.role ?? 'owner'} step={step} go={(s) => { go(s); }} close={() => setDialog(null)} />}
       {dialog === 'share' && <ShareDialog p={p} close={() => setDialog(null)} toast={toast} />}
@@ -369,17 +371,11 @@ function SaveState({ cloud, user, readOnly }: { cloud: { s: string; msg?: string
 }
 
 function More({ openKeys, newProject }: { openKeys: () => void; newProject: () => void }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <span class="more">
-      <Btn kind="quiet" icon="more" title="More" onClick={() => setOpen(!open)} />
-      {open && <div class="menu" role="menu" onClick={() => setOpen(false)}>
-        <button type="button" role="menuitem" onClick={newProject}><Icon n="plus" size={15} />New project</button>
-        <a role="menuitem" href={`${BASE}app/`}><Icon n="site" size={15} />The simple editor</a>
-        <button type="button" role="menuitem" onClick={openKeys}><Icon n="key" size={15} />Keyboard shortcuts</button>
-      </div>}
-    </span>
-  );
+  return <Menu label="More" items={[
+    { label: 'New project', icon: 'plus', onSelect: newProject },
+    { label: 'The simple editor', icon: 'site', href: `${BASE}app/` },
+    { label: 'Keyboard shortcuts', icon: 'key', onSelect: openKeys },
+  ]} />;
 }
 
 /** The account's Pro projects: open one, start a new one, delete (two clicks). */
@@ -393,7 +389,7 @@ function Projects({ current, open, fresh, close }: { current: string | null; ope
     try { await deletePro(id); setSure(''); void reload(); } catch (x) { setErr(explain(x)); }
   };
   return (
-    <Modal title="Your projects" close={close} side>
+    <Dialog title="Your projects" close={close} side>
       <Btn kind="primary" icon="plus" onClick={fresh}>New project</Btn>
       {err && <p class="note bad">{err}</p>}
       {!list && !err && <p class="note">Loading…</p>}
@@ -412,7 +408,7 @@ function Projects({ current, open, fresh, close }: { current: string | null; ope
           </li>
         ))}</ul>
       </>}
-    </Modal>
+    </Dialog>
   );
 }
 
@@ -444,9 +440,9 @@ function Team({ pid, role, step, go, close }: { pid: string; role: 'owner' | 'ed
       </div>
     </li>
   );
-  if (off) return <Modal title="Team" close={close} side><p class="note">{off} The site's owner turns them on by running <code>supabase/migrations/0004_project_team.sql</code> once in Supabase.</p></Modal>;
+  if (off) return <Dialog title="Team" close={close} side><p class="note">{off} The site's owner turns them on by running <code>supabase/migrations/0004_project_team.sql</code> once in Supabase.</p></Dialog>;
   return (
-    <Modal title="Team" close={close} side>
+    <Dialog title="Team" close={close} side>
       {err && <p class="note bad">{err}</p>}
       <h3 class="mh">People</h3>
       <ul class="people">
@@ -459,7 +455,7 @@ function Team({ pid, role, step, go, close }: { pid: string; role: 'owner' | 'ed
       </ul>
       {role === 'owner' && <form class="invite" onSubmit={(ev) => { ev.preventDefault(); if (EMAIL.test(email.trim())) void run(async () => { const who = email.trim().toLowerCase(); await addMember(pid, who, as); setEmail(''); const r = await sendInvite(pid, who).catch(() => 'off' as const); setSent(r === 'sent' ? `Added, and an invite emailed to ${who}.` : `Added ${who}. Send them the project link: it opens once they sign in with that email.`); }); }}>
         <input type="email" class="txt" placeholder="Their email" value={email} onInput={(ev) => setEmail((ev.target as HTMLInputElement).value)} aria-label="Email to add" />
-        <select value={as} onChange={(ev) => setAs((ev.target as HTMLSelectElement).value as Member['role'])} aria-label="Their role"><option value="editor">Can edit</option><option value="viewer">Can view and comment</option></select>
+        <Select<Member['role']> aria-label="Their role" value={as} onChange={setAs} options={[{ value: 'editor', label: 'Can edit' }, { value: 'viewer', label: 'Can view and comment' }]} />
         <Btn kind="primary" submit disabled={busy || !EMAIL.test(email.trim())}>Add</Btn>
       </form>}
       {sent && <p class="note ok" role="status">{sent}</p>}
@@ -477,7 +473,7 @@ function Team({ pid, role, step, go, close }: { pid: string; role: 'owner' | 'ed
       <ul class="cmts">{[...open].reverse().map((c) => <Item c={c} />)}</ul>
       {done.length > 0 && <button type="button" class="linkbtn" onClick={() => setShowDone(!showDone)}>{showDone ? 'Hide' : 'Show'} {done.length} resolved</button>}
       {showDone && <ul class="cmts">{[...done].reverse().map((c) => <Item c={c} />)}</ul>}
-    </Modal>
+    </Dialog>
   );
 }
 
@@ -486,27 +482,27 @@ function ShareDialog({ p, close, toast }: { p: ProProject; close: () => void; to
   useEffect(() => { encodeShare(p).then((s) => setUrl(`${location.origin}${location.pathname}#s=${s}`)); }, []);
   const copy = async () => { try { await navigator.clipboard.writeText(url); toast('Link copied.'); close(); } catch { toast('Select the link and copy it.'); } };
   return (
-    <Modal title="Share this scheme" close={close}>
+    <Dialog title="Share this scheme" close={close}>
       <p class="note">Anyone with the link sees the scheme, its 3D and its figures, read-only. They can make their own copy. The whole project is in the link: nothing is uploaded.</p>
       <input class="share-url" readOnly value={url} onFocus={(ev) => (ev.target as HTMLInputElement).select()} />
       <div class="row r2"><Btn kind="primary" icon="link" onClick={copy} disabled={!url}>Copy link</Btn><Btn href={`https://wa.me/?text=${encodeURIComponent(`${p.name} on UrbanPlan: ${url}`)}`} icon="share">WhatsApp</Btn></div>
-    </Modal>
+    </Dialog>
   );
 }
 
 function Keys({ close }: { close: () => void }) {
   const rows: [string, string][] = [['1 – 6', 'Go to a step'], ['\\', 'Show or hide the panel'], ['X', 'X-ray floor on or off'], ['[  ]', 'Floor down / up'], ['F · S · T', 'Camera: whole site, street, from above'], ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · redo'], ['↑ ↓ in a number', 'Step it (Shift: ×10)'], ['Esc', 'Close this']];
-  return <Modal title="Keyboard shortcuts" close={close}><dl class="lines keys">{rows.map(([a, b]) => <div><dt><kbd>{a}</kbd></dt><dd>{b}</dd></div>)}</dl></Modal>;
+  return <Dialog title="Keyboard shortcuts" close={close}><dl class="lines keys">{rows.map(([a, b]) => <div><dt><kbd>{a}</kbd></dt><dd>{b}</dd></div>)}</dl></Dialog>;
 }
 
 /** First visit: start from a plot in three numbers, or look round the sample. */
 function Welcome({ close }: { close: (p?: ProProject) => void }) {
   const [w, setW] = useState(30), [dpt, setD] = useState(40), [road, setRoad] = useState(12), [city, setCity] = useState<ProProject['city']>('pune');
   return (
-    <Modal title="Size up a plot in a minute" close={() => close()} wide>
+    <Dialog title="Size up a plot in a minute" close={() => close()} wide>
       <p class="note">Give the plot and its road. You get the most the rules let you build, a scheme in 3D, the money and our own scrutiny, all at once. Change anything after.</p>
       <div class="row r2">
-        <label class="f"><span class="f-l">Planning authority</span><select value={city} onChange={(ev) => setCity((ev.target as HTMLSelectElement).value as ProProject['city'])}><option value="pune">Pune (UDCPR)</option><option value="pune-congested">Pune old city</option><option value="mumbai-suburbs">Mumbai suburbs</option><option value="mumbai-island">Mumbai island city</option></select></label>
+        <Select<ProProject['city']> label="Planning authority" value={city} onChange={setCity} options={[{ value: 'pune', label: 'Pune (UDCPR)' }, { value: 'pune-congested', label: 'Pune old city' }, { value: 'mumbai-suburbs', label: 'Mumbai suburbs' }, { value: 'mumbai-island', label: 'Mumbai island city' }]} />
         <Num label="Road in front" value={road} set={setRoad} min={3} max={80} unit="m" />
       </div>
       <div class="row r2"><Num label="Frontage" value={w} set={setW} min={10} max={400} unit="m" /><Num label="Depth" value={dpt} set={setD} min={10} max={400} unit="m" /></div>
@@ -515,18 +511,7 @@ function Welcome({ close }: { close: (p?: ProProject) => void }) {
         <Btn onClick={() => close()}>Look round the sample first</Btn>
       </div>
       <p class="note">Plot not a rectangle? Draw it or import a GeoJSON / KML in the Site step.</p>
-    </Modal>
-  );
-}
-
-function Modal({ title, close, children, side, wide }: { title: string; close: () => void; children: preact.ComponentChildren; side?: boolean; wide?: boolean }) {
-  return (
-    <div class={`modal-bg${side ? ' side' : ''}`} onClick={(ev) => { if (ev.target === ev.currentTarget) close(); }}>
-      <div class={`modal${wide ? ' wide' : ''}`} role="dialog" aria-modal="true" aria-label={title}>
-        <header><h2>{title}</h2><Btn kind="quiet" icon="x" title="Close" onClick={close} /></header>
-        <div class="modal-b">{children}</div>
-      </div>
-    </div>
+    </Dialog>
   );
 }
 
