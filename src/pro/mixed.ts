@@ -46,8 +46,8 @@ export function shopStrips(r: PlotReport, d: SiteReport, depth: number): ShopStr
   const first = Math.min(...vmin);
   const out: ShopStrip[] = [];
   d.buildings.forEach((b, bi) => {
-    // the front row: within 8 m of the building nearest the road
-    if (vmin[bi] > first + 8) return;
+    // the front row: within 8 m of the building nearest the road (a formed building's own uses stand instead)
+    if (vmin[bi] > first + 8 || b.laid) return;
     const V = vmin[bi] + depth;
     for (const q of b.quads) {
       // keep v ≤ V: (p − o)·(−v) ≥ −V
@@ -72,9 +72,10 @@ export function withShops(r: PlotReport, site: PlotSite, use: PlotUse, f: Fronta
   // FSI: the ground-floor shops count on top of the flats; trim the tallest building a floor at a time until it fits
   let s: PlotSite = { ...site, buildings: site.buildings.map((b, i) => ({ ...b, floors: d.buildings[i]?.floors ?? b.floors })) };
   let trimmed = 0;
+  // (a formed building's floors are its form's, so only the plain ones are trimmed)
   while (d.bua + ground > r.bua + 1 && trimmed < 200) {
-    const i = d.buildings.reduce((k, b, j) => (b.floors > d.buildings[k].floors ? j : k), 0);
-    if (d.buildings[i].floors <= 1) break;
+    const i = d.buildings.reduce((k, b, j) => (!b.laid && (d.buildings[k].laid || b.floors > d.buildings[k].floors) ? j : k), 0);
+    if (d.buildings[i].laid || d.buildings[i].floors <= 1) break;
     s = { ...s, buildings: s.buildings.map((b, j) => (j === i ? { ...b, floors: d.buildings[i].floors - 1 } : b)) };
     d = solveSite(r, s, use);
     trimmed++;
@@ -111,9 +112,9 @@ export function withShops(r: PlotReport, site: PlotSite, use: PlotUse, f: Fronta
   const build = M.build + ground * SQFT * c.build, soft = (build + M.parking) * c.soft / 100;
   const fsiShare = d.bua > 0 ? 1 + ground / d.bua : 1;
   const upfront = M.land + (M.premium + M.tdr + M.ancillary) * fsiShare;
-  const revenue = M.revenue + shopRevenue - lostRevenue, cost = upfront + build + M.parking + soft;
-  const cash = cashflow(upfront, build + M.parking + soft, revenue, c);
-  const money = { ...M, revenue, build, soft, premium: M.premium * fsiShare, tdr: M.tdr * fsiShare, ancillary: M.ancillary * fsiShare, cost, profit: revenue - cost, margin: revenue > 0 ? (revenue - cost) / revenue : 0, ...cash };
+  const sales = M.sales + shopRevenue - lostRevenue, revenue = sales + M.exit, cost = upfront + build + M.parking + soft;
+  const cash = cashflow(upfront, build + M.parking + soft, sales, c, M.exit);
+  const money = { ...M, revenue, sales, earns: M.earns || shopRevenue > 0, build, soft, premium: M.premium * fsiShare, tdr: M.tdr * fsiShare, ancillary: M.ancillary * fsiShare, cost, profit: revenue - cost, margin: revenue > 0 ? (revenue - cost) / revenue : 0, ...cash };
   const allowed = shopFloorsAllowed(r.roadW);
   const front = strips.reduce((s2, x) => s2 + x.front, 0);
   const shops: Shops = {

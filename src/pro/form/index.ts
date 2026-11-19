@@ -1,6 +1,10 @@
 // The form procedure's public face: everything outside src/pro/form imports from here, nothing deeper.
-// (The form core fills these in; the signatures are the contract in ./types.ts.)
+// (The signatures are the contract in ./types.ts; the work is done in ./curve, ./slice, ./skeleton, ./units,
+// ./lay and ./templates.)
 import type { SiteBuilding } from '../../doc/site';
+import { sampleCurve as sample } from './curve';
+import { layMemo } from './lay';
+import { TEMPLATES as GALLERY } from './templates';
 import type { Curve, Form, FormContext, FormLayout, FormTemplate, Pt } from './types';
 
 export * from './types';
@@ -23,15 +27,17 @@ export function toLocal(b: Pick<SiteBuilding, 'spine'>, X: number, Z: number): P
   return [dx * u[0] + dz * u[1], dx * n[0] + dz * n[1]];
 }
 
-/** The curve as a polygon (local, flat x, z pairs), smooth stretches sampled about every `step` metres. */
-export function sampleCurve(c: Curve, step = 1.5): number[] { void step; return c.pts.flat(); }
+/** The curve as a polygon (local, flat x, z pairs, anticlockwise, no repeated points), smooth stretches sampled
+ *  about every `step` metres; `round` (0 … 1) eases its corners, as the design language asks. */
+export function sampleCurve(c: Curve, step = 1.5, round = 0): number[] { return sample(c, step, round); }
 
-/** The form laid out floor by floor for a building (its spine places it; `floors` its floors over the ground).
- *  Null when the form can't make a floor (an empty or degenerate plan). */
-export function layForm(b: SiteBuilding & { form?: Form }, ctx: FormContext): FormLayout | null { void b; void ctx; return null; }
+/** The form laid out floor by floor for a building (its spine places it; `floors` its floors over the ground, which
+ *  win over the form's bands: the top band grows or shrinks to match). Null when the form can't make a floor (an
+ *  empty or degenerate plan). Remembered: the same building and project give back the same layout object. */
+export function layForm(b: SiteBuilding & { form?: Form }, ctx: FormContext): FormLayout | null { return layMemo(b, ctx); }
 
 /** The templates, in the gallery's order. */
-export const TEMPLATES: FormTemplate[] = [];
+export const TEMPLATES: FormTemplate[] = GALLERY;
 
 /** A plain box form (the default for a building given a form by hand): a rectangle w × d, `floors` of homes. */
 export function boxForm(w: number, d: number, floors: number): Form {

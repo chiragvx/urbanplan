@@ -12,7 +12,7 @@
 //   rainwater harvesting, the fire and domestic pump room, the yard hydrants, EV charging. `systemsOf` sizes the plant
 //   for the building as if it stood alone (those lines and spaces carry `site: true`, and `plantCost` says how much of
 //   `cost` is plant); `siteSystems` sizes it once for every building together.
-import type { BuildingReport } from '../doc/site';
+import { buaOf, floorKind, type BuildingReport, type FloorUse } from '../doc/site';
 
 export type Code = 'udcpr' | 'dcpr-island' | 'dcpr-suburbs';
 export type StairType = 'dog-leg' | 'scissor';
@@ -194,6 +194,55 @@ function fireBand(h: number) {
 }
 const SPRINKLER_RANK: Record<Sprinklers, number> = { none: 0, basement: 1, all: 2 };
 const RISER_RANK: Record<Riser, number> = { none: 0, downcomer: 1, wet: 2 };
+type Band = ReturnType<typeof fireBand>;
+
+/** A formed building's floors by use, as the systems size them. NBC 2016 Part 4 occupancy groups: A residential (A-4
+ *  apartments; A-5 hotels, as the 2016 code lists them, with A-6 for starred hotels), B educational (B-1 schools),
+ *  C institutional (C-1 hospitals: a clinic taken as C-1, though an outpatient-only one may be classed E-1
+ *  business), D assembly (a community hall; a library taken as assembly too, though a small one may be classed
+ *  business), E business (E-1 offices; a public toilet, which has no group of its own, taken as E), F mercantile (F-1
+ *  shops up to 500 m² a floor, F-2 more). `occ`: m² a person, NBC 2016 Part 4 Table 3 (residential 12.5, educational
+ *  4, institutional 15 in-patients (10 taken for a clinic's visitors), assembly without fixed seats 1.5, business
+ *  10, mercantile upper sale floors 6 (3 on the street floor)); a library at 4 m² a reader is our figure, not the
+ *  table's. `lpcd`: NBC 2016 Part 9 Table 1 (offices and shops 45, day schools 45, auditoria 15 a seat, hotels 180 a
+ *  bed; a clinic taken at 45 a visitor), a public toilet by its floor (`waterM2`, placeholder: a seat in 6 m² used
+ *  40 times a day at about 9 L). `w` connected load (W/m² of carpet) and `trM2` (m² of carpet a tonne of AC, 0 for
+ *  none) are rules of thumb (as assumed). Lift traffic (CIBSE Guide D): `hc` the share carried in 5 minutes and
+ *  `interval` the longest wait (s), offices 12 % and 30 s, the rest about 10 % and 40–45 s (as assumed). */
+const USE_LOAD: Record<FloorUse, { cls: string; occ: number; lpcd: number; waterM2?: number; w: number; trM2: number; hc: number; interval: number }> = {
+  residential: { cls: 'A-4', occ: 12.5, lpcd: LPCD, w: 0, trM2: 0, hc: HC5, interval: INTERVAL },
+  hotel: { cls: 'A-5', occ: 12.5, lpcd: 180, w: 80, trM2: 25, hc: 0.1, interval: 45 },
+  school: { cls: 'B-1', occ: 4, lpcd: 45, w: 25, trM2: 0, hc: 0.1, interval: 45 },
+  clinic: { cls: 'C-1', occ: 10, lpcd: 45, w: 80, trM2: 20, hc: 0.1, interval: 45 },
+  community: { cls: 'D', occ: 1.5, lpcd: 15, w: 60, trM2: 25, hc: 0.1, interval: 45 },
+  library: { cls: 'D', occ: 4, lpcd: 15, w: 70, trM2: 25, hc: 0.1, interval: 45 },
+  office: { cls: 'E-1', occ: OFFICE_M2_PP, lpcd: OFFICE_LPCD, w: OFFICE_W, trM2: OFFICE_M2_TR, hc: 0.12, interval: 30 },
+  toilet: { cls: 'E', occ: 10, lpcd: 0, waterM2: 60, w: 15, trM2: 0, hc: 0.1, interval: 45 },
+  retail: { cls: 'F', occ: 6, lpcd: 45, w: 120, trM2: 20, hc: 0.1, interval: 40 },
+  parking: { cls: 'G-parking', occ: 30, lpcd: 0, w: 5, trM2: 0, hc: 0.05, interval: 90 },
+};
+
+/** The fire provisions a non-residential occupancy asks for over the apartments' Table 7 band (as assumed, until
+ *  each group's own column of Table 7 is checked): above 15 m a wet riser, sprinklers throughout and a manual alarm
+ *  for business, mercantile, assembly, institutional and hotels; automatic detection throughout for hotels,
+ *  institutional and assembly at any height and for the others above 15 m; mercantile floors over 500 m² (F-2)
+ *  sprinklered at any height; tanks and pumps at least those of the 35–45 m apartment band above 15 m. */
+function bandFor(kinds: Set<FloorUse>, h: number, biggestRetail: number): Band & { classes: string[] } {
+  const band: Band = { ...fireBand(h) };
+  const classes = [...new Set([...kinds].map((k) => USE_LOAD[k].cls))];
+  const other = [...kinds].filter((k) => k !== 'residential' && k !== 'parking');
+  const up = (x: Partial<Band>) => {
+    if (x.riser && RISER_RANK[x.riser] > RISER_RANK[band.riser]) band.riser = x.riser;
+    if (x.sprinklers && SPRINKLER_RANK[x.sprinklers] > SPRINKLER_RANK[band.sprinklers]) band.sprinklers = x.sprinklers;
+    band.hydrant ||= !!x.hydrant; band.alarm ||= !!x.alarm; band.detect ||= !!x.detect;
+    band.tank = Math.max(band.tank, x.tank ?? 0); band.terrace = Math.max(band.terrace, x.terrace ?? 0); band.pump = Math.max(band.pump, x.pump ?? 0);
+  };
+  if (other.length && h > 15) up({ riser: 'wet', sprinklers: 'all', alarm: true, detect: true, tank: 75, terrace: 10, pump: 2280 });
+  if (other.some((k) => k === 'hotel' || k === 'clinic' || k === 'community' || k === 'library')) up({ alarm: true, detect: true });
+  if (kinds.has('retail') && biggestRetail > 500) up({ sprinklers: 'all', alarm: true });
+  if (other.length) band.band = `${band.band}, ${classes.join(' + ')}`;
+  return { ...band, classes };
+}
 
 // costs, ₹ (2026, Pune; Mumbai × 1.1), all as assumed
 const RATE = {
@@ -225,37 +274,73 @@ interface Demand {
   flatKW: number; commonKW: number; mdKVA: number; commonKVA: number;
   water: number; // L/day
   tr: number;
+  /** a formed building's uses: the people the lifts carry in 5 minutes and the longest wait its strictest use
+   *  allows; the most people on one floor (for the stairs); its fire band, the strictest of its occupancies' */
+  hcPop?: number; interval?: number; floorOcc?: number; fire?: Band & { classes: string[] };
 }
 
 function demandOf(b: BuildingReport, o: SystemsOpts, s: SystemsSettings, a: Pick<Auto, 'flatKW' | 'officeW' | 'persons' | 'lpcd'>, commonKW: number): Demand {
   const flats: [number, number, number] = [b.perFloor[0] * b.floors, b.perFloor[1] * b.floors, b.perFloor[2] * b.floors];
-  const nFlats = flats[0] + flats[1] + flats[2];
   let officeCarpet = b.units.filter((u) => u.t === 3).reduce((x, u) => x + u.carpet, 0) * b.floors;
-  const bua = b.plate * b.floors;
-  // a building with no flats or offices laid out (a shed, a use with no units yet): treat its floors as offices
-  if (!nFlats && !officeCarpet) officeCarpet = bua * 0.7;
   const E = s.electrical ?? {}, Pl = s.plumbing ?? {};
   const kw = [0, 1, 2].map((t) => pick(E.flatKW?.[t as 0 | 1 | 2], a.flatKW[t]));
   const pp = [0, 1, 2].map((t) => pick(Pl.persons?.[t as 0 | 1 | 2], a.persons[t]));
-  const flatKW = flats.reduce((x, n, t) => x + n * kw[t], 0) + (officeCarpet * pick(E.officeW, a.officeW)) / 1000;
-  const pop = flats.reduce((x, n, t) => x + n * pp[t], 0) + officeCarpet / OFFICE_M2_PP;
   const lpcd = pick(Pl.lpcd, a.lpcd);
-  const water = flats.reduce((x, n, t) => x + n * pp[t], 0) * lpcd + (officeCarpet / OFFICE_M2_PP) * OFFICE_LPCD;
+  // a formed building floor by floor, each by its own use (USE_LOAD); its offices' W/m² as set, if set
+  let other: { pop: number; water: number; kW: number; tr: number; hcPop: number; interval: number; floorOcc: number; fire: Demand['fire'] } | null = null;
+  if (b.laid) {
+    flats.fill(0); officeCarpet = 0;
+    const o2 = { pop: 0, water: 0, kW: 0, tr: 0, hcPop: 0, interval: INTERVAL, floorOcc: 0, fire: undefined as Demand['fire'] };
+    const kinds = new Set<FloorUse>();
+    let biggestRetail = 0;
+    for (const f of b.laid.floors) {
+      const k = floorKind(f, b.use), U = USE_LOAD[k];
+      kinds.add(k);
+      if (k === 'residential') {
+        for (const u of f.units) if (u.t < 3) flats[u.t as 0 | 1 | 2]++;
+        o2.floorOcc = Math.max(o2.floorOcc, f.area / OCC_M2);
+        continue;
+      }
+      // (a floor with no units laid yet counted at 70 % of its area)
+      const c = f.units.reduce((x, u) => x + u.carpet, 0) || f.area * 0.7;
+      officeCarpet += c;
+      const pop = c / U.occ;
+      o2.pop += pop; o2.water += pop * U.lpcd + f.area * (U.waterM2 ?? 0);
+      o2.kW += (c * (k === 'office' ? pick(E.officeW, a.officeW) : U.w)) / 1000;
+      o2.tr += U.trM2 ? c / U.trM2 : 0;
+      o2.hcPop += pop * U.hc; o2.interval = Math.min(o2.interval, U.interval);
+      o2.floorOcc = Math.max(o2.floorOcc, f.area / U.occ);
+      if (k === 'retail') biggestRetail = Math.max(biggestRetail, f.area);
+    }
+    o2.fire = bandFor(kinds, b.height, biggestRetail);
+    other = o2;
+  }
+  const nFlats = flats[0] + flats[1] + flats[2];
+  const bua = buaOf(b);
+  // a building with no flats or offices laid out (a shed, a use with no units yet): treat its floors as offices
+  if (!nFlats && !officeCarpet) officeCarpet = bua * 0.7;
+  const flatPop = flats.reduce((x, n, t) => x + n * pp[t], 0);
+  const flatKW = flats.reduce((x, n, t) => x + n * kw[t], 0) + (other ? other.kW : (officeCarpet * pick(E.officeW, a.officeW)) / 1000);
+  const pop = flatPop + (other ? other.pop : officeCarpet / OFFICE_M2_PP);
+  const water = flatPop * lpcd + (other ? other.water : (officeCarpet / OFFICE_M2_PP) * OFFICE_LPCD);
   const div = pick(E.diversity, divFor(nFlats || officeCarpet / 60));
   const commonKVA = (commonKW * COMMON_DIV) / PF;
   const mdKVA = (flatKW * div) / PF + commonKVA;
-  const tr = flats.reduce((x, n, t) => x + n * FLAT_TR[t], 0) + officeCarpet / OFFICE_M2_TR;
+  const tr = flats.reduce((x, n, t) => x + n * FLAT_TR[t], 0) + (other ? other.tr : officeCarpet / OFFICE_M2_TR);
   const basementArea = o.basementArea ?? b.plate * (o.basements ?? 0);
-  return { flats, nFlats, officeCarpet, bua, plate: b.plate, floors: b.floors, height: b.height, roof: b.plate, basementArea, pop, perFloorPop: pop / Math.max(1, b.floors), flatKW, commonKW, mdKVA, commonKVA, water, tr };
+  const roof = b.laid ? b.laid.floors[b.laid.floors.length - 1].area : b.plate;
+  const extra = other ? { hcPop: flatPop * HC5 + other.hcPop, interval: other.interval, floorOcc: other.floorOcc, fire: other.fire } : {};
+  return { flats, nFlats, officeCarpet, bua, plate: b.plate, floors: b.floors, height: b.height, roof, basementArea, pop, perFloorPop: pop / Math.max(1, b.floors), flatKW, commonKW, mdKVA, commonKVA, water, tr, ...extra };
 }
 
-/** Lifts a building needs for its traffic (round-trip time), with the RTT. */
-function liftsFor(pop: number, floors: number, rise: number, cap: LiftCap, v: number) {
+/** Lifts a building needs for its traffic (round-trip time), with the RTT. `hcPop`: the people to carry in 5 minutes
+ *  (unset: 5 % of the population, as for flats); `interval`: the longest wait (s). */
+function liftsFor(pop: number, floors: number, rise: number, cap: LiftCap, v: number, hcPop = HC5 * pop, interval = INTERVAL) {
   const P = LOAD * cap, N = Math.max(1, floors);
   const S = N * (1 - (1 - 1 / N) ** P);
   const rtt = (2 * rise) / v + (S + 1) * T_STOP + 2 * P * T_PAX;
   const perCar = (300 * P) / rtt;
-  const n = Math.max(Math.ceil((HC5 * pop) / perCar - 1e-9), Math.ceil(rtt / INTERVAL - 1e-9));
+  const n = Math.max(Math.ceil(hcPop / perCar - 1e-9), Math.ceil(rtt / interval - 1e-9));
   return { n, rtt, perCar };
 }
 
@@ -317,7 +402,9 @@ function plant({ d, code, settings: s, bays, dgAuto, fireH }: PlantIn): PlantOut
   // water: a day underground (domestic), a fire tank by the tallest building's band
   const ugtAuto = up((water * UGT_DAYS) / 1000, 5);
   const ugt = pick(Pl.ugt, ugtAuto);
-  const band = fireBand(fireH);
+  // (the tallest building's band, made stricter by any building's occupancies)
+  const band = { ...fireBand(fireH) };
+  for (const x of d) if (x.fire) { band.tank = Math.max(band.tank, x.fire.tank); band.pump = Math.max(band.pump, x.fire.pump); band.hydrant ||= x.fire.hydrant; if (x.fire.tank >= band.tank) band.band = x.fire.band; }
   const tank = pick(F.tank, band.tank);
   L('Plumbing', 'Underground tank (domestic)', kl(ugt), `${fmt(UGT_DAYS)} day of ${kl(water / 1000)} a day`);
   L('Fire', 'Underground fire tank', tank ? kl(tank) : 'none', `NBC 2016 Part 4 Table 7, ${band.band}`);
@@ -388,9 +475,12 @@ function building(b: BuildingReport, o: SystemsOpts): BuildingOut {
   const codeMin = H > TWO_LIFTS_H ? 2 : liftsNeeded ? 1 : 0;
   const capAuto = capFor(H), speedAuto = speedFor(H);
   const cap = pick(Co.liftCap, capAuto), v = pick(Co.liftSpeed, speedAuto);
-  const traffic = liftsFor(d0.pop, b.floors, rise, cap, v);
+  const traffic = liftsFor(d0.pop, b.floors, rise, cap, v, d0.hcPop, d0.interval);
   // up to 15 m a lift is a choice: auto gives one when there are five floors or more of flats
-  const liftsAuto = liftsNeeded ? Math.max(codeMin, traffic.n, cores) : b.floors + o.under >= 5 ? Math.max(1, cores) : 0;
+  // (and a building the public uses gets one from two floors up, for access: as assumed, after the accessibility
+  // provisions of NBC 2016 Part 3 and the Harmonised Guidelines 2021)
+  const publicAccess = !!b.laid && d0.officeCarpet > 0 && b.floors > 1;
+  const liftsAuto = liftsNeeded ? Math.max(codeMin, traffic.n, cores) : b.floors + o.under >= 5 || publicAccess ? Math.max(1, cores) : 0;
   const lifts = pick(Co.lifts, liftsAuto);
   const fireLiftAuto = H > FIRE_LIFT_H;
   const fireLift = pick(Co.fireLift, fireLiftAuto) && lifts > 0;
@@ -423,7 +513,7 @@ function building(b: BuildingReport, o: SystemsOpts): BuildingOut {
   const stairsAuto = Math.max(stairsMin, cores);
   const stairs = pick(Co.stairs, stairsAuto);
   const wReq = stairFor(H);
-  const occ = b.plate / OCC_M2, wCap = (Math.ceil(occ / PER_UNIT - 1e-9) * UNIT_W);
+  const occ = d0.floorOcc ?? b.plate / OCC_M2, wCap = (Math.ceil(occ / PER_UNIT - 1e-9) * UNIT_W);
   const stairWAuto = Math.max(wReq, up(wCap / Math.max(1, stairs), 0.05));
   const stairW = pick(Co.stairW, stairWAuto);
   const typeAuto: StairType = H > 45 && cores === 1 ? 'scissor' : 'dog-leg';
@@ -484,7 +574,7 @@ function building(b: BuildingReport, o: SystemsOpts): BuildingOut {
   // ---- plumbing, in the building
   const ohtAuto = up((d.water * OHT_DAYS) / 1000, 5);
   const oht = pick(Pl.oht, ohtAuto);
-  const band = fireBand(H);
+  const band = d.fire ?? fireBand(H);
   L('Plumbing', 'Population and water', `${fmt(d.pop)} people, ${kl(d.water / 1000)} a day`, `${fmt(pick(Pl.lpcd, LPCD))} lpcd (NBC 2016 Part 9 Table 1); ${[0, 1, 2].map((t) => fmt(pick(Pl.persons?.[t as 0 | 1 | 2], PERSONS[t]), 1)).join(' / ')} persons a 1 / 2 / 3 BHK`);
   L('Plumbing', 'Overhead tank', `${kl(oht)} domestic + ${kl(band.terrace)} fire`, `${OHT_DAYS} day of domestic`);
   if (oht < ohtAuto - 0.5) C({ key: 'oht', group: 'Plumbing', rule: 'Overhead tank', required: `${kl(ohtAuto)} (half a day)`, proposed: kl(oht), status: 'warn', clause: 'NBC 2016 Part 9 (as assumed)' });
@@ -494,7 +584,8 @@ function building(b: BuildingReport, o: SystemsOpts): BuildingOut {
 
   // ---- fire, in the building
   const riser = pick(F.riser, band.riser), sprinklers = pick(F.sprinklers, band.sprinklers), alarm = pick(F.alarm, band.alarm);
-  L('Fire', 'Height band', band.band, 'NBC 2016 Part 4 Table 7, A-4 apartment houses');
+  L('Fire', 'Height band', band.band, d.fire ? 'NBC 2016 Part 4 Table 7, the strictest of its occupancies (non-residential groups as assumed)' : 'NBC 2016 Part 4 Table 7, A-4 apartment houses');
+  if (d.fire && d.fire.classes.length > 1) C({ key: 'occupancy', group: 'Fire', rule: 'Mixed occupancy', required: 'the stricter provisions of each group, or each separated by fire walls', proposed: d.fire.classes.join(' + '), status: 'info', clause: 'NBC 2016 Part 4 (mixed occupancy)' });
   L('Fire', 'Riser', riser === 'wet' ? `wet riser ×${cores}, hose reels each floor` : riser === 'downcomer' ? `downcomer ×${cores}` : 'none (extinguishers and a hose reel)');
   L('Fire', 'Sprinklers', sprinklers === 'all' ? 'throughout' : sprinklers === 'basement' ? ((o.basements ?? 0) > 0 ? 'basements' : 'basements (none here)') : 'none');
   L('Fire', 'Detection and alarm', alarm ? (band.detect ? 'manual call points, automatic detection' : 'manual call points, talk-back') : 'none');

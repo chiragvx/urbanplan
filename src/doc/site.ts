@@ -7,7 +7,7 @@
 //
 // Pure: a site and a plot report in, numbers and rings (tile metres x,z) out.
 import { clipHalf, inset, polyArea, sideMargin, useInfo, type PlotCode, type PlotReport, type PlotUse } from './plot';
-import { anglesFor, area as mpArea, fromFlat, fromFlats, inter, layBays, layGround, NO_GROUND, outlines, shrink, union, type GroundMap } from './ground';
+import { anglesFor, area as mpArea, diff, fromFlat, fromFlats, inter, layBays, layGround, NO_GROUND, offset, outlines, shrink, triangles, union, type GroundMap } from './ground';
 
 /** flat types: 1, 2 and 3 BHK; commercial floors are one office per stretch of corridor */
 export type UnitType = 0 | 1 | 2 | 3;
@@ -30,6 +30,28 @@ export interface Costs {
   /** construction period (months), and the % of flats booked by its end (the rest sell over the year after) */
   months: number; presold: number;
 }
+/** The rates for a formed building's other uses. Offices let, ₹ per sq ft of carpet a month; a hotel's operating
+ *  profit, ₹ per sq ft of carpet a year; the yields (%) the offices and the hotel are valued at, so their value sits
+ *  beside the flats' sales (useRates); shops sold, ₹ per sq ft of carpet (unset: the sale price × SHOP_RATE). */
+export interface UseRates { officeRent: number; hotelNoi: number; officeYield: number; hotelYield: number; retail?: number }
+
+/** shops sell at about this many times the flats' rate (as the Pro side's SHOP_PREMIUM) */
+export const SHOP_RATE = 1.8;
+/** offices: the share of the rent lost to empty months and costs the tenants don't pay back (placeholder) */
+export const OFFICE_VOID = 0.1;
+/** months after completion that let or opened buildings are valued at (leasing up, opening) */
+export const LEASE_UP = 6;
+/** Starting rents and yields for the uses that are let or run (placeholders: rough 2026 figures to replace). Office
+ *  rents on carpet: Pune ₹95, Mumbai suburbs ₹160, the island city ₹280 a sq ft a month. A hotel's operating profit
+ *  (EBITDA) a sq ft of carpet a year: a room of about 30 m² at Pune's ₹5,000 a night, 65 % full, a third of its
+ *  takings kept, is about ₹1,500; Mumbai more. Offices are valued at an 8 % yield, hotels at 9 %. */
+export function useRates(code: PlotCode): UseRates {
+  return {
+    officeRent: code === 'dcpr-island' ? 280 : code === 'dcpr-suburbs' ? 160 : 95,
+    hotelNoi: code === 'dcpr-island' ? 3500 : code === 'dcpr-suburbs' ? 2700 : 1500,
+    officeYield: 8, hotelYield: 9,
+  };
+}
 
 export interface SiteBuilding {
   id: string;
@@ -45,7 +67,63 @@ export interface SiteBuilding {
   auto?: boolean;
   /** its own flat mix (1 / 2 / 3 BHK shares; unset: the site's) */
   mix?: [number, number, number];
+  /** its floors as a form lays them out (src/pro/form), worked out afresh on every evaluation and never saved: each
+   *  floor its own area, height, units and use. Unset: the plain building of spine and depth. */
+  laid?: Laid;
 }
+
+/** What a floor of a formed building is for. The same list as the form's uses (src/pro/form/types.ts BuildingUse),
+ *  kept in step by hand: the engine doesn't reach into the Pro side for it. */
+export type FloorUse = 'residential' | 'office' | 'retail' | 'hotel' | 'library' | 'toilet' | 'community' | 'school' | 'clinic' | 'parking';
+/** A floor of a formed building as the engine counts it. */
+export interface LaidFloor {
+  /** floor area (m², after any carves) and floor to floor (m) */
+  area: number; h: number;
+  units: Unit[];
+  /** the plot use it counts as, and the finer use it is */
+  use?: PlotUse; kind?: FloorUse;
+  /** its slab's outline (x,z,…), where a parking floor's bays go */
+  ring?: number[];
+}
+export interface Laid {
+  /** the whole volume seen from above: what the margins, the clashes and the fire tender's way are checked against */
+  outline: number[];
+  /** the floors from the lowest up, and the cores every floor shares */
+  floors: LaidFloor[]; cores: number[][];
+  /** metres of the roof counted in the height: half a sloping roof's rise (UDCPR measures to its middle) */
+  roof?: number;
+}
+
+/** Each floor use as the engine treats it: the plot use it counts as; a car for this many m² of carpet (0: none; homes
+ *  go by UDCPR Table 8-B per flat instead); how it earns (sold, let and valued at a yield, run as a business and
+ *  valued the same way, or a public building that only costs); and its construction cost over the base rate.
+ *  Placeholders where the code has no figure of its own, as marked. */
+export const FLOOR_USE: Record<FloorUse, { plot: PlotUse; park: number; earns: 'sale' | 'lease' | 'operate' | 'public'; build: number }> = {
+  residential: { plot: 'residential', park: 0, earns: 'sale', build: 1 },
+  // offices and shops: a car per 100 m² of carpet, as PARK_PER has for commercial use
+  office: { plot: 'commercial', park: 100, earns: 'lease', build: 1.1 },
+  retail: { plot: 'shops', park: 100, earns: 'sale', build: 1 },
+  // a hotel: a car per four rooms of about 30 m² carpet each (placeholder: UDCPR Table 8-B goes by rooms and city
+  // class); dearer to build for its services and fit-out (placeholder)
+  hotel: { plot: 'commercial', park: 120, earns: 'operate', build: 1.6 },
+  // assembly by the seats it holds: a community hall a seat per 1.5 m² of carpet, a library a reader per 4 m², a car
+  // per 40 and 25 seats (placeholders)
+  library: { plot: 'government', park: 100, earns: 'public', build: 1.1 },
+  community: { plot: 'government', park: 60, earns: 'public', build: 1.1 },
+  // a public toilet needs no parking of its own; its tiling and fittings cost more a m² (placeholder)
+  toilet: { plot: 'government', park: 0, earns: 'public', build: 1.3 },
+  school: { plot: 'school', park: 200, earns: 'public', build: 1 },
+  clinic: { plot: 'hospital', park: 100, earns: 'public', build: 1.2 },
+  // a parking floor holds cars rather than needing them; free of FSI, priced at the parking rate
+  parking: { plot: 'carpark', park: 0, earns: 'public', build: 0 },
+};
+const KIND_OF_PLOT: Partial<Record<PlotUse, FloorUse>> = { residential: 'residential', commercial: 'office', shops: 'retail', school: 'school', hospital: 'clinic', government: 'library', carpark: 'parking' };
+/** A laid floor's use: its own, else the one its plot use stands for, else the building's. */
+export const floorKind = (f: LaidFloor, use: PlotUse): FloorUse => f.kind ?? KIND_OF_PLOT[f.use ?? use] ?? (use === 'residential' ? 'residential' : 'office');
+/** A laid floor counts in the built-up area (FSI) unless it's parking. */
+export const laidBua = (L: Laid, use: PlotUse = 'residential') => L.floors.reduce((s, f) => s + (floorKind(f, use) === 'parking' ? 0 : f.area), 0);
+/** A building's built-up area: its floors' own when it's formed, else the plate on every floor. */
+export const buaOf = (b: Pick<BuildingReport, 'laid' | 'plate' | 'floors' | 'use'>) => (b.laid ? laidBua(b.laid, b.use) : b.plate * b.floors);
 
 /** Things on the site besides the buildings: a parking building, a surface lot and a garden are areas (a ring, drawn
  *  or dragged out; the lot and the garden laid out on what the roads and buildings leave of them); an internal road
@@ -131,7 +209,7 @@ export interface PlotSite {
   stilt: boolean; podium: number; basements: number; surface?: boolean;
   /** surface bays as asked for (unset: the optimiser's call) */
   surfacePick?: boolean;
-  cost: Partial<Costs>;
+  cost: Partial<Costs & UseRates>;
   /** what the optimiser is asked for; the buildings are its until they're shaped by hand (`manual`) */
   design?: import('./optimise').Design;
   manual?: boolean;
@@ -224,6 +302,17 @@ export interface BuildingReport {
   use: PlotUse;
   /** floors (of flats, over the stilt and podium) the height limit allows; whether it's taller than that */
   allowedFloors: number; overHeight: boolean;
+  /** a formed building's floors as laid (its `units` and `cores` are then the floor with the most units: `typical`,
+   *  an index into laid.floors, repeated on `repeats` floors of the same use and as many units) */
+  laid?: Laid; typical?: number; repeats?: number;
+}
+
+/** What a use brings in or costs, summed over the scheme (for a line per use in the money). */
+export interface UseLine {
+  use: FloorUse; floors: number; area: number; carpet: number; units: number;
+  earns: 'sale' | 'lease' | 'operate' | 'public';
+  /** ₹: sold, or the let or run building's value at its yield (0 for public uses) */
+  value: number;
 }
 
 /** Where the project departs from the rules: flagged, never refused. `key` is stable (a note typed against it
@@ -266,8 +355,13 @@ export interface SiteReport {
     levels: Level[];
   };
   money: {
-    costs: Costs;
+    costs: Costs & UseRates;
     revenue: number;
+    /** of the revenue: sales booked as the building goes up, and the let or run buildings' value at their yields,
+     *  realised once they're leased up (LEASE_UP months after completion) */
+    sales: number; exit: number;
+    /** by use, when a building is formed (empty otherwise); whether anything earns at all (a public scheme only costs) */
+    uses: UseLine[]; earns: boolean;
     land: number; premium: number; tdr: number; ancillary: number; build: number; parking: number; soft: number;
     cost: number; profit: number; margin: number;
     /** month by month: net cash, and the running total */
@@ -416,13 +510,15 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
   const fits = (quads: number[][], h: number) => { const e = envAt(h); return e.length >= 6 && quads.every((q) => ringInside(q, e)); };
   const maxN = Math.max(0, Math.floor(R.maxH / fh + 1e-6) - under);
 
-  // plates, the most floors each can take, and whether buildings run into each other
+  // plates, the most floors each can take, and whether buildings run into each other. A formed building is its
+  // outline cut into convex pieces (the clash and margin checks want convex rings) and its ground floor's area.
   const B = site.buildings.filter((b) => b.spine.length >= 4).map((b) => {
-    const quads = buildingQuads(b);
-    const plate = quads.reduce((s, q) => s + polyArea(q), 0);
+    const L = laidOf(b);
+    const quads = L ? convexPieces(L.outline) : buildingQuads(b);
+    const plate = L ? L.floors[0].area : quads.reduce((s, q) => s + polyArea(q), 0);
     let most = 0;
     while (most < maxN && fits(quads, (most + 1 + under) * fh)) most++;
-    return { b, quads, plate, most, floors: 0, overlap: false, zone: false };
+    return { b, L, quads, plate, most, floors: 0, overlap: false, zone: false };
   });
   // (on a no-build zone or an obstruction's clearance)
   for (const x of B) if (site.keepOut?.length && x.quads.some((a) => site.keepOut!.some((k) => k.length >= 6 && mpArea(inter(fromFlat(a), fromFlat(k))) > 0.5))) x.zone = true;
@@ -435,37 +531,46 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
   const decks = els.filter((e) => e.kind === 'parking').map(ringOf);
   for (const x of B) if (x.quads.some((a) => solid.some((c) => convexOverlap(a, c)) || decks.some((c) => mpArea(inter(fromFlat(a), fromFlat(c))) > 0.5))) x.overlap = true;
   // floors: as asked, then the rest of the FSI shared out a floor at a time, lowest building first
+  // (a formed building's floors are its form's: they don't take a share of what's left)
   let used = 0;
-  for (const x of B) if (x.b.floors > 0) { x.floors = x.b.floors; used += x.floors * x.plate; }
+  for (const x of B) if (x.L) { x.floors = x.L.floors.length; used += laidBua(x.L, useOf(x.b)); } else if (x.b.floors > 0) { x.floors = x.b.floors; used += x.floors * x.plate; }
   for (;;) {
     let pick: (typeof B)[number] | null = null;
-    for (const x of B) if (!x.b.floors && x.floors < x.most && used + x.plate <= r.bua + 0.5 && (!pick || x.floors < pick.floors)) pick = x;
+    for (const x of B) if (!x.L && !x.b.floors && x.floors < x.most && used + x.plate <= r.bua + 0.5 && (!pick || x.floors < pick.floors)) pick = x;
     if (!pick) break;
     pick.floors++;
     used += pick.plate;
   }
   // an automatic building that doesn't fit even one floor still shows (as a clash) with one
-  for (const x of B) if (!x.b.floors && !x.floors && x.plate > 0) { x.floors = 1; used += x.plate; }
+  for (const x of B) if (!x.L && !x.b.floors && !x.floors && x.plate > 0) { x.floors = 1; used += x.plate; }
 
-  // flats, floor by floor the same: cores, corridors and flats along every wing
+  // flats, floor by floor the same: cores, corridors and flats along every wing (a formed building's floors are
+  // each their own, as its form laid them; its height is theirs, on the stilt and podium, with the roof's share)
   const placed = [0, 0, 0];
   const buildings: BuildingReport[] = B.map((x) => {
-    const height = (x.floors + under) * fh;
-    const bu = useOf(x.b);
+    const L = x.L;
+    const height = L ? L.floors.reduce((s, f) => s + f.h, 0) + under * fh + (L.roof ?? 0) : (x.floors + under) * fh;
+    const bu0 = useOf(x.b);
     // (a building with its own mix lays its flats by it, counted on its own)
-    const lay = x.b.mix ? layFloor(x.b, { ...site, mix: x.b.mix }, bu, height, [0, 0, 0]) : layFloor(x.b, site, bu, height, placed);
+    const lay: Pick<BuildingReport, 'units' | 'cores' | 'corridors' | 'perFloor' | 'laid' | 'typical' | 'repeats'> = L ? layLaid(L, bu0) : x.b.mix ? layFloor(x.b, { ...site, mix: x.b.mix }, bu0, height, [0, 0, 0]) : layFloor(x.b, site, bu0, height, placed);
+    // (a formed building counts as the use of its typical floor)
+    const bu = L && lay.typical !== undefined ? FLOOR_USE[floorKind(L.floors[lay.typical], bu0)].plot : bu0;
     const clash = x.overlap ? 'overlap' : x.zone ? 'zone' : !fits(x.quads, height) ? 'margins' : null;
-    const fire = height > FIRE_H ? fireBand(x.b) : [];
+    const fire = height > FIRE_H ? (L ? fireBandOf(L.outline) : fireBand(x.b)) : [];
     const fireOk = fire.every((q) => onSite(r, q) && B.every((y) => y === x || !y.quads.some((c) => convexOverlap(q, c))));
     return { b: x.b, quads: x.quads, plate: x.plate, ...lay, floors: x.floors, height, clash, maxFloors: x.most, fire, fireOk, use: bu, allowedFloors: maxN, overHeight: height > R.maxH + 1e-6 };
   });
 
+  // counts and carpet: a plain building's typical floor on every floor, a formed one's floor by floor
   const count: [number, number, number, number] = [0, 0, 0, 0];
   let carpet = 0, bua = 0, plate = 0, height = 0;
   for (const b of buildings) {
-    for (let t = 0; t < 4; t++) count[t] += b.perFloor[t] * b.floors;
-    carpet += b.units.reduce((s, u) => s + u.carpet, 0) * b.floors;
-    bua += b.plate * b.floors;
+    if (b.laid) for (const f of b.laid.floors) for (const u of f.units) { count[u.t]++; carpet += u.carpet; }
+    else {
+      for (let t = 0; t < 4; t++) count[t] += b.perFloor[t] * b.floors;
+      carpet += b.units.reduce((s, u) => s + u.carpet, 0) * b.floors;
+    }
+    bua += buaOf(b);
     plate += b.plate;
     height = Math.max(height, b.height);
   }
@@ -474,13 +579,22 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
   // parking: UDCPR Table 8-B per flat by carpet area, 5 % for visitors; offices one car and two scooters per 100 m²;
   // industry a car per 300 m² and a truck bay per 1,000 m² (each truck bay counted as three car bays)
   // (other uses a car per so many m² of carpet: placeholders where the code has no table of its own; a building with
-  // no use yet asks for none)
+  // no use yet asks for none). A formed building parks floor by floor, each floor by its own use (FLOOR_USE).
   let cars = 0, scooters = 0, trucks = 0;
-  for (const b of buildings) for (const u of b.units) {
-    if (b.use === 'industrial') { cars += (u.carpet / 300) * b.floors; scooters += (u.carpet / 150) * b.floors; trucks += (u.carpet / 1000) * b.floors; continue; }
-    if (u.t === 3) { const per = PARK_PER[b.use] ?? 0; if (per) { cars += (u.carpet / per) * b.floors; scooters += ((2 * u.carpet) / per) * b.floors; } continue; }
-    cars += (u.carpet >= 150 ? 2 : u.carpet >= 80 ? 1 : u.carpet >= 30 ? 0.5 : 0) * b.floors;
-    scooters += b.floors;
+  const parkUnit = (u: Unit, n: number, per: number) => {
+    if (u.t === 3) { if (per) { cars += (u.carpet / per) * n; scooters += ((2 * u.carpet) / per) * n; } return; }
+    cars += (u.carpet >= 150 ? 2 : u.carpet >= 80 ? 1 : u.carpet >= 30 ? 0.5 : 0) * n;
+    scooters += n;
+  };
+  for (const b of buildings) {
+    if (b.laid) {
+      for (const f of b.laid.floors) { const k = floorKind(f, b.use); for (const u of f.units) parkUnit(u, 1, k === 'residential' ? PARK_PER.commercial! : FLOOR_USE[k].park); }
+      continue;
+    }
+    for (const u of b.units) {
+      if (b.use === 'industrial') { cars += (u.carpet / 300) * b.floors; scooters += (u.carpet / 150) * b.floors; trucks += (u.carpet / 1000) * b.floors; continue; }
+      parkUnit(u, b.floors, PARK_PER[b.use] ?? 0);
+    }
   }
   cars = Math.ceil(cars * 1.05); scooters = Math.ceil(scooters * 1.05);
   trucks = Math.ceil(trucks);
@@ -506,16 +620,17 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
   if (buildings.length) {
     if (site.stilt) {
       const bays: number[][] = [];
-      for (const b of buildings) bays.push(...stiltBays(b));
+      for (const b of buildings) bays.push(...(b.laid ? laidStiltBays(b, [F0.ux, F0.uz]) : stiltBays(b)));
       levels.push({ kind: 'stilt', bays, ramp: null, area: plate });
     }
     const F = roadFrame(r);
-    // podium levels under the buildings (not the whole envelope: that's a car park the size of the plot)
+    // podium levels under the buildings (not the whole envelope: that's a car park the size of the plot); under a
+    // formed building, its outline's convex hull (its pieces are too small to park in one by one)
     for (let k = 0; k < site.podium; k++) {
       const lv: Level = { kind: 'podium', bays: [], ramp: null, area: 0 };
       const cores = buildings.flatMap((b) => b.cores);
       lv.columns = []; lv.stairs = [];
-      for (const b of buildings) for (const q of b.quads) {
+      for (const b of buildings) for (const q of b.laid ? [hull(b.laid.outline)] : b.quads) {
         const l = levelIn('podium', q, F, { floorH: fh, cores, ramp: !lv.ramp });
         lv.bays.push(...l.bays); lv.ramp ??= l.ramp; lv.area += l.area; lv.columns.push(...(l.columns ?? [])); lv.stairs.push(...(l.stairs ?? []));
       }
@@ -541,35 +656,63 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
       levels.push({ kind: 'structure', bays: lay.bays.slice(ramp.length), ramp: rq, area: mpArea(P) });
     }
   }
+  // a formed building's parking floors, bay by bay on their slabs (ramps not drawn)
+  for (const b of buildings) for (const f of b.laid?.floors ?? []) {
+    if (floorKind(f, b.use) !== 'parking') continue;
+    const ring = f.ring && f.ring.length >= 6 ? f.ring : b.laid!.outline, P = fromFlat(ring);
+    const bays = layBays(shrink(P, 0.6), anglesFor(P, [F0.ux, F0.uz]), false).bays.filter((q) => !b.cores.some((c) => convexOverlap(q, c)));
+    levels.push({ kind: 'structure', bays, ramp: null, area: f.area });
+  }
   laid.lotBays.forEach((l) => levels.push({ kind: 'lot', bays: l.bays, ramp: null, area: l.bays.length * BAY_W * BAY_L }));
   const have = levels.reduce((s, l) => s + l.bays.length, 0);
 
   // money: land, the FSI bought (premium, TDR, ancillary, in that order of need), building, parking, soft costs
-  const rate = { ...defaultCosts(r.code, use), ...site.cost };
+  const rate = { ...defaultCosts(r.code, use), ...useRates(r.code), ...site.cost };
   const consumed = bua / (1 + R.ancillary), anc = bua - consumed;
   const free = r.parts.basic + r.parts.credit;
   const prem = Math.min(r.parts.premium, Math.max(0, consumed - free));
   const tdr = Math.max(0, consumed - free - prem);
   const parkArea = levels.reduce((s, l) => s + (l.kind === 'surface' || l.kind === 'lot' ? 0 : l.area), 0);
+  // (a formed building's floors are built at their own use's rate over the base)
+  const buildArea = buildings.reduce((s, b) => s + (b.laid ? b.laid.floors.reduce((a, f) => a + f.area * FLOOR_USE[floorKind(f, b.use)].build, 0) : buaOf(b)), 0);
   const m = {
     land: r.area * SQFT * rate.land,
     premium: prem * SQFT * rate.asr * rate.premiumPct / 100,
     tdr: tdr * SQFT * rate.asr * rate.tdrPct / 100,
     ancillary: anc * SQFT * rate.asr * rate.ancillaryPct / 100,
-    build: bua * SQFT * rate.build,
+    build: buildArea * SQFT * rate.build,
     parking: parkArea * SQFT * rate.parking,
     soft: 0,
   };
   m.soft = (m.build + m.parking) * rate.soft / 100;
   const cost = m.land + m.premium + m.tdr + m.ancillary + m.build + m.parking + m.soft;
-  // sold or let: the uses that sell, or any once a sale rate is put in
+  // sold or let: the uses that sell, or any once a sale rate is put in. A formed building's floors go by their own
+  // use: homes and shops sold; offices let and hotels run, each valued at its yield so the profit and the IRR stay
+  // comparable with a sale; public floors earn nothing.
   const sells = (b: BuildingReport) => useInfo(b.use).sells || site.cost.sale !== undefined;
-  const revenue = buildings.reduce((s, b) => s + (sells(b) ? b.units.reduce((a, u) => a + u.carpet, 0) * b.floors : 0), 0) * SQFT * rate.sale;
-  const cash = cashflow(m.land + m.premium + m.tdr + m.ancillary, m.build + m.parking + m.soft, revenue, rate);
+  const uses = new Map<FloorUse, UseLine>();
+  let sales = 0, exit = 0;
+  for (const b of buildings) {
+    if (!b.laid) { if (sells(b)) sales += b.units.reduce((a, u) => a + u.carpet, 0) * b.floors * SQFT * rate.sale; continue; }
+    for (const f of b.laid.floors) {
+      const k = floorKind(f, b.use), earns = FLOOR_USE[k].earns, c = f.units.reduce((a, u) => a + u.carpet, 0) * SQFT;
+      const value = earns === 'sale' ? c * (k === 'retail' ? rate.retail ?? rate.sale * SHOP_RATE : rate.sale)
+        : earns === 'lease' ? (c * rate.officeRent * 12 * (1 - OFFICE_VOID)) / (rate.officeYield / 100)
+        : earns === 'operate' ? (c * rate.hotelNoi) / (rate.hotelYield / 100) : 0;
+      if (earns === 'sale') sales += value; else exit += value;
+      const line = uses.get(k) ?? { use: k, floors: 0, area: 0, carpet: 0, units: 0, earns, value: 0 };
+      line.floors++; line.area += f.area; line.carpet += c / SQFT; line.units += f.units.length; line.value += value;
+      uses.set(k, line);
+    }
+  }
+  const revenue = sales + exit;
+  const cash = cashflow(m.land + m.premium + m.tdr + m.ancillary, m.build + m.parking + m.soft, sales, rate, exit);
+  const earnsAny = buildings.some((b) => (b.laid ? b.laid.floors.some((f) => FLOOR_USE[floorKind(f, b.use)].earns !== 'public') : sells(b)));
 
   // open ground: the net plot less the buildings, the roads and the lots; green: the gardens as they're left
   const openHave = laid.map.openArea;
-  const openNeed = r.area >= RG_FROM && (buildings.some((b) => b.use === 'residential') || (!buildings.length && use === 'residential')) ? r.area * RG_SHARE : 0;
+  const homes = (b: BuildingReport) => b.use === 'residential' || !!b.laid?.floors.some((f) => floorKind(f, b.use) === 'residential');
+  const openNeed = r.area >= RG_FROM && (buildings.some(homes) || (!buildings.length && use === 'residential')) ? r.area * RG_SHARE : 0;
   const green = laid.map.gardenArea;
 
   const out: SiteReport = {
@@ -582,13 +725,13 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
     known: {
       building: buildings.length > 0,
       use: buildings.some((b) => b.use !== 'none') || (!buildings.length && use !== 'none'),
-      money: buildings.some(sells),
+      money: earnsAny,
     },
     departures: [],
     open: { need: openNeed, have: openHave, green: Math.max(0, green) },
     ground,
     parking: { cars, scooters, trucks, need, have, levels },
-    money: { costs: rate, revenue, ...m, cost, profit: revenue - cost, margin: revenue ? (revenue - cost) / revenue : 0, ...cash },
+    money: { costs: rate, revenue, sales, exit, uses: [...uses.values()], earns: earnsAny, ...m, cost, profit: revenue - cost, margin: revenue ? (revenue - cost) / revenue : 0, ...cash },
   };
   out.departures = departuresOf(r, out);
   return out;
@@ -792,6 +935,55 @@ function layFloorAs(b: SiteBuilding, site: PlotSite, use: PlotUse, height: numbe
   return { units, cores, corridors, perFloor };
 }
 
+// ---------------- formed buildings ----------------
+
+/** A building's laid floors, when it has any worth counting. */
+const laidOf = (b: SiteBuilding): Laid | null => (b.laid && b.laid.floors.length && b.laid.outline.length >= 6 ? b.laid : null);
+
+/** An outline (any shape) as convex pieces: its triangles, so the separating-axis clash test and the vertex-by-vertex
+ *  margin test work on a curved or notched plan as they do on a wing's quad. */
+function convexPieces(outline: number[]): number[][] {
+  const t = triangles(fromFlat(outline)).filter((q) => polyArea(q) > 1e-3);
+  return t.length ? t : [outline];
+}
+
+/** A formed building's typical floor (the one with the most units, the lowest of equals), for whatever reads one
+ *  floor: the windows and doors, the rooms, the systems' shafts. */
+function layLaid(L: Laid, use: PlotUse) {
+  let typ = 0;
+  L.floors.forEach((f, i) => { if (f.units.length > L.floors[typ].units.length) typ = i; });
+  const T = L.floors[typ], k = floorKind(T, use);
+  const perFloor: [number, number, number, number] = [0, 0, 0, 0];
+  for (const u of T.units) perFloor[u.t]++;
+  const repeats = L.floors.filter((f) => floorKind(f, use) === k && f.units.length === T.units.length).length;
+  return { units: T.units, cores: L.cores, corridors: [] as number[][], perFloor, laid: L, typical: typ, repeats };
+}
+
+/** The fire tender's way round a formed building: its outline grown by the way's width, less the outline, in pieces. */
+function fireBandOf(outline: number[]): number[][] {
+  const P = fromFlat(outline);
+  return triangles(diff(offset(P, FIRE_W), P)).filter((q) => polyArea(q) > 1e-3);
+}
+
+/** Bays on the stilt under a formed building: across its lowest floor, clear of the cores. */
+function laidStiltBays(b: BuildingReport, axis: [number, number]): number[][] {
+  const f = b.laid!.floors[0], ring = f.ring && f.ring.length >= 6 ? f.ring : b.laid!.outline, P = fromFlat(ring);
+  return layBays(shrink(P, 0.6), anglesFor(P, axis), false).bays.filter((q) => !b.cores.some((c) => convexOverlap(q, c)));
+}
+
+/** The convex hull of a ring (x,z,…), anticlockwise. */
+function hull(r: number[]): number[] {
+  const P: [number, number][] = [];
+  for (let i = 0; i < r.length; i += 2) P.push([r[i], r[i + 1]]);
+  P.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (P.length < 3) return r;
+  const cross = (o: number[], a: number[], b: number[]) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo: [number, number][] = [], hi: [number, number][] = [];
+  for (const p of P) { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+  for (const p of [...P].reverse()) { while (hi.length >= 2 && cross(hi[hi.length - 2], hi[hi.length - 1], p) <= 0) hi.pop(); hi.push(p); }
+  return [...lo.slice(0, -1), ...hi.slice(0, -1)].flat();
+}
+
 // ---------------- the ground round the buildings ----------------
 
 /** The compound wall along the plot (behind the DP road line), gates onto the roads, and, once a building tops
@@ -951,8 +1143,10 @@ function openGround(net: number[], taken: number[][]): number {
 /** Month by month. Month 0: the land and the FSI bought. Construction (with parking and soft costs) along an
  *  S-curve over the build. Flats are booked steadily from month 3 (the presold share by completion, the rest over
  *  the year after) and buyers pay as the building goes up (RERA stage payments), the balance on possession. */
-export function cashflow(upfront: number, build: number, revenue: number, c: Costs) {
+export function cashflow(upfront: number, build: number, revenue: number, c: Costs, exit = 0) {
   const T = Math.max(6, Math.round(c.months)), pre = Math.max(0, Math.min(100, c.presold)) / 100, end = T + 12;
+  // (what's let or run comes in as its value once it's leased up or open: as if sold on, or refinanced, then)
+  const exitAt = Math.min(end, T + LEASE_UP);
   const progress = (t: number) => (t >= T ? 1 : t <= 0 ? 0 : Math.sin((Math.PI / 2) * (t / T)) ** 2);
   const booked = (t: number) => (t < 3 ? 0 : t <= T ? (pre * (t - 3)) / (T - 3) : pre + ((1 - pre) * Math.min(t - T, 12)) / 12);
   const flow: number[] = [], cum: number[] = [];
@@ -960,7 +1154,7 @@ export function cashflow(upfront: number, build: number, revenue: number, c: Cos
   for (let t = 0; t <= end; t++) {
     const spend = t === 0 ? upfront : build * (progress(t) - progress(t - 1));
     const due = revenue * booked(t) * progress(t);
-    const f = due - paid - spend;
+    const f = due - paid - spend + (t === exitAt ? exit : 0);
     paid = due;
     flow.push(f); run += f; cum.push(run);
   }

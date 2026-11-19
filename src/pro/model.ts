@@ -11,7 +11,7 @@ import type { Evaluated } from './evaluate';
 import type { FlatRooms } from './rooms';
 import { outline, roadLines } from './project';
 import { CITIES } from './project';
-import { UNIT_LABEL } from '../doc/site';
+import { floorKind, UNIT_LABEL, type FloorUse } from '../doc/site';
 
 export interface ModelRoom { kind: string; name: string; area: number; ring: number[] }
 export interface ModelOpening { tag: string; w: number; h: number; sill: number; x: number; z: number }
@@ -20,8 +20,11 @@ export interface ModelFloor {
   level: number;
   /** its floor's height above the ground (m), and floor to floor */
   z: number; height: number;
-  use: 'stilt' | 'flats' | 'shops' | 'parking';
+  /** a formed building's floors are each their own use (FloorUse) */
+  use: 'stilt' | 'flats' | 'shops' | 'parking' | FloorUse;
   units: ModelUnit[];
+  /** a formed building's floor: its slab outline(s) after carves (x,z,…) and its area */
+  outline?: number[][]; area?: number;
   /** parking bays on the level */
   bays?: number;
 }
@@ -58,6 +61,23 @@ export function buildModel(e: Evaluated, rooms: FlatRooms[][]): ProModel {
       const shopUnits: ModelUnit[] = k === 0 ? strips.map((s, si) => ({ id: `${bi}-G-S${si + 1}`, type: 'shop', carpet: r2(s.area * 0.8), ring: rr(s.ring), rooms: [], openings: [] })) : [];
       const stiltBays = d.parking.levels.filter((l) => l.kind === 'stilt' || l.kind === 'podium')[k]?.bays.length;
       floors.push({ level: k, z: k * fh, height: fh, use: shopUnits.length ? 'shops' : 'stilt', units: shopUnits, ...(stiltBays ? { bays: stiltBays } : {}) });
+    }
+    // a formed building: each floor as its form laid it, at its own height and use (the rooms, windows and doors on
+    // its typical floor, which they're worked out for; the other floors' units as outlines)
+    const form = e.forms[b.b.id];
+    if (b.laid) {
+      let z = under * fh;
+      b.laid.floors.forEach((lf, f) => {
+        const level = under + f, tag = `${bi}-${level}`, typ = f === b.typical, kind = floorKind(lf, b.use);
+        const units: ModelUnit[] = lf.units.map((u, ui) => ({
+          id: `${tag}-${ui + 1}`, type: u.t === 3 ? kind : (UNIT_LABEL[u.t] ?? 'unit'), carpet: r2(u.carpet), ring: rr(u.ring),
+          rooms: typ ? (rooms[bi]?.[ui]?.rooms ?? []).map((x) => ({ kind: x.kind, name: x.name, area: r2(x.area), ring: rr(x.ring) })) : [],
+          openings: typ ? plans[bi].openings.filter((x) => x.unit === ui).map((x) => ({ tag: x.tag, w: x.w, h: x.h, sill: x.sill, x: r2(x.x), z: r2(x.z) })) : [],
+        }));
+        floors.push({ level, z: r2(z), height: r2(lf.h), use: kind === 'residential' ? 'flats' : kind, units, outline: (form?.floors[f]?.rings ?? (lf.ring ? [lf.ring] : [])).map(rr), area: r2(lf.area) });
+        z += lf.h;
+      });
+      return { id: b.b.id, name, floors, cores: b.cores.map(rr) };
     }
     // the floors of flats: the typical floor repeated
     const gone = shops?.removed.get(bi), upper = shops?.upperOf[bi] ?? 0;

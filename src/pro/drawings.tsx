@@ -10,7 +10,8 @@
 // everything before it goes in for approval.
 import { featureOf } from './siteObjects';
 import type { ComponentChildren, JSX } from 'preact';
-import { SQFT, UNIT_COLOR, UNIT_LABEL } from '../doc/site';
+import { floorKind, SQFT, UNIT_COLOR, UNIT_LABEL, type FloorUse } from '../doc/site';
+import { USE_LABEL } from './deal';
 import type { Evaluated } from './evaluate';
 import { outline, roadLines } from './project';
 
@@ -35,7 +36,7 @@ function planFrame(x0: number, z0: number, x1: number, z1: number, box = AREA) {
 
 function Frame({ e, title, no, scale, children }: { e: Evaluated; title: string; no: number; scale: string; children: ComponentChildren }) {
   const tx = W - PAD - TB, d = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-  const rows: [string, string][] = [['Project', e.p.name], ['Sheet', `${no} of 4 · ${title}`], ['Scale', scale], ['Rules', e.r.code === 'udcpr' ? 'UDCPR 2020' : 'DCPR 2034'], ['Date', d]];
+  const rows: [string, string][] = [['Project', e.p.name], ['Sheet', `${no} of ${4 + formedSheets(e).length} · ${title}`], ['Scale', scale], ['Rules', e.r.code === 'udcpr' ? 'UDCPR 2020' : 'DCPR 2034'], ['Date', d]];
   return (
     <section class="sheet">
       <svg viewBox={`0 0 ${W} ${H}`} width={`${W}mm`} height={`${H}mm`} xmlns="http://www.w3.org/2000/svg" font-family="Helvetica, Arial, sans-serif">
@@ -144,7 +145,7 @@ function SitePlan({ e }: { e: Evaluated }) {
         })}
         {fp.length >= 6 && <polygon points={pts(fp, T)} fill="none" stroke="#1b4fd8" stroke-width="0.3" stroke-dasharray="2 1" />}
         {surface.flatMap((l) => l.bays).map((b) => <polygon points={pts(b, T)} fill="none" stroke="#999" stroke-width="0.15" />)}
-        {d.buildings.map((b, i) => b.quads.map((q) => <polygon points={pts(q, T)} fill="#d9d4c8" stroke="#111" stroke-width="0.5" />).concat([
+        {d.buildings.map((b, i) => (b.laid ? [b.laid.outline] : b.quads).map((q) => <polygon points={pts(q, T)} fill="#d9d4c8" stroke="#111" stroke-width="0.5" />).concat([
           (() => { const [x, z] = mid(b.quads[0]); const [sx, sy] = T(x, z); return <g><text x={sx} y={sy} font-size="4" font-weight="700" text-anchor="middle">{`BUILDING ${String.fromCharCode(65 + i)}`}</text><text x={sx} y={sy + 4.5} font-size="2.6" text-anchor="middle">{`${d.under ? 'STILT + ' : ''}${b.floors} FLOORS · ${f2(b.height)} M`}</text></g>; })(),
         ]))}
         {/* the front and side margins, dimensioned from the margin line out to the plot's edge */}
@@ -187,7 +188,7 @@ function FloorPlan({ e }: { e: Evaluated }) {
       <g>
         {d.buildings.map((b, bi) => (
           <g>
-            {b.quads.map((q) => <polygon points={pts(q, T)} fill="#fff" stroke="#111" stroke-width="0.6" />)}
+            {(b.laid ? floorRings(e, bi, b.typical ?? 0) : b.quads).map((q) => <polygon points={pts(q, T)} fill="#fff" stroke="#111" stroke-width="0.6" />)}
             {b.corridors.map((c) => <polygon points={pts(c, T)} fill="#f1efe9" stroke="#777" stroke-width="0.2" />)}
             {b.units.map((u, ui) => {
               const [x, z] = mid(u.ring), [sx, sy] = T(x, z), shop = shops?.removed.get(bi)?.has(ui);
@@ -208,7 +209,7 @@ function FloorPlan({ e }: { e: Evaluated }) {
       </g>
       <g font-size="2.6">
         <text x={AREA.x} y={AREA.y + 4} font-weight="700">TYPICAL FLOOR</text>
-        <text x={AREA.x} y={AREA.y + 8}>{d.buildings.map((b, i) => `${String.fromCharCode(65 + i)}: ${b.floors} floors`).join(' · ')}</text>
+        <text x={AREA.x} y={AREA.y + 8}>{d.buildings.map((b, i) => `${String.fromCharCode(65 + i)}: ${b.laid ? `${b.repeats ?? 1} of ${b.floors} floors (the rest on its floor plans)` : `${b.floors} floors`}`).join(' · ')}</text>
         {shops && shops.removedFlats > 0 && <text x={AREA.x} y={AREA.y + 12}>* shops instead on the lower floors</text>}
         <text x={AREA.x} y={AREA.y + 16} fill="#1b4fd8">Windows (blue), doors (brown); tags as the schedule</text>
       </g>
@@ -225,7 +226,7 @@ function Elevation({ e }: { e: Evaluated }) {
   const spans = d.buildings.map((b) => { let a = Infinity, c = -Infinity; for (const q of b.quads) for (let i = 0; i < q.length; i += 2) { a = Math.min(a, q[i]); c = Math.max(c, q[i]); } return [a, c]; });
   let cursor = 0;
   const placed = spans.map(([a, c]) => { const w = c - a, x = cursor; cursor += w + 8; return { x, w }; });
-  const totalW = Math.max(10, cursor - 8), totalH = Math.max(...d.buildings.map((b) => (under + b.floors) * fh + 4), 10);
+  const totalW = Math.max(10, cursor - 8), totalH = Math.max(...d.buildings.map((b) => (b.laid ? b.height : (under + b.floors) * fh) + 4), 10);
   const need = Math.max((totalW + 20) * 1000 / AREA.w, (totalH + 12) * 1000 / AREA.h);
   const scale = SCALES.find((s) => s >= need) ?? 2000, k = 1000 / scale;
   const gx = AREA.x + (AREA.w - totalW * k) / 2, gy = AREA.y + AREA.h - 18;
@@ -236,6 +237,25 @@ function Elevation({ e }: { e: Evaluated }) {
       <text x={AREA.x} y={gy + 4} font-size="2.4">GROUND LEVEL ±0.00</text>
       {d.buildings.map((b, bi) => {
         const { x, w } = placed[bi], top = (under + b.floors) * fh;
+        if (b.laid) {
+          // a formed building: each floor at its own height, as wide as its own outline (a taper or a lean shows)
+          const x0 = spans[bi][0];
+          let y = under * fh;
+          return <g>
+            {b.laid.floors.map((f, fi) => {
+              let a = Infinity, c = -Infinity;
+              for (const q of floorRings(e, bi, fi)) for (let i = 0; i < q.length; i += 2) { a = Math.min(a, q[i]); c = Math.max(c, q[i]); }
+              const y0 = y; y += f.h;
+              return <g>
+                <rect x={X(x + a - x0)} y={Y(y0 + f.h)} width={Math.max(0, c - a) * k} height={f.h * k} fill={floorKind(f, b.use) === 'residential' ? ds.facade.wall : '#cfe3f3'} stroke="#111" stroke-width="0.3" />
+                <text x={X(x) - 1.5} y={Y(y0 + f.h / 2) + 0.8} font-size="1.9" text-anchor="end">{`${fi + 1}F +${f2(y0)}`}</text>
+              </g>;
+            })}
+            <Dim a={[X(x + w) + 6, Y(0)]} b={[X(x + w) + 6, Y(b.height)]} label={`${f2(b.height)} M`} />
+            <text x={X(x + w / 2)} y={gy + 8} font-size="3" font-weight="700" text-anchor="middle">{`BUILDING ${String.fromCharCode(65 + bi)}`}</text>
+            <text x={X(x + w / 2)} y={gy + 12} font-size="2.3" text-anchor="middle">{`${under ? 'Stilt + ' : ''}${b.floors} floors${b.laid.roof ? ', height to the middle of the roof' : ''}`}</text>
+          </g>;
+        }
         const shopFloors = shops && shops.strips.some((s) => s.b === bi) ? 1 + shops.upperOf[bi] : 0;
         return (
           <g>
@@ -283,13 +303,14 @@ function AreaStatement({ e }: { e: Evaluated }) {
   row('Total permissible', r.bua);
   h('PROPOSED BUILT-UP AREA');
   if (shops) row('Ground floor shops', shops.ground);
-  d.buildings.forEach((b, i) => { const plate = b.quads.reduce((s, q) => { let a = 0; for (let j = 0; j < q.length; j += 2) { const k = (j + 2) % q.length; a += q[j] * q[k + 1] - q[k] * q[j + 1]; } return s + Math.abs(a / 2); }, 0); row(`Building ${String.fromCharCode(65 + i)}: ${b.floors} floors × ${f2(plate)} m²`, plate * b.floors); });
+  d.buildings.forEach((b, i) => { if (b.laid) { formedGroups(e, i).forEach((g) => row(`Building ${String.fromCharCode(65 + i)}: ${levelsName(g.a, g.z).toLowerCase()} ${USE_LABEL[g.kind].toLowerCase()}, ${g.z - g.a + 1} × ${f2(g.area)} m²${g.kind === 'parking' ? ' (free of FSI)' : ''}`, g.kind === 'parking' ? 0 : g.area * (g.z - g.a + 1))); return; } const plate = b.quads.reduce((s, q) => { let a = 0; for (let j = 0; j < q.length; j += 2) { const k = (j + 2) % q.length; a += q[j] * q[k + 1] - q[k] * q[j + 1]; } return s + Math.abs(a / 2); }, 0); row(`Building ${String.fromCharCode(65 + i)}: ${b.floors} floors × ${f2(plate)} m²`, plate * b.floors); });
   row('Total proposed', d.bua);
   row('FSI used', f2(d.fsi));
   rows.push(['Balance', `${f2(d.left)} m²`]);
   h('CARPET (RERA)');
   [0, 1, 2].forEach((t) => { if (d.count[t]) rows.push([`${UNIT_LABEL[t]}`, `${d.count[t]} flats`]); });
   if (shops) rows.push(['Shops', `${shops.count} · ${f2(shops.carpet)} m²`]);
+  for (const x of d.money.uses) if (x.use !== 'residential') rows.push([USE_LABEL[x.use], `${x.units} unit${x.units === 1 ? '' : 's'} · ${f2(x.carpet)} m²`]);
   row('Total carpet (flats)', d.carpet);
   rows.push(['', `${nf(d.carpet * SQFT)} sq ft`]);
   h('PARKING');
@@ -311,6 +332,65 @@ function AreaStatement({ e }: { e: Evaluated }) {
   );
 }
 
+// ---------------- formed buildings: a plan per distinct floor ----------------
+
+/** a formed building's floor as built (its rings after carves), from the form's layout, else its slab outline */
+function floorRings(e: Evaluated, bi: number, fi: number): number[][] {
+  const b = e.d.buildings[bi], f = e.forms[b.b.id]?.floors[fi];
+  return f?.rings.length ? f.rings : [b.laid?.floors[fi]?.ring ?? b.laid?.outline ?? []];
+}
+/** "LEVELS 3–12", "LEVEL 2" (the ground is level 0; the stilt and podium count) */
+const levelsName = (a: number, z: number) => (a === z ? `LEVEL ${a}` : `LEVELS ${a}–${z}`);
+interface FloorGroup { a: number; z: number; fi: number; kind: FloorUse; area: number }
+/** a formed building's floors in runs of identical ones (the same use, units and outline share one plan) */
+function formedGroups(e: Evaluated, bi: number): FloorGroup[] {
+  const b = e.d.buildings[bi], L = b.laid;
+  if (!L) return [];
+  const sig = (i: number) => `${floorKind(L.floors[i], b.use)}|${L.floors[i].units.length}|${floorRings(e, bi, i).map((q) => q.map((v) => Math.round(v * 10)).join()).join('/')}`;
+  const out: FloorGroup[] = [];
+  for (let i = 1, s0 = 0; i <= L.floors.length; i++) if (i === L.floors.length || sig(i) !== sig(s0)) { out.push({ a: e.d.under + s0, z: e.d.under + i - 1, fi: s0, kind: floorKind(L.floors[s0], b.use), area: L.floors[s0].area }); s0 = i; }
+  return out;
+}
+/** a sheet per formed building, at most twelve plans to a sheet */
+function formedSheets(e: Evaluated): { bi: number; groups: FloorGroup[] }[] {
+  const out: { bi: number; groups: FloorGroup[] }[] = [];
+  e.d.buildings.forEach((_, bi) => { const g = formedGroups(e, bi); for (let i = 0; i < g.length; i += 12) out.push({ bi, groups: g.slice(i, i + 12) }); });
+  return out;
+}
+
+/** Every distinct floor of a formed building, side by side at one scale. */
+function FormedPlans({ e, bi, groups, no }: { e: Evaluated; bi: number; groups: FloorGroup[]; no: number }) {
+  const b = e.d.buildings[bi], L = b.laid!;
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  for (let i = 0; i < L.outline.length; i += 2) { x0 = Math.min(x0, L.outline[i]); x1 = Math.max(x1, L.outline[i]); z0 = Math.min(z0, L.outline[i + 1]); z1 = Math.max(z1, L.outline[i + 1]); }
+  const cols = groups.length <= 1 ? 1 : groups.length <= 4 ? 2 : groups.length <= 9 ? 3 : 4, rowsN = Math.ceil(groups.length / cols);
+  const cw = AREA.w / cols, ch = (AREA.h - 8) / rowsN;
+  const fr = planFrame(x0 - 2, z0 - 2, x1 + 2, z1 + 2, { x: 0, y: 0, w: cw - 6, h: ch - 10 });
+  const fs = Math.min(2.2, Math.max(1, 0.8 * fr.k));
+  return (
+    <Frame e={e} title={`Floor plans, building ${String.fromCharCode(65 + bi)}`} no={no} scale={`1:${fr.scale}`}>
+      {groups.map((g, gi) => {
+        const ox = AREA.x + (gi % cols) * cw + 3, oy = AREA.y + 8 + Math.floor(gi / cols) * ch;
+        const T = (x: number, z: number): [number, number] => { const [u, v] = fr.T(x, z); return [u + ox, v + oy]; };
+        const f = L.floors[g.fi];
+        return <g>
+          {floorRings(e, bi, g.fi).map((q) => <polygon points={pts(q, T)} fill="#fff" stroke="#111" stroke-width="0.5" />)}
+          {f.units.map((u) => { const [sx, sy] = T(...mid(u.ring)); return <g>
+            <polygon points={pts(u.ring, T)} fill={UNIT_COLOR[u.t]} fill-opacity="0.22" stroke="#111" stroke-width="0.25" />
+            {fr.k >= 1 && <text x={sx} y={sy} font-size={fs} text-anchor="middle">{u.t === 3 ? `${f2(u.carpet)} m²` : UNIT_LABEL[u.t]}</text>}
+          </g>; })}
+          {b.cores.map((c) => <polygon points={pts(c, T)} fill="#bbb" stroke="#111" stroke-width="0.3" />)}
+          <text x={ox} y={oy + ch - 6} font-size="2.6" font-weight="700">{`${levelsName(g.a, g.z)} · ${USE_LABEL[g.kind].toUpperCase()}`}</text>
+          <text x={ox} y={oy + ch - 2.8} font-size="2.2">{`${f2(f.area)} m² a floor · ${f.units.length} unit${f.units.length === 1 ? '' : 's'} · ${f2(f.h)} m floor to floor`}</text>
+        </g>;
+      })}
+      <text x={AREA.x} y={AREA.y + 4} font-size="2.6" font-weight="700">{`BUILDING ${String.fromCharCode(65 + bi)}: EVERY DISTINCT FLOOR (LEVEL 0 THE GROUND)`}</text>
+      <North x={AREA.x + AREA.w - 8} y={AREA.y + 12} />
+      <ScaleBar x={AREA.x} y={AREA.y + AREA.h - 2} k={fr.k} scale={fr.scale} />
+    </Frame>
+  );
+}
+
 export function Sheets({ e }: { e: Evaluated }): JSX.Element {
   return (
     <div class="sheets">
@@ -318,6 +398,7 @@ export function Sheets({ e }: { e: Evaluated }): JSX.Element {
       <FloorPlan e={e} />
       <Elevation e={e} />
       <AreaStatement e={e} />
+      {formedSheets(e).map((x, i) => <FormedPlans e={e} bi={x.bi} groups={x.groups} no={5 + i} />)}
     </div>
   );
 }

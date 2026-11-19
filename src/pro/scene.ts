@@ -8,9 +8,14 @@
 // as the scheme changes) and shaded (the materials, the sun, the windows). X-ray is always shaded.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { PlotReport } from '../doc/plot';
 import { UNIT_COLOR, type SiteReport } from '../doc/site';
-import type { DesignSystem } from './design';
+import { finishOf, languageOf, type DesignSystem } from './design';
+import { materialOf } from './materials';
+import { DEFAULT_SITE } from '../doc/site';
+import { frameOf, layForm, type Form, type FormLayout } from './form';
+import { buildForm, disposeBuilt, layoutHash, type Built, type Look } from './form/mesh';
 import type { FloorPlan, Opening } from './openings';
 
 import { SHOP_W, type Shops } from './mixed';
@@ -29,7 +34,11 @@ export interface ViewData {
   rooms?: RoomsLike[][]; roomColor?: Record<string, string>;
   /** obstructions and no-build zones, the plot's levels, where north is, the building picked */
   features?: SiteFeature[]; levels?: Levels; north?: number; sel?: string | null;
+  /** the formed buildings' layouts by building id (Evaluated.forms); unset, worked out here from each one's form */
+  forms?: Record<string, FormLayout>;
 }
+/** a formed building as drawn: its layout, what it was drawn with, and the meshes (kept while nothing changes) */
+interface FormEntry { L: FormLayout; hash: string; key: string; built: Built }
 export type CameraView = 'fit' | 'street' | 'top';
 /** what's being drawn or edited, over everything: lines (x,y,z pairs) and handles (x,y,z each), in ink */
 export interface Overlay { lines?: number[]; dashed?: number[]; points?: number[]; hot?: number[] }
@@ -131,6 +140,9 @@ export class ProView {
   private fog = new THREE.Fog('#e4e4e2', 400, 1400);
   private sky = new THREE.Color('#e4e4e2');
   private paper = new THREE.Color('#fafaf9');
+  private env: THREE.Texture;
+  /** the formed buildings drawn, by building id */
+  private formed = new Map<string, FormEntry>();
 
   constructor(public canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
@@ -142,6 +154,10 @@ export class ProView {
     this.scene.background = this.sky.clone();
     this.scene.fog = this.fog;
     this.scene.add(new THREE.HemisphereLight('#f4f7fb', '#b9ae9a', 1.3));
+    // (a soft room to reflect in, for the formed buildings' glass and metal only: the straight ones look as before)
+    const pm = new THREE.PMREMGenerator(this.renderer);
+    this.env = pm.fromScene(new RoomEnvironment(), 0.04).texture;
+    pm.dispose();
     this.sun.position.set(-120, 180, -90);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
@@ -242,11 +258,40 @@ export class ProView {
       if (this.controls.update()) this.frame();
       // (the wireframe keeps drawing while edges fade in or out)
       if (this.wired && this.wire.write()) this.frame();
+      if (!this.wired) this.lod();
       this.compass();
       this.renderer.render(this.scene, this.cam);
     });
   }
-  dispose() { cancelAnimationFrame(this.raf); this.clear(); this.wire.dispose(); this.controls.dispose(); this.renderer.dispose(); }
+  dispose() {
+    cancelAnimationFrame(this.raf); this.clear();
+    for (const e of this.formed.values()) disposeBuilt(e.built);
+    this.formed.clear(); this.env.dispose();
+    this.wire.dispose(); this.controls.dispose(); this.renderer.dispose();
+  }
+
+  /** The formed buildings' level of detail: each one's fins and patterns drawn in full when it's big on screen,
+   *  every third when smaller, none when tiny, and the nearest kept first when there are too many in all. */
+  private lod() {
+    if (!this.formed.size) return;
+    const H = this.canvas.clientHeight || 800, cam = this.cam;
+    const focal = H / 2 / Math.tan((this.camera.fov * Math.PI) / 360);
+    const L = [...this.formed.values()].map((e) => {
+      const b = e.built, px = this.plan ? (b.radius * this.ortho.zoom * H) / (2 * this.orthoH) : (b.radius / Math.max(1, cam.position.distanceTo(b.centre))) * focal;
+      return { b, px };
+    }).sort((a, z) => z.px - a.px);
+    let used = 0;
+    const BUDGET = 260000;
+    for (const { b, px } of L) {
+      const level = px > 260 ? 2 : px > 70 ? 1 : 0;
+      for (const p of b.parts) {
+        const major = p.userData.major as number, all = p.userData.all as number;
+        let n = level === 2 ? all : level === 1 ? major : 0;
+        if (used + n > BUDGET) n = used + major <= BUDGET ? major : 0;
+        p.count = n; p.visible = n > 0; used += n;
+      }
+    }
+  }
 
   /** drawn as the wireframe just now (X-ray is always shaded) */
   get wired() { return this.mode === 'wire' && !this.xrayOn; }
@@ -319,8 +364,14 @@ export class ProView {
     return { tag: m.o.tag, label: m.label, size: `${f(m.o.w)} × ${f(m.o.h)} m${m.o.sill ? `, sill ${f(m.o.sill)} m` : ''}`, floor: m.floor, x: px - r.left, y: py - r.top };
   }
 
+  /** what was last drawn (for the console and scripts) */
+  last: ViewData | null = null;
   set(v: ViewData) {
+    this.last = v;
+    // (the formed buildings are kept aside, so clearing doesn't throw away the ones that haven't changed)
+    for (const e of this.formed.values()) this.root.remove(e.built.group);
     this.clear();
+    const seen = new Set<string>(), forms: Record<string, FormLayout> = {};
     const { r, d, plans, ds } = v;
     const fh = r.rules.floorH, mat = (color: string, o: Partial<THREE.MeshStandardMaterialParameters> = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.85, ...o });
     const mats = (ds: DesignSystem) => ({
@@ -424,6 +475,30 @@ export class ProView {
       const bds = v.dsOf?.(bi) ?? ds;
       M = bds === ds ? site : mats(bds);
       const ds_ = bds;
+      // a formed building: its own meshes, rebuilt only when its layout or its look changes
+      const form = (b.b as { form?: Form }).form;
+      const FL = v.forms?.[b.b.id] ?? (form ? layForm(b.b, { floorH: bds.floorH, mix: b.b.mix ?? [0.3, 0.5, 0.2], sizes: DEFAULT_SITE.sizes }) : null);
+      if (FL && FL.floors.length) {
+        forms[b.b.id] = FL; seen.add(b.b.id);
+        const lang = languageOf(bds), fr = frameOf(b.b);
+        const look: Look = {
+          wall: bds.facade.wall, glass: bds.glazing.glass, accent: bds.facade.accent, frame: bds.glazing.frame, slab: '#d8d4cc',
+          roof: materialOf(finishOf(bds).roof).colour, base: bds.facade.base, core: '#a7a39b',
+          skin: { ...lang.skin, ...(form?.skin ?? {}) }, roofKind: form?.roof ?? { kind: lang.roof, pitch: 20, overhang: 0.6, dir: 0, parapet: 1 }, round: lang.round,
+        };
+        const key = JSON.stringify([look, v.xray, form?.shell ?? null, fr.u]);
+        const old = this.formed.get(b.b.id);
+        const hash = old && old.L === FL ? old.hash : layoutHash(FL);
+        let e = old;
+        if (!e || e.hash !== hash || e.key !== key) {
+          if (old) disposeBuilt(old.built);
+          e = { L: FL, hash, key, built: buildForm(FL, look, { xray: v.xray, frame: { u: fr.u, n: fr.n }, shell: form?.shell ?? null, env: this.env }) };
+          this.formed.set(b.b.id, e);
+        }
+        e.L = FL;
+        add(e.built.group);
+        return;
+      }
       const all = b.floors, show = v.xray === null ? all : Math.min(all, Math.max(1, v.xray));
       const top = y0 + (v.xray === null ? all : show - 1) * fh;
       // stilt / podium: columns round the edge, the cores carried down
@@ -517,6 +592,11 @@ export class ProView {
       flush();
     });
 
+    // the formed buildings no longer in the scheme go; the many small parts stop casting shadows when there are lots
+    for (const [id, e] of this.formed) if (!seen.has(id)) { disposeBuilt(e.built); this.formed.delete(id); }
+    const many = [...this.formed.values()].reduce((s, e) => s + e.built.instances, 0);
+    for (const e of this.formed.values()) for (const p of e.built.parts) p.castShadow = many < 60000;
+
     // frame the camera on the plot the first time (and when its size changes)
     const key = `${minX}|${maxX}|${minZ}|${maxZ}`;
     this.box = { cx: (minX + maxX) / 2, cz: (minZ + maxZ) / 2, s: Math.max(maxX - minX, maxZ - minZ, 30), h: d.height || 30 };
@@ -529,7 +609,11 @@ export class ProView {
       sc.left = -R; sc.right = R; sc.top = R; sc.bottom = -R; sc.near = 1; sc.far = 800; sc.updateProjectionMatrix();
       this.sun.position.set(cx - 120, 220, cz - 90);
     }
-    this.wire.set({ r, d, roads: v.roads, shops: v.shops, features: v.features, levels: v.levels, north: v.north, sel: v.sel });
+    this.wire.set({ r, d, roads: v.roads, shops: v.shops, features: v.features, levels: v.levels, north: v.north, sel: v.sel, forms, skinOf: (id) => {
+      const bi = d.buildings.findIndex((x) => x.b.id === id), bds = (bi >= 0 ? v.dsOf?.(bi) : undefined) ?? ds, f = d.buildings[bi]?.b as { form?: Form } | undefined;
+      const lang = languageOf(bds);
+      return { skin: { ...lang.skin, ...(f?.form?.skin ?? {}) }, roof: f?.form?.roof ?? { kind: lang.roof, pitch: 20, overhang: 0.6, dir: 0, parapet: 1 }, shell: f?.form?.shell ?? null };
+    } });
     this.north = v.north ?? 0;
     this.xrayOn = v.xray !== null;
     this.apply();

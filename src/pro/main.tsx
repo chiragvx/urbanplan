@@ -78,6 +78,9 @@ function App() {
   const [tool, setToolS] = useState<Tool>(SELECT), [picked, setPicked] = useState<EditPicked>(null), [hint, setHint] = useState<string | null>(null);
   const edit = useRef<CanvasEdit | null>(null);
   const setTool = (t: Tool) => { setToolS(t); edit.current?.setTool(t); };
+  // snapping on by default (Alt held suspends it), remembered in this browser
+  const [snap, setSnapS] = useState<boolean>(() => store.get<boolean>('urbanplan:pro:snap', true));
+  const setSnap = (on: boolean) => { setSnapS(on); store.set('urbanplan:pro:snap', on); if (edit.current) edit.current.snapOn = on; };
   const [plan, setPlanS] = useState(false);
   const setPlan = (on: boolean) => { setPlanS(on); view.current?.setPlan(on); };
   const needle = useRef<HTMLSpanElement>(null);
@@ -119,6 +122,18 @@ function App() {
       setCloud({ s: 'saved', msg: `Opened ${hhmm()}` });
     } catch (err) { setCloud({ s: 'error', msg: explain(err) }); }
   };
+  // (a start asked for from the dashboard: a blank plot sized in the welcome, the sample, or a plot found by its
+  // survey number or imported, on the Site step with that way open; under the authority the user prefers)
+  useEffect(() => {
+    const start = new URLSearchParams(location.search).get('new');
+    if (start === null) return;
+    let city = DEFAULT_PROJECT.city;
+    try { const a = (JSON.parse(localStorage.getItem('urbanplan:prefs') ?? '{}') as { authority?: ProProject['city'] }).authority; if (a) city = a; } catch { /* */ }
+    fresh({ ...DEFAULT_PROJECT, city });
+    if (start === 'blank') setDialog('welcome');
+    if (start === 'survey' || start === 'import') { try { sessionStorage.setItem('urbanplan:pro:way', start); } catch { /* */ } go('site'); }
+    if (start === 'sample') go('build');
+  }, []);
   useEffect(() => {
     const id = new URLSearchParams(location.search).get('p');
     if (user && id && id !== ref?.id) void openId(id);
@@ -165,6 +180,7 @@ function App() {
       view: () => view.current, p: () => pRef.current, e: () => eRef.current, up: (o) => up(o), step: () => stepRef.current,
       picked: () => pickedRef.current, pick: (x) => setPicked(x), done: () => { setToolS(SELECT); ce.setTool(SELECT); }, hint: setHint, readOnly: () => roRef.current,
     });
+    ce.snapOn = store.get<boolean>('urbanplan:pro:snap', true);
     edit.current = ce;
     const theme = () => v.setTheme(document.documentElement.dataset.theme === 'dark');
     theme();
@@ -181,7 +197,7 @@ function App() {
       r: e.r, d: e.d, plans: e.plans, ds: e.ds, xray: xr, shops: e.shops,
       roads: roadLines(o.ring, o.roads).map((l) => ({ pts: l.pts, today: l.road.today })),
       dsOf: (i) => dsOfBuilding(p, i, e.ds, e.d.buildings[i]?.b.id), rooms, roomColor: ROOM_COLOR,
-      features: p.features, levels: p.levels, north: p.north, sel: picked?.k === 'building' ? picked.id : null,
+      features: p.features, levels: p.levels, north: p.north, sel: picked?.k === 'building' ? picked.id : null, forms: e.forms,
     });
     edit.current?.draw();
     applySun();
@@ -249,7 +265,7 @@ function App() {
   return (
     <div class={`pro${panel ? '' : ' no-panel'}${readOnly ? ' ro' : ''}`}>
       <header class="top">
-        <a class="logo" href={BASE} aria-label="UrbanPlan home"><Dither field="mark" cell={2} class="mark" />UrbanPlan</a>
+        <a class="logo" href={`${BASE}dashboard/`} aria-label="Your dashboard"><Dither field="mark" cell={2} class="mark" />UrbanPlan</a>
         <b class="chip">Pro</b>
         <label class="pname"><input value={p.name} aria-label="Project name" readOnly={readOnly} onChange={(ev) => up({ name: (ev.target as HTMLInputElement).value.trim() || 'Untitled project' })} /><Icon n="edit" size={14} /></label>
         <SaveState cloud={cloud} user={!!user} readOnly={readOnly} />
@@ -323,6 +339,7 @@ function App() {
             <button type="button" aria-label="From the street" aria-keyshortcuts="S" data-tip="From the street (S)" onClick={() => cam('street')}><Icon n="street" size={16} /></button>
             <button type="button" aria-label="From above" aria-keyshortcuts="T" data-tip="From above (T)" onClick={() => cam('top')}><Icon n="top" size={16} /></button>
             <button type="button" aria-label="X-ray, a floor at a time" data-tip="X-ray: a floor at a time" aria-pressed={xr !== null} onClick={() => setXray(xr === null ? Math.max(1, Math.round(maxFloor / 2)) : null)}><Icon n="layers" size={16} /></button>
+            <button type="button" aria-label="Snapping" data-tip={snap ? 'Snapping on (hold Alt to move freely)' : 'Snapping off'} aria-pressed={snap} onClick={() => setSnap(!snap)}><Icon n="magnet" size={16} /></button>
           </div>
           <div class={`tgroup sun${sun.on ? ' on' : ''}`}>
             <button type="button" aria-label="Sun" data-tip="Sun and shadows on a date and time" aria-pressed={sun.on} onClick={() => { if (!sun.on && mode === 'wire') setMode('shaded'); setSun({ ...sun, on: !sun.on }); }}><Icon n="sun" size={16} />{sun.on ? '' : 'Sun'}</button>
@@ -371,6 +388,8 @@ function ResultBar({ e, deal, sum, go }: { e: ReturnType<typeof evaluate>; deal:
     return () => clearTimeout(t);
   }, [k.bua, k.flats, k.profit, k.irr]);
   const used = r.bua > 0 ? d.bua / r.bua : 0;
+  // (a scheme of public buildings only earns nothing: what it costs stands in for profit and return)
+  const publicOnly = d.buildings.length > 0 && (d.money as { earns?: boolean }).earns === false;
   const D = (x: keyof typeof k, fmt: (v: number) => string) => delta[x] !== undefined && <i class={`delta ${delta[x]! > 0 ? 'up' : 'down'}`}>{delta[x]! > 0 ? '+' : '−'}{fmt(Math.abs(delta[x]!))}</i>;
   return (
     <div class="results" role="region" aria-label="Result">
@@ -379,9 +398,20 @@ function ResultBar({ e, deal, sum, go }: { e: ReturnType<typeof evaluate>; deal:
         <small><i class="meter"><i style={`width:${Math.min(100, used * 100)}%`} /></i>{nf(used * 100)}% of {nf(r.bua * 10.7639 / 1000)}k allowed</small>
       </button>
       <button type="button" class="kpi" onClick={() => go('build')}>
-        <span>Homes</span><b>{d.flats}{shops ? <em> + {shops.count} shops</em> : null}{D('flats', (v) => nf(v))}</b>
+        {publicOnly ? <span>Buildings</span> : <span>Homes</span>}
+        {publicOnly ? <b>{d.buildings.length}</b> : <b>{d.flats}{shops ? <em> + {shops.count} shops</em> : null}{D('flats', (v) => nf(v))}</b>}
         <small>{d.buildings.length} bldg · {d.buildings.map((b) => b.floors).join('+') || 0} floors · {nf(d.height)} m</small>
       </button>
+      {publicOnly ? <>
+      <button type="button" class="kpi" onClick={() => go('money')}>
+        <span>Cost</span><b>{cr(d.money.cost)}</b>
+        <small>public: nothing sold</small>
+      </button>
+      <button type="button" class="kpi" onClick={() => go('money')}>
+        <span>Build per m²</span><b>{d.bua > 0 ? `₹${nf((d.money.build + d.money.parking + d.money.soft) / d.bua)}` : '—'}</b>
+        <small>built-up, land aside</small>
+      </button>
+      </> : <>
       <button type="button" class="kpi" onClick={() => go('money')}>
         <span>Profit</span><b class={deal.profit < 0 ? 'bad' : ''}>{cr(deal.profit)}{D('profit', (v) => `${nf(v / 1e7, 2)} cr`)}</b>
         <small>{e.p.sale || e.p.land ? `${pct(deal.margin)} margin · ${cr(deal.revenue)} sales` : `${pct(deal.margin)} · starting prices`}</small>
@@ -390,6 +420,7 @@ function ResultBar({ e, deal, sum, go }: { e: ReturnType<typeof evaluate>; deal:
         <span>IRR</span><b class={deal.irr !== null && deal.irr < 0 ? 'bad' : ''}>{pct(deal.irr)}{D('irr', (v) => `${nf(v * 100, 1)} pt`)}</b>
         <small>peak cash {cr(deal.peak)}</small>
       </button>
+      </>}
       <button type="button" class={`kpi rules ${sum.fail ? 'bad' : sum.warn ? 'warn' : 'ok'}`} onClick={() => go('approve')}>
         <span>Rules</span>
         <b><Icon n={sum.fail ? 'x' : sum.warn ? 'warn' : 'check'} size={16} />{sum.fail ? `${sum.fail} fail` : sum.warn ? `${sum.warn} to check` : 'All clear'}</b>
@@ -527,7 +558,7 @@ function ShareDialog({ p, close, toast }: { p: ProProject; close: () => void; to
 }
 
 function Keys({ close }: { close: () => void }) {
-  const rows: [string, string][] = [['1 – 6', 'Go to a step'], ['\\', 'Show or hide the panel'], ['X', 'X-ray floor on or off'], ['[  ]', 'Floor down / up'], ['F · S · T', 'Camera: whole site, street, from above'], ['P', 'The plan from above, or back to 3D'], ['V', 'Back to picking'], ['Enter · Esc · Backspace', 'Drawing: finish, cancel, take back a point'], ['Shift', 'Drawing: keep a line square to the road'], ['Delete', 'Remove what’s picked'], ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · redo'], ['↑ ↓ in a number', 'Step it (Shift: ×10)'], ['Esc', 'Close this']];
+  const rows: [string, string][] = [['1 – 6', 'Go to a step'], ['\\', 'Show or hide the panel'], ['X', 'X-ray floor on or off'], ['[  ]', 'Floor down / up'], ['F · S · T', 'Camera: whole site, street, from above'], ['P', 'The plan from above, or back to 3D'], ['V', 'Back to picking'], ['Enter · Esc · Backspace', 'Drawing: finish, cancel, take back a point'], ['Shift', 'Drawing: keep a line square to the road'], ['Alt', 'Hold while dragging: no snapping'], ['← → ↑ ↓', 'Nudge what’s picked a grid step (Shift: ×10)'], ['Delete', 'Remove what’s picked'], ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · redo'], ['↑ ↓ in a number', 'Step it (Shift: ×10)'], ['Esc', 'Close this']];
   return <Dialog title="Keyboard shortcuts" close={close}><dl class="lines keys">{rows.map(([a, b]) => <div><dt><kbd>{a}</kbd></dt><dd>{b}</dd></div>)}</dl></Dialog>;
 }
 

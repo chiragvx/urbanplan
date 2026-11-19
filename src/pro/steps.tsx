@@ -154,18 +154,36 @@ export function MoneyStep({ p, e, up, deal, go }: StepProps) {
   const setD = (o: Partial<Deal>) => up({ deal: { ...D, ...o } });
   const ins = deal.lines.filter((l) => l.kind === 'in'), outs = deal.lines.filter((l) => l.kind === 'out');
   const total = Math.max(1, deal.revenue, deal.cost);
+  // (what the formed buildings hold: offices and a hotel are let or run, so their rents and yields show)
+  const has = new Set(e.d.money.uses.map((x) => x.use));
+  const setR = (o: Partial<NonNullable<ProProject['rents']>>) => up({ rents: { ...(p.rents ?? {}), ...o } });
   return (
     <>
-      <Section title="Result">
+      {deal.earns ? <Section title="Result">
         <Lines rows={[['IRR', pct(deal.irr)], ['Margin', pct(deal.margin)], ['Peak funding', cr(deal.peak)], [deal.owner.label, cr(deal.owner.value)]]} />
         <CashChart flow={deal.flow} cum={deal.cum} months={c.months} />
-      </Section>
+      </Section> : <Section title="Cost" sub="Public buildings only: nothing sold or let, so what it costs to build.">
+        <Lines rows={[...outs.filter((l) => l.amount > 0).map((l) => [l.label, cr(l.amount)] as [string, string]), ['Total', cr(deal.cost), 'tot'], ['A m² of built-up', e.d.bua > 0 ? `₹${nf(deal.cost / e.d.bua)}` : '—']]} />
+        <CashChart flow={deal.flow} cum={deal.cum} months={c.months} />
+      </Section>}
+
+      {deal.uses.length > 0 && <Section title="By use">
+        <Lines rows={deal.uses.map((x) => [<span>{x.label}<small>{x.note}</small></span>, x.kind === 'in' ? cr(x.amount) : `${cr(x.amount)} cost`])} />
+      </Section>}
 
       <Section title="Prices">
         <Row>
-          <Num label="Sale price" value={p.sale || c.sale} set={(v) => up({ sale: v })} step={250} min={1000} max={300000} unit="₹/ft²" hint="on carpet" />
+          {deal.earns && <Num label="Sale price" value={p.sale || c.sale} set={(v) => up({ sale: v })} step={250} min={1000} max={300000} unit="₹/ft²" hint="on carpet" />}
           <Num label="Land price" value={p.land || c.land} set={(v) => up({ land: v })} step={250} min={0} max={1000000} unit="₹/ft²" hint={D.kind === 'outright' ? 'of plot' : 'not paid in this deal'} />
         </Row>
+        {has.has('office') && <Row>
+          <Num label="Office rent" value={c.officeRent} set={(v) => setR({ officeRent: v })} step={5} min={10} max={2000} unit="₹/ft²" hint="carpet, a month" />
+          <Num label="Office yield" value={c.officeYield} set={(v) => setR({ officeYield: v })} step={0.25} min={3} max={20} unit="%" />
+        </Row>}
+        {has.has('hotel') && <Row>
+          <Num label="Hotel operating profit" value={c.hotelNoi} set={(v) => setR({ hotelNoi: v })} step={50} min={100} max={20000} unit="₹/ft²" hint="carpet, a year" />
+          <Num label="Hotel yield" value={c.hotelYield} set={(v) => setR({ hotelYield: v })} step={0.25} min={3} max={20} unit="%" />
+        </Row>}
         <Lines rows={[['Construction', `₹${nf(c.build)}/ft²`], ['of which finishes and spec', `${e.rate >= 0 ? '+' : '−'}₹${nf(Math.abs(e.rate))}/ft²`], ['Building systems', `${cr(e.sys.cost)} · ₹${nf(e.sys.costPerSqft)}/ft²`]]} />
         <Num label="Build time" value={p.costs?.months ?? c.months} set={(v) => up({ costs: { ...(p.costs ?? {}), months: v } })} min={6} max={96} unit="months" />
         <Row>
@@ -191,7 +209,7 @@ export function MoneyStep({ p, e, up, deal, go }: StepProps) {
 
       <Section title="Statement" fold open={false}>
         <div class="bars">{[...ins, ...outs].filter((l) => l.amount > 0).map((l) => <div class={`bar ${l.kind}`}><span>{l.label}</span><i style={`width:${Math.max(1, (l.amount / total) * 100)}%`} /><b>{cr(l.amount)}</b></div>)}</div>
-        <Lines rows={[['Revenue', cr(deal.revenue), 'tot'], ['Cost', cr(deal.cost), 'tot'], ['Profit', cr(deal.profit), `tot ${deal.profit < 0 ? 'bad' : ''}`], ['GST collected from buyers', cr(deal.gstCollected)], ['Carpet sold', sqft(deal.saleCarpet)], ...(deal.ownerCarpet ? [['Carpet handed over', sqft(deal.ownerCarpet)] as [string, string]] : [])]} />
+        <Lines rows={deal.earns ? [['Revenue', cr(deal.revenue), 'tot'], ['Cost', cr(deal.cost), 'tot'], ['Profit', cr(deal.profit), `tot ${deal.profit < 0 ? 'bad' : ''}`], ['GST collected from buyers', cr(deal.gstCollected)], ['Carpet sold', sqft(deal.saleCarpet)], ...(deal.ownerCarpet ? [['Carpet handed over', sqft(deal.ownerCarpet)] as [string, string]] : [])] : [['Cost', cr(deal.cost), 'tot']]} />
       </Section>
     </>
   );

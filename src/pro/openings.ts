@@ -140,9 +140,11 @@ export function planFloor(b: SiteReport['buildings'][number], ds: DesignSystem, 
 export function schedule(d: SiteReport, plans: FloorPlan[], ds: DesignSystem, shopFloors: (b: number, unit: number) => number = () => 0): ScheduleRow[] {
   const n: Record<string, number> = { D1: 0, D2: 0, D3: 0, SD: 0, W1: 0, W2: 0, V1: 0 };
   d.buildings.forEach((b, i) => {
-    // (a flat given over to shops on some floors has none of its doors and windows there)
-    for (const o of plans[i].openings) n[o.tag] += b.floors - shopFloors(i, o.unit);
-    b.units.forEach((u, ui) => { if (u.t === 3) return; const f = b.floors - shopFloors(i, ui); n.D2 += BEDS[u.t] * f; n.D3 += BATHS[u.t] * f; });
+    // (a flat given over to shops on some floors has none of its doors and windows there; a formed building's
+    // typical floor repeats only on the floors like it, the others not scheduled yet)
+    const floors = b.repeats ?? b.floors;
+    for (const o of plans[i].openings) n[o.tag] += floors - shopFloors(i, o.unit);
+    b.units.forEach((u, ui) => { if (u.t === 3) return; const f = floors - shopFloors(i, ui); n.D2 += BEDS[u.t] * f; n.D3 += BATHS[u.t] * f; });
   });
   const m = (v: number) => `${v.toFixed(2)}`;
   const door = (t: 'D1' | 'D2' | 'D3' | 'SD', where: string): ScheduleRow => { const x = ds.doors[t]; return { tag: t, label: x.label, size: `${m(x.w)} × ${m(x.h)} m`, sill: '—', kind: x.kind.replace('-', ' '), count: n[t], where }; };

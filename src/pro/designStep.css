@@ -60,3 +60,12 @@
   .dss-name { grid-template-columns: 1fr auto; }
   .dss-name .f { grid-column: 1 / -1; }
 }
+
+/* ---- the design language: drawn choices in a row, the chosen one inked */
+.dsl-icons { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; }
+.dsl-ic { display: grid; place-items: center; aspect-ratio: 1; min-width: 32px; min-height: 32px; padding: 0; border: 1px solid var(--up-line-strong); border-radius: 7px; background: var(--up-surface); color: var(--up-muted); }
+.dsl-ic:hover { color: var(--up-ink); border-color: var(--up-muted); }
+.dsl-ic[aria-checked="true"] { color: var(--up-paper); background: var(--up-ink); border-color: var(--up-ink); }
+.dsl-ic:focus-visible { outline: 2px solid var(--up-ink); outline-offset: 2px; }
+.dsl-sliders { display: grid; gap: 4px; margin: 4px 0; }
+@media (max-width: 420px) { .dsl-icons { grid-template-columns: repeat(4, minmax(0, 1fr)); } }

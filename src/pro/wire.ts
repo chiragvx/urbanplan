@@ -1,5 +1,5 @@
-// The Pro 3D's wireframe: the scheme drawn as low-poly lines. Every building face is split into floors and bays with a
-// triangle across each bay; the plot is triangulated; roads, the buildable line and the DP widening are outlined.
+// The Pro 3D's wireframe: the scheme drawn as low-poly lines. Every straight building's face is split into floors and
+// bays with a triangle across each bay (a formed one is drawn by its slab edges and the lines up it instead: `formed`); the plot is triangulated; roads, the buildable line and the DP widening are outlined.
 // Edges in front are drawn in ink, edges behind faint (an invisible copy of the masses hides them from the ink pass).
 //
 // The edges are kept between changes: a change fades only the new ones in and the gone ones out (a soft cross-fade,
@@ -10,6 +10,8 @@ import { elementRings, isArea, offsetSpine, type SiteReport } from '../doc/site'
 import type { Shops } from './mixed';
 import { featureOf, keptOf, levelAt, type Levels, type SiteFeature } from './siteObjects';
 import { outlines } from '../doc/ground';
+import { frameOf, type FormLayout, type Roof, type Shell, type Skin } from './form';
+import { canonical, canonOf, formMass, loftPair, roofLines } from './form/mesh';
 
 type V3 = [number, number, number];
 /** one edge: its ends, how strong (0 faint … 1 ink), and its animation */
@@ -18,6 +20,9 @@ export interface WireData {
   r: PlotReport; d: SiteReport; roads: { pts: [number, number, number, number]; today: number }[]; shops?: Shops | null;
   /** obstructions and no-build zones, the plot's levels and where north is, the building picked */
   features?: SiteFeature[]; levels?: Levels; north?: number; sel?: string | null;
+  /** the formed buildings' layouts by building id, and each one's skin, roof and shell */
+  forms?: Record<string, FormLayout>;
+  skinOf?: (id: string) => { skin: Skin; roof: Roof; shell: Shell | null };
 }
 
 /** Lines across a ring, `gap` apart, running along (dx, dz): a hatch, or contours. */
@@ -143,6 +148,8 @@ function edges(v: WireData): { k: string; a: V3; b: V3; w: number }[] {
   // the buildings: floors × bays, a triangle across each bay; the stilt as columns; the roof triangulated
   for (const b of d.buildings) {
     const pick = v.sel === b.b.id, kW = (w: number) => (pick ? Math.min(1, w * 1.9 + 0.15) : w);
+    const FL = v.forms?.[b.b.id];
+    if (FL && FL.floors.length) { formed(FL, b.b, v.skinOf?.(b.b.id) ?? null, add, kW); continue; }
     const top = y0 + b.floors * fh;
     const lv = [0]; if (y0 > 0) lv.push(y0); for (let f = 1; f < b.floors; f++) lv.push(y0 + f * fh); lv.push(top);
     for (const q of b.quads) {
@@ -228,6 +235,8 @@ export class Wire {
     this.masses.clear();
     const fh = v.r.rules.floorH, y0 = v.d.under * fh;
     for (const b of v.d.buildings) {
+      const FL = v.forms?.[b.b.id];
+      if (FL && FL.floors.length) { const m = new THREE.Mesh(formMass(FL), this.hide); m.userData.id = b.b.id; this.masses.add(m); continue; }
       const top = y0 + b.floors * fh;
       for (const q of b.quads) { const m = new THREE.Mesh(prism(q, 0, top), this.hide); m.userData.id = b.b.id; this.masses.add(m); }
       for (const c of b.cores) this.masses.add(new THREE.Mesh(prism(c, top, top + 2.4), this.hide));
@@ -259,6 +268,70 @@ export class Wire {
   }
 
   dispose() { this.geo.dispose(); this.dotGeo.dispose(); this.masses.traverse((o) => (o as THREE.Mesh).geometry?.dispose()); }
+}
+
+/** A formed building as lines: each floor's slab edge (every other floor past 40), lines up the corners and, on
+ *  smooth stretches, every few metres (following the twist and the taper), the carves' corners, the shell's outline
+ *  and the roof's edges. No bays and no triangles: a curved tower should read as calmly as it looks. */
+function formed(L: FormLayout, b: { spine: number[] }, look: { skin: Skin; roof: Roof; shell: Shell | null } | null, add: (a: V3, b: V3, w: number) => void, kW: (w: number) => number) {
+  const F = L.floors, C = canonOf(L), last = F.length - 1, every = F.length > 40 ? 2 : 1;
+  const ring = (r: number[], y: number, w: number) => { for (let i = 0; i < r.length; i += 2) { const j = (i + 2) % r.length; add([r[i], y, r[i + 1]], [r[j], y, r[j + 1]], w); } };
+  const corner = (r: number[], i: number) => {
+    const n = r.length / 2, p = (i - 1 + n) % n, q = (i + 1) % n;
+    const ax = r[i * 2] - r[p * 2], az = r[i * 2 + 1] - r[p * 2 + 1], bx = r[q * 2] - r[i * 2], bz = r[q * 2 + 1] - r[i * 2 + 1];
+    return (ax * bx + az * bz) / ((Math.hypot(ax, az) * Math.hypot(bx, bz)) || 1) < Math.cos((35 * Math.PI) / 180);
+  };
+  const dense = look && (look.skin.pattern === 'fins' || look.skin.pattern === 'curtain') ? 3 : 7.5;
+  F.forEach((f, k) => {
+    const yT = f.y + f.h, slab = k === 0 || k % every === 0;
+    C.floors[k].forEach((cr, i) => {
+      if (slab) ring(cr.ring, f.y, kW(k === 0 ? 1 : 0.42));
+      if (k === last) ring(cr.ring, yT, kW(1));
+      // up the floor: the corners in ink, smooth stretches every few metres, faint (from this floor to the next)
+      const { A, B } = k === last ? { A: cr.ring, B: cr.ring } : loftPair(C, k, i, f.h);
+      const y1 = k === last ? yT : F[k + 1].y, n = A.length / 2;
+      let run = 0, at = 0;
+      for (let q = 0; q < n; q++) {
+        const j = (q + 1) % n, L = Math.hypot(A[j * 2] - A[q * 2], A[j * 2 + 1] - A[q * 2 + 1]);
+        if (corner(A, q)) { add([A[q * 2], f.y, A[q * 2 + 1]], [B[q * 2], y1, B[q * 2 + 1]], kW(0.85)); run = 0; }
+        // (along the edge, a line every `dense` metres since the last one)
+        while (run + L - at >= dense) { at += dense - run; run = 0; const t = at / (L || 1); add([A[q * 2] + (A[j * 2] - A[q * 2]) * t, f.y, A[q * 2 + 1] + (A[j * 2 + 1] - A[q * 2 + 1]) * t], [B[q * 2] + (B[j * 2] - B[q * 2]) * t, y1, B[q * 2 + 1] + (B[j * 2 + 1] - B[q * 2 + 1]) * t], kW(0.22)); }
+        run += L - at; at = 0;
+      }
+    });
+    // the carves' cut faces: their corners up the floor
+    for (const c of f.cuts) for (let q = 0; q < c.ring.length; q += 2) add([c.ring[q], f.y, c.ring[q + 1]], [c.ring[q], yT, c.ring[q + 1]], kW(0.6));
+  });
+  // the shell: its outline at the start and past the roof, faint rings up it, its lines every few metres
+  if (L.shell?.length && look?.shell) {
+    const S = canonical(L.shell.map((r) => [r])), n = Math.min(L.shell.length, F.length), sh = look.shell;
+    for (let k = 0; k < n; k++) {
+      const cr = S.floors[k][0]; if (!cr) continue;
+      const f = F[k], top = k === n - 1, y0 = Math.max(f.y, sh.under), y1 = top ? f.y + f.h + Math.max(0, sh.over) : F[k + 1].y;
+      if (y1 <= y0) continue;
+      if (k === 0 || f.y <= sh.under && y1 > sh.under) ring(cr.ring, y0, kW(0.8));
+      else if (k % 4 === 0) ring(cr.ring, f.y, kW(0.2));
+      const { A, B } = top ? { A: cr.ring, B: cr.ring } : loftPair(S, k, 0, f.h);
+      if (top) ring(cr.ring, y1, kW(0.9));
+      const m = A.length / 2, step = Math.max(1, Math.round(m / 16));
+      const t0 = (y0 - f.y) / ((y1 - f.y) || 1);
+      for (let q = 0; q < m; q += step) add([A[q * 2] + (B[q * 2] - A[q * 2]) * t0, y0, A[q * 2 + 1] + (B[q * 2 + 1] - A[q * 2 + 1]) * t0], [B[q * 2], y1, B[q * 2 + 1]], kW(0.5));
+    }
+  }
+  // the roof's edges
+  if (look && last >= 0) {
+    const fr = frameOf(b), top = F[last], y0 = top.y + top.h;
+    for (const cr of C.floors[last]) {
+      if (cr.hole) continue;
+      const l = roofLines(cr.ring, [], y0, look.roof, { u: fr.u, n: fr.n }, look.skin);
+      for (let i = 0; i + 5 < l.length; i += 6) add([l[i], l[i + 1], l[i + 2]], [l[i + 3], l[i + 4], l[i + 5]], kW(0.8));
+    }
+  }
+  // the cores' lift rooms over a flat roof
+  if (!look || look.roof.kind === 'flat') {
+    const y0 = F[last].y + F[last].h;
+    for (const c of L.cores) { ring(c, y0 + 3, kW(0.7)); for (let i = 0; i < c.length; i += 2) add([c[i], y0, c[i + 1]], [c[i], y0 + 3, c[i + 1]], kW(0.6)); }
+  }
 }
 
 /** a closed prism over a ring (x,z,…), for hiding */

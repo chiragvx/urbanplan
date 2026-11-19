@@ -124,6 +124,11 @@ export interface Form {
   uses: UseBand[];
   /** the skin over the design system's (unset: the design system's language speaks) */
   skin?: Partial<Skin>;
+  /** how round its corners are, 0 sharp … 1 soft (unset: the design language's, FormContext.round) */
+  round?: number;
+  /** low-rise homes side by side (row houses, a villa): the plan cut across local x into this many houses, each its
+   *  own stair and one home a floor, so no shared core or corridor */
+  houses?: number;
 }
 
 // ---------------- what the procedure makes of a form ----------------
@@ -160,9 +165,19 @@ export interface FormLayout {
   columns: Pt[]; transfers: number;
   /** the shell's ring per floor (world), when there is one */
   shell: number[][] | null;
-  /** the top of the roof (m) */
+  /** the top of the roof (m): the roof's ridge or parapet, or the shell's top when it rises past them */
   top: number;
   issues: FormIssue[];
+  /** what the cores hold, all of them together (stairs, lifts) and their area on a floor (m²) */
+  core?: { stairs: number; lifts: number; area: number };
+  /** every column as a run: where it stands at its lowest floor and its highest (world x, z), the levels it spans,
+   *  and whether it starts on a slab rather than the ground (a transfer). A column off plumb is raked, not moved. */
+  posts?: { x0: number; z0: number; x1: number; z1: number; from: number; to: number; transfer: boolean }[];
+  /** the shell's bottom and top (m), when there is one */
+  shellY?: [number, number];
+  /** the roof over the top floor: its eaves ring (world, overhang and all), the height it starts at, how high it
+   *  rises over that, and the way it falls (world unit vector) */
+  roof?: { ring: number[]; y: number; rise: number; dir: Pt };
 }
 
 /** what the procedure needs from the project */
@@ -172,6 +187,8 @@ export interface FormContext {
   /** the flat mix (1/2/3 BHK shares) and the flats' sizes (m² carpet) */
   mix: [number, number, number];
   sizes: [number, number, number];
+  /** the design language's corners, 0 sharp … 1 soft (unset: as drawn) */
+  round?: number;
 }
 
 /** A template: a starting form (or several buildings) a five-year-old can drop on the plot and then shape. */

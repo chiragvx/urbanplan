@@ -3,12 +3,13 @@
 // options explorer, the screening table, the brief runner and the API all go through this, so they can't disagree.
 import type { PlotReport } from '../doc/plot';
 import type { SiteReport } from '../doc/site';
-import { finishRate, presetOf, specRateNet, type DesignSystem } from './design';
+import { finishRate, languageOf, presetOf, specRateNet, type DesignSystem } from './design';
 import type { Shops } from './mixed';
 import { planFloor, schedule, type FloorPlan, type ScheduleRow, type UnitCheck } from './openings';
 import { generate, plotReport, type ProProject } from './project';
 import { siteSystems, type SystemsResult } from './systems';
-import { SQFT } from '../doc/site';
+import { DEFAULT_SITE, SQFT } from '../doc/site';
+import { layForm, type FormLayout } from './form';
 
 export interface Evaluated {
   p: ProProject; ds: DesignSystem;
@@ -21,6 +22,10 @@ export interface Evaluated {
   /** the building systems (lifts, MEP, fire, plant), sized for the scheme, and what they add over the systems a
    *  typical construction rate already carries (₹ per sq ft of built-up; negative when leaner) */
   sys: SystemsResult & { buildings: SystemsResult[] }; sysRate: number;
+  /** the user's formed buildings laid out floor by floor (./form), by building id: what the engine counted, for the
+   *  3D, the editor and the drawings to reuse rather than lay out again. A form that lays out to nothing is absent
+   *  (its building stays the plain one of its spine). */
+  forms: Record<string, FormLayout>;
 }
 
 /** the systems a typical construction rate already carries, ₹ per sq ft of built-up (as assumed) */
@@ -42,15 +47,23 @@ export function evaluate(p: ProProject): Evaluated {
   const r = plotReport(p, ds.floorH);
   // (the specification's extras and the chosen finishes over plain ones, ₹ per sq ft of built-up)
   const rate = specRateNet(ds) + finishRate(ds);
-  let { d, shops } = generate(p, r, rate, ds.premium);
+  // (the formed buildings laid out once, at the design system's floor height and each building's flat mix)
+  const forms: Record<string, FormLayout> = {};
+  for (const b of p.scheme?.buildings ?? []) {
+    if (!b.form) continue;
+    const L = layForm(b, { floorH: ds.floorH, mix: b.mix ?? p.mix, sizes: DEFAULT_SITE.sizes, round: languageOf(dsOfBuilding(p, 0, ds, b.id)).round });
+    if (L && L.floors.length) forms[b.id] = L;
+  }
+  let { d, shops } = generate(p, r, rate, ds.premium, forms);
   const sysOf = (x: typeof d) => siteSystems(x.buildings.map((b) => ({ b, settings: p.systems?.byBuilding?.[b.b.id] })), { under: x.under, floorH: ds.floorH, code: r.code, basements: x.site.basements, bays: x.parking.have, site: p.systems?.site });
   let sys = sysOf(d);
   // (the systems as sized, over a typical construction rate's: the money worked out again with them)
   const bua = d.bua * SQFT, sysRate = bua > 0 ? Math.round(sys.cost / bua - TYPICAL_SYSTEMS) : 0;
-  if (sysRate) { ({ d, shops } = generate(p, r, rate + sysRate, ds.premium)); sys = sysOf(d); }
+  if (sysRate) { ({ d, shops } = generate(p, r, rate + sysRate, ds.premium, forms)); sys = sysOf(d); }
   // (a building with a style of its own takes that one's windows and doors)
   const plans = d.buildings.map((b, i) => planFloor(b, dsOfBuilding(p, i, ds, b.b.id), r.code === 'udcpr' ? 1 / 10 : 1 / 6));
   const rows = schedule(d, plans, ds, (bi, ui) => (shops?.removed.get(bi)?.has(ui) ? shops.upperOf[bi] : 0));
-  const checks = plans.flatMap((pl, i) => pl.checks.map((c) => ({ ...c, floors: d.buildings[i].floors })));
-  return { p, ds, r, d, shops, plans, rows, checks, rate, sys, sysRate };
+  // (a formed building's typical floor repeats only on the floors like it)
+  const checks = plans.flatMap((pl, i) => pl.checks.map((c) => ({ ...c, floors: d.buildings[i].repeats ?? d.buildings[i].floors })));
+  return { p, ds, r, d, shops, plans, rows, checks, rate, sys, sysRate, forms };
 }

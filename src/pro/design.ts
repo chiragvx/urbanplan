@@ -5,6 +5,7 @@
 // `finish` names the materials (./materials.ts) of each surface: the facade, the floors room by room, the roof and
 // the railings. Picking a facade material also sets the matching `facade` colour, which is what the 3D reads.
 import { materialOf, type Material } from './materials';
+import type { RoofKind, Skin, SkinPattern } from './form/types';
 
 /** A window type in the catalog: W1, W2, V1 … (m) */
 export interface WindowType {
@@ -93,7 +94,7 @@ export interface DesignSystem {
   language?: Language;
 }
 
-export interface Language { skin: import('./form/types').Skin; roof: import('./form/types').RoofKind; round: number }
+export interface Language { skin: Skin; roof: RoofKind; round: number }
 
 /** Room kinds that get a floor material of their own. */
 export type FloorRoom = 'living' | 'bed' | 'kitchen' | 'toilet' | 'balcony' | 'common';
@@ -173,7 +174,75 @@ export const PRESETS: DesignSystem[] = [
   },
 ];
 
+// The three that speak a formed building's language first: inspired by Copenhagen's wavy fin blocks, a white
+// monolith split by a glass slot, and twin towers wrapped in a fluted shell.
+const SK = (pattern: SkinPattern, spacing: number, depth: number, glass: number, o: Partial<Skin> = {}): Skin => ({ pattern, spacing, depth, angle: 0, grade: 0, slabEdge: false, glass, ...o });
+PRESETS.push(
+  {
+    id: 'fluid', name: 'Fluid', blurb: 'Deep bronze fins close together, the slab edges as bands: made for curved, wavy plans.',
+    facade: { wall: '#b9a88a', wallName: 'ACP, champagne', accent: '#6e5a45', accentName: 'Bronze fins', base: '#3f3a35', bands: true, fins: true },
+    glazing: { glass: '#4b4a44', frame: '#5a4632', frameName: 'Bronze aluminium' },
+    windows: { W1: W('W1', 'Full-height glazing', 2.4, 2.4, 0.15, 'fixed'), W2: W('W2', 'Full-height glazing, openable', 1.2, 2.4, 0.15, 'casement'), V1: W('V1', 'Louvred ventilator', 0.6, 0.6, 2.0, 'louvre') },
+    doors: { D1: D('D1', 'Main door, full-height veneered', 1.1, 2.4, 'veneer'), D2: D('D2', 'Room door, veneered', 0.9, 2.4, 'veneer'), D3: D('D3', 'Toilet door', 0.75, 2.4, 'flush'), SD: D('SD', 'Deck door', 1.8, 2.4, 'glass-sliding') },
+    balcony: { kind: 'french', depth: 0.3, railing: 'glass' },
+    floorH: 3.3,
+    spec: { flooring: 2, kitchen: 2, bath: 1, doors: 1, windows: 2, facade: 2, lifts: 1, amenities: 2 },
+    premium: 0.35,
+    finish: { wall: 'acp-champagne', accent: 'bronze-fins', base: 'granite-flamed', flooring: { living: 'vit-marble-look', bed: 'engineered-oak', kitchen: 'vit-1200', toilet: 'vit-matt-grey', balcony: 'vit-wood-look', common: 'marble-indian' }, roof: 'roof-green', railing: 'rail-frameless' },
+    language: { skin: SK('fins', 0.6, 0.7, 0.9, { grade: 0.25, slabEdge: true }), roof: 'flat', round: 1 },
+  },
+  {
+    id: 'monolith', name: 'Monolith', blurb: 'White and solid, cut through by folded glass slots, the top tilted: a sculpture of a building.',
+    facade: { wall: '#f1f1ef', wallName: 'ACP, white', accent: '#e4e4e0', accentName: 'White panel joints', base: '#8a8a8a', bands: false, fins: false },
+    glazing: { glass: '#33414d', frame: '#d8d8d4', frameName: 'White aluminium' },
+    windows: { W1: W('W1', 'Fixed glazing', 1.8, 2.1, 0.45, 'fixed'), W2: W('W2', 'Casement window', 1.0, 1.5, 0.75, 'casement'), V1: W('V1', 'Ventilator', 0.6, 0.45, 2.0, 'louvre') },
+    doors: { D1: D('D1', 'Main door, veneered', 1.1, 2.4, 'veneer'), D2: D('D2', 'Room door, flush', 0.9, 2.4, 'flush'), D3: D('D3', 'Toilet door', 0.75, 2.4, 'flush'), SD: D('SD', 'Deck door', 1.8, 2.4, 'glass-sliding') },
+    balcony: { kind: 'recessed', depth: 1.8, railing: 'glass' },
+    floorH: 3.3,
+    spec: { flooring: 2, kitchen: 1, bath: 2, doors: 1, windows: 2, facade: 2, lifts: 1, amenities: 1 },
+    premium: 0.3,
+    finish: { wall: 'acp-white', accent: 'acp-white', base: 'granite-grey-clad', flooring: { living: 'vit-1200', bed: 'engineered-oak', kitchen: 'vit-1200', toilet: 'vit-marble-look', balcony: 'vit-matt-grey', common: 'marble-italian' }, roof: 'roof-cool', railing: 'rail-frameless' },
+    language: { skin: SK('curtain', 1.5, 0.05, 0), roof: 'tilted', round: 0.15 },
+  },
+  {
+    id: 'sculpted', name: 'Sculpted', blurb: 'A fluted white shell standing off bronze glass floors ringed with balconies, rising past the roof.',
+    facade: { wall: '#f4f3ef', wallName: 'White GRC fins', accent: '#6e5a45', accentName: 'Bronze rails and edges', base: '#4b5157', bands: true, fins: true },
+    glazing: { glass: '#5e4b3a', frame: '#5a4632', frameName: 'Bronze aluminium' },
+    windows: { W1: W('W1', 'Full-height glazing', 2.4, 2.4, 0.15, 'fixed'), W2: W('W2', 'Full-height glazing, openable', 1.5, 2.4, 0.15, 'casement'), V1: W('V1', 'Louvred ventilator', 0.6, 0.6, 2.0, 'louvre') },
+    doors: { D1: D('D1', 'Main door, full-height veneered', 1.2, 2.4, 'veneer'), D2: D('D2', 'Room door, veneered', 0.9, 2.4, 'veneer'), D3: D('D3', 'Toilet door, veneered', 0.8, 2.4, 'veneer'), SD: D('SD', 'Deck door, lift-and-slide', 3.0, 2.4, 'glass-sliding') },
+    balcony: { kind: 'cantilever', depth: 1.8, railing: 'glass' },
+    floorH: 3.3,
+    spec: { flooring: 2, kitchen: 2, bath: 2, doors: 2, windows: 2, facade: 2, lifts: 2, amenities: 2 },
+    premium: 0.6,
+    finish: { wall: 'paint-white', accent: 'bronze-fins', base: 'slate', flooring: { living: 'marble-italian', bed: 'engineered-oak', kitchen: 'vit-marble-look', toilet: 'vit-marble-look', balcony: 'vit-wood-look', common: 'marble-italian' }, roof: 'roof-green', railing: 'rail-frameless' },
+    language: { skin: SK('balconies', 0.7, 1.8, 0.95, { grade: 0.4, slabEdge: true }), roof: 'flat', round: 1 },
+  },
+);
+
 export const presetOf = (id: string) => PRESETS.find((p) => p.id === id) ?? PRESETS[0];
+
+/** The design language a design system speaks: its own, else one derived from its facade and balconies (fins
+ *  become fins, floor bands bands, balconies balcony rings; the glass from its main window's share of a bay). The
+ *  older presets carry none and are read this way, so they keep looking like themselves on a formed building. */
+export function languageOf(ds: DesignSystem): Language {
+  if (ds.language) return ds.language;
+  const W1 = ds.windows.W1, glass = Math.max(0.3, Math.min(0.92, (W1.w * W1.h) / (3.2 * ds.floorH) + (W1.sill < 0.3 ? 0.25 : 0)));
+  const bal = ds.balcony.kind === 'cantilever' && ds.balcony.depth >= 1;
+  const tall = W1.h >= 2.2;
+  let skin: Skin;
+  if (ds.facade.fins && tall) skin = SK('curtain', 1.5, 0.35, Math.max(glass, 0.85), { slabEdge: ds.facade.bands });
+  else if (ds.facade.fins) skin = SK('fins', 1.2, 0.45, glass, { slabEdge: ds.facade.bands, grade: 0.15 });
+  else if (bal) skin = SK('balconies', 1.5, ds.balcony.depth, glass, { slabEdge: ds.facade.bands });
+  else if (ds.facade.bands) skin = SK('bands', 1.5, 0.15, glass);
+  else skin = SK('grid', 3, 0.2, glass);
+  // (a stone-and-brick look likes a pitched roof; the rest a flat terrace)
+  const roof = ds.finish?.roof === 'roof-clay' ? 'hip' : 'flat';
+  return { skin, roof, round: ds.facade.fins && tall ? 0.6 : 0.25 };
+}
+
+/** The skin patterns and roof kinds, in the pickers' order. */
+export const SKIN_PATTERNS: SkinPattern[] = ['grid', 'fins', 'louvres', 'bands', 'diagrid', 'screen', 'curtain', 'balconies'];
+export const ROOF_KINDS: RoofKind[] = ['flat', 'mono', 'gable', 'hip', 'barrel', 'tilted', 'dome', 'crown'];
 export const clone = (d: DesignSystem): DesignSystem => JSON.parse(JSON.stringify(d));
 
 /** What the specification adds to construction (₹ / sq ft of built-up area). */

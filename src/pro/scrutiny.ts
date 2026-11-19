@@ -3,7 +3,8 @@
 // requires, what the project proposes and the clause, the way an authority's scrutiny report reads, so an architect
 // can see at a glance what will come back. It is advisory: the values are UDCPR 2020 / DCPR 2034 and NBC 2016 as
 // assumed here (see each clause), and the authority's own scrutiny has the last word. Check with your architect.
-import { FIRE_H, FIRE_W, RG_FROM, RG_SHARE, SQFT, UNIT_LABEL } from '../doc/site';
+import { FIRE_H, FIRE_W, floorKind, RG_FROM, RG_SHARE, SQFT, UNIT_LABEL } from '../doc/site';
+import { shopFloorsAllowed } from './mixed';
 import { sideMargin } from '../doc/plot';
 import type { Evaluated } from './evaluate';
 
@@ -52,9 +53,33 @@ export function scrutiny(e: Evaluated, rooms?: RoomsLike): Check[] {
   // ---- building: height, margins ----
   if (!hasBuildings) add({ key: 'building', group: 'Building', rule: 'A building', clause: '—', required: 'a building to check', proposed: 'none fits the plot', status: 'fail' });
   d.buildings.forEach((b, i) => {
-    add({ key: `height:${i}`, group: 'Building', rule: `Height${name(i)}`, clause: 'Height limit (fire and aviation clearances, as assumed)', required: `at most ${m(R.maxH)}`, proposed: `${m(b.height)} · ${b.floors} floors${d.under ? ' on a stilt' : ''}`, status: b.overHeight ? 'fail' : 'pass' });
+    const roof = b.laid?.roof ? ` to the middle of its sloping roof` : '';
+    add({ key: `height:${i}`, group: 'Building', rule: `Height${name(i)}`, clause: `Height limit (fire and aviation clearances, as assumed)${roof ? `; ${code} measures to the middle of a sloping roof` : ''}`, required: `at most ${m(R.maxH)}`, proposed: `${m(b.height)}${roof} · ${b.floors} floors${d.under ? ' on a stilt' : ''}`, status: b.overHeight ? 'fail' : 'pass' });
     const side = sideMargin(R, b.height);
     add({ key: `margins:${i}`, group: 'Building', rule: `Margins${name(i)}`, clause: r.code === 'udcpr' ? 'UDCPR 2020 Table 6-D' : 'DCPR 2034 Table 18; Reg. 41(2) Table A', required: `front ${m(R.front)}, sides and rear ${m(side)} at ${m(b.height)}`, proposed: b.clash === 'margins' ? 'past the margins' : b.clash === 'overlap' ? 'overlaps another building' : b.clash === 'zone' ? 'on a no-build zone' : 'inside the margins', status: b.clash ? 'fail' : 'pass' });
+  });
+  // a formed building: what its form's procedure flagged, the columns that land on nothing, the floors that stand out
+  d.buildings.forEach((b, i) => {
+    const L = e.forms[b.b.id];
+    if (!L) return;
+    for (const x of L.issues) add({ key: `form:${x.key}:${i}`, group: 'Building', rule: `Form${name(i)}`, clause: 'The form as laid out', required: 'a buildable form', proposed: x.text, status: x.tone });
+    if (L.transfers > 0) add({ key: `transfers:${i}`, group: 'Building', rule: `Structure: transfers${name(i)}`, clause: 'Structural (as assumed; the structural engineer has the last word)', required: 'columns carried straight to the ground', proposed: `${L.transfers} column${L.transfers === 1 ? '' : 's'} on a transfer girder`, status: 'warn', note: 'A column that lands on nothing below needs a transfer girder or slab: deeper floors there, and cost.' });
+    const out = L.floors.filter((f) => f.over > 0.5);
+    if (out.length) {
+      const most = out.reduce((a, f) => (f.over > a.over ? f : a));
+      add({ key: `cantilever:${i}`, group: 'Building', rule: `Structure: cantilevers${name(i)}`, clause: 'Structural (as assumed); projections count in the built-up area', required: 'floors carried by the floor below', proposed: `${out.length} floor${out.length === 1 ? '' : 's'} standing out, up to ${m2(most.over)} (level ${most.level})`, status: 'warn', note: 'Cantilevered floors need back-spans or transfer structure; check the margins below them too.' });
+    }
+  });
+  // mixed use in a formed building: shops, offices or a hotel under homes, on as many floors as the road allows
+  // (mixed.ts's tiers)
+  d.buildings.forEach((b, i) => {
+    if (!b.laid) return;
+    const kinds = b.laid.floors.map((f) => floorKind(f, b.use));
+    if (!kinds.includes('residential')) return;
+    const commercial = kinds.filter((k) => k === 'retail' || k === 'office' || k === 'hotel').length;
+    if (!commercial) return;
+    const allowed = shopFloorsAllowed(r.roadW), over = commercial > allowed;
+    add({ key: `mixed:${i}`, group: 'Planning', rule: `Commercial floors by road width${name(i)}`, clause: `${code} mixed use (as summarised: 9 m G, 18 m G+1, 24 m G+2, 30 m all)`, required: allowed === 0 ? `none on a ${m(r.roadW, 0)} road` : allowed >= 99 ? 'any floor' : `${allowed} floor${allowed > 1 ? 's' : ''} on a ${m(r.roadW, 0)} road`, proposed: `${commercial} floor${commercial > 1 ? 's' : ''} of shops, offices or hotel`, status: over ? 'fail' : 'pass', note: 'Also depends on the zone in the DP: check the zone permits commercial use.' });
   });
   if (hasBuildings) add({ key: 'coverage', group: 'Building', rule: 'Ground coverage', clause: `${code} (no separate cap for residential in this table, as assumed)`, required: 'inside the margins', proposed: `${Math.round(d.coverage * 100)}% of the plot`, status: 'info' });
 
@@ -109,7 +134,7 @@ export function scrutiny(e: Evaluated, rooms?: RoomsLike): Check[] {
   } else if (flats.length) {
     add({ key: 'rooms', group: 'Flats & rooms', rule: 'Room sizes', clause: `${code} Chapter 9`, required: 'every room at its minimum size and width', proposed: 'rooms not laid out', status: 'warn', note: 'Checked by flat until rooms are modelled.' });
   }
-  add({ key: 'carpet', group: 'Flats & rooms', rule: 'Carpet area (RERA)', clause: 'RERA 2016 s.2(k)', required: 'declared per flat', proposed: `${Math.round(d.carpet * SQFT).toLocaleString('en-IN')} sq ft over ${d.flats} flats`, status: 'info' });
+  add({ key: 'carpet', group: 'Flats & rooms', rule: 'Carpet area (RERA)', clause: 'RERA 2016 s.2(k)', required: 'declared per flat', proposed: `${Math.round(d.carpet * SQFT).toLocaleString('en-IN')} sq ft over ${d.count[0] + d.count[1] + d.count[2]} flats${d.count[3] ? ` and ${d.count[3]} other units` : ''}`, status: 'info' });
   return out;
 }
 

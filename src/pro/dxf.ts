@@ -23,7 +23,7 @@
 //
 // Plan x is DXF X; plan z runs away from the front road, so it becomes −Y (the front road along the bottom).
 import { union, type MP } from '../doc/ground';
-import { UNIT_LABEL } from '../doc/site';
+import { floorKind, UNIT_LABEL } from '../doc/site';
 import type { Evaluated } from './evaluate';
 import { outline, roadLines } from './project';
 
@@ -224,13 +224,18 @@ export function predcrDxf(e: Evaluated): string {
     const inB = (q: number[]) => { const [cx, cz] = mid(q); return b.quads.some((qq) => inRing(qq, cx, cz)); };
 
     // the floors, bottom up: ground (stilt or flats), podium levels, then the flats in runs of identical floors
-    type Plan = { a: number; z: number; kind: 'stilt' | 'podium' | 'basement' | 'flats'; mixed?: boolean; level?: (typeof d.parking.levels)[number] };
+    type Plan = { a: number; z: number; kind: 'stilt' | 'podium' | 'basement' | 'flats' | 'formed'; mixed?: boolean; level?: (typeof d.parking.levels)[number]; fi?: number };
     const plans: Plan[] = [];
     if (bi === 0) basements.forEach((lv, k) => plans.push({ a: -(k + 1), z: -(k + 1), kind: 'basement', level: lv }));
     if (stilt) plans.push({ a: 0, z: 0, kind: 'stilt', level: d.parking.levels.find((l) => l.kind === 'stilt') });
     podium.forEach((lv, k) => plans.push({ a: stilt + k, z: stilt + k, kind: 'podium', level: lv }));
     const f0 = stilt + podium.length, fN = f0 + b.floors - 1;
-    if (b.floors > 0) {
+    // a formed building: one plan per distinct floor (the same use, units and outline share one, as TYPICAL a-b)
+    const form = e.forms[b.b.id], LF = b.laid?.floors ?? [];
+    const ringsOf = (i: number) => form?.floors[i]?.rings ?? [LF[i].ring ?? b.laid!.outline];
+    const sig = (i: number) => `${floorKind(LF[i], b.use)}|${LF[i].units.length}|${ringsOf(i).map((q) => q.map((v) => Math.round(v * 10)).join()).join('/')}`;
+    if (b.laid) for (let i = 1, s0 = 0; i <= LF.length; i++) if (i === LF.length || sig(i) !== sig(s0)) { plans.push({ a: f0 + s0, z: f0 + i - 1, kind: 'formed', fi: s0 }); s0 = i; }
+    if (b.floors > 0 && !b.laid) {
       // floors 1..upper are partly shops; the ground on its own when it's flats (no stilt); then the rest
       const cuts = new Set<number>([f0]);
       if (f0 === 0) cuts.add(1);
@@ -261,7 +266,13 @@ export function predcrDxf(e: Evaluated): string {
 
       const parking = (lv?: (typeof d.parking.levels)[number]) => { for (const bay of lv?.bays ?? []) if (whole || inB(bay)) named('_Parking', T(bay), ringArea(bay) >= 12.4 ? 'CP-L' : 'CP-S', 0.25); };
       const cores = () => b.cores.forEach((c) => { const [s, l] = splitCore(c); named('_Staircase', T(s), 'STAIRCASE', 0.25); if (l.length) named('_Liftwell', T(l), 'LIFT', 0.25); });
-      if (pl.kind === 'basement') parking(pl.level);
+      if (pl.kind === 'formed') {
+        const lf = LF[pl.fi!], k = floorKind(lf, b.use), fsi = k === 'residential' ? '_ResiFSI' : '_CommFSI';
+        if (k === 'parking') parking(d.parking.levels.filter((l) => l.kind === 'structure' && Math.abs(l.area - lf.area) < 0.01)[0]);
+        else ringsOf(pl.fi!).forEach((q) => w.poly(fsi, T(q)));
+        lf.units.forEach((u) => named('_CarpetArea', T(u.ring), `${(u.t === 3 ? k.toUpperCase() : (UNIT_LABEL[u.t] ?? 'UNIT')).replace(/\s+/g, '')} ${u.carpet.toFixed(2)}`, 0.25));
+        cores();
+      } else if (pl.kind === 'basement') parking(pl.level);
       else if (pl.kind === 'stilt' || pl.kind === 'podium') {
         parking(pl.level);
         cores();
@@ -286,15 +297,17 @@ export function predcrDxf(e: Evaluated): string {
 
     // the section: one band per floor, named as its plan, on the ground line
     const floorsUp = plans.filter((pl) => pl.kind !== 'basement');
-    const levels: string[] = [];
-    for (const pl of floorsUp) for (let f = pl.a; f <= pl.z; f++) levels.push(nameOf(pl));
+    // (a formed building's floors at their own heights)
+    const levels: { name: string; h: number }[] = [];
+    for (const pl of floorsUp) for (let f = pl.a; f <= pl.z; f++) levels.push({ name: nameOf(pl), h: pl.kind === 'formed' ? LF[f - f0]?.h ?? fh : fh });
     const below = plans.filter((pl) => pl.kind === 'basement').reverse();
-    const secW = Math.max(bw, 8), H = levels.length * fh, Bh = below.length * fh;
+    const secW = Math.max(bw, 8), H = levels.reduce((t, l) => t + l.h, 0), Bh = below.length * fh;
     const left = sx, right = sx + secW + 8, groundY = rowY - 4 - H, top = rowY, bottom = groundY - Bh - 5;
     named('_Section', [left, top, right, top, right, bottom, left, bottom], 'Section', 0.6, [(left + right) / 2, bottom + 1.5]);
-    levels.forEach((nm, k) => {
-      const y0 = groundY + k * fh;
-      named('_FloorInSection', [left + 4, y0, left + 4 + secW, y0, left + 4 + secW, y0 + fh, left + 4, y0 + fh], nm, Math.min(0.3, fh / 4));
+    let y0 = groundY;
+    levels.forEach(({ name: nm, h }) => {
+      named('_FloorInSection', [left + 4, y0, left + 4 + secW, y0, left + 4 + secW, y0 + h, left + 4, y0 + h], nm, Math.min(0.3, h / 4));
+      y0 += h;
     });
     below.forEach((pl, k) => {
       const y1 = groundY - k * fh;

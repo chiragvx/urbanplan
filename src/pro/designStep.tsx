@@ -8,14 +8,15 @@ import type { JSX } from 'preact';
 import { useEffect, useId, useState } from 'preact/hooks';
 import './designStep.css';
 import {
-  clone, finishOf, finishRate, FINISHED, FLOOR_ROOMS, presetOf, PRESETS, setFinish, SPEC,
-  type BalconyKind, type DesignSystem, type DoorType, type FinishSlot, type WindowType,
+  clone, finishOf, finishRate, FINISHED, FLOOR_ROOMS, languageOf, presetOf, PRESETS, ROOF_KINDS, setFinish, SKIN_PATTERNS, SPEC,
+  type BalconyKind, type DesignSystem, type DoorType, type FinishSlot, type Language, type WindowType,
 } from './design';
+import type { RoofKind, SkinPattern } from './form/types';
 import { byCategory, materialOf, SLOT_CATEGORIES, type Material } from './materials';
 import * as library from './designLibrary';
 import type { SavedDesign } from './designLibrary';
 import type { StepProps } from './steps';
-import { Btn, Color, Icon, Note, nf, Num, Row, Section, Seg, Select, Toggle } from './ui';
+import { Btn, Color, Icon, Note, nf, Num, Row, Section, Seg, Select, Slider, Toggle } from './ui';
 
 // ---------------------------------------------------------------- colour helpers (for drawing materials only)
 const rgb = (hex: string) => { const h = hex.replace('#', ''); const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
@@ -218,6 +219,71 @@ function Elevation({ ds }: { ds: DesignSystem }) {
   );
 }
 
+// ---------------------------------------------------------------- the design language
+/** Each skin pattern and roof kind as a small drawing (24 × 24, in the ink): the pickers show these, not words. */
+const PATTERN_ICON: Record<SkinPattern, JSX.Element> = {
+  grid: <path d="M5 4v16M12 4v16M19 4v16M3 8h18M3 14h18" />,
+  fins: <path d="M5 3v18M9 3v18M13 3v18M17 3v18M21 3v18" stroke-width="2.4" />,
+  louvres: <path d="M3 5l18 2M3 10l18 2M3 15l18 2M3 20l18 2" />,
+  bands: <path d="M3 6h18M3 12h18M3 18h18" stroke-width="3" />,
+  diagrid: <path d="M3 21L12 3l9 18M3 3l9 18 9-18M3 12h18" />,
+  screen: <g fill="currentColor" stroke="none">{[5, 10, 15, 20].flatMap((y) => [4, 9, 14, 19].map((x) => <circle cx={x + (y % 10 ? 0 : 1.5)} cy={y - 1} r="1.6" />))}</g>,
+  curtain: <path d="M4 3v18M8 3v18M12 3v18M16 3v18M20 3v18M3 12h18" stroke-width="1" />,
+  balconies: <path d="M4 3v18M20 3v18M2 8h20M2 14h20M2 20h20M2 8v-2M22 8v-2M2 14v-2M22 14v-2" />,
+};
+const ROOF_ICON: Record<RoofKind, JSX.Element> = {
+  flat: <path d="M4 21V9h16v12M3 9h18M4 9V7M20 9V7" />,
+  mono: <path d="M4 21v-9l16-5v14" />,
+  gable: <path d="M4 21v-9l8-7 8 7v9" />,
+  hip: <path d="M3 21v-8l6-6h6l6 6v8" />,
+  barrel: <path d="M4 21v-8a8 7 0 0 1 16 0v8" />,
+  tilted: <path d="M5 21V5l14 6v10" />,
+  dome: <path d="M3 21v-7h18v7M4 14a8 8 0 0 1 16 0" />,
+  crown: <path d="M4 21v-9h16v9M5 12V4M9 12V7M12 12V3M15 12V7M19 12V4" />,
+};
+const PATTERN_NAME: Record<SkinPattern, string> = { grid: 'Grid', fins: 'Fins', louvres: 'Louvres', bands: 'Bands', diagrid: 'Diagrid', screen: 'Screen', curtain: 'Curtain wall', balconies: 'Balcony rings' };
+const ROOF_NAME: Record<RoofKind, string> = { flat: 'Flat', mono: 'Mono-pitch', gable: 'Gable', hip: 'Hip', barrel: 'Barrel', tilted: 'Tilted', dome: 'Dome', crown: 'Crown' };
+
+/** A row of drawn choices (a radiogroup): the name shows on hover or focus. */
+function IconRow<T extends string>({ label, value, options, icons, names, set }: { label: string; value: T; options: T[]; icons: Record<T, JSX.Element>; names: Record<T, string>; set: (v: T) => void }) {
+  const at = Math.max(0, options.indexOf(value));
+  return (
+    <div class="dsl-icons" role="radiogroup" aria-label={label} onKeyDown={(e) => { const n = gridKey(e); if (n >= 0) set(options[n]); }}>
+      {options.map((o, i) => (
+        <button type="button" role="radio" aria-checked={o === value} tabIndex={i === at ? 0 : -1} class="dsl-ic" aria-label={names[o]} data-tip={names[o]} onClick={() => set(o)}>
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{icons[o]}</svg>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The design language a formed building speaks: the pattern laid over every face, its rhythm, the roof it likes and
+ *  how round it likes its corners. Every change shows at once on the model. */
+function LanguageSection({ ds, setDs }: { ds: DesignSystem; setDs: (fn: (d: DesignSystem) => void) => void }) {
+  const lang = languageOf(ds), sk = lang.skin;
+  const setL = (fn: (l: Language) => void) => setDs((d) => { const l: Language = JSON.parse(JSON.stringify(languageOf(d))); fn(l); d.language = l; });
+  const m = (v: number) => `${nf(v, 2)} m`, pc = (v: number) => `${Math.round(v * 100)}%`;
+  // (what each pattern's spacing and depth mean: a balcony's depth is how far it stands out, a louvre's spacing is
+  // the gap between blades)
+  const deep = sk.pattern === 'balconies' ? 3 : 1.5;
+  return (
+    <Section title="Language" sub="How formed buildings look, all over.">
+      <IconRow<SkinPattern> label="Skin" value={sk.pattern} options={SKIN_PATTERNS} icons={PATTERN_ICON} names={PATTERN_NAME} set={(v) => setL((l) => { l.skin.pattern = v; })} />
+      <div class="dsl-sliders">
+        <Slider label="Spacing" value={sk.spacing} min={0.3} max={6} step={0.05} fmt={m} set={(v) => setL((l) => { l.skin.spacing = v; })} />
+        <Slider label="Depth" value={sk.depth} min={0} max={deep} step={0.05} fmt={m} set={(v) => setL((l) => { l.skin.depth = v; })} />
+        {(sk.pattern === 'fins' || sk.pattern === 'louvres') && <Slider label="Angle" value={sk.angle} min={-60} max={60} step={1} fmt={(v) => `${v}°`} set={(v) => setL((l) => { l.skin.angle = v; })} />}
+        {(sk.pattern === 'fins' || sk.pattern === 'balconies') && <Slider label="Grade" value={sk.grade} min={0} max={1} step={0.05} fmt={pc} set={(v) => setL((l) => { l.skin.grade = v; })} />}
+        <Slider label="Glass" value={sk.glass} min={0} max={1} step={0.05} fmt={pc} set={(v) => setL((l) => { l.skin.glass = v; })} />
+      </div>
+      <Toggle label="Slab edges" value={sk.slabEdge} set={(v) => setL((l) => { l.skin.slabEdge = v; })} />
+      <IconRow<RoofKind> label="Roof" value={lang.roof} options={ROOF_KINDS} icons={ROOF_ICON} names={ROOF_NAME} set={(v) => setL((l) => { l.roof = v; })} />
+      <Slider label="Round corners" value={lang.round} min={0} max={1} step={0.05} fmt={pc} set={(v) => setL((l) => { l.round = v; })} />
+    </Section>
+  );
+}
+
 // ---------------------------------------------------------------- start from: presets and saved ones
 /** Stable comparison of two design systems (key order doesn't matter). */
 const stable = (v: unknown): string => (v && typeof v === 'object' ? (Array.isArray(v) ? `[${v.map(stable).join(',')}]` : `{${Object.keys(v as object).sort().map((k) => `${k}:${stable((v as Record<string, unknown>)[k])}`).join(',')}}`) : JSON.stringify(v));
@@ -343,6 +409,8 @@ export function DesignSystemStep({ p, e, up, toast }: StepProps) {
         </Row>
         <Num label="Floor to floor" value={ds.floorH} step={0.05} min={2.8} max={4.5} unit="m" set={(v) => setDs((d) => { d.floorH = v; })} />
       </Section>
+
+      <LanguageSection ds={ds} setDs={setDs} />
 
       <Section title="Windows and balconies" fold open={false}>
         <Seg<BalconyKind> label="Balconies" value={ds.balcony.kind} set={(v) => setDs((d) => { d.balcony.kind = v; })} options={[{ value: 'cantilever', label: 'Cantilever' }, { value: 'recessed', label: 'Recessed' }, { value: 'french', label: 'French' }, { value: 'none', label: 'None' }]} />

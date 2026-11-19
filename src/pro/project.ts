@@ -2,7 +2,8 @@
 // the builder's design system, and what the generator is asked for. Turned into the same PlotReport and SiteReport
 // the editor's Site Studio works from (src/doc/plot.ts, site.ts, optimise.ts), so both give the same numbers.
 import { analysePlot, type PlotCode, type PlotReport, type PlotRules } from '../doc/plot';
-import { defaultCosts, solveSite, type PlotSite, type SiteBuilding, type SiteElement, type SiteReport } from '../doc/site';
+import { defaultCosts, FLOOR_USE, solveSite, type Laid, type PlotSite, type UseRates, type SiteBuilding, type SiteElement, type SiteReport } from '../doc/site';
+import type { Form, FormLayout } from './form/types';
 import { DEFAULT_DESIGN, optimise, park, siteDefaults, type Access, type Typology } from '../doc/optimise';
 import type { CityDoc } from '../doc/doc';
 import type { Compiler } from '../doc/compile';
@@ -89,6 +90,9 @@ export interface ProProject {
   buildingStyle?: Record<number, string>;
   /** the money model's timing and overheads, over the city's starting figures */
   costs?: { months?: number; presold?: number; soft?: number };
+  /** a formed building's offices and hotel: rent, operating profit and the yields they're valued at, over the city's
+   *  starting figures (src/doc/site.ts useRates) */
+  rents?: Partial<UseRates>;
   /** what the plot sits in, for the NOCs */
   approval?: { nearAirport?: boolean; trees?: boolean; heritage?: boolean; kind?: import('./approvals').PermissionKind };
   /** what's on and round the plot: obstructions and no-build zones (./siteObjects.ts) */
@@ -200,10 +204,25 @@ export function plotReport(p: ProProject, floorH = 3): PlotReport {
   return analysePlot(doc, C, () => ids, { ...plot, rules }, cfg.code);
 }
 
-/** The generated scheme on it, with shops along the front if asked for (./mixed.ts). */
-export function generate(p: ProProject, r: PlotReport, specRate = 0, premium = 0): { d: SiteReport; shops: Shops | null } {
+/** A form's floors as the engine counts them (src/doc/site.ts Laid): each floor's area, height, units and use, the
+ *  outline, the cores, and the share of the roof that counts in the height. UDCPR measures a building's height to
+ *  the middle of a sloping roof, so half the rise of a pitched, curved or tilted roof counts; a flat roof's parapet
+ *  doesn't. (A dome or crown is taken as a roof too, as assumed: an authority may treat it as an ornament instead.) */
+export function laidOf(L: FormLayout, roof?: Form['roof']): Laid {
+  const last = L.floors[L.floors.length - 1];
+  const rise = roof && roof.kind !== 'flat' && last ? Math.max(0, L.top - (last.y + last.h)) : 0;
+  return {
+    outline: L.outline, cores: L.cores, roof: rise / 2,
+    floors: L.floors.map((f) => ({ area: f.area, h: f.h, units: f.units, use: FLOOR_USE[f.use].plot, kind: f.use, ring: f.outer })),
+  };
+}
+
+/** The generated scheme on it, with shops along the front if asked for (./mixed.ts). `forms`: the user's formed
+ *  buildings laid out (by id, see ./evaluate.ts), each counted floor by floor; a building whose form lays out to
+ *  nothing stays the plain building of its spine. */
+export function generate(p: ProProject, r: PlotReport, specRate = 0, premium = 0, forms: Record<string, FormLayout> = {}): { d: SiteReport; shops: Shops | null } {
   const c = defaultCosts(r.code, 'residential');
-  const cost = { ...(p.costs ?? {}), build: c.build + specRate, ...(p.land ? { land: p.land } : {}), sale: p.sale > 0 ? p.sale : Math.round((c.sale * (1 + premium)) / 50) * 50 };
+  const cost = { ...(p.costs ?? {}), ...(p.rents ?? {}), build: c.build + specRate, ...(p.land ? { land: p.land } : {}), sale: p.sale > 0 ? p.sale : Math.round((c.sale * (1 + premium)) / 50) * 50, ...(p.shops && p.shops.sale > 0 ? { retail: p.shops.sale } : {}) };
   const f = fillOf(p);
   const base: PlotSite = {
     ...siteDefaults('residential'), ...parkingOf(f), mix: p.mix, cost, keepOut: keepOutOf(p.features),
@@ -211,7 +230,9 @@ export function generate(p: ProProject, r: PlotReport, specRate = 0, premium = 0
   };
   // the user's own buildings: as they stand, checked
   if (p.scheme) {
-    let own: PlotSite = { ...base, buildings: p.scheme.buildings, elements: p.scheme.elements, manual: true };
+    // (copies: `laid` is worked out afresh every time and must never reach the saved project)
+    const buildings = p.scheme.buildings.map((b) => { const L = b.form ? forms[b.id] : undefined; return L ? { ...b, laid: laidOf(L, b.form?.roof) } : b; });
+    let own: PlotSite = { ...base, buildings, elements: p.scheme.elements, manual: true };
     own = f.basements === undefined ? park(r, own, 'residential') : { ...own, basements: f.basements };
     const sh = p.shops;
     if (!sh || sh.floors <= 0) return { d: solveSite(r, own, 'residential'), shops: null };
@@ -268,7 +289,7 @@ function shaped(r: PlotReport, site: PlotSite, f: Fill): PlotSite {
 /** The scheme as it stands, as the user's own to shape: the fill's buildings and things, kept. */
 export function ownScheme(d: SiteReport, styles?: Record<number, string>): NonNullable<ProProject['scheme']> {
   return {
-    buildings: d.buildings.map((b, i) => ({ ...b.b, floors: b.floors, auto: undefined, name: `Building ${String.fromCharCode(65 + i)}`, ...(styles?.[i] ? { style: styles[i] } : {}) })),
+    buildings: d.buildings.map((b, i) => ({ ...b.b, laid: undefined, floors: b.floors, auto: undefined, name: `Building ${String.fromCharCode(65 + i)}`, ...(styles?.[i] ? { style: styles[i] } : {}) })),
     elements: (d.site.elements ?? []).map((e) => ({ ...e, auto: undefined })),
   };
 }

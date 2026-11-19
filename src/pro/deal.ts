@@ -7,7 +7,7 @@
 // developer collects it and passes it on, so it isn't revenue; it's shown so the buyer's all-in price is known.
 // Stamp duty is the developer's: on the conveyance when land is bought, on the agreement under a JDA. All the rates
 // are starting figures to replace with the project's own.
-import { cashflow, SQFT } from '../doc/site';
+import { cashflow, FLOOR_USE, LEASE_UP, SQFT, type UseLine } from '../doc/site';
 import type { Evaluated } from './evaluate';
 
 export type DealKind = 'outright' | 'jda-revenue' | 'jda-area' | 'redevelopment';
@@ -43,7 +43,14 @@ export interface DealResult {
   lines: { label: string; amount: number; kind: 'in' | 'out' }[];
   gstCollected: number; stampDuty: number;
   notes: string[];
+  /** whether anything earns: a scheme of public buildings only costs, so it has no profit or IRR to show */
+  earns: boolean;
+  /** by use, when there's more than one (homes sold, offices let…): what each brings in (the developer's share) or,
+   *  for a public use, what it costs to build */
+  uses: { label: string; amount: number; note: string; kind: 'in' | 'out' }[];
 }
+
+export const USE_LABEL: Record<UseLine['use'], string> = { residential: 'Homes', office: 'Offices', retail: 'Shops', hotel: 'Hotel', library: 'Library', toilet: 'Public toilet', community: 'Community hall', school: 'School', clinic: 'Clinic', parking: 'Parking floors' };
 
 /** Annual internal rate of return of monthly flows, by bisection; null when there isn't one (as in site.ts). */
 export function irr(flow: number[]): number | null {
@@ -114,7 +121,10 @@ export function applyDeal(e: Evaluated, deal: Deal): DealResult {
   const stampBase = deal.kind === 'outright' ? M.land : owner.value;
   const stampDuty = stampBase * (deal.stampPct / 100);
   const upfront = land + fsiCost + stampDuty;
-  const base = cashflow(upfront, buildAll, revenue, c);
+  // (the deal's share of the revenue, split as the scheme's is: sales as they're booked, the let and run buildings'
+  // value once they're leased up)
+  const k = M.revenue > 0 ? revenue / M.revenue : 0;
+  const base = cashflow(upfront, buildAll, M.sales * k, c, M.exit * k);
   const flow = [...base.flow];
   for (const t of tweaks) { const i = t.at === 'end' ? flow.length - 1 : Math.min(flow.length - 1, t.at); flow[i] += t.amount; }
   const s = summarise(flow);
@@ -124,16 +134,29 @@ export function applyDeal(e: Evaluated, deal: Deal): DealResult {
   const saleCarpet = carpet - ownerCarpet;
   const gstCollected = revenue * (deal.gstPct / 100);
 
+  // by use, when the scheme has more than one: what each earns at the deal's share, or what a public one costs
+  const earns = M.earns !== false && M.revenue > 0;
+  const sqft = (v: number) => `${Math.round(v * SQFT).toLocaleString('en-IN')} sq ft`;
+  const uses: DealResult['uses'] = (M.uses ?? []).length > 1 ? M.uses.map((x) => x.earns === 'public'
+    ? { label: USE_LABEL[x.use], amount: x.area * FLOOR_USE[x.use].build * SQFT * c.build, note: `${x.floors} floor${x.floors === 1 ? '' : 's'}, ${Math.round(x.area).toLocaleString('en-IN')} m²: built for its cost`, kind: 'out' as const }
+    : { label: USE_LABEL[x.use], amount: x.value * k, note: x.earns === 'sale' ? `${sqft(x.carpet)} sold` : x.earns === 'lease' ? `${sqft(x.carpet)} let, valued at a ${c.officeYield}% yield` : `${sqft(x.carpet)} run, valued at a ${c.hotelYield}% yield on its operating profit`, kind: 'in' as const }) : [];
+  // (a scheme that only costs shows its construction, its systems and its fees apart)
+  const sys = Math.min(M.build, e.sys?.cost ?? 0);
+  const earned = uses.filter((x) => x.kind === 'in');
   const lines: DealResult['lines'] = [
-    { label: deal.kind === 'outright' ? 'Sales' : 'Sales (developer\'s share)', amount: revenue, kind: 'in' },
+    ...(earned.length > 1 ? earned.map((x) => ({ label: x.label, amount: x.amount, kind: 'in' as const }))
+      : earns ? [{ label: `${M.sales > 0 ? 'Sales' : 'Value at its yield (let or run)'}${deal.kind === 'outright' ? '' : ' (developer\'s share)'}`, amount: revenue, kind: 'in' as const }] : []),
     ...(land > 0 ? [{ label: 'Land', amount: land, kind: 'out' as const }] : []),
     { label: 'Premium FSI, TDR, ancillary', amount: fsiCost, kind: 'out' },
-    { label: 'Construction', amount: M.build, kind: 'out' },
+    ...(earns ? [{ label: 'Construction', amount: M.build, kind: 'out' as const }]
+      : [{ label: 'Construction', amount: M.build - sys, kind: 'out' as const }, { label: 'Building systems', amount: sys, kind: 'out' as const }]),
     { label: 'Parking levels', amount: M.parking, kind: 'out' },
-    { label: 'Soft costs', amount: M.soft, kind: 'out' },
+    { label: earns ? 'Soft costs' : 'Fees, consultants, approvals', amount: M.soft, kind: 'out' },
     { label: 'Stamp duty', amount: stampDuty, kind: 'out' },
     ...extraLines.filter((x) => x.amount > 0),
   ];
-  notes.push(`GST of ${deal.gstPct}% (₹${(gstCollected / 1e7).toFixed(2)} cr) is paid by the buyers on top of the price and passed on: not revenue.`);
-  return { revenue, cost, profit, margin: revenue > 0 ? profit / revenue : 0, irr: s.irr, peak: s.peak, flow: s.flow, cum: s.cum, saleCarpet, ownerCarpet, owner, lines, gstCollected, stampDuty, notes };
+  if (earns) notes.push(`GST of ${deal.gstPct}% (₹${(gstCollected / 1e7).toFixed(2)} cr) is paid by the buyers on top of the price and passed on: not revenue.`);
+  else notes.push('Public buildings only: nothing is sold or let, so this is what it costs to build, not a profit.');
+  if (M.exit > 0) notes.push(`Offices and hotels are let or run, not sold: valued at their yields once leased up, ${LEASE_UP} months after completion, as if sold on or refinanced then.`);
+  return { revenue, cost, profit, margin: revenue > 0 ? profit / revenue : 0, irr: earns ? s.irr : null, peak: s.peak, flow: s.flow, cum: s.cum, saleCarpet, ownerCarpet, owner, lines, gstCollected, stampDuty, notes, earns, uses };
 }
