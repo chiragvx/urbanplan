@@ -1,7 +1,7 @@
 // A Pro project: a plot set up by its outline and the roads along its edges (no city map needed), the rules it falls under,
 // the builder's design system, and what the generator is asked for. Turned into the same PlotReport and SiteReport
 // the editor's Site Studio works from (src/doc/plot.ts, site.ts, optimise.ts), so both give the same numbers.
-import { analysePlot, type PlotCode, type PlotReport } from '../doc/plot';
+import { analysePlot, type PlotCode, type PlotReport, type PlotRules } from '../doc/plot';
 import { defaultCosts, solveSite, type SiteReport } from '../doc/site';
 import { DEFAULT_DESIGN, optimise, siteDefaults, type Typology } from '../doc/optimise';
 import type { CityDoc } from '../doc/doc';
@@ -47,6 +47,17 @@ export interface ProProject {
   land?: number;
   /** shops along the front road: floors of them (0: none), how deep, and their sale price (₹/sq ft carpet; 0: the starting figure) */
   shops?: { floors: number; depth: number; sale: number };
+  /** the site's own limits: a height cap (airport clearance, fire, a heritage zone: m, 0 none), and a transit
+   *  zone (near a metro station: the FSI goes up to `todFsi` with premium) */
+  limits?: { maxH: number; tod: boolean; todFsi: number };
+  /** the deal on the land (./deal.ts): outright purchase, a joint development, a society's redevelopment */
+  deal?: import('./deal').Deal;
+  /** a building's own design system (a preset id, by building index): the layer under the project's style */
+  buildingStyle?: Record<number, string>;
+  /** the money model's timing and overheads, over the city's starting figures */
+  costs?: { months?: number; presold?: number; soft?: number };
+  /** what the plot sits in, for the NOCs */
+  approval?: { nearAirport?: boolean; trees?: boolean; heritage?: boolean };
 }
 
 /** shops sell at about this many times the flats' rate until a price is put in */
@@ -117,13 +128,21 @@ export function plotReport(p: ProProject, floorH = 3): PlotReport {
   const doc = { get: (id: string) => sections.get(id) } as unknown as CityDoc;
   const C = { geo: (id: string) => geo.get(id) } as unknown as Compiler;
   const plot: PlotObj = { kind: 'plot', id: 'plot', name: p.name, use: 'residential', congested: p.city === 'pune-congested', rules: { floorH }, ring };
-  return analysePlot(doc, C, () => ids, plot, cfg.code);
+  const r = analysePlot(doc, C, () => ids, plot, cfg.code);
+  const L = p.limits;
+  if (!L || (!(L.maxH > 0) && !L.tod)) return r;
+  // the site's limits on top of the code's: a lower height cap; in a transit zone, premium FSI up to the zone's total
+  // (as Maharashtra's TOD policy allows on wide enough roads; check the notified zone)
+  const rules: Partial<PlotRules> = { floorH };
+  if (L.maxH > 0) rules.maxH = Math.min(r.rules.maxH, L.maxH);
+  if (L.tod && r.roadW >= 9) rules.premium = Math.max(r.rules.premium, (L.todFsi || 4) - r.rules.basic - r.rules.tdr);
+  return analysePlot(doc, C, () => ids, { ...plot, rules }, cfg.code);
 }
 
 /** The generated scheme on it, with shops along the front if asked for (./mixed.ts). */
 export function generate(p: ProProject, r: PlotReport, specRate = 0, premium = 0): { d: SiteReport; shops: Shops | null } {
   const c = defaultCosts(r.code, 'residential');
-  const cost = { build: c.build + specRate, ...(p.land ? { land: p.land } : {}), sale: p.sale > 0 ? p.sale : Math.round((c.sale * (1 + premium)) / 50) * 50 };
+  const cost = { ...(p.costs ?? {}), build: c.build + specRate, ...(p.land ? { land: p.land } : {}), sale: p.sale > 0 ? p.sale : Math.round((c.sale * (1 + premium)) / 50) * 50 };
   const base = { ...siteDefaults('residential'), mix: p.mix, cost, design: { ...DEFAULT_DESIGN, type: p.typology, maxFloors: p.maxFloors } };
   const site = optimise(r, base, 'residential');
   const sh = p.shops;

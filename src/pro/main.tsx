@@ -1,108 +1,95 @@
-// UrbanPlan Pro (/pro/): the full planning workspace, beside the simple editor (/app/). A project is a plot and its
-// roads, the rules it falls under, and the builder's design system; the generator builds the scheme straight away
-// and everything follows from it: the 3D view with every window and door at its catalog size, the area and money
-// figures, the departures from the rules, the light and ventilation check and the door and window schedule.
-// Kept in this browser (localStorage) and, signed in, in the account's projects a few seconds behind (./cloud.ts).
+// UrbanPlan Pro (/pro/): the full planning workspace, beside the simple editor (/app/).
+//
+// The layout follows how a developer works a plot, and keeps the answer in view the whole time:
+// - a rail of six steps on the left (site, scheme, design, money, approval, explore), each with its own panel;
+// - the 3D in the middle, with the result bar over it (built-up, homes, profit, IRR, the rules), which flashes what
+//   each change did to it, so cause and effect are never a scroll away;
+// - view tools along the bottom of the 3D (exterior or an X-ray floor, the camera, the sun);
+// - on a phone the steps move to a bar along the bottom and the panel sits under the 3D.
+// Every change can be undone (Ctrl+Z). The project is kept in this browser and, signed in, in the account a few
+// seconds behind (./cloud.ts); a share link carries the whole project in the URL and opens read-only.
 import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import '../theme/tokens.css';
 import './pro.css';
-import { CITIES, DEFAULT_PROJECT, generate, outline, plotReport, roadLines, type ProProject } from './project';
-import { PlotEditor } from './PlotEditor';
-import { shopFloorsAllowed } from './mixed';
+import { DEFAULT_PROJECT, outline, roadLines, type ProProject } from './project';
 import { deletePro, listPro, openPro, savePro, toText, type CloudRef } from './cloud';
 import { authReady, explain, peekSession, session, startAuth } from '../auth/auth';
 import type { Project } from '../app/cloud';
-import { clone, presetOf, PRESETS, SPEC, specRate, type BalconyKind, type DesignSystem, type DoorType, type Railing, type WindowType } from './design';
-import { planFloor, schedule } from './openings';
-import { ProView, type Picked } from './scene';
-import { CARPET, SQFT, UNIT_COLOR, UNIT_LABEL } from '../doc/site';
-import { TYPOLOGIES, type Typology } from '../doc/optimise';
+import { evaluate, dsOfBuilding } from './evaluate';
+import { ProView, type CameraView, type Picked } from './scene';
+import { UNIT_COLOR, UNIT_LABEL } from '../doc/site';
+import { fitRooms } from './rooms';
+import { ROOM_COLOR } from './rooms';
+import { scrutiny, scrutinySummary } from './scrutiny';
+import { applyDeal, DEFAULT_DEAL } from './deal';
+import { CITY_LATLON, indiaTime, sunDirection } from './sun';
+import { encodeShare, decodeShare } from './share';
+import { exploreOptions } from './options';
+import { parseBrief, runBrief } from './brief';
+import { Sheets, SHEET_CSS } from './drawings';
+import { ApproveStep, BuildStep, DesignStep, ExploreStep, MoneyStep, SiteStep, STEPS, type Step, type StepProps } from './steps';
+import { Btn, cr, Icon, nf, Num, pct, sqft } from './ui';
 
-const KEY = 'urbanplan:pro:project';
-function load(): ProProject {
-  try { const p = JSON.parse(localStorage.getItem(KEY) || 'null'); if (p?.v === 1) return { ...DEFAULT_PROJECT, ...p }; } catch { /* a fresh project */ }
-  return DEFAULT_PROJECT;
-}
-const save = (p: ProProject) => { try { localStorage.setItem(KEY, JSON.stringify(p)); } catch { /* not kept */ } };
-const REF = 'urbanplan:pro:cloud';
-const loadRef = (): CloudRef => { try { return JSON.parse(localStorage.getItem(REF) || 'null'); } catch { return null; } };
-const saveRef = (r: CloudRef) => { try { localStorage.setItem(REF, JSON.stringify(r)); } catch { /* not kept */ } };
+const KEY = 'urbanplan:pro:project', REF = 'urbanplan:pro:cloud', SEEN = 'urbanplan:pro:seen';
+const store = {
+  get<T>(k: string, d: T): T { try { const v = JSON.parse(localStorage.getItem(k) || 'null'); return v ?? d; } catch { return d; } },
+  set(k: string, v: unknown) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* not kept */ } },
+};
+const loadP = (): ProProject => { const p = store.get<ProProject | null>(KEY, null); return p?.v === 1 ? { ...DEFAULT_PROJECT, ...p } : DEFAULT_PROJECT; };
 const BASE = import.meta.env.BASE_URL;
 const hhmm = (d = new Date()) => d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 const ago = (iso: string) => `${new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}, ${hhmm(new Date(iso))}`;
-
-/** The account's Pro projects: open one, start a new one, delete (two clicks). */
-function Projects({ current, open, fresh, close }: { current: string | null; open: (id: string) => void; fresh: () => void; close: () => void }) {
-  const [list, setList] = useState<Project[] | null>(null);
-  const [err, setErr] = useState('');
-  const [sure, setSure] = useState('');
-  const reload = () => listPro().then(setList, (e) => setErr(explain(e)));
-  useEffect(() => { void reload(); }, []);
-  const del = async (id: string) => {
-    if (sure !== id) { setSure(id); return; }
-    try { await deletePro(id); setSure(''); void reload(); } catch (e) { setErr(explain(e)); }
-  };
-  return (
-    <div class="pro-menu" role="dialog" aria-label="Your projects">
-      <div class="pro-menu-head"><b>Your projects</b><button class="pbtn primary" onClick={fresh}>New project</button></div>
-      {err && <p class="ped-err">{err}</p>}
-      {!list && !err && <p class="pro-note">Loading…</p>}
-      {list && !list.length && <p class="pro-note">None yet: this one is saved here as you work.</p>}
-      {list && list.length > 0 && <ul>{list.map((x) => (
-        <li class={x.id === current ? 'on' : ''}>
-          <button class="pro-proj" onClick={() => open(x.id)}><b>{x.name}</b><span>{x.region.replace('pro:', '').replace('-', ' ')} · {ago(x.updated_at)}</span></button>
-          <button class="pbtn small" onClick={() => void del(x.id)}>{sure === x.id ? 'Delete?' : 'Delete'}</button>
-        </li>
-      ))}</ul>}
-      <button class="linkbtn" onClick={close}>Close</button>
-    </div>
-  );
-}
-
-const nf = (v: number, d = 0) => v.toLocaleString('en-IN', { maximumFractionDigits: d, minimumFractionDigits: d });
-const sqft = (m2: number) => `${nf(m2 * SQFT)} sq ft`;
-const cr = (rs: number) => `₹${nf(rs / 1e7, 2)} cr`;
-
-function Num({ label, value, set, step = 1, min = 0, max = 9999, unit }: { label: string; value: number; set: (v: number) => void; step?: number; min?: number; max?: number; unit?: string }) {
-  return (
-    <label class="pf">
-      <span>{label}</span>
-      <span class="pf-in">
-        <input type="number" value={value} step={step} min={min} max={max} onChange={(e) => { const v = parseFloat((e.target as HTMLInputElement).value); if (Number.isFinite(v)) set(Math.min(max, Math.max(min, v))); }} />
-        {unit && <i>{unit}</i>}
-      </span>
-    </label>
-  );
-}
-function Seg<T extends string>({ value, set, options }: { value: T; set: (v: T) => void; options: { value: T; label: string; title?: string }[] }) {
-  return <div class="pseg" role="group">{options.map((o) => <button type="button" title={o.title} aria-pressed={o.value === value} onClick={() => set(o.value)}>{o.label}</button>)}</div>;
-}
-function Color({ label, value, set }: { label: string; value: string; set: (v: string) => void }) {
-  return <label class="pf pf-color"><span>{label}</span><input type="color" value={value} onInput={(e) => set((e.target as HTMLInputElement).value)} /></label>;
-}
-function Toggle({ label, value, set }: { label: string; value: boolean; set: (v: boolean) => void }) {
-  return <label class="pcheck"><input type="checkbox" checked={value} onChange={(e) => set((e.target as HTMLInputElement).checked)} /> {label}</label>;
-}
-
-function Swatches({ d }: { d: DesignSystem }) {
-  return <span class="sw">{[d.facade.wall, d.facade.accent, d.glazing.frame, d.glazing.glass].map((c) => <i style={`background:${c}`} />)}</span>;
-}
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
 
 function App() {
-  const [p, setP] = useState<ProProject>(load);
-  const [tab, setTab] = useState<'plot' | 'style' | 'spec'>('plot');
-  const [xray, setXray] = useState<number | null>(null);
-  const [hover, setHover] = useState<Picked | null>(null);
-  const up = (o: Partial<ProProject>) => setP((x) => { const n = { ...x, ...o }; save(n); return n; });
+  // ---------- the project, with undo ----------
+  const [p, setP] = useState<ProProject>(loadP);
+  const past = useRef<ProProject[]>([]), future = useRef<ProProject[]>([]), lastPush = useRef(0);
+  const [readOnly, setReadOnly] = useState(false);
+  const up = (o: Partial<ProProject>) => {
+    if (readOnly) return;
+    setP((x) => {
+      // (a burst of changes, typing a number, is one undo step)
+      const now = Date.now();
+      if (now - lastPush.current > 700) { past.current = [...past.current.slice(-80), x]; future.current = []; }
+      lastPush.current = now;
+      const n = { ...x, ...o }; store.set(KEY, n); return n;
+    });
+  };
+  const replace = (n: ProProject) => { past.current = [...past.current.slice(-80), p]; future.current = []; store.set(KEY, n); setP(n); };
+  const undo = () => { const x = past.current.pop(); if (!x) return; future.current.push(p); store.set(KEY, x); setP(x); };
+  const redo = () => { const x = future.current.pop(); if (!x) return; past.current.push(p); store.set(KEY, x); setP(x); };
 
-  // ---- the account: sign-in state, the cloud copy, the projects list ----
-  const [ref, setRefState] = useState<CloudRef>(loadRef);
-  const setRef = (r: CloudRef) => { saveRef(r); setRefState(r); };
+  const [step, setStep] = useState<Step>(() => store.get<Step>('urbanplan:pro:step', 'site'));
+  const [panel, setPanel] = useState(true);
+  const go = (s: Step) => { setStep(s); setPanel(true); store.set('urbanplan:pro:step', s); };
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const toastT = useRef<number>();
+  const toast = (s: string) => { setToastMsg(s); clearTimeout(toastT.current); toastT.current = window.setTimeout(() => setToastMsg(null), 4200); };
+  const [dialog, setDialog] = useState<null | 'projects' | 'share' | 'drawings' | 'keys' | 'welcome'>(() => (store.get(SEEN, false) || location.hash.startsWith('#s=') ? null : 'welcome'));
+
+  // ---------- a shared link: /pro/#s=<the project> opens read-only ----------
+  useEffect(() => {
+    const m = location.hash.match(/^#s=(.+)$/);
+    if (!m) return;
+    decodeShare(m[1]).then((x) => { setP(x); setReadOnly(true); setDialog(null); }, () => toast('That share link is damaged.'));
+  }, []);
+  const keepCopy = () => { store.set(KEY, p); setReadOnly(false); history.replaceState(null, '', location.pathname); toast('This scheme is now your own copy.'); };
+
+  // ---------- everything worked out from it ----------
+  const e = useMemo(() => evaluate(p), [JSON.stringify(p)]);
+  const rooms = useMemo(() => e.d.buildings.map((b, i) => fitRooms(b, e.plans[i])), [e]);
+  const checks = useMemo(() => scrutiny(e, rooms), [e, rooms]);
+  const deal = useMemo(() => applyDeal(e, p.deal ?? DEFAULT_DEAL), [e]);
+  const sum = scrutinySummary(checks);
+
+  // ---------- the account ----------
+  const [ref, setRefState] = useState<CloudRef>(() => store.get<CloudRef>(REF, null));
+  const setRef = (r: CloudRef) => { store.set(REF, r); setRefState(r); };
   const [cloud, setCloud] = useState<{ s: 'local' | 'saving' | 'saved' | 'error'; msg?: string }>({ s: 'local' });
-  const [menu, setMenu] = useState(false);
   const user = session.value?.user ?? null;
-  // (what's in the cloud, or for a project never saved what it opened as: just opening Pro saves nothing)
   const lastSaved = useRef(toText(p));
   useEffect(() => { peekSession(); void startAuth(); }, []);
   const openId = async (id: string) => {
@@ -110,24 +97,18 @@ function App() {
       setCloud({ s: 'saving', msg: 'Opening…' });
       const o = await openPro(id);
       lastSaved.current = toText(o.p);
-      save(o.p); setP(o.p); setRef(o.ref); setMenu(false);
+      replace(o.p); setRef(o.ref); setDialog(null);
       history.replaceState(null, '', `?p=${id}`);
       setCloud({ s: 'saved', msg: `Opened ${hhmm()}` });
-    } catch (e) { setCloud({ s: 'error', msg: explain(e) }); }
+    } catch (err) { setCloud({ s: 'error', msg: explain(err) }); }
   };
-  // a project linked as /pro/?p=<id> opens once signed in
   useEffect(() => {
     const id = new URLSearchParams(location.search).get('p');
     if (user && id && id !== ref?.id) void openId(id);
   }, [user?.id]);
-  const fresh = () => {
-    const n = { ...DEFAULT_PROJECT };
-    save(n); setP(n); setRef(null); lastSaved.current = ''; setMenu(false);
-    history.replaceState(null, '', location.pathname);
-  };
-  // signed in: the cloud follows a few seconds behind every change (a version kept every 10 minutes)
+  const fresh = (n: ProProject = { ...DEFAULT_PROJECT }) => { replace(n); setRef(null); lastSaved.current = ''; setDialog(null); history.replaceState(null, '', location.pathname); };
   useEffect(() => {
-    if (!user) { setCloud({ s: 'local' }); return; }
+    if (!user || readOnly) { setCloud({ s: 'local' }); return; }
     const text = toText(p);
     if (text === lastSaved.current) return;
     const t = setTimeout(async () => {
@@ -138,247 +119,324 @@ function App() {
         setRef({ id: r.id, rev: r.revision });
         history.replaceState(null, '', `?p=${r.id}`);
         setCloud({ s: 'saved', msg: r.copied ? 'Newer work was in the cloud: saved this as a copy' : `Saved ${hhmm()}` });
-      } catch (e) { setCloud({ s: 'error', msg: explain(e) }); }
+      } catch (err) { setCloud({ s: 'error', msg: explain(err) }); }
     }, 2500);
     return () => clearTimeout(t);
   }, [JSON.stringify(p), user?.id]);
-  const ds = p.custom ?? presetOf(p.style);
-  const setDs = (f: (d: DesignSystem) => void) => { const d = clone(ds); f(d); up({ custom: d }); };
 
-  const out = useMemo(() => {
-    const r = plotReport(p, ds.floorH);
-    const rate = specRate(ds);
-    const { d, shops } = generate(p, r, rate, ds.premium);
-    const plans = d.buildings.map((b) => planFloor(b, ds));
-    const rows = schedule(d, plans, ds, (bi, ui) => (shops?.removed.get(bi)?.has(ui) ? shops.upperOf[bi] : 0));
-    const checks = plans.flatMap((pl, i) => pl.checks.map((c) => ({ ...c, floors: d.buildings[i].floors })));
-    return { r, d, plans, rows, checks, rate, shops };
-  }, [JSON.stringify(p)]);
-
+  // ---------- the 3D ----------
   const canvas = useRef<HTMLCanvasElement>(null), view = useRef<ProView | null>(null);
+  const [xray, setXray] = useState<number | null>(null);
+  const [hover, setHover] = useState<Picked | null>(null);
+  const [sun, setSun] = useState<{ on: boolean; month: number; hour: number }>({ on: false, month: 12, hour: 15 });
   useEffect(() => {
     const v = new ProView(canvas.current!);
     view.current = v;
     (window as unknown as { proView?: ProView }).proView = v; // (for the console)
     const ro = new ResizeObserver(() => v.resize());
     ro.observe(canvas.current!.parentElement!);
-    return () => { ro.disconnect(); v.dispose(); };
+    const theme = () => v.setTheme(document.documentElement.dataset.theme === 'dark');
+    theme();
+    const mo = new MutationObserver(theme);
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => { ro.disconnect(); mo.disconnect(); v.dispose(); };
   }, []);
-  const maxFloor = Math.max(1, ...out.d.buildings.map((b) => b.floors));
+  const maxFloor = Math.max(1, ...e.d.buildings.map((b) => b.floors));
   const xr = xray === null ? null : Math.min(xray, maxFloor);
   useEffect(() => {
     setHover(null);
     const o = outline(p);
-    view.current?.set({ r: out.r, d: out.d, plans: out.plans, ds, xray: xr, shops: out.shops, roads: roadLines(o.ring, o.roads).map((l) => ({ pts: l.pts, today: l.road.today })) });
-  }, [out, xr]);
-
-  const { r, d, shops } = out;
-  const sh = p.shops ?? { floors: 0, depth: 9, sale: 0 };
-  const setShops = (o: Partial<typeof sh>) => up({ shops: { ...sh, ...o } });
-  const allowed = shopFloorsAllowed(r.roadW);
-  // drawing starts from the rectangle as it stands (once; after that the drawn outline is kept)
-  const setShape = (v: 'rect' | 'poly') => {
-    if (v === 'rect') { up({ shape: 'rect' }); return; }
-    const o = outline({ ...p, shape: 'rect' });
-    up({ shape: 'poly', ring: p.ring ?? o.ring, edgeRoads: p.edgeRoads ?? o.roads });
+    view.current?.set({
+      r: e.r, d: e.d, plans: e.plans, ds: e.ds, xray: xr, shops: e.shops,
+      roads: roadLines(o.ring, o.roads).map((l) => ({ pts: l.pts, today: l.road.today })),
+      dsOf: (i) => dsOfBuilding(p, i, e.ds), rooms, roomColor: ROOM_COLOR,
+    });
+    applySun();
+  }, [e, xr, rooms]);
+  const applySun = () => {
+    const [lat, lon] = CITY_LATLON[p.city] ?? [18.52, 73.86];
+    view.current?.setSun(sun.on ? sunDirection(lat, lon, indiaTime(2026, sun.month, 21, sun.hour)) : null);
   };
-  const flatsOk = out.checks.filter((c) => c.t !== 3 && c.light && c.air).reduce((s, c) => s + c.floors, 0);
-  const flatsAll = out.checks.filter((c) => c.t !== 3).reduce((s, c) => s + c.floors, 0);
-  const failing = out.checks.filter((c) => c.t !== 3 && !(c.light && c.air));
-  const city = CITIES.find((c) => c.value === p.city)!;
+  useEffect(applySun, [sun, p.city]);
+  const cam = (k: CameraView) => view.current?.look(k);
+
+  // ---------- keys ----------
+  useEffect(() => {
+    const on = (ev: KeyboardEvent) => {
+      if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') { if (typing(ev.target)) return; ev.preventDefault(); if (ev.shiftKey) redo(); else undo(); return; }
+      if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'y') { if (typing(ev.target)) return; ev.preventDefault(); redo(); return; }
+      if (ev.ctrlKey || ev.metaKey || ev.altKey || typing(ev.target)) return;
+      if (ev.key === 'Escape') { setDialog(null); return; }
+      const i = '123456'.indexOf(ev.key);
+      if (i >= 0) { go(STEPS[i].key); return; }
+      if (ev.key === 'x') setXray((v) => (v === null ? Math.max(1, Math.round(maxFloor / 2)) : null));
+      if (ev.key === ']' ) setXray((v) => (v === null ? null : Math.min(maxFloor, v + 1)));
+      if (ev.key === '[') setXray((v) => (v === null ? null : Math.max(1, v - 1)));
+      if (ev.key === 'f') cam('fit');
+      if (ev.key === 't') cam('top');
+      if (ev.key === 's') cam('street');
+      if (ev.key === '\\') setPanel((v) => !v);
+      if (ev.key === '?') setDialog('keys');
+    };
+    addEventListener('keydown', on);
+    return () => removeEventListener('keydown', on);
+  });
+
+  // ---------- the scripting API: what a script, or an agent, drives (the same functions the panels use) ----------
+  const pRef = useRef(p); pRef.current = p;
+  useEffect(() => {
+    (window as unknown as { urbanplan?: unknown }).urbanplan = {
+      /** the project as data */
+      get: () => structuredClone(pRef.current),
+      /** change it (as a panel would: undoable) */
+      set: (o: Partial<ProProject>) => up(o),
+      /** everything worked out from a project (this one unless given) */
+      evaluate: (q?: ProProject) => evaluate(q ?? pRef.current),
+      scrutiny: (q?: ProProject) => { const x = evaluate(q ?? pRef.current); return scrutiny(x, x.d.buildings.map((b, i) => fitRooms(b, x.plans[i]))); },
+      options: (q?: ProProject) => exploreOptions(q ?? pRef.current),
+      brief: (text: string) => runBrief(pRef.current, parseBrief(text).brief),
+      deal: (q?: ProProject) => { const x = evaluate(q ?? pRef.current); return applyDeal(x, x.p.deal ?? DEFAULT_DEAL); },
+    };
+  }, []);
+
+  const cur = STEPS.find((s) => s.key === step)!;
+  const props: StepProps = { p, e, up, rooms, checks, deal, go, openDrawings: () => setDialog('drawings'), toast };
+  const Body = { site: SiteStep, build: BuildStep, design: DesignStep, money: MoneyStep, approve: ApproveStep, explore: ExploreStep }[step];
 
   return (
-    <div class="pro">
-      <header class="pro-top">
-        <a class="pro-logo" href="/">Urban<span>Plan</span></a>
-        <b class="pro-chip">Pro</b>
-        <input class="pro-name" value={p.name} aria-label="Project name" onChange={(e) => up({ name: (e.target as HTMLInputElement).value || 'Untitled project' })} />
-        <span class="pro-gap" />
-        <span class="pro-beta">Beta · free while we build it</span>
-        {authReady && user && <span class={`pro-cloud ${cloud.s}`} title={cloud.msg}>{cloud.s === 'saving' ? (cloud.msg ?? 'Saving…') : cloud.s === 'saved' ? (cloud.msg ?? 'Saved') : cloud.s === 'error' ? 'Not saved' : ''}</span>}
-        {authReady && user && <button class="pro-link" onClick={() => setMenu(!menu)} aria-expanded={menu}>Projects</button>}
-        {authReady && session.value === null && <a class="pro-link" href={`${BASE}login/?next=${encodeURIComponent(location.pathname)}`} title="Keep your projects in your account">Sign in to save</a>}
-        <a class="pro-link" href={`${BASE}app/`}>Simple editor</a>
-        {menu && user && <Projects current={ref?.id ?? null} open={(id) => void openId(id)} fresh={fresh} close={() => setMenu(false)} />}
+    <div class={`pro${panel ? '' : ' no-panel'}${readOnly ? ' ro' : ''}`}>
+      <header class="top">
+        <a class="logo" href={BASE} aria-label="UrbanPlan home">Urban<span>Plan</span></a>
+        <b class="chip">Pro</b>
+        <label class="pname"><input value={p.name} aria-label="Project name" readOnly={readOnly} onChange={(ev) => up({ name: (ev.target as HTMLInputElement).value.trim() || 'Untitled project' })} /><Icon n="edit" size={14} /></label>
+        <SaveState cloud={cloud} user={!!user} readOnly={readOnly} />
+        <span class="gap" />
+        {!readOnly && <span class="hist">
+          <Btn kind="quiet" icon="undo" title="Undo (Ctrl+Z)" onClick={undo} disabled={!past.current.length} />
+          <Btn kind="quiet" icon="redo" title="Redo (Ctrl+Shift+Z)" onClick={redo} disabled={!future.current.length} />
+        </span>}
+        {readOnly
+          ? <Btn kind="primary" icon="check" onClick={keepCopy}>Make it my copy</Btn>
+          : <Btn icon="share" onClick={() => setDialog('share')}>Share</Btn>}
+        {authReady && user && <Btn icon="folder" onClick={() => setDialog(dialog === 'projects' ? null : 'projects')}>Projects</Btn>}
+        {authReady && session.value === null && <Btn icon="user" href={`${BASE}login/?next=${encodeURIComponent(location.pathname)}`} title="Keep your projects in your account">Sign in</Btn>}
+        <More openKeys={() => setDialog('keys')} newProject={() => fresh()} />
       </header>
 
-      <aside class="pro-left">
-        <div class="pro-tabs" role="tablist">
-          {([['plot', 'Plot'], ['style', 'Design system'], ['spec', 'Spec & price']] as const).map(([k, l]) => <button role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>{l}</button>)}
-        </div>
+      <nav class="rail" aria-label="Steps">
+        {STEPS.map((s, i) => (
+          <button type="button" class="step" aria-current={step === s.key ? 'step' : undefined} onClick={() => (step === s.key ? setPanel(!panel) : go(s.key))} title={`${s.title} (${i + 1})`}>
+            <Icon n={s.icon} size={20} />
+            <span>{s.label}</span>
+            {s.key === 'approve' && sum.fail + sum.warn > 0 && <i class={`dot ${sum.fail ? 'bad' : 'warn'}`} />}
+          </button>
+        ))}
+        <span class="gap" />
+        <button type="button" class="step small" onClick={() => setPanel(!panel)} title="Show or hide the panel (\)"><Icon n="panel" size={18} /></button>
+      </nav>
 
-        {tab === 'plot' && (
-          <div class="pro-sec">
-            <label class="pf"><span>Rules</span>
-              <select value={p.city} onChange={(e) => up({ city: (e.target as HTMLSelectElement).value as ProProject['city'] })}>{CITIES.map((c) => <option value={c.value}>{c.label}</option>)}</select>
-            </label>
-            <p class="pro-note">{city.note}</p>
-            <h3>Plot</h3>
-            <Seg<'rect' | 'poly'> value={p.shape === 'poly' ? 'poly' : 'rect'} set={setShape} options={[{ value: 'rect', label: 'Rectangle' }, { value: 'poly', label: 'Draw the outline' }]} />
-            {p.shape === 'poly' && p.ring
-              ? <PlotEditor ring={p.ring} roads={outline(p).roads} set={(ring, edgeRoads) => up({ ring, edgeRoads })} />
-              : <>
-                <div class="pf-row"><Num label="Frontage" value={p.width} set={(v) => up({ width: v })} min={10} max={300} unit="m" /><Num label="Depth" value={p.depth} set={(v) => up({ depth: v })} min={10} max={300} unit="m" /></div>
-                <p class="pro-note">{nf(p.width * p.depth)} m² · {sqft(p.width * p.depth)}</p>
-                <h3>Roads</h3>
-                <div class="pf-row"><Num label="Front road today" value={p.road} set={(v) => up({ road: v })} min={3} max={60} unit="m" /><Num label="In the DP" value={p.dpRoad} set={(v) => up({ dpRoad: v })} min={0} max={60} unit="m" /></div>
-                <Toggle label="Corner plot (a road down the side)" value={p.corner} set={(v) => up({ corner: v })} />
-                {p.corner && <Num label="Side road" value={p.sideRoad} set={(v) => up({ sideRoad: v })} min={3} max={60} unit="m" />}
-              </>}
-            <h3>Scheme</h3>
-            <Seg<Typology> value={p.typology} set={(v) => up({ typology: v })} options={TYPOLOGIES} />
-            <Num label="At most this many floors (0: as the rules allow)" value={p.maxFloors} set={(v) => up({ maxFloors: Math.round(v) })} max={80} />
-            <h3>Flat mix</h3>
-            <div class="pf-row three">
-              {[0, 1, 2].map((i) => <Num label={UNIT_LABEL[i]} value={Math.round(p.mix[i] * 100)} unit="%" max={100} set={(v) => { const m = [...p.mix] as [number, number, number]; m[i] = v / 100; const s = m[0] + m[1] + m[2] || 1; up({ mix: m.map((x) => x / s) as [number, number, number] }); }} />)}
-            </div>
-            <h3>Shops at the front</h3>
-            <Seg<string> value={String(sh.floors)} set={(v) => setShops({ floors: +v })}
-              options={[{ value: '0', label: 'None' }, { value: '1', label: 'Ground' }, { value: '2', label: 'G + 1' }, { value: '3', label: 'G + 2' }]} />
-            {sh.floors > 0 && <>
-              <div class="pf-row">
-                <Num label="Depth from the front" value={sh.depth} set={(v) => setShops({ depth: v })} min={4} max={30} unit="m" />
-                <Num label={`Price${sh.sale ? '' : ' (0: starting)'}`} value={sh.sale} set={(v) => setShops({ sale: v })} step={500} max={200000} unit="₹/ft²" />
-              </div>
-              <p class={`chk ${allowed >= sh.floors ? 'ok' : 'warn'}`}>{allowed === 0 ? `A ${nf(r.roadW)} m road allows no shops (9 m and wider).` : `A ${nf(r.roadW)} m road allows shops on ${allowed >= 99 ? 'every floor' : allowed === 1 ? 'the ground floor' : `${allowed} floors`}.`} Check the zone and the authority's mixed-use rules.</p>
-              <p class="pro-note">The ground floor counts in the FSI, so floors of flats come off the top; the shops' parking is added. {sh.floors > 1 ? 'Above the ground, flats in the strip become shops.' : ''}</p>
+      {panel && (
+        <aside class="panel" aria-label={cur.title}>
+          <header class="panel-h">
+            <div><h2>{cur.title}</h2><p>{cur.sub}</p></div>
+            <Btn kind="quiet" icon="x" title="Hide the panel" onClick={() => setPanel(false)} />
+          </header>
+          <div class="panel-b" key={step}>
+            {readOnly && <p class="note">A shared scheme, view only. <button type="button" class="linkbtn" onClick={keepCopy}>Make it your own copy</button> to change it.</p>}
+            <fieldset disabled={readOnly}><Body {...props} /></fieldset>
+          </div>
+          <footer class="panel-f">
+            {STEPS.findIndex((s) => s.key === step) > 0 && <Btn kind="quiet" onClick={() => go(STEPS[STEPS.findIndex((s) => s.key === step) - 1].key)}>Back</Btn>}
+            <span class="gap" />
+            {STEPS.findIndex((s) => s.key === step) < STEPS.length - 1 && <Btn kind="primary" onClick={() => go(STEPS[STEPS.findIndex((s) => s.key === step) + 1].key)}>Next: {STEPS[STEPS.findIndex((s) => s.key === step) + 1].label}<Icon n="chevron" size={15} /></Btn>}
+          </footer>
+        </aside>
+      )}
+
+      <main class="stage">
+        <canvas ref={canvas} onPointerMove={(ev) => setHover(view.current?.pick(ev.clientX, ev.clientY) ?? null)} onPointerLeave={() => setHover(null)} />
+        <ResultBar e={e} deal={deal} sum={sum} go={go} />
+        <div class="tools">
+          <div class="tgroup seg" role="radiogroup" aria-label="View">
+            <button type="button" role="radio" aria-checked={xr === null} onClick={() => setXray(null)}><Icon n="cube" size={15} />Exterior</button>
+            <button type="button" role="radio" aria-checked={xr !== null} onClick={() => setXray(Math.max(1, Math.round(maxFloor / 2)))}><Icon n="layers" size={15} />X-ray</button>
+          </div>
+          {xr !== null && <div class="tgroup floor">
+            <button type="button" onClick={() => setXray(Math.max(1, xr - 1))} aria-label="Floor down ([)"><Icon n="minus" size={14} /></button>
+            <b>Floor {xr}<small> of {maxFloor}</small></b>
+            <button type="button" onClick={() => setXray(Math.min(maxFloor, xr + 1))} aria-label="Floor up (])"><Icon n="plus" size={14} /></button>
+          </div>}
+          <div class="tgroup">
+            <button type="button" title="Whole site (F)" onClick={() => cam('fit')}><Icon n="fit" size={16} /></button>
+            <button type="button" title="From the street (S)" onClick={() => cam('street')}><Icon n="street" size={16} /></button>
+            <button type="button" title="From above (T)" onClick={() => cam('top')}><Icon n="top" size={16} /></button>
+          </div>
+          <div class={`tgroup sun${sun.on ? ' on' : ''}`}>
+            <button type="button" title="Sun and shadows on a date and time" aria-pressed={sun.on} onClick={() => setSun({ ...sun, on: !sun.on })}><Icon n="sun" size={16} />{sun.on ? '' : 'Sun'}</button>
+            {sun.on && <>
+              <select aria-label="Month" value={sun.month} onChange={(ev) => setSun({ ...sun, month: +(ev.target as HTMLSelectElement).value })}>{MONTHS.map((m, i) => <option value={i + 1}>21 {m}</option>)}</select>
+              <input type="range" min={6} max={19} step={0.25} value={sun.hour} aria-label="Time of day" onInput={(ev) => setSun({ ...sun, hour: +(ev.target as HTMLInputElement).value })} />
+              <b class="time">{`${Math.floor(sun.hour)}:${String(Math.round((sun.hour % 1) * 60)).padStart(2, '0')}`}</b>
             </>}
           </div>
-        )}
-
-        {tab === 'style' && (
-          <div class="pro-sec">
-            <p class="pro-note">The builder's look and make, for every building in the project. Pick one, then change anything: the 3D, the schedule and the cost follow.</p>
-            <div class="presets">
-              {PRESETS.map((x) => (
-                <button class="preset" aria-pressed={p.style === x.id && !p.custom} onClick={() => up({ style: x.id, custom: null })}>
-                  <Swatches d={x} />
-                  <b>{x.name}</b>
-                  <span>{x.blurb}</span>
-                </button>
-              ))}
-            </div>
-            {p.custom && <p class="pro-note">Customised from {presetOf(p.style).name}. <button class="linkbtn" onClick={() => up({ custom: null })}>Reset</button></p>}
-            <h3>Facade</h3>
-            <div class="pf-row three">
-              <Color label="Walls" value={ds.facade.wall} set={(c) => setDs((d) => { d.facade.wall = c; })} />
-              <Color label="Accent" value={ds.facade.accent} set={(c) => setDs((d) => { d.facade.accent = c; })} />
-              <Color label="Stilt / base" value={ds.facade.base} set={(c) => setDs((d) => { d.facade.base = c; })} />
-            </div>
-            <div class="pf-row"><Toggle label="Floor bands" value={ds.facade.bands} set={(v) => setDs((d) => { d.facade.bands = v; })} /><Toggle label="Fins at windows" value={ds.facade.fins} set={(v) => setDs((d) => { d.facade.fins = v; })} /></div>
-            <h3>Glazing</h3>
-            <div class="pf-row"><Color label="Glass" value={ds.glazing.glass} set={(c) => setDs((d) => { d.glazing.glass = c; })} /><Color label="Frames" value={ds.glazing.frame} set={(c) => setDs((d) => { d.glazing.frame = c; })} /></div>
-            <h3>Balconies</h3>
-            <Seg<BalconyKind> value={ds.balcony.kind} set={(v) => setDs((d) => { d.balcony.kind = v; })} options={[{ value: 'cantilever', label: 'Cantilever' }, { value: 'recessed', label: 'Recessed' }, { value: 'french', label: 'French' }, { value: 'none', label: 'None' }]} />
-            <div class="pf-row">
-              <Num label="Depth" value={ds.balcony.depth} step={0.1} min={0.3} max={4} unit="m" set={(v) => setDs((d) => { d.balcony.depth = v; })} />
-              <label class="pf"><span>Railing</span><select value={ds.balcony.railing} onChange={(e) => setDs((d) => { d.balcony.railing = (e.target as HTMLSelectElement).value as Railing; })}><option value="glass">Glass</option><option value="ms">MS steel</option><option value="solid">Solid parapet</option></select></label>
-            </div>
-            <Num label="Floor to floor" value={ds.floorH} step={0.05} min={2.8} max={4.5} unit="m" set={(v) => setDs((d) => { d.floorH = v; })} />
-            <h3>Windows</h3>
-            <table class="cat">
-              <thead><tr><th>Tag</th><th>W</th><th>H</th><th>Sill</th><th>Type</th></tr></thead>
-              <tbody>{(['W1', 'W2', 'V1'] as const).map((t) => <CatRow t={t} x={ds.windows[t]} sill set={(f) => setDs((d) => f(d.windows[t]))} kinds={['sliding', 'casement', 'fixed', 'louvre']} />)}</tbody>
-            </table>
-            <h3>Doors</h3>
-            <table class="cat">
-              <thead><tr><th>Tag</th><th>W</th><th>H</th><th /><th>Type</th></tr></thead>
-              <tbody>{(['D1', 'D2', 'D3', 'SD'] as const).map((t) => <CatRow t={t} x={ds.doors[t]} set={(f) => setDs((d) => f(d.doors[t]))} kinds={['flush', 'panel', 'veneer', 'glass-sliding', 'fire-rated']} />)}</tbody>
-            </table>
-          </div>
-        )}
-
-        {tab === 'spec' && (
-          <div class="pro-sec">
-            <p class="pro-note">What the flats are sold with. Each choice adds to construction (₹ per sq ft of built-up area, rough figures to replace with your own).</p>
-            {SPEC.map((c) => (
-              <label class="pf"><span>{c.label}</span>
-                <select value={ds.spec[c.key] ?? 0} onChange={(e) => setDs((d) => { d.spec[c.key] = +(e.target as HTMLSelectElement).value; })}>
-                  {c.options.map((o, i) => <option value={i}>{o.label}{o.rate ? ` (+₹${o.rate})` : ''}</option>)}
-                </select>
-              </label>
-            ))}
-            <div class="pro-total"><span>Spec adds</span><b>₹{nf(out.rate)} / sq ft</b></div>
-            <div class="pro-total"><span>Construction</span><b>₹{nf(d.money.costs.build)} / sq ft</b></div>
-            <h3>Land and price</h3>
-            <Num label="Land, ₹ per sq ft of plot (0: the city's starting figure)" value={p.land ?? 0} step={500} max={500000} set={(v) => up({ land: v })} />
-            <p class="pro-note">Land at ₹{nf(d.money.costs.land)} / sq ft of plot: {cr(d.money.land)}.</p>
-            <Num label="Sale price, ₹ per sq ft of RERA carpet (0: the city's starting figure)" value={p.sale} step={500} max={200000} set={(v) => up({ sale: v })} />
-            <p class="pro-note">Selling at ₹{nf(d.money.costs.sale)} / sq ft carpet{p.sale > 0 ? '' : `: the city's starting figure ${ds.premium >= 0 ? '+' : '−'}${Math.round(Math.abs(ds.premium) * 100)}% for this design system`}.</p>
-          </div>
-        )}
-      </aside>
-
-      <main class="pro-stage">
-        <canvas ref={canvas} onPointerMove={(e) => setHover(view.current?.pick(e.clientX, e.clientY) ?? null)} onPointerLeave={() => setHover(null)} />
-        <div class="pro-viewbar">
-          <Seg<'out' | 'xray'> value={xr === null ? 'out' : 'xray'} set={(v) => setXray(v === 'out' ? null : Math.max(1, Math.round(maxFloor / 2)))} options={[{ value: 'out', label: 'Exterior' }, { value: 'xray', label: 'X-ray floor' }]} />
-          {xr !== null && (
-            <span class="pro-floor">
-              <button onClick={() => setXray(Math.max(1, xr - 1))} aria-label="Floor down">−</button>
-              <b>Floor {xr}</b>
-              <button onClick={() => setXray(Math.min(maxFloor, xr + 1))} aria-label="Floor up">+</button>
-            </span>
-          )}
         </div>
-        {xr !== null && <div class="pro-legend">{[0, 1, 2].map((t) => <span><i style={`background:${UNIT_COLOR[t]}`} />{UNIT_LABEL[t]}</span>)}</div>}
-        {hover && <div class="pro-tip" style={`left:${hover.x + 14}px;top:${hover.y + 14}px`}><b>{hover.label}</b><span>{hover.size}</span><span>Floor {hover.floor}</span></div>}
-        <p class="pro-hint">Drag to orbit, right-drag to pan, scroll to zoom. Point at a window or door for its size.</p>
+        {xr !== null && <div class="legend floating">{[0, 1, 2].map((t) => <span><i style={`background:${UNIT_COLOR[t]}`} />{UNIT_LABEL[t]}</span>)}{(['living', 'bed', 'kitchen', 'toilet'] as const).map((k) => <span><i style={`background:${ROOM_COLOR[k]}`} />{k === 'bed' ? 'bedroom' : k}</span>)}</div>}
+        {hover && <div class="tip" style={`left:${hover.x + 14}px;top:${hover.y + 14}px`}><b>{hover.label}</b><span>{hover.size}</span><span>Floor {hover.floor}</span></div>}
       </main>
 
-      <aside class="pro-right">
-        <section>
-          <h2>Scheme</h2>
-          <dl class="kv">
-            <div><dt>Plot</dt><dd>{nf(r.area)} m² <small>({nf(r.netArea)} m² after the DP road)</small></dd></div>
-            <div><dt>FSI on a {nf(r.roadW)} m road</dt><dd>{nf(r.fsi, 2)} + {Math.round(r.rules.ancillary * 100)}% {r.code === 'udcpr' ? 'ancillary' : 'fungible'}</dd></div>
-            <div><dt>Built-up area</dt><dd>{sqft(d.bua)} <small>of {sqft(r.bua)}</small></dd></div>
-            <div><dt>Buildings</dt><dd>{d.buildings.length} · {nf(d.height, 1)} m tall · {d.buildings.map((b) => b.floors).join(' + ')} floors{d.under ? ' over a stilt' : ''}</dd></div>
-            <div><dt>Flats</dt><dd>{d.flats} <small>{[0, 1, 2].filter((t) => d.count[t]).map((t) => `${d.count[t]} × ${UNIT_LABEL[t]}`).join(', ')}</small></dd></div>
-            {shops && <div><dt>Shops</dt><dd>{shops.count} <small>{sqft(shops.carpet)} carpet · {cr(shops.revenue)}</small></dd></div>}
-            <div><dt>Carpet (RERA)</dt><dd>{sqft(d.carpet)}</dd></div>
-            <div><dt>Parking</dt><dd>{d.parking.have} car bays <small>{d.parking.need} needed</small></dd></div>
-          </dl>
-        </section>
-        <section>
-          <h2>Money</h2>
-          <dl class="kv">
-            <div><dt>Revenue</dt><dd>{cr(d.money.revenue)}</dd></div>
-            <div><dt>Cost</dt><dd>{cr(d.money.cost)}</dd></div>
-            <div><dt>Profit</dt><dd class={d.money.profit < 0 ? 'bad' : ''}>{cr(d.money.profit)} <small>{nf(d.money.margin * 100, 1)}%</small></dd></div>
-            <div><dt>IRR</dt><dd>{d.money.irr === null ? '—' : `${nf(d.money.irr * 100, 1)}%`}</dd></div>
-          </dl>
-        </section>
-        <section>
-          <h2>Checks</h2>
-          <p class={`chk ${flatsOk === flatsAll ? 'ok' : 'warn'}`}>Light and air: {flatsOk} of {flatsAll} flats have openings of 1/10 of their floor area (half of it opening).</p>
-          {failing.length > 0 && <ul class="chk-list">{failing.slice(0, 4).map((c) => <li>{UNIT_LABEL[c.t]} of {nf(c.carpet)} m²: {nf(c.glazed, 1)} m² of openings, needs {nf(c.carpet / 10, 1)}</li>)}</ul>}
-          {shops && <p class={`chk ${shops.over ? 'warn' : 'ok'}`}>Shops: {shops.over ? `${shops.floors} floors asked, the ${nf(r.roadW)} m road allows ${shops.allowed}. ` : ''}{shops.trimmed ? `${shops.trimmed} floor${shops.trimmed > 1 ? 's' : ''} of flats came off the top to stay in the FSI` : 'Within the FSI'}{shops.removedFlats ? `, ${shops.removedFlats} flats became shops` : ''}; {shops.cars} cars for them{shops.basementsAdded ? `, ${shops.basementsAdded} more basement${shops.basementsAdded > 1 ? 's' : ''}` : ''}.</p>}
-          {d.departures.length ? <ul class="chk-list">{d.departures.map((x) => <li class="warn">{x.rule}: {x.value} (allowed {x.allowed}) <small>{x.clause}</small></li>)}</ul> : <p class="chk ok">No departures from {r.code === 'udcpr' ? 'UDCPR' : 'DCPR'} in the rules checked.</p>}
-        </section>
-        <section>
-          <h2>Door & window schedule</h2>
-          <table class="sched">
-            <thead><tr><th>Tag</th><th>Type</th><th>Size</th><th>No.</th></tr></thead>
-            <tbody>{out.rows.map((x) => <tr title={`${x.where}${x.sill !== '—' ? `, sill ${x.sill}` : ''}`}><td><b>{x.tag}</b></td><td>{x.label}</td><td>{x.size}</td><td>{nf(x.count)}</td></tr>)}</tbody>
-          </table>
-          <p class="pro-note">Carpet is taken as {Math.round(CARPET * 100)}% of a flat's plate. Checked by flat until rooms are modelled.</p>
-        </section>
-      </aside>
+      {toastMsg && <div class="toast" role="status">{toastMsg}</div>}
+      {dialog === 'projects' && user && <Projects current={ref?.id ?? null} open={(id) => void openId(id)} fresh={() => fresh()} close={() => setDialog(null)} />}
+      {dialog === 'share' && <ShareDialog p={p} close={() => setDialog(null)} toast={toast} />}
+      {dialog === 'keys' && <Keys close={() => setDialog(null)} />}
+      {dialog === 'welcome' && <Welcome close={(n) => { store.set(SEEN, true); setDialog(null); if (n) { fresh(n); go('site'); } }} />}
+      {dialog === 'drawings' && (
+        <div class="sheets-wrap" role="dialog" aria-label="Drawing set">
+          <style>{SHEET_CSS}</style>
+          <div class="sheets-bar"><b>Drawing set · {p.name}</b><span class="gap" /><Btn kind="primary" icon="print" onClick={() => print()}>Print or save as PDF</Btn><Btn icon="x" onClick={() => setDialog(null)}>Close</Btn></div>
+          <Sheets e={e} />
+        </div>
+      )}
     </div>
   );
 }
 
-function CatRow<T extends WindowType | DoorType>({ t, x, set, kinds, sill }: { t: string; x: T; set: (f: (x: T) => void) => void; kinds: string[]; sill?: boolean }) {
-  const n = (k: 'w' | 'h' | 'sill', v: string) => { const f = parseFloat(v); if (Number.isFinite(f) && f >= 0 && f < 10) set((y) => { (y as unknown as Record<string, number>)[k] = f; }); };
+/** The answer, always in view: what the plot builds, sells and makes, and whether it passes. Each figure flashes
+ *  by how much the last change moved it. */
+function ResultBar({ e, deal, sum, go }: { e: ReturnType<typeof evaluate>; deal: ReturnType<typeof applyDeal>; sum: ReturnType<typeof scrutinySummary>; go: (s: Step) => void }) {
+  const { r, d, shops } = e;
+  const k = { bua: d.bua, flats: d.flats + (shops?.count ?? 0), profit: deal.profit, irr: deal.irr ?? 0 };
+  const prev = useRef(k), [delta, setDelta] = useState<Partial<Record<keyof typeof k, number>>>({});
+  useEffect(() => {
+    const dd: Partial<Record<keyof typeof k, number>> = {};
+    (Object.keys(k) as (keyof typeof k)[]).forEach((x) => { const v = k[x] - prev.current[x]; if (Math.abs(v) > 1e-6 * Math.max(1, Math.abs(k[x]))) dd[x] = v; });
+    prev.current = k;
+    if (!Object.keys(dd).length) return;
+    setDelta(dd);
+    const t = setTimeout(() => setDelta({}), 2600);
+    return () => clearTimeout(t);
+  }, [k.bua, k.flats, k.profit, k.irr]);
+  const used = r.bua > 0 ? d.bua / r.bua : 0;
+  const D = (x: keyof typeof k, fmt: (v: number) => string) => delta[x] !== undefined && <i class={`delta ${delta[x]! > 0 ? 'up' : 'down'}`}>{delta[x]! > 0 ? '+' : '−'}{fmt(Math.abs(delta[x]!))}</i>;
   return (
-    <tr>
-      <td><b>{t}</b></td>
-      <td><input type="number" step="0.05" value={x.w} onChange={(e) => n('w', (e.target as HTMLInputElement).value)} aria-label={`${t} width`} /></td>
-      <td><input type="number" step="0.05" value={x.h} onChange={(e) => n('h', (e.target as HTMLInputElement).value)} aria-label={`${t} height`} /></td>
-      <td>{sill ? <input type="number" step="0.05" value={(x as WindowType).sill} onChange={(e) => n('sill', (e.target as HTMLInputElement).value)} aria-label={`${t} sill`} /> : null}</td>
-      <td><select value={x.kind} onChange={(e) => set((y) => { (y as { kind: string }).kind = (e.target as HTMLSelectElement).value; })}>{kinds.map((k) => <option value={k}>{k.replace('-', ' ')}</option>)}</select></td>
-    </tr>
+    <div class="results" role="region" aria-label="Result">
+      <button type="button" class="kpi" onClick={() => go('build')}>
+        <span>Built-up</span><b>{sqft(d.bua)}{D('bua', (v) => `${nf(v * 10.7639)}`)}</b>
+        <small><i class="meter"><i style={`width:${Math.min(100, used * 100)}%`} /></i>{nf(used * 100)}% of {nf(r.bua * 10.7639 / 1000)}k allowed</small>
+      </button>
+      <button type="button" class="kpi" onClick={() => go('build')}>
+        <span>Homes</span><b>{d.flats}{shops ? <em> + {shops.count} shops</em> : null}{D('flats', (v) => nf(v))}</b>
+        <small>{d.buildings.length} bldg · {d.buildings.map((b) => b.floors).join('+') || 0} floors · {nf(d.height)} m</small>
+      </button>
+      <button type="button" class="kpi" onClick={() => go('money')}>
+        <span>Profit</span><b class={deal.profit < 0 ? 'bad' : ''}>{cr(deal.profit)}{D('profit', (v) => `${nf(v / 1e7, 2)} cr`)}</b>
+        <small>{e.p.sale || e.p.land ? `${pct(deal.margin)} margin · ${cr(deal.revenue)} sales` : `${pct(deal.margin)} · starting prices`}</small>
+      </button>
+      <button type="button" class="kpi" onClick={() => go('money')}>
+        <span>IRR</span><b class={deal.irr !== null && deal.irr < 0 ? 'bad' : ''}>{pct(deal.irr)}{D('irr', (v) => `${nf(v * 100, 1)} pt`)}</b>
+        <small>peak cash {cr(deal.peak)}</small>
+      </button>
+      <button type="button" class={`kpi rules ${sum.fail ? 'bad' : sum.warn ? 'warn' : 'ok'}`} onClick={() => go('approve')}>
+        <span>Rules</span>
+        <b><Icon n={sum.fail ? 'x' : sum.warn ? 'warn' : 'check'} size={16} />{sum.fail ? `${sum.fail} fail` : sum.warn ? `${sum.warn} to check` : 'All clear'}</b>
+        <small>{sum.pass} pass{sum.fail && sum.warn ? ` · ${sum.warn} to check` : ''}</small>
+      </button>
+    </div>
+  );
+}
+
+function SaveState({ cloud, user, readOnly }: { cloud: { s: string; msg?: string }; user: boolean; readOnly: boolean }) {
+  if (readOnly) return <span class="save ro"><Icon n="link" size={13} />Shared view</span>;
+  if (!user) return <span class="save" title="Kept in this browser. Sign in to keep it in your account.">Saved in this browser</span>;
+  const t = cloud.s === 'saving' ? (cloud.msg ?? 'Saving…') : cloud.s === 'saved' ? (cloud.msg ?? 'Saved') : cloud.s === 'error' ? 'Not saved' : 'Saved';
+  return <span class={`save ${cloud.s}`} title={cloud.msg}><i />{t}</span>;
+}
+
+function More({ openKeys, newProject }: { openKeys: () => void; newProject: () => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span class="more">
+      <Btn kind="quiet" icon="more" title="More" onClick={() => setOpen(!open)} />
+      {open && <div class="menu" role="menu" onClick={() => setOpen(false)}>
+        <button type="button" role="menuitem" onClick={newProject}><Icon n="plus" size={15} />New project</button>
+        <a role="menuitem" href={`${BASE}app/`}><Icon n="site" size={15} />The simple editor</a>
+        <button type="button" role="menuitem" onClick={openKeys}><Icon n="key" size={15} />Keyboard shortcuts</button>
+      </div>}
+    </span>
+  );
+}
+
+/** The account's Pro projects: open one, start a new one, delete (two clicks). */
+function Projects({ current, open, fresh, close }: { current: string | null; open: (id: string) => void; fresh: () => void; close: () => void }) {
+  const [list, setList] = useState<Project[] | null>(null);
+  const [err, setErr] = useState(''), [sure, setSure] = useState('');
+  const reload = () => listPro().then(setList, (x) => setErr(explain(x)));
+  useEffect(() => { void reload(); }, []);
+  const del = async (id: string) => {
+    if (sure !== id) { setSure(id); return; }
+    try { await deletePro(id); setSure(''); void reload(); } catch (x) { setErr(explain(x)); }
+  };
+  return (
+    <Modal title="Your projects" close={close} side>
+      <Btn kind="primary" icon="plus" onClick={fresh}>New project</Btn>
+      {err && <p class="note bad">{err}</p>}
+      {!list && !err && <p class="note">Loading…</p>}
+      {list && !list.length && <p class="note">None yet: this one saves to your account as you work.</p>}
+      {list && list.length > 0 && <ul class="plist">{list.map((x) => (
+        <li class={x.id === current ? 'on' : ''}>
+          <button type="button" class="pitem" onClick={() => open(x.id)}><b>{x.name}</b><span>{x.region.replace('pro:', '').replace('-', ' ')} · {ago(x.updated_at)}</span></button>
+          <Btn kind="quiet" onClick={() => void del(x.id)}>{sure === x.id ? 'Delete?' : 'Delete'}</Btn>
+        </li>
+      ))}</ul>}
+    </Modal>
+  );
+}
+
+function ShareDialog({ p, close, toast }: { p: ProProject; close: () => void; toast: (s: string) => void }) {
+  const [url, setUrl] = useState('');
+  useEffect(() => { encodeShare(p).then((s) => setUrl(`${location.origin}${location.pathname}#s=${s}`)); }, []);
+  const copy = async () => { try { await navigator.clipboard.writeText(url); toast('Link copied.'); close(); } catch { toast('Select the link and copy it.'); } };
+  return (
+    <Modal title="Share this scheme" close={close}>
+      <p class="note">Anyone with the link sees the scheme, its 3D and its figures, read-only. They can make their own copy. The whole project is in the link: nothing is uploaded.</p>
+      <input class="share-url" readOnly value={url} onFocus={(ev) => (ev.target as HTMLInputElement).select()} />
+      <div class="row r2"><Btn kind="primary" icon="link" onClick={copy} disabled={!url}>Copy link</Btn><Btn href={`https://wa.me/?text=${encodeURIComponent(`${p.name} on UrbanPlan: ${url}`)}`} icon="share">WhatsApp</Btn></div>
+    </Modal>
+  );
+}
+
+function Keys({ close }: { close: () => void }) {
+  const rows: [string, string][] = [['1 – 6', 'Go to a step'], ['\\', 'Show or hide the panel'], ['X', 'X-ray floor on or off'], ['[  ]', 'Floor down / up'], ['F · S · T', 'Camera: whole site, street, from above'], ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · redo'], ['↑ ↓ in a number', 'Step it (Shift: ×10)'], ['Esc', 'Close this']];
+  return <Modal title="Keyboard shortcuts" close={close}><dl class="lines keys">{rows.map(([a, b]) => <div><dt><kbd>{a}</kbd></dt><dd>{b}</dd></div>)}</dl></Modal>;
+}
+
+/** First visit: start from a plot in three numbers, or look round the sample. */
+function Welcome({ close }: { close: (p?: ProProject) => void }) {
+  const [w, setW] = useState(30), [dpt, setD] = useState(40), [road, setRoad] = useState(12), [city, setCity] = useState<ProProject['city']>('pune');
+  return (
+    <Modal title="Size up a plot in a minute" close={() => close()} wide>
+      <p class="note">Give the plot and its road. You get the most the rules let you build, a scheme in 3D, the money and our own scrutiny, all at once. Change anything after.</p>
+      <div class="row r2">
+        <label class="f"><span class="f-l">Planning authority</span><select value={city} onChange={(ev) => setCity((ev.target as HTMLSelectElement).value as ProProject['city'])}><option value="pune">Pune (UDCPR)</option><option value="pune-congested">Pune old city</option><option value="mumbai-suburbs">Mumbai suburbs</option><option value="mumbai-island">Mumbai island city</option></select></label>
+        <Num label="Road in front" value={road} set={setRoad} min={3} max={80} unit="m" />
+      </div>
+      <div class="row r2"><Num label="Frontage" value={w} set={setW} min={10} max={400} unit="m" /><Num label="Depth" value={dpt} set={setD} min={10} max={400} unit="m" /></div>
+      <div class="row r2">
+        <Btn kind="primary" onClick={() => close({ ...DEFAULT_PROJECT, city, width: w, depth: dpt, road, dpRoad: road, name: `${w} × ${dpt} m plot` })}>Work it out</Btn>
+        <Btn onClick={() => close()}>Look round the sample first</Btn>
+      </div>
+      <p class="note">Plot not a rectangle? Draw it or import a GeoJSON / KML in the Site step.</p>
+    </Modal>
+  );
+}
+
+function Modal({ title, close, children, side, wide }: { title: string; close: () => void; children: preact.ComponentChildren; side?: boolean; wide?: boolean }) {
+  return (
+    <div class={`modal-bg${side ? ' side' : ''}`} onClick={(ev) => { if (ev.target === ev.currentTarget) close(); }}>
+      <div class={`modal${wide ? ' wide' : ''}`} role="dialog" aria-modal="true" aria-label={title}>
+        <header><h2>{title}</h2><Btn kind="quiet" icon="x" title="Close" onClick={close} /></header>
+        <div class="modal-b">{children}</div>
+      </div>
+    </div>
   );
 }
 

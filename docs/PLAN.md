@@ -108,23 +108,59 @@ The rule of thumb: we own whatever the authority checks and whatever the develop
 
 ## Where Pro is now (`/pro/`, beta)
 
-The first cut of the platform, in `src/pro/`:
-- **`project.ts`:** a plot as a rectangle (front road today and in the DP, an optional corner road) or a drawn outline with a road, or none, on any edge, under UDCPR or DCPR. It runs on the editor's own engine (`analysePlot`, `optimise`, `solveSite`), so Pro and Site Studio give the same numbers. Concave plots (an L, a T) get their margins from a true inset (`inset` in `src/doc/plot.ts`); convex plots are worked out exactly as before.
-- **`PlotEditor.tsx`:** the outline drawn in plan.
-  - Drag a corner in half-metre steps, or add one with the + on any edge; select a corner to delete it.
-  - Type an edge's exact length, and put a road on any edge (width today and in the DP).
-  - Or paste the corners as x, y in metres.
-- **`cloud.ts`:** signed in, the project saves to the account a few seconds after each change, with versions, through the editor's own project storage. Pro projects sit in the same table, marked `region` `pro:<city>`, so no database change was needed. The Projects menu opens, starts and deletes them, and `/pro/?p=<id>` links straight to one.
-- **`mixed.ts`:** shops along the front road under the flats: the ground floor, G + 1 or G + 2, at a depth set from the front. The ground-floor shops count in the FSI, so floors of flats come off the top; above the ground, flats in the strip become shops. The shops' parking is added, and basements too if needed. Shops sell at their own rate, 1.8× the flats' until a price is put in, in the same cash flow. The road-width tiers for shop floors are flagged, never enforced, and still need checking against UDCPR's mixed-use clauses: 9 m allows the ground floor, 18 m two floors, 24 m three, 30 m all.
-- **`design.ts`:** the design system. Five presets (Pune Contemporary, Mumbai Glass Tower, Warm Earth, Value Housing, Signature Luxury), with every token editable. The spec adds to construction cost; each preset's price premium sets the sale price until one is typed in.
-- **`openings.ts`:** windows and doors placed from the catalog on each flat's outside walls (living, bedrooms, kitchen, toilet ventilators), entrance doors on the corridor. Produces the door and window schedule and a light and ventilation check per flat.
-- **`scene.ts`:** three.js 3D with instanced windows, doors, balconies, bands and fins in the design system's materials. An X-ray floor shows a level as a plan cut at 1.5 m (flats by type, walls, entrance doors). Pointing at a window or door shows its tag and size.
+Every phase has a first cut in `src/pro/`; each one gets deeper from here. All of it runs on one evaluation of the project (`evaluate.ts`), which uses the editor's own engine (`analysePlot`, `optimise`, `solveSite`), so the panels, the options, the brief, the screening and the API can't disagree with each other or with Site Studio.
 
-Not yet:
-- picking a plot from data (survey or CTS number, Bhunaksha)
-- rooms inside flats
-- more mixed use: offices over shops, a podium of shops, a separate commercial block
-- drawings and exports
+**The workspace** (`main.tsx`, `steps.tsx`, `ui.tsx`, `pro.css`):
+- Six steps on a rail: Site, Scheme, Design, Money, Approval, Explore. Each step has one panel; the less-used parts fold away.
+- A result bar over the 3D, always in view: built-up against what's allowed, homes, profit, IRR and the rules. After each change it flashes how much the change moved each figure.
+- Numbers update as they're typed, with − / + steppers and arrow keys.
+- Undo and redo; keyboard shortcuts (`?` lists them).
+- View tools: exterior or an X-ray floor; camera for the whole site, the street or from above; a sun study for any month and hour.
+- A first-visit card that starts from three numbers.
+- A share link that carries the whole project and opens read-only.
+- Projects in the account.
+- On a phone, the 3D stays at the top and the steps sit in a bar along the bottom.
+
+**1. Plot and an instant answer**
+- `PlotEditor.tsx`: a rectangle, or an outline drawn corner by corner with a road on any edge.
+- `importPlot.ts`: GeoJSON or KML, or pasted latitude / longitude or metres (UTM). Only the outline is read.
+- `project.ts`: the site's own limits (a height cap from airport, fire or heritage rules; a transit zone's FSI), on top of UDCPR or DCPR. Concave plots get a true inset.
+- `deal.ts`: the Indian deal model. Outright purchase, a JDA on revenue share or area share (with a refundable deposit), or a society's redevelopment (rehab carpet, corpus, rent). GST and stamp duty included. Everything runs in one monthly cash flow, so the IRR and the peak cash are real.
+
+**2. Building model v2**
+- `rooms.ts`: flat templates fitted into every flat (living room, bedrooms, kitchen, toilets, foyer), each room checked against the minimum sizes. They show in the X-ray and as plans in Design.
+- `model.ts`: the building as data, from building to floors to flats to rooms and openings. Exported as JSON, or as IFC4 spaces for Revit and other BIM tools.
+- The scripting API, `window.urbanplan`: `get`, `set`, `evaluate`, `scrutiny`, `options`, `brief`, `deal`.
+
+**3. Design system**
+- `design.ts`: five presets with every token editable. Each building can take its own preset (the layer under the project's).
+- `openings.ts`: windows and doors from the catalog, the schedule, and the light and ventilation check.
+- `scene.ts`: the 3D, in each building's own materials.
+- `mixed.ts`: shops along the front road.
+
+**4. Approval suite**
+- `scrutiny.ts`: our own scrutiny, pass / fail / to check, each with its clause. It covers FSI, height, margins, fire tender access, lifts, refuge areas, stairs, parking, open and amenity space, inclusive housing, light and ventilation, room sizes, shop floors and environment clearance.
+- `approvals.ts`: the NOCs the scheme needs, the documents to file, and rough fees and charges.
+- `drawings.tsx`: the drawing set as A3 sheets (site plan, typical floor, elevation, area statement), printed to PDF.
+- `dxf.ts`: a PreDCR-style DXF (R12, closed polylines on named layers).
+
+**5. More options, more plots, sharing**
+- `options.ts`: options ranked by profit.
+- `screen.ts`: many plots screened from a pasted table, with a CSV out.
+- `layout.ts`: plotted layouts (internal roads, open and amenity space).
+- `share.ts`: share links.
+- `sun.ts`: sun and shadow.
+
+**6. Agent**
+- `brief.ts`: a written brief turned into constraints. It searches the generator, checks each scheme against the rules and keeps the best that passes, showing its steps. It is rule-based for now; a language model can drive the same functions through the API.
+
+**Still to do, or to do properly:**
+- picking a plot by survey or CTS number (the Bhunaksha harvest);
+- DCPR's own margins and Mumbai's island-city line;
+- permission types in project setup;
+- teams and comments (they need the server);
+- PreDCR layer names checked against SoftTech's manual, and a real submission tested;
+- the room minimums, fee rates and fire rules checked against the official texts (all marked "as assumed" in the code).
 
 ## Open questions
 - What exactly to charge for, and when.

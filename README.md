@@ -137,15 +137,15 @@ editor for the account pages saves the map in the browser first.
 
 ## Pro (`/pro/`, beta)
 
-The full planning workspace beside the simple editor: set up a plot (a rectangle, or an outline drawn or pasted corner by corner with a road on any edge), add shops along the front if wanted, pick the builder's **design system** (facade, glazing, the window and door catalog, balconies, floor height, the spec sold), and the scheme is generated at once. Pro shows:
+The full planning workspace beside the simple editor. It runs in six steps:
+- **Site:** draw, paste or import a plot (GeoJSON, KML, latitude / longitude) and give its roads; the rules and the site's own limits apply.
+- **Scheme:** buildings, flat mix and shops at the front.
+- **Design:** a design system, rooms in every flat, every window and door.
+- **Money:** prices, an outright, JDA or redevelopment deal, and the monthly cash.
+- **Approval:** our own scrutiny, NOCs, fees, an A3 drawing set and a PreDCR-style DXF.
+- **Explore:** ranked options, a written brief, screening many plots, plotted layouts.
 
-- the scheme in 3D, every window and door at its catalog size; point at one to read it
-- an X-ray floor plan
-- the door and window schedule
-- the light and ventilation check and departures from the rules
-- the money
-
-It runs on the same engine as Site Studio. Signed in, projects save to the account (the editor's project storage, `region` `pro:<city>`). Code: `src/pro/`. Where it is going: [docs/PLAN.md](docs/PLAN.md).
+The result stays in view over the 3D. Projects save to the account, and a share link opens read-only. It runs on the same engine as Site Studio. Code: `src/pro/`; plan: [docs/PLAN.md](docs/PLAN.md).
 
 ## The editor
 

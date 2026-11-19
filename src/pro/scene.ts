@@ -13,7 +13,16 @@ import type { FloorPlan, Opening } from './openings';
 import { SHOP_W, type Shops } from './mixed';
 import { roadFrame } from '../doc/site';
 
-export interface ViewData { r: PlotReport; d: SiteReport; plans: FloorPlan[]; ds: DesignSystem; xray: number | null; roads: { pts: [number, number, number, number]; today: number }[]; shops?: Shops | null }
+/** a flat's rooms for the X-ray floor (./rooms.ts), by building, by flat of the typical floor */
+export interface RoomsLike { rooms: { kind: string; ring: number[] }[]; walls: number[][] }
+export interface ViewData {
+  r: PlotReport; d: SiteReport; plans: FloorPlan[]; ds: DesignSystem; xray: number | null;
+  roads: { pts: [number, number, number, number]; today: number }[]; shops?: Shops | null;
+  /** a building's own design system (the project's when unset) */
+  dsOf?: (b: number) => DesignSystem;
+  rooms?: RoomsLike[][]; roomColor?: Record<string, string>;
+}
+export type CameraView = 'fit' | 'street' | 'top';
 export interface Picked { tag: string; label: string; size: string; floor: number; x: number; y: number }
 
 const box = new THREE.BoxGeometry(1, 1, 1);
@@ -123,6 +132,36 @@ export class ProView {
   frame() { if (!this.raf) this.raf = requestAnimationFrame(() => { this.raf = 0; if (this.controls.update()) this.frame(); this.renderer.render(this.scene, this.camera); }); }
   dispose() { cancelAnimationFrame(this.raf); this.clear(); this.controls.dispose(); this.renderer.dispose(); }
 
+  /** the plot's middle, its size and the tallest building: for the camera and the sun */
+  box = { cx: 0, cz: 0, s: 30, h: 30 };
+  /** move the camera: the whole site, down at a pedestrian's height from the front road, or straight down */
+  look(kind: CameraView) {
+    const { cx, cz, s, h } = this.box, c = this.controls;
+    // (far enough back for the plot or the building, whichever is bigger, with room under the result bar)
+    if (kind === 'fit') { const R = Math.max(s, h * 0.95); c.target.set(cx, h * 0.38, cz); this.camera.position.set(cx - R * 1.2, h * 0.38 + R * 1.05, cz - R * 1.75); }
+    if (kind === 'street') { c.target.set(cx, Math.min(h * 0.45, 40), cz); this.camera.position.set(cx - s * 0.35, 1.7, cz - s * 0.9 - 12); }
+    if (kind === 'top') { c.target.set(cx, 0, cz); this.camera.position.set(cx, Math.max(s * 2.2, h * 1.6), cz + 0.01); }
+    c.update(); this.frame();
+  }
+  /** the sun from this direction (x east, y up, z south; null: the default afternoon light) */
+  setSun(dir: [number, number, number] | null) {
+    const { cx, cz } = this.box;
+    const [x, y, z] = dir ?? [-0.45, 0.75, -0.35];
+    const up = Math.max(0.02, y), L = Math.hypot(x, up, z);
+    this.sun.position.set(cx + (x / L) * 300, (up / L) * 300, cz + (z / L) * 300);
+    this.sun.target.position.set(cx, 0, cz);
+    this.sun.intensity = y <= 0 ? 0.15 : 2.6 * Math.min(1, y / L * 2.2);
+    this.frame();
+  }
+  /** a darker sky for the dark theme */
+  setTheme(dark: boolean) {
+    const c = new THREE.Color(dark ? '#1b1f26' : '#dfe6ec');
+    this.scene.background = c; (this.scene.fog as THREE.Fog).color = c;
+    this.frame();
+  }
+  /** the view as a PNG (for the drawings and a share) */
+  snapshot(): string { this.renderer.render(this.scene, this.camera); return this.canvas.toDataURL('image/png'); }
+
   clear() {
     this.root.traverse((o) => { const m = o as THREE.Mesh; if (m.geometry && m.geometry !== box) m.geometry.dispose(); });
     this.root.clear();
@@ -145,14 +184,16 @@ export class ProView {
     this.clear();
     const { r, d, plans, ds } = v;
     const fh = r.rules.floorH, mat = (color: string, o: Partial<THREE.MeshStandardMaterialParameters> = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.85, ...o });
-    const M = {
+    const mats = (ds: DesignSystem) => ({
       wall: mat(ds.facade.wall), accent: mat(ds.facade.accent, { roughness: 0.6 }), base: mat(ds.facade.base),
       frame: mat(ds.glazing.frame, { roughness: 0.45, metalness: 0.3 }), glass: mat(ds.glazing.glass, { roughness: 0.08, metalness: 0.55, envMapIntensity: 1 }),
       rail: ds.balcony.railing === 'glass' ? mat('#cfe3ee', { transparent: true, opacity: 0.38, roughness: 0.05 }) : ds.balcony.railing === 'ms' ? mat('#2b2b2e', { roughness: 0.5, metalness: 0.5 }) : mat(ds.facade.wall),
       slab: mat('#d8d4cc'), road: mat('#5b5e66', { roughness: 0.95 }), dp: mat('#e5484d', { transparent: true, opacity: 0.28 }), paving: mat('#d3cfc5'),
       shop: mat('#efe2c8', { emissive: '#ffd9a0', emissiveIntensity: 0.25 }), sign: mat('#1d1f24', { roughness: 0.4 }),
       core: mat('#a7a39b'), door: mat('#8a5a3b', { roughness: 0.6 }), partition: mat('#f5f3ef'),
-    };
+    });
+    let M = mats(ds);
+    const site = M;
     const add = (o: THREE.Object3D | null) => { if (o) this.root.add(o); return o; };
     const mesh = (g: THREE.BufferGeometry, m: THREE.Material, cast = true) => { const x = new THREE.Mesh(g, m); x.castShadow = cast; x.receiveShadow = true; return add(x) as THREE.Mesh; };
 
@@ -174,10 +215,19 @@ export class ProView {
       line.computeLineDistances(); add(line);
     }
 
-    const bands = new Boxes(), fins = new Boxes(), frames = new Boxes(), panes = new Boxes(), slabs = new Boxes(), rails = new Boxes(), cols = new Boxes(), parts = new Boxes(), doors = new Boxes(), parapets = new Boxes();
+    let bands = new Boxes(), fins = new Boxes(), frames = new Boxes(), panes = new Boxes(), slabs = new Boxes(), rails = new Boxes(), cols = new Boxes(), parts = new Boxes(), doors = new Boxes(), parapets = new Boxes(), signs = new Boxes();
+    const flush = () => {
+      for (const [B, m, cast] of [[bands, M.accent, true], [fins, M.accent, true], [frames, M.frame, true], [panes, M.glass, false], [slabs, M.slab, true], [rails, M.rail, false], [cols, M.base, true], [parts, M.partition, true], [doors, M.door, true], [parapets, M.wall, true], [signs, M.sign, true]] as [Boxes, THREE.Material, boolean][]) {
+        const im = B.mesh(m, cast);
+        if (!im) continue;
+        add(im);
+        if (B === frames || B === panes || B === doors) this.pickables.push(im);
+      }
+      bands = new Boxes(); fins = new Boxes(); frames = new Boxes(); panes = new Boxes(); slabs = new Boxes(); rails = new Boxes(); cols = new Boxes(); parts = new Boxes(); doors = new Boxes(); parapets = new Boxes(); signs = new Boxes();
+    };
     const under = d.under, y0 = under * fh;
     // shops at the front: the road-facing edges of each strip, and which flats are shops on the floors above
-    const F = roadFrame(r), signs = new Boxes();
+    const F = roadFrame(r);
     const shopFronts = (ring: number[]) => {
       const out: { x: number; z: number; ux: number; uz: number; nx: number; nz: number; L: number }[] = [];
       let sa = 0;
@@ -212,6 +262,10 @@ export class ProView {
     }
     d.buildings.forEach((b, bi) => {
       const plan = plans[bi];
+      // (each building in its own design system: its materials, then its instanced meshes flushed at the end)
+      const bds = v.dsOf?.(bi) ?? ds;
+      M = bds === ds ? site : mats(bds);
+      const ds_ = bds;
       const all = b.floors, show = v.xray === null ? all : Math.min(all, Math.max(1, v.xray));
       const top = y0 + (v.xray === null ? all : show - 1) * fh;
       // stilt / podium: columns round the edge, the cores carried down
@@ -227,7 +281,7 @@ export class ProView {
       const floorsShown = v.xray === null ? all : show;
       for (let f = 0; f < floorsShown; f++) {
         const fy = y0 + f * fh;
-        if (ds.facade.bands) for (const q of b.quads) for (let i = 0; i < q.length; i += 2) {
+        if (ds_.facade.bands) for (const q of b.quads) for (let i = 0; i < q.length; i += 2) {
           const j = (i + 2) % q.length, L = Math.hypot(q[j] - q[i], q[j + 1] - q[i + 1]);
           if (L < 0.5) continue;
           const ux = (q[j] - q[i]) / L, uz = (q[j + 1] - q[i + 1]) / L;
@@ -239,7 +293,7 @@ export class ProView {
         for (const o of plan.openings) {
           if (gone?.has(o.unit)) continue;
           if (!o.outside && !cut) continue;
-          const s = o.tag === 'SD' || o.tag === 'D1' ? ds.doors[o.tag] : ds.windows[o.tag];
+          const s = o.tag === 'SD' || o.tag === 'D1' ? ds_.doors[o.tag] : ds_.windows[o.tag];
           const cy = fy + o.sill + o.h / 2, off = o.outside ? 0.07 : 0;
           const meta = { o, floor: f + 1, label: `${o.tag} · ${s.label}` };
           // (the cut floor is drawn as a plan: walls to 1.5 m, the glass only below that)
@@ -248,17 +302,17 @@ export class ProView {
           if (o.tag === 'D1') { doors.add(o.x - o.ux * o.w / 2 - o.nx * o.w / 2, fy + Math.min(o.h, CUT + 0.3) / 2, o.z - o.uz * o.w / 2 - o.nz * o.w / 2, o.nx, o.nz, o.w, Math.min(o.h, CUT + 0.3), 0.05, meta); continue; }
           frames.add(o.x + o.nx * off, cy, o.z + o.nz * off, o.ux, o.uz, o.w + 0.12, o.h + 0.12, 0.1, meta);
           panes.add(o.x + o.nx * (off + 0.04), cy, o.z + o.nz * (off + 0.04), o.ux, o.uz, o.w - 0.06, o.h - 0.06, 0.04, meta);
-          if (ds.facade.fins && (o.tag === 'W1' || o.tag === 'SD')) for (const sgn of [-1, 1]) {
+          if (ds_.facade.fins && (o.tag === 'W1' || o.tag === 'SD')) for (const sgn of [-1, 1]) {
             const fx = o.x + o.ux * sgn * (o.w / 2 + 0.25), fz = o.z + o.uz * sgn * (o.w / 2 + 0.25);
             fins.add(fx + o.nx * 0.3, fy + fh / 2, fz + o.nz * 0.3, o.nx, o.nz, 0.6, fh, 0.12);
           }
-          if (o.tag === 'SD' && ds.balcony.kind !== 'none') {
-            const dep = ds.balcony.kind === 'french' ? 0.3 : ds.balcony.depth, w = o.w + 0.9;
-            const out = ds.balcony.kind === 'recessed' ? 0.12 : dep;
-            if (ds.balcony.kind === 'cantilever') slabs.add(o.x + o.nx * dep / 2, fy - 0.08, o.z + o.nz * dep / 2, o.ux, o.uz, w, 0.16, dep);
-            if (ds.balcony.kind === 'recessed') slabs.add(o.x + o.nx * 0.06, fy + fh - 0.25, o.z + o.nz * 0.06, o.ux, o.uz, w, 0.5, 0.12);
+          if (o.tag === 'SD' && ds_.balcony.kind !== 'none') {
+            const dep = ds_.balcony.kind === 'french' ? 0.3 : ds_.balcony.depth, w = o.w + 0.9;
+            const out = ds_.balcony.kind === 'recessed' ? 0.12 : dep;
+            if (ds_.balcony.kind === 'cantilever') slabs.add(o.x + o.nx * dep / 2, fy - 0.08, o.z + o.nz * dep / 2, o.ux, o.uz, w, 0.16, dep);
+            if (ds_.balcony.kind === 'recessed') slabs.add(o.x + o.nx * 0.06, fy + fh - 0.25, o.z + o.nz * 0.06, o.ux, o.uz, w, 0.5, 0.12);
             rails.add(o.x + o.nx * out, fy + 0.55, o.z + o.nz * out, o.ux, o.uz, w, 1.1, 0.05);
-            if (ds.balcony.kind === 'cantilever') for (const sgn of [-1, 1]) rails.add(o.x + o.ux * sgn * w / 2 + o.nx * dep / 2, fy + 0.55, o.z + o.uz * sgn * w / 2 + o.nz * dep / 2, o.nx, o.nz, dep, 1.1, 0.05);
+            if (ds_.balcony.kind === 'cantilever') for (const sgn of [-1, 1]) rails.add(o.x + o.ux * sgn * w / 2 + o.nx * dep / 2, fy + 0.55, o.z + o.uz * sgn * w / 2 + o.nz * dep / 2, o.nx, o.nz, dep, 1.1, 0.05);
           }
         }
       }
@@ -274,7 +328,15 @@ export class ProView {
         // the cut floor: its slab, the flats tinted by type, the walls (dolls'-house height), the entrance doors
         const fy = top;
         for (const q of b.quads) mesh(prism(q, fy - 0.15, fy + 0.02), M.slab);
-        for (const u of b.units) { const g = flat(u.ring, fy + 0.05); mesh(g, mat(UNIT_COLOR[u.t], { transparent: true, opacity: 0.55 }), false); }
+        const rooms = v.rooms?.[bi];
+        if (rooms && v.roomColor) {
+          // rooms tinted by kind, their partitions to the cut height
+          const rm = new Map<string, THREE.Material>();
+          rooms.forEach((fr) => {
+            for (const rr of fr.rooms) { if (rr.ring.length < 6) continue; let m = rm.get(rr.kind); if (!m) { m = mat(v.roomColor![rr.kind] ?? '#ccc', { transparent: true, opacity: 0.7 }); rm.set(rr.kind, m); } mesh(flat(rr.ring, fy + 0.05), m, false); }
+            for (const w of fr.walls) { const L = Math.hypot(w[2] - w[0], w[3] - w[1]); if (L > 0.05) parts.add((w[0] + w[2]) / 2, fy + CUT / 2, (w[1] + w[3]) / 2, (w[2] - w[0]) / L, (w[3] - w[1]) / L, L, CUT, 0.1); }
+          });
+        } else for (const u of b.units) { const g = flat(u.ring, fy + 0.05); mesh(g, mat(UNIT_COLOR[u.t], { transparent: true, opacity: 0.55 }), false); }
         const wh = CUT;
         for (const w of plan.walls) {
           const L = Math.hypot(w[2] - w[0], w[3] - w[1]);
@@ -294,21 +356,16 @@ export class ProView {
           piece(t0, L, 0, wh);
         }
       }
+      flush();
     });
-    for (const [B, m, cast] of [[bands, M.accent, true], [fins, M.accent, true], [frames, M.frame, true], [panes, M.glass, false], [slabs, M.slab, true], [rails, M.rail, false], [cols, M.base, true], [parts, M.partition, true], [doors, M.door, true], [parapets, M.wall, true], [signs, M.sign, true]] as [Boxes, THREE.Material, boolean][]) {
-      const im = B.mesh(m, cast);
-      if (!im) continue;
-      add(im);
-      if (B === frames || B === panes || B === doors) this.pickables.push(im);
-    }
 
     // frame the camera on the plot the first time (and when its size changes)
     const key = `${minX}|${maxX}|${minZ}|${maxZ}`;
+    this.box = { cx: (minX + maxX) / 2, cz: (minZ + maxZ) / 2, s: Math.max(maxX - minX, maxZ - minZ, 30), h: d.height || 30 };
     if (key !== this.fitted) {
       this.fitted = key;
       const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2, s = Math.max(maxX - minX, maxZ - minZ, 30), h = d.height || 30;
-      this.controls.target.set(cx, Math.min(h * 0.35, 30), cz);
-      this.camera.position.set(cx - s * 1.1, Math.max(h * 1.1, s * 0.9), cz - s * 1.5);
+      this.look('fit');
       this.sun.target.position.set(cx, 0, cz);
       const sc = this.sun.shadow.camera as THREE.OrthographicCamera, R = s * 1.2 + h * 0.6;
       sc.left = -R; sc.right = R; sc.top = R; sc.bottom = -R; sc.near = 1; sc.far = 800; sc.updateProjectionMatrix();
