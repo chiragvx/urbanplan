@@ -1,28 +1,28 @@
 // Pricing: free during the beta; Pro and Firm are announced, not sold yet (no prices until they ship).
-import { APP, href, Icon, Page } from './ui';
+import { href, Icon, Page, PRO } from './ui';
 import { SITE_NAME } from './brand';
 
 const PLANS = [
   {
-    name: 'Free', price: '₹0', per: 'during the beta', cta: 'Open the editor', to: APP, feature: false,
-    items: ['Pune and Mumbai, 2D and 3D', 'Every road and terrain tool', 'DP sheets and zones', 'Publish, fork, GeoJSON'],
+    name: 'Beta', price: '₹0', per: 'while in beta', cta: 'Start a project', to: PRO, feature: true,
+    items: ['Pro: plot to scheme in 3D, any building shape', 'UDCPR and DCPR 2034, checked live', 'Money: cost, profit, IRR, cash flow', 'Drawings, report, IFC and PreDCR DXF', 'Projects saved to your account, shared with your team'],
   },
   {
-    name: 'Pro', price: 'Soon', per: 'for professionals', cta: 'Get early access', to: href('signup/?plan=pro'), feature: true,
-    items: ['Everything in Free', 'Maps saved to your account', 'Plot sandbox: FSI and height', 'Exports: glTF, OBJ, DXF, STL', 'Satellite imagery', 'Analysis credits'],
+    name: 'Pro', price: 'Soon', per: 'for professionals', cta: 'Get early access', to: href('signup/?plan=pro'), feature: false,
+    items: ['Everything in the beta', 'Plots by survey number across Maharashtra', 'Unlimited options and screening', 'Branded reports'],
   },
   {
     name: 'Firm', price: 'Soon', per: 'for teams', cta: 'Join the list', to: href('signup/?plan=firm'), feature: false,
-    items: ['Everything in Pro', 'Shared workspace', 'Branded site reports', 'Screen many plots', 'API access'],
+    items: ['Everything in Pro', 'A shared workspace and roles', 'Your own design systems for every project', 'API access'],
   },
 ];
 
 const FAQ: [string, string][] = [
-  ['Is it really free?', 'Yes. Everything in the editor today is free during the beta, and it keeps working without an account. Paid plans will add things that cost us money to run: storage, exports, imagery and analysis.'],
-  ['Which cities does it cover?', 'Pune and Pimpri-Chinchwad (PMC and PCMC), and Mumbai (MCGM, Colaba to Dahisar and Mulund). The Development Plan layer covers Pune’s sanctioned DP for the old city limits.'],
-  ['Can I rely on it for a purchase or an approval?', `No. ${SITE_NAME} is a survey aid and a design tool. The DP layer is traced from scanned sheets and lined up to within a few metres; it is not a DP remark, a zone certificate or legal boundary. Always check with the planning authority and a licensed architect.`],
-  ['Where does the data come from?', 'Roads and buildings from OpenStreetMap, terrain from the Copernicus GLO-30 elevation model, and the Development Plan from Pune Municipal Corporation’s published sheets. Every layer says where it came from in the editor.'],
-  ['Do my maps leave my browser?', 'Not unless you publish or export them. Today maps are saved in your browser. An account stores your email and profile; saving maps to your account comes with Pro.'],
+  ['Is it really free?', `Yes, during the beta. ${SITE_NAME} Pro works without an account too: your projects are kept in your browser. Paid plans will add what costs us to run at scale: storage, plot lookups, screening and exports.`],
+  ['Which cities does it cover?', 'The rules of Pune (UDCPR 2020, including the old city) and Mumbai (DCPR 2034, suburbs and island city). Plot lookup by survey or CTS number works across Maharashtra. Anywhere else, draw the plot and pick the closest rules.'],
+  ['Can I rely on it for a purchase or an approval?', `No. ${SITE_NAME} is a planning aid. Its figures follow the regulations as written, but plots, roads and the DP are traced from public sources. Always check with the planning authority and a licensed architect before you buy, design or apply.`],
+  ['Where does the data come from?', 'Plots from the state’s land records map, roads and buildings from OpenStreetMap, terrain from the Copernicus GLO-30 elevation model, and the Development Plan from Pune Municipal Corporation’s published sheets.'],
+  ['Who sees my projects?', 'Only you, until you share one. Projects saved to your account are private to you and the people you invite.'],
 ];
 
 export function Pricing() {

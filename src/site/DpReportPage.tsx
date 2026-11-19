@@ -9,8 +9,8 @@ import { authReady, logReport, session, startAuth } from '../auth/auth';
 import { AREAS, DPR_PATH, RESERVED_MEANS, SUMMARY, areaPath, clsColor, clsLabel, clsShort, type DprArea } from './dpreport/data';
 import type { Report } from './dpreport/geo';
 import { Crumbs } from './CityMap';
-import { Swatch, sqm, shareUnlocked, appAt, CopyLink, Provenance } from './DpReport';
-import { href, Icon, Page } from './ui';
+import { Swatch, sqm, shareUnlocked, CopyLink, Provenance } from './DpReport';
+import { href, Icon, Loading, Page, proStart } from './ui';
 import { SITE_NAME } from './brand';
 import './place.css';
 import './dpreport/dpreport.css';
@@ -111,6 +111,11 @@ function Locked({ may, has, children }: { may: boolean | null; has: string[]; ch
   );
 }
 
+/** A map picture still being drawn (or that couldn't be). */
+const PicWait = ({ failed }: { failed: boolean }) => (
+  <div class="rpt-pic-wait">{failed ? <p class="small muted">The picture couldn’t be drawn.</p> : <Loading label="Drawing the map…" />}</div>
+);
+
 const today = () => new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 
 export function DpReportPage() {
@@ -118,6 +123,7 @@ export function DpReportPage() {
   const [r, setR] = useState<Report | null>(null);
   const [name, setName] = useState<PlaceName | null>(null);
   const [pics, setPics] = useState<[string, string] | null>(null);
+  const [failed, setFailed] = useState<'' | 'report' | 'pics'>('');
   const may = useMay();
 
   useEffect(() => {
@@ -128,8 +134,8 @@ export function DpReportPage() {
     const [la, lo] = q!;
     void import('./dpreport/geo').then(({ reportAt }) => reportAt(la, lo)).then((x) => {
       setR(x);
-      void import('./dpreport/print').then(({ reportPictures }) => reportPictures(la, lo, x.parcel, 960, 640)).then(setPics).catch(() => {});
-    });
+      void import('./dpreport/print').then(({ reportPictures }) => reportPictures(la, lo, x.parcel, 960, 640)).then(setPics).catch(() => setFailed('pics'));
+    }).catch(() => setFailed('report'));
     void nameOf(la, lo).then(setName);
   }, []);
   useEffect(() => { if (may && r) void logReport({ lat: r.lat, lon: r.lon, area: nearestArea(r.lat, r.lon)?.slug, cls: r.parcel?.cls }); }, [may, !!r]);
@@ -169,7 +175,9 @@ export function DpReportPage() {
           <p class="rpt-lede">{name?.sub ? `${name.sub} · ` : ''}{at ? `${at[0].toFixed(5)}, ${at[1].toFixed(5)}` : ''}</p>
           <p class="rpt-stamp"><Icon.info /> Plan: PMC Development Plan 2007–2027, sanctioned 5 Jan 2017 · traced {SUMMARY.baked} · report made {today()} · <a href={mapHref}>See it on the map</a></p>
 
-          {!r ? <p class="rpt-loading">Reading the plan…</p> : (
+          {!r ? (failed === 'report'
+            ? <p class="rpt-loading">The plan couldn’t load. Check your connection and reload the page.</p>
+            : <div class="rpt-loading"><Loading label="Reading the plan…" /></div>) : (
             <>
               <div class="rpt-tiles">
                 <div><span>DP zone</span><b>{p ? <><Swatch cls={p.cls} /> {clsLabel(p.cls)}</> : r.covered ? 'Road / open strip' : 'Not traced'}</b></div>
@@ -180,12 +188,12 @@ export function DpReportPage() {
 
               <div class="rpt-pics">
                 <figure>
-                  {pics ? <img src={pics[0]} alt="Satellite image with the traced DP zones: reserved sites dashed red, this parcel in blue." /> : <div class="rpt-pic-wait" />}
+                  {pics ? <img src={pics[0]} alt="Satellite image with the traced DP zones: reserved sites dashed red, this parcel in blue." /> : <PicWait failed={failed === 'pics'} />}
                   <figcaption>Satellite with the traced DP zones: reserved sites dashed red, the parcel in blue.</figcaption>
                 </figure>
                 <figure>
                   <Locked may={may} has={['The PMC’s DP sheet over this plot, registered to the satellite image']}>
-                    {pics ? <img src={pics[1]} alt="The PMC DP sheet over the satellite image, centred on this point." /> : <div class="rpt-pic-wait" />}
+                    {pics ? <img src={pics[1]} alt="The PMC DP sheet over the satellite image, centred on this point." /> : <PicWait failed={failed === 'pics'} />}
                   </Locked>
                   <figcaption>The PMC DP sheet, registered over the satellite image.</figcaption>
                 </figure>
@@ -246,7 +254,7 @@ export function DpReportPage() {
                   : <a class="btn btn-primary" href={href(`login/?next=${encodeURIComponent(`${location.pathname}${location.search}`)}`)}><Icon.sheet /> Sign in to download the PDF</a>}
                 <CopyLink hash="" />
                 <a class="btn" href={mapHref}><Icon.pin /> Back to the map</a>
-                <a class="btn" href={appAt(r.lat, r.lon)}><Icon.cube /> Open in 3D</a>
+                <a class="btn" href={proStart('survey', 'pune')}><Icon.building /> Plan this plot in Pro</a>
               </div>
             </>
           )}

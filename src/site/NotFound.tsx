@@ -10,7 +10,8 @@ const WAYS: [string, string, string][] = [
   ['mumbai/map/', 'Mumbai 3D map', 'Roads, buildings and terrain'],
   ['guides/', 'Guides', 'FSI, setbacks, TDR and DP roads'],
   ['data/', 'Open data', 'The main road networks as GeoJSON'],
-  ['app/', 'The editor', 'Pune and Mumbai in 2D and 3D'],
+  ['pro/', SITE_NAME + ' Pro', 'From a plot to a project, in 3D'],
+  ['pune/dp-report/', 'Check a plot', 'The Pune DP plan on satellite'],
 ];
 
 export function NotFoundBody() {

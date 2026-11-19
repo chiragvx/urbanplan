@@ -1,6 +1,8 @@
 /* The FSI calculator (src/site/FsiPages.tsx): the inputs beside the result, the road-width ladder under both. */
 .fsi-calc {
-  --fsi-basic: #f3a45c; --fsi-premium: #d24f2a; --fsi-tdr: #a22d3b; --fsi-extra: #5c1b4a;
+  /* the four layers of FSI, a ramp of ink: basic darkest, the paid-for extra lightest */
+  --fsi-basic: color-mix(in srgb, var(--up-ink) 90%, var(--up-paper)); --fsi-premium: color-mix(in srgb, var(--up-ink) 65%, var(--up-paper));
+  --fsi-tdr: color-mix(in srgb, var(--up-ink) 40%, var(--up-paper)); --fsi-extra: color-mix(in srgb, var(--up-ink) 20%, var(--up-paper));
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--up-space-5); align-items: start; margin-block: var(--up-space-5) var(--up-space-7);
 }
 .fsi-inputs, .fsi-out { display: grid; gap: var(--up-space-5); padding: var(--up-space-5); border-radius: var(--up-radius-lg); border: 1px solid var(--up-line); background: var(--up-surface); align-content: start; }
@@ -34,10 +36,11 @@
 .fsi-ladder li { display: grid; grid-template-columns: 130px minmax(0, 1fr) minmax(0, 260px); gap: var(--up-space-3); align-items: center; padding: 8px 12px; border-radius: var(--up-radius); font-size: var(--up-text-sm); font-variant-numeric: tabular-nums; }
 .fsi-ladder li.on { background: var(--up-surface); outline: 1px solid var(--up-line-strong); }
 .fsi-ladder .bar { height: 12px; border-radius: 999px; background: var(--up-surface-2); overflow: hidden; }
-.fsi-ladder .bar i { display: block; height: 100%; border-radius: 999px; transition: width 0.25s; }
+.fsi-ladder .bar i { display: block; height: 100%; border-radius: 999px; transition: width 0.25s; background: color-mix(in srgb, var(--up-ink) 30%, var(--up-paper)); }
+.fsi-ladder li.on .bar i { background: var(--up-ink); }
 .fsi-ladder .v { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
 .fsi-ladder .tag { font-size: var(--up-text-xs); padding: 2px 8px; border-radius: 999px; background: var(--up-ink); color: var(--up-paper); }
-.fsi-ladder .up { color: #1f8a4c; font-weight: 500; }
+.fsi-ladder .up { color: var(--up-ok); font-weight: 500; }
 @media (max-width: 860px) {
   .fsi-calc { grid-template-columns: 1fr; }
   .fsi-out { position: static; }
@@ -53,10 +56,10 @@
 .fsi-map-box [hidden] { display: none; }
 .fsi-map-box canvas { touch-action: pan-y; cursor: grab; } /* one finger scrolls the page; two move and zoom the map */
 .fsi-map-box canvas:active { cursor: grabbing; }
-.fsi-zoom { position: absolute; top: 12px; right: 12px; display: grid; border-radius: var(--up-radius); overflow: hidden; box-shadow: var(--up-shadow-sm); border: 1px solid #dcd6cc; }
-.fsi-zoom button { width: 38px; height: 38px; border: 0; border-bottom: 1px solid #e6e1d8; background: #fff; color: #1d1a17; font: 500 20px/1 var(--up-font-body); cursor: pointer; }
+.fsi-zoom { position: absolute; top: 12px; right: 12px; display: grid; border-radius: var(--up-radius); overflow: hidden; box-shadow: var(--up-shadow-sm); border: 1px solid var(--up-line-strong); }
+.fsi-zoom button { width: 38px; height: 38px; border: 0; border-bottom: 1px solid var(--up-line); background: var(--up-paper); color: var(--up-ink); font: 500 20px/1 var(--up-font-body); cursor: pointer; }
 .fsi-zoom button:last-child { border-bottom: 0; font-size: 17px; }
-.fsi-zoom button:hover { background: #f4f1ec; }
+.fsi-zoom button:hover { background: var(--up-surface-2); }
 .fsi-map-facts { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(260px, 1fr); gap: var(--up-space-5); align-items: start; }
 .fsi-map-cta { display: grid; gap: var(--up-space-3); padding: var(--up-space-5); border-radius: var(--up-radius-lg); border: 1px solid var(--up-line); background: var(--up-surface); }
 .fsi-map-facts .rules th[scope="rowgroup"] { text-align: left; padding-top: var(--up-space-3); }

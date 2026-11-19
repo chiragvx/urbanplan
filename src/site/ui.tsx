@@ -6,7 +6,19 @@ import { LOGO_PARTS, SITE_NAME } from './brand';
 import { Dither } from '../theme/Dither';
 
 export const href = (p: string) => `${BASE}${p}`;
-export const APP = href('app/');
+/** Pro (the planning tool), the signed-in dashboard, and a new Pro project: a blank plot sized in three numbers, the
+ *  sample, or a plot found by its survey number; under a city's rules when one is given. (The city editor at /app/
+ *  is kept off the website for now: nothing links to it.) */
+export const PRO = href('pro/');
+export const DASH = href('dashboard/');
+export type SiteCity = 'pune' | 'mumbai';
+export const proStart = (how: 'blank' | 'sample' | 'survey' = 'blank', city?: SiteCity) => href(`pro/?new=${how}${city ? `&city=${city}` : ''}`);
+
+/** Something loading or being worked out: the brand's dither, as Pro shows it, with a word. `block` covers its
+ *  (positioned) parent, for a map or a picture still on its way. */
+export function Loading({ label = 'Loading…', block = false }: { label?: string; block?: boolean }) {
+  return <p class={`loading${block ? ' block' : ''}`} role="status"><Dither class="dz" cell={2} />{label}</p>;
+}
 
 /** The mark: a road running into the distance, its centre line dashed — the favicon, drawn larger. */
 export function Mark({ size = 30 }: { size?: number }) {
@@ -74,10 +86,10 @@ export function AccountLink() {
   if (!authReady || s === null) return <a class="btn btn-ghost hide-sm" href={href('login/')}>Sign in</a>;
   if (s === undefined) return <span class="btn btn-ghost hide-sm" aria-hidden="true" style="visibility:hidden">Sign in</span>;
   const name = shortName(s.user);
-  return <a class="chip-account" href={href('account/')} title={s.user.email ?? ''}><span class="avatar">{name[0]?.toUpperCase()}</span><span class="hide-sm">{name}</span></a>;
+  return <a class="chip-account" href={DASH} title={`Your dashboard (${s.user.email ?? name})`}><span class="avatar">{name[0]?.toUpperCase()}</span><span class="hide-sm">Dashboard</span></a>;
 }
 
-const NAV: [string, string][] = [['pro/', 'Pro'], ['pune/dp-report/', 'Check a plot'], ['app/', 'City editor'], ['guides/', 'Guides'], ['pricing/', 'Pricing']];
+const NAV: [string, string][] = [['pro/', 'Pro'], ['pune/dp-report/', 'Check a plot'], ['pune/fsi-calculator/', 'FSI calculator'], ['guides/', 'Guides'], ['pricing/', 'Pricing']];
 
 export function Header({ current, lang }: { current?: string; lang?: string }) {
   const [open, setOpen] = useState(false);
@@ -91,13 +103,14 @@ export function Header({ current, lang }: { current?: string; lang?: string }) {
             const url = to.startsWith('#') ? (onHome ? to : href('') + to) : href(to);
             return <a key={to} href={url} aria-current={current === to ? 'page' : undefined} onClick={() => setOpen(false)}>{label}</a>;
           })}
-          <a class="show-xs" href={href('pro/')}>Start a project</a>
+          <a class="show-xs" href={PRO}>Start a project</a>
+          {authReady && !!session.value && <a class="show-xs" href={DASH}>Dashboard</a>}
           {authReady && !session.value && <a class="show-xs" href={href('login/')}>Sign in</a>}
         </nav>
         <div class="head-actions">
           <ThemeToggle />
           <AccountLink />
-          <a class="btn btn-ink hide-xs" href={href('pro/')}>Start a project</a>
+          <a class="btn btn-ink hide-xs" href={PRO}>Start a project</a>
           <button class="icon-btn menu-btn" aria-label={open ? 'Close the menu' : 'Open the menu'} aria-expanded={open} onClick={() => setOpen(!open)}>{open ? <Icon.close /> : <Icon.menu />}</button>
         </div>
       </div>
@@ -112,7 +125,9 @@ export function Footer({ lang }: { lang?: string }) {
         <div class="foot-row">
           <Logo />
           <nav aria-label="Footer">
-            <a href={APP}>Editor</a>
+            <a href={PRO}>Pro</a>
+            <a href={DASH}>Dashboard</a>
+            <a href={href('pune/dp-report/')}>Check a plot</a>
             <a href={href('guides/')}>Guides</a>
             <a href={href('pune/')}>Pune</a>
             <a href={href('mumbai/')}>Mumbai</a>
@@ -165,8 +180,8 @@ export function useSearch(): string {
   return s;
 }
 
-/** A same-site path to go to after signing in (?next=/app/…); anything else falls back to the account page. */
+/** A same-site path to go to after signing in (?next=/pro/…); anything else falls back to the dashboard. */
 export function nextUrl(): string {
   const n = new URLSearchParams(location.search).get('next');
-  return n && n.startsWith('/') && !n.startsWith('//') ? n : href('account/');
+  return n && n.startsWith('/') && !n.startsWith('//') ? n : DASH;
 }

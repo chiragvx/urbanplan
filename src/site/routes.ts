@@ -59,11 +59,11 @@ export interface Route {
 const IMG = { city: 'site/og-city.jpg', studio: 'site/og-studio.jpg', dp: 'site/og-dp.jpg' };
 const ALT = {
   city: `${SITE_NAME}: a city's roads, buildings and terrain in 3D`,
-  studio: `${SITE_NAME} Site Studio: the most a plot can hold, with FSI, parking and returns`,
+  studio: `${SITE_NAME} Pro: a scheme on a plot in 3D, with its FSI, parking and returns`,
   dp: `${SITE_NAME}: the Development Plan laid over today's map`,
 };
-const SITE_UPDATED = '2026-11-03';
-const LEGAL_UPDATED = '2026-11-01';
+const SITE_UPDATED = '2026-11-20';
+const LEGAL_UPDATED = '2026-11-20';
 export const CITY_LABEL: Record<City, string> = { pune: 'Pune', mumbai: 'Mumbai' };
 const MR_NOTE = 'Marathi text drafted without native review: have a native Marathi speaker check it (see README, "Website and accounts").';
 
@@ -72,8 +72,8 @@ const MR_NOTE = 'Marathi text drafted without native review: have a native Marat
 type U = (p: string) => string;
 const org = (url: U) => ({ '@type': 'Organization', '@id': url('#org'), name: SITE_NAME, url: url(''), logo: url('icon-512.png') });
 const app = (url: U) => ({
-  '@type': 'SoftwareApplication', name: SITE_NAME, url: url('app/'), applicationCategory: 'DesignApplication', operatingSystem: 'Web browser',
-  description: 'A map editor for Indian cities: roads, flyovers, terrain and the Development Plan in 2D and 3D, and Site Studio for what a plot can hold.',
+  '@type': 'SoftwareApplication', name: `${SITE_NAME} Pro`, url: url('pro/'), applicationCategory: 'DesignApplication', operatingSystem: 'Web browser',
+  description: 'Plot-to-project planning for Indian cities: what a plot can hold under UDCPR or DCPR 2034 in 3D, any building shape, the money, and the approval drawings.',
   offers: { '@type': 'Offer', price: '0', priceCurrency: 'INR' },
   publisher: { '@id': url('#org') },
 });
@@ -113,21 +113,21 @@ const STATIC: Route[] = [
     head: {
       title: `${SITE_NAME}: from a plot to a project`,
       description: 'See what a plot in Pune or Mumbai can hold under UDCPR or DCPR, what it’s worth and what the authority will ask for. Check a plot’s DP free.',
-      image: IMG.studio, imageAlt: ALT.studio, preload: 'site/pro-scheme.webp',
+      image: IMG.studio, imageAlt: ALT.studio, preload: 'site/pro-hero.webp',
       ld: (url) => [
         { '@type': 'WebSite', '@id': url('#site'), name: SITE_NAME, url: url(''), inLanguage: 'en-IN', publisher: { '@id': url('#org') } },
         org(url), app(url),
       ],
     },
-    images: ['site/pro-scheme.webp', 'site/pro-design.webp', 'site/pro-money.webp', 'site/pro-approval.webp', 'site/report-cover.webp'],
+    images: ['site/pro-hero.webp', 'site/pro-scheme.webp', 'site/form-twins.webp', 'site/form-library.webp', 'site/form-taper.webp', 'site/pro-design.webp', 'site/pro-money.webp', 'site/pro-approval.webp', 'site/report-cover.webp'],
   },
   {
-    path: 'app/', priority: 0.9, updated: SITE_UPDATED,
+    // (the city editor: kept off the website and out of search for now; nothing links here)
+    path: 'app/', priority: 0, updated: SITE_UPDATED,
     head: {
-      title: 'The editor: Pune and Mumbai in 2D and 3D',
-      description: `Open the ${SITE_NAME} editor in your browser: the city’s roads, buildings and terrain, the Development Plan, the plot sandbox and Site Studio. Free in beta.`,
-      image: IMG.city, imageAlt: ALT.city,
-      ld: (url) => [app(url)],
+      title: 'The city editor: Pune and Mumbai in 2D and 3D',
+      description: `The ${SITE_NAME} city editor: roads, buildings and terrain in 2D and 3D.`,
+      image: IMG.city, imageAlt: ALT.city, noindex: true,
     },
   },
   {
@@ -137,7 +137,7 @@ const STATIC: Route[] = [
   },
   {
     path: 'pricing/', priority: 0.6, updated: SITE_UPDATED,
-    head: { title: 'Pricing', description: `${SITE_NAME} is free during the beta. Pro and Firm will add maps saved to your account, exports and analysis.`, image: IMG.city, imageAlt: ALT.city, ld: (url) => [app(url)] },
+    head: { title: 'Pricing', description: `${SITE_NAME} is free during the beta. Paid plans will add team workspaces, exports and plot screening at scale.`, image: IMG.city, imageAlt: ALT.city, ld: (url) => [app(url)] },
   },
   {
     path: 'guides/', priority: 0.8, updated: SITE_UPDATED,

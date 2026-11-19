@@ -13,7 +13,7 @@
 // across the road) and a grid along the road, half a metre, a metre or five by how near the camera is. Each snap
 // shows a short dashed guide. Moving a building snaps its corners the same way. Escape cancels, Delete removes
 // what's picked, the arrow keys nudge it a grid step (Shift: ten). Everything goes through `up`, so it undoes.
-import { roadFrame, buildingQuads, newBuildingId, pointIn, type SiteElement, type ElementKind } from '../doc/site';
+import { DEFAULT_SITE, roadFrame, buildingQuads, newBuildingId, pointIn, type SiteElement, type ElementKind } from '../doc/site';
 import type { ProView, Overlay } from './scene';
 import type { Evaluated } from './evaluate';
 import { outline, ownScheme, type ProBuilding, type ProProject } from './project';
@@ -157,7 +157,7 @@ export function placeTemplate(id: string, o: Pt, e: Evaluated): ProBuilding[] {
   return made.map((m, k) => {
     const ox = at[k][0] + su * u[0] + sv * v[0], oz = at[k][1] + su * u[1] + sv * v[1];
     const s = sampleCurve(m.form.plan, 2); let z0 = Infinity, z1 = -Infinity; for (let i = 1; i < s.length; i += 2) { z0 = Math.min(z0, s[i]); z1 = Math.max(z1, s[i]); }
-    const form = fitRules(m.form, s, e, made.length);
+    const form = fitRules(m.form, e, made.length);
     const floors = form.uses.reduce((t, x) => t + x.floors, 0) || m.floors;
     return { id: newBuildingId(), name: m.name, floors, depth: Number.isFinite(z1 - z0) ? r2(Math.max(6, z1 - z0)) : 14, spine: [r2(ox), r2(oz), r2(ox + u[0]), r2(oz + u[1])], form };
   });
@@ -167,21 +167,28 @@ export function placeTemplate(id: string, o: Pt, e: Evaluated): ProBuilding[] {
  *  (shared between the template's buildings), taken off its top band of floors. It lands passing the rules; floors
  *  can be added back by hand, and then the rules flag it rather than refuse. At least two floors (or the template's
  *  own, if fewer), so a tower still reads as one. */
-function fitRules(f: Form, plan: number[], e: Evaluated, parts: number): Form {
+function fitRules(f: Form, e: Evaluated, parts: number): Form {
   const R = e.r.rules, under = e.d.under, fh = R.floorH;
   const hOf = (u: UseBand) => (u.use === 'residential' ? fh : u.floorH ?? USE_INFO[u.use].floorH) * u.floors;
-  let a = 0; for (let i = 0; i < plan.length; i += 2) { const j = (i + 2) % plan.length; a += plan[i] * plan[j + 1] - plan[j] * plan[i + 1]; }
-  const plate = Math.abs(a / 2);
   const left = Math.max(0, e.r.bua - (e.p.scheme ? e.d.bua : 0)) / Math.max(1, parts);
-  const uses = f.uses.map((u) => ({ ...u }));
-  const total = () => uses.reduce((t, u) => t + u.floors, 0);
-  const least = Math.min(2, total());
-  const over = () => under * fh + uses.reduce((t, u) => t + hOf(u), 0) > R.maxH + 1e-6 || (plate > 0 && total() * plate > left + 1);
-  while (over() && total() > least) {
-    const top = [...uses].reverse().find((u) => u.floors > 0)!;
-    top.floors--;
-  }
-  return { ...f, uses: uses.filter((u) => u.floors > 0) };
+  const total = f.uses.reduce((t, u) => t + u.floors, 0), least = Math.min(2, total);
+  // (k floors off the top band, then the next band down)
+  const trim = (k: number): UseBand[] => {
+    const uses = f.uses.map((u) => ({ ...u }));
+    for (let i = uses.length - 1; i >= 0 && k > 0; i--) { const d = Math.min(k, uses[i].floors); uses[i].floors -= d; k -= d; }
+    return uses.filter((u) => u.floors > 0);
+  };
+  // its floor area as laid out (a taper's upper floors are smaller than its base), parking aside
+  const bua = (uses: UseBand[]) => {
+    const b: ProBuilding = { id: 'fit', name: 'fit', floors: uses.reduce((t, x) => t + x.floors, 0), depth: 14, spine: [0, 0, 1, 0], form: { ...f, uses } };
+    try { return (layForm(b, { floorH: fh, mix: e.p.mix, sizes: DEFAULT_SITE.sizes })?.floors ?? []).reduce((s, x) => s + (x.use === 'parking' ? 0 : x.area), 0); } catch { return 0; }
+  };
+  const over = (k: number) => { const u = trim(k); return under * fh + u.reduce((t, x) => t + hOf(x), 0) > R.maxH + 1e-6 || bua(u) > left + 1; };
+  // the fewest floors taken off that pass (more off is always less), by halves
+  let lo = 0, hi = total - least;
+  if (!over(0)) return f;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (over(mid)) lo = mid + 1; else hi = mid; }
+  return { ...f, uses: trim(lo) };
 }
 
 // ---------------------------------------------------------------- the canvas

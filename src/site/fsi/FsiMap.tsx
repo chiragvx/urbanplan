@@ -5,6 +5,7 @@
 // SVG map until the data is in, and keeps it for search engines and pages without scripts.
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { fsiColor, type FsiView } from './model';
+import { Loading } from '../ui';
 
 type Mode = 'roads' | 'heat';
 interface Lines { cls: Uint8Array; start: Uint32Array; xy: Int32Array }
@@ -136,10 +137,12 @@ export function FsiMap({ view: V, base, svg, svgW, svgH, alt }: { view: FsiView;
   const wrap = useRef<HTMLDivElement>(null), cv = useRef<HTMLCanvasElement>(null);
   const [mode, setMode] = useState<Mode>('heat');
   const [ready, setReady] = useState(false);
+  // 'loading' only once mounted, so the prerendered page (and a page without scripts) shows the plain map
+  const [busy, setBusy] = useState(false);
   const [cellM, setCellM] = useState(0);
   // everything the drawing needs, outside Preact's state (it changes on every frame of a drag)
   const S = useRef({
-    mode: 'heat' as Mode, cx: V.w / 2, cz: V.h / 2, s: 0, fit: 0, W: 0, H: 0, dpr: 1, raf: 0,
+    drawn: false, mode: 'heat' as Mode, cx: V.w / 2, cz: V.h / 2, s: 0, fit: 0, W: 0, H: 0, dpr: 1, raf: 0,
     main: null as Lines | null, local: null as Lines | null, localAsked: false,
     mainPaths: null as Path2D[] | null, localPaths: null as Path2D[] | null, grids: new Map<string, Grid>(),
   }).current;
@@ -200,6 +203,7 @@ export function FsiMap({ view: V, base, svg, svgW, svgH, alt }: { view: FsiView;
     ctx.beginPath(); ctx.moveTo(18, by - 6); ctx.lineTo(18, by); ctx.lineTo(18 + bw, by); ctx.lineTo(18 + bw, by - 6); ctx.stroke();
     ctx.fillStyle = '#2b2723'; ctx.font = '500 12px Inter, "Segoe UI", Arial, sans-serif';
     ctx.fillText(m >= 1000 ? `${m / 1000} km` : `${m} m`, 24 + bw, by + 1);
+    if (!S.drawn) { S.drawn = true; setBusy(false); }
   };
   const redraw = () => { if (!S.raf) S.raf = requestAnimationFrame(draw); };
 
@@ -225,11 +229,12 @@ export function FsiMap({ view: V, base, svg, svgW, svgH, alt }: { view: FsiView;
 
   useEffect(() => {
     let live = true;
-    fetch(base + V.main).then((r) => r.arrayBuffer()).then((b) => {
+    setBusy(true);
+    fetch(base + V.main).then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.arrayBuffer(); }).then((b) => {
       if (!live) return;
       S.main = decode(b); S.mainPaths = paths(S.main, V.classes.length);
       setReady(true);
-    }).catch(() => { /* keep the static map */ });
+    }).catch(() => { if (live) setBusy(false); /* keep the static map */ });
     return () => { live = false; if (S.raf) cancelAnimationFrame(S.raf); };
   }, []);
 
@@ -298,6 +303,7 @@ export function FsiMap({ view: V, base, svg, svgW, svgH, alt }: { view: FsiView;
       <div class="fsi-map-box" ref={wrap} style={`aspect-ratio:${V.w} / ${V.h}`}>
         <img src={svg} width={svgW} height={svgH} alt={alt} fetchpriority="high" hidden={ready} />
         <canvas ref={cv} hidden={!ready} aria-label={`${alt}. Drag to move, scroll or pinch to zoom.`} role="img" />
+        {busy && <Loading block label="Loading the map…" />}
         {ready && (
           <div class="fsi-zoom" role="group" aria-label="Zoom">
             <button type="button" aria-label="Zoom in" onClick={() => zoomAt(1.8)}>+</button>

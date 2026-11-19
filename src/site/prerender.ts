@@ -111,7 +111,7 @@ export function llms(site: string): string {
   const group = (pre: RegExp) => indexable().filter((r) => pre.test(r.path)).map((r) => line(r.path));
   return [
     `# ${SITE_NAME}`, '',
-    `> ${TAGLINE}. ${SITE_NAME} is a browser map editor for Pune and Mumbai: the real road network, buildings and terrain in 2D and 3D, the Pune Development Plan over today's city, a plot sandbox for FSI, setbacks and height by road width (UDCPR 2020, DCPR 2034), and Site Studio for the most a plot can hold. Free during the beta.`, '',
+    `> ${TAGLINE}. ${SITE_NAME} works out what a plot in Pune or Mumbai can hold under the rules (UDCPR 2020, DCPR 2034): the scheme in 3D in any building shape, its FSI, setbacks, height and parking, the money (cost, profit, IRR) and the approval drawings, in the browser. Free pages check a plot against the Pune Development Plan, work out FSI by road width, and explain the rules. Free during the beta.`, '',
     'Data coverage and its limits:',
     `- Pune and Pimpri-Chinchwad: ${P.km2} km², ${P.counts.roads} roads, ${P.counts.buildings} buildings (OpenStreetMap, baked ${P.baked}).`,
     `- Pune Development Plan: ${P.dp!.sheets} sanctioned PMC DP sheets for the old PMC limits (about ${Math.round(P.dp!.km2)} km²), registered to about 2-3 m. DP road widths are traced for ${Math.round(P.dp!.tracedKm)} km of road in part of east-central Pune only. Pimpri-Chinchwad, Hinjewadi and the merged villages have no DP sheets.`,
@@ -122,7 +122,7 @@ export function llms(site: string): string {
     '## Cities and places', ...group(/^(pune|mumbai)\/$/), ...group(/^(pune|mumbai)\/(?!map\/|dp-map\/|road-width-map\/)[a-z0-9-]+\/$/), '',
     '## Guides', ...group(/^guides\//), '',
     '## Data', line('data/'), `- [Pune main roads, GeoJSON](${url(P.download.file)})`, `- [Mumbai main roads, GeoJSON](${url(M.download.file)})`, '',
-    '## Optional', line('app/'), line('pricing/'), line('terms/'), line('privacy/'), '',
+    '## Optional', line('pricing/'), line('terms/'), line('privacy/'), '',
   ].join('\n');
 }
 

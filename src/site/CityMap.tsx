@@ -6,7 +6,7 @@ import type { ComponentChildren } from 'preact';
 import RAW from './maps/generated/maps.json';
 import type { CityMapData, MapRoad } from './maps/types';
 import { CITY_LABEL, PLACES, placeOf, type City, type Place } from './places/data';
-import { APP, href, Icon, Page } from './ui';
+import { href, Icon, Page, proStart } from './ui';
 import { SITE_NAME } from './brand';
 import './place.css';
 
@@ -15,7 +15,6 @@ const n = (v: number) => v.toLocaleString('en-IN');
 const km = (v: number) => `${n(Math.round(v))} km`;
 const mb = (b: number) => `${(b / 1e6).toFixed(1)} MB`;
 const date = (d: string, locale = 'en-IN') => new Date(d).toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
-export const appCity = (city: City, at?: [number, number], zoom = 16) => `${APP}?region=${city}${at ? `&at=${at[0]},${at[1]},${zoom}` : ''}`;
 const roadName = (r: MapRoad) => r.name;
 
 export function Crumbs({ trail }: { trail: [string, string | null][] }) {
@@ -68,14 +67,17 @@ function Rows({ rows }: { rows: [string, ComponentChildren][] }) {
   return <dl class="calc-rows place-facts">{rows.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>;
 }
 
-function Cta({ city, title, body, at }: { city: City; title: string; body: string; at?: [number, number] }) {
+/** The next step from a map page: work out a plot in Pro, and check its DP (Pune) or its FSI (Mumbai). */
+function Cta({ city, title, body }: { city: City; title: string; body: string }) {
   return (
     <div class="cta-panel place-cta">
       <h2>{title}</h2>
       <p>{body}</p>
       <div class="cta-row">
-        <a class="btn btn-primary btn-lg" href={appCity(city, at)}>Open {CITY_LABEL[city]} in the editor <Icon.arrow /></a>
-        <a class="btn btn-lg" href={href(`${city}/`)}>Places in {CITY_LABEL[city]}</a>
+        <a class="btn btn-primary btn-lg" href={proStart('blank', city)}>Work out a plot in {CITY_LABEL[city]} <Icon.arrow /></a>
+        {city === 'pune'
+          ? <a class="btn btn-lg" href={href('pune/dp-report/')}>Check a plot’s DP</a>
+          : <a class="btn btn-lg" href={href(`${city}/fsi-calculator/`)}>{CITY_LABEL[city]} FSI calculator</a>}
       </div>
     </div>
   );
@@ -108,7 +110,7 @@ export function MapPage({ city }: { city: City }) {
           <p class="answer">
             {SITE_NAME}’s map of {city === 'pune' ? 'Pune and Pimpri-Chinchwad' : 'Mumbai'} covers <b>{n(M.km2)} km²</b>: <b>{n(M.counts.roads)} roads</b> in{' '}
             {n(M.counts.sections)} sections, <b>{km(M.roadKm)}</b> of them ({km(M.mainKm)} of main roads{deck}), <b>{n(M.counts.buildings)} buildings</b> and the shape
-            of the ground, in 2D and 3D. It opens in the browser, free, with nothing to install, and every road can be edited.
+            of the ground, in 2D and 3D. The place pages, the road width map and the DP pages are all drawn from it.
           </p>
           <div class="place-grid">
             <figure class="place-map city-map">
@@ -131,15 +133,15 @@ export function MapPage({ city }: { city: City }) {
                 ['Development Plan', city === 'pune' ? 'Old PMC, 21 sheets' : 'Not in ' + SITE_NAME + ' yet'],
                 ['Base map', date(M.baked)],
               ]} />
-              <a class="btn btn-primary btn-lg btn-block" href={appCity(city)}>Open the {label} map <Icon.arrow /></a>
-              <p class="cta-note">Free, in the browser. Your edits stay on your computer.</p>
+              <a class="btn btn-primary btn-lg btn-block" href={proStart('blank', city)}>Work out a plot in {label} <Icon.arrow /></a>
+              <p class="cta-note">In {SITE_NAME} Pro: FSI, margins and height under {city === 'pune' ? 'UDCPR' : 'DCPR 2034'}. Free to start.</p>
             </aside>
           </div>
 
           {city === 'pune' && (
             <figure class="shot">
-              <img src={href('site/city-3d.webp')} width={1600} height={900} loading="lazy" alt="The editor's 3D view of Pune by the Mula-Mutha river near Koregaon Park: buildings, the road network and the metro viaduct." />
-              <figcaption class="small muted">The same map in 3D: press <kbd>Tab</kbd> in the editor.</figcaption>
+              <img src={href('site/city-3d.webp')} width={1600} height={900} loading="lazy" alt="The base map of Pune in 3D by the Mula-Mutha river near Koregaon Park: buildings, the road network and the metro viaduct." />
+              <figcaption class="small muted">The same map in 3D, by the Mula-Mutha near Koregaon Park.</figcaption>
             </figure>
           )}
 
@@ -150,27 +152,25 @@ export function MapPage({ city }: { city: City }) {
             <li><b>The terrain</b>: hills, river banks and slopes, from the Copernicus 30 m elevation model.</li>
             {city === 'pune'
               ? <li><b>The Development Plan</b> for the old PMC limits: the sanctioned DP sheets as a layer over the map, and the planned road widths traced for part of east-central Pune (see the <a href={href('pune/dp-map/')}>Pune DP map</a>).</li>
-              : <li><b>No Development Plan yet</b>: Mumbai’s DP 2034 isn’t in {SITE_NAME}. The FSI rules of DCPR 2034 are in the plot sandbox.</li>}
+              : <li><b>No Development Plan yet</b>: Mumbai’s DP 2034 isn’t in {SITE_NAME}. The FSI rules of DCPR 2034 are in the <a href={href('mumbai/fsi-calculator/')}>Mumbai FSI calculator</a> and Pro.</li>}
           </ul>
           <div class="table-wrap">
             <table class="rules">
-              <caption>Length of road in the map by class, as the editor labels them (OpenStreetMap’s highway classes)</caption>
+              <caption>Length of road in the map by class, as {SITE_NAME} labels them (OpenStreetMap’s highway classes)</caption>
               <thead><tr><th>Class</th><th class="n">Length</th></tr></thead>
               <tbody>{M.byClass.map((c) => <tr key={c.cls}><td>{c.label}</td><td class="n">{km(c.km)}</td></tr>)}</tbody>
             </table>
           </div>
 
-          <h2>How to use it</h2>
-          <ol>
-            <li><a href={appCity(city)}>Open the map of {label}</a> and search for a street, an area or a landmark.</li>
-            <li>Press <kbd>Tab</kbd> to switch between 2D and 3D. In 3D, right-drag to orbit and fly with <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd>.</li>
-            {city === 'pune' && <li>Press <kbd>D</kbd> to lay the Development Plan sheets over the map.</li>}
-            <li>Click a road to see its cross-section; drag its width handles to try it wider or narrower, or draw a new road, flyover or tunnel.</li>
-            <li>Press <kbd>F</kbd> and click a plot’s corners to see what it can hold: FSI by road width, margins and height, as a block in 3D.</li>
-          </ol>
-          <p>Links can open the map at a point: <code>{`/app/?region=${city}&at=<lat>,<lon>,<zoom>`}</code>. Each place below opens that way.</p>
+          <h2>What you can do with it</h2>
+          <ul>
+            <li><b>Look up a place</b>: each place below has a page with its roads and their widths, the junctions and the buildings.</li>
+            {city === 'pune' && <li><b>Check a plot’s DP</b>: the <a href={href('pune/dp-report/')}>Pune DP report</a> shows the zone, reservations and DP roads on any plot, free.</li>}
+            <li><b>Get the FSI quickly</b>: the <a href={href(`${city}/fsi-calculator/`)}>{label} FSI calculator</a> needs only the plot area and the road width.</li>
+            <li><b>Work out a plot</b>: <a href={proStart('blank', city)}>{SITE_NAME} Pro</a> takes the plot and the road in front of it and works out the FSI, margins, height and the buildings it can hold.</li>
+          </ul>
 
-          <Cta city={city} title={`Open the ${label} map`} body="Every road, flyover and building, in 2D and 3D, in your browser. Try a width, draw a road, see what a plot can hold." />
+          <Cta city={city} title={`Plan a plot in ${label}`} body="Give Pro the plot’s size and the road in front of it. It works out what the rules allow, lays out the buildings and parking, and costs it." />
 
           <h2>Places on the {label} map</h2>
           <p>Each has a page of its own: the roads and their widths, the junctions, the buildings{city === 'pune' ? ', the Development Plan where it’s traced' : ''}, and a few what-ifs to try.</p>
@@ -196,14 +196,13 @@ export const DP_FAQ: [string, string][] = [
   [`Is the Pune DP map in ${SITE_NAME} official?`, `No. It is the Pune Municipal Corporation’s sanctioned DP sheets, scanned and registered over today’s map to about 2–3 m: enough to see whether a road line or a reservation is near a plot, not to measure it. The official answer is a DP remark or zone certificate from the PMC.`],
   ['Does it cover Pimpri-Chinchwad, Hinjewadi or the merged villages?', `No. The DP sheets in ${SITE_NAME} cover the old PMC limits. Pimpri-Chinchwad (PCMC), Hinjewadi and the villages merged into the PMC since have no DP sheets in ${SITE_NAME}.`],
   ['Where are the DP road widths traced?', `Only in part of east-central Pune, round Bund Garden Road, Koregaon Park, Kalyani Nagar, Nagar Road and Pune Station. Elsewhere the sheets are a picture to read, and the widths in ${SITE_NAME} are today’s roads.`],
-  ['How do I see the DP over my plot?', 'Open the editor on Pune, find the plot and press D: the sheet is laid over the map, in 2D and draped over the ground in 3D. Press F and click the plot’s corners to see what a traced DP road takes from it.'],
+  ['How do I see the DP over my plot?', 'Open the Pune DP report, search for the area and click the plot: it gives the zone, any reservation and the DP roads near it, over satellite imagery. Then work the plot out in Pro to see what a DP road takes from it.'],
 ];
 
 export function DpMapPage() {
   const M = MAPS.pune, D = M.dp!;
   const pune = PLACES.filter((p) => p.city === 'pune');
   const traced = pune.filter((p) => p.data.dp === 'traced'), sheets = pune.filter((p) => p.data.dp === 'sheets'), none = pune.filter((p) => p.data.dp === 'none');
-  const at: [number, number] = [traced[0].data.lat, traced[0].data.lon];
   return (
     <Page>
       <section class="wrap guide place">
@@ -212,7 +211,7 @@ export function DpMapPage() {
           <h1>Pune DP map (Development Plan) online</h1>
           <p class="answer">
             {SITE_NAME} lays the <b>{D.sheets} sheets of Pune’s sanctioned Development Plan</b> over today’s map, registered to about 2–3 m, across{' '}
-            <b>{n(Math.round(D.km2))} km²</b> of the old PMC limits. You can view them in the editor, in 2D or draped over the ground in 3D, with <kbd>D</kbd>.
+            <b>{n(Math.round(D.km2))} km²</b> of the old PMC limits.
             The DP’s road widths are <b>traced for {km(D.tracedKm)} of road in part of east-central Pune</b> only. Pimpri-Chinchwad, Hinjewadi and the
             merged villages have no DP sheets in {SITE_NAME}.
           </p>
@@ -239,8 +238,8 @@ export function DpMapPage() {
                 ['PCMC, Hinjewadi, merged villages', 'no DP sheets'],
                 ['Base map', date(M.baked)],
               ]} />
-              <a class="btn btn-primary btn-lg btn-block" href={appCity('pune', at)}>Open the DP in the editor <Icon.arrow /></a>
-              <p class="cta-note">Then press <kbd>D</kbd> for the DP sheets.</p>
+              <a class="btn btn-primary btn-lg btn-block" href={href('pune/dp-report/')}>Check a plot’s DP <Icon.arrow /></a>
+              <p class="cta-note">Zone, reservations and DP roads on any plot, free.</p>
             </aside>
           </div>
 
@@ -255,7 +254,7 @@ export function DpMapPage() {
             <section>
               <h3><i class="legend-swatch round" style="background:#2f5fb3" /> DP sheets, widths not traced ({sheets.length})</h3>
               <ul>{sheets.map((p) => <li key={p.slug}><a href={href(`pune/${p.slug}/`)}>{p.name}</a></li>)}</ul>
-              <p class="small muted">The sheet opens over the map in the editor; the page gives no DP widths.</p>
+              <p class="small muted">The sheets cover them, but the pages give no DP widths.</p>
             </section>
             <section>
               <h3><i class="legend-swatch round" style="background:#8a8178" /> No DP sheets in {SITE_NAME} ({none.length})</h3>
@@ -277,12 +276,11 @@ export function DpMapPage() {
             </table>
           </div>
 
-          <h2>How to view the DP in the editor</h2>
+          <h2>How to check the DP on your plot</h2>
           <ol>
-            <li><a href={appCity('pune', at)}>Open the editor on Pune</a> and search for your street or area.</li>
-            <li>Press <kbd>D</kbd> (or pick <b>DP sheets</b> in the info views at the top left). <b>DP regions</b> colours the zones instead.</li>
-            <li>Press <kbd>Tab</kbd> for 3D: the sheet drapes over the ground.</li>
-            <li>Press <kbd>F</kbd> and click your plot’s corners: where the DP width is traced, the panel shows the strip the DP road takes, and the FSI by the DP width or today’s.</li>
+            <li>Open the <a href={href('pune/dp-report/')}>Pune DP report</a> and search for your street or area.</li>
+            <li>Click the plot: the report gives its zone, any reservation on it and the DP roads near it.</li>
+            <li>To see what a DP road takes from the plot, and the FSI by the DP width or today’s, <a href={proStart('survey', 'pune')}>find the plot by its survey number in Pro</a>.</li>
           </ol>
 
           <h2>What a DP map tells you, and what it doesn’t</h2>
@@ -317,7 +315,7 @@ export function DpMapPage() {
           <h2>Questions</h2>
           <div class="faq">{DP_FAQ.map(([q, a]) => <details key={q}><summary>{q}</summary><p>{a}</p></details>)}</div>
 
-          <Cta city="pune" at={at} title="See the DP over today’s Pune" body="Press D in the editor for the sheets, F to draw a plot and see what the DP road takes from it." />
+          <Cta city="pune" title="Plan a plot under Pune’s DP" body="Check the plot’s zone and reservations in the DP report, then work it out in Pro: the strip a DP road takes, the FSI by its width, the buildings it can hold." />
           <p>The rest of the city: the <a href={href('pune/map/')}>Pune 3D map</a> and the <a href={href('pune/road-width-map/')}>Pune road width map</a>.</p>
           <Sources city="pune" dp />
         </article>
@@ -339,7 +337,7 @@ function RoadTable({ city, list, caption, pair }: { city: City; list: MapRoad[];
             const near = r.near ? placeOf(city, r.near) : undefined;
             return (
               <tr key={r.name + r.at.join()}>
-                <td><a href={appCity(city, r.at, 16.5)} title={`Open ${roadName(r)} in the editor`}>{roadName(r)}</a></td>
+                <td>{roadName(r)}</td>
                 <td>{r.cls}</td>
                 {!pair && <td class="n">{r.km} km</td>}
                 <td class="n"><b>{r.w} m</b>{pair ? ' each way' : ''}</td>
@@ -387,7 +385,7 @@ export function WidthMapPage({ city }: { city: City }) {
                   <tbody>{M.bands.map((b) => <tr key={b.lo}><td><i class="legend-swatch" style={`background:${b.color};display:inline-block;margin-right:8px`} />{bandLabel(b.lo, b.hi)}</td><td class="n">{km(b.km)}</td><td class="n">{Math.round((100 * b.km) / total)} %</td></tr>)}</tbody>
                 </table>
               </div>
-              <a class="btn btn-primary btn-lg btn-block" href={appCity(city)}>Try a width in the editor <Icon.arrow /></a>
+              <a class="btn btn-primary btn-lg btn-block" href={href(`${city}/fsi-calculator/`)}>What a road’s width lets you build <Icon.arrow /></a>
             </aside>
           </div>
 
@@ -415,7 +413,7 @@ export function WidthMapPage({ city }: { city: City }) {
           <h2>The longest named main roads</h2>
           <RoadTable city={city} list={M.longest} caption="Length of the road in the map, both carriageways counted where it’s mapped as two" />
 
-          <Cta city={city} title={`Try a wider road in ${label}`} body="Click a road in the editor to see its cross-section, drag it to a new width and see the lanes, footpaths and buildings it reaches." />
+          <Cta city={city} title={`What a wider road means for a plot in ${label}`} body="The FSI a plot can load goes up with the width of the road in front of it. Give Pro the plot and the road, try a wider one, and see the floor area and the buildings follow." />
 
           <h2>Road widths, place by place</h2>
           <p>The place pages measure each area’s main roads in more detail: the narrowest and widest stretches, the gap between buildings across the road{city === 'pune' ? ', and the DP width where it’s traced' : ''}.</p>
@@ -433,7 +431,7 @@ export function WidthMapPage({ city }: { city: City }) {
 export const DATA_FIELDS: [string, string][] = [
   ['name', 'The road’s name in OpenStreetMap (null if it has none)'],
   ['highway', 'OpenStreetMap’s highway class: motorway, trunk, primary, secondary, tertiary or busway'],
-  ['class', 'The class as the editor labels it: Expressway, Highway, Arterial, Sub-arterial, Collector, BRTS'],
+  ['class', `The class as ${SITE_NAME} labels it: Expressway, Highway, Arterial, Sub-arterial, Collector, BRTS`],
   ['width_m', 'Width in the model, kerb to kerb with footpaths (m)'],
   ['carriageway_m', 'The carriageway alone, without footpaths (m)'],
   ['lanes', 'Traffic lanes in the model'],

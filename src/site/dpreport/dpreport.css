@@ -5,11 +5,12 @@
 .dpr .h3 { font-size: var(--up-text-lg); letter-spacing: -0.025em; line-height: 1.25; margin: 0; }
 
 .dpr-viewer { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 0; border: 1px solid var(--up-line); border-radius: var(--up-radius-lg); overflow: hidden; background: var(--up-surface); scroll-margin-top: 72px; }
-.dpr-stage { position: relative; min-height: 560px; height: min(74vh, 720px); background: #1d2a22; }
-.dpr-map { position: absolute; inset: 0; background: #1d2a22; }
-.dpr-map .leaflet-container, .dpr-map.leaflet-container { font: inherit; background: #1d2a22; cursor: crosshair; }
+.dpr-stage { position: relative; min-height: 560px; height: min(74vh, 720px); background: var(--up-night); }
+.dpr-map { position: absolute; inset: 0; background: var(--up-night); }
+.dpr-map .leaflet-container, .dpr-map.leaflet-container { font: inherit; background: var(--up-night); cursor: crosshair; }
+.dpr-stage > .loading.block { z-index: 450; } /* over the map's panes, under its tools */
 .dpr-poster { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.dpr-noscript { color: #fff; padding: 24px; }
+.dpr-noscript { color: var(--up-on-night); padding: 24px; }
 .dpr-tools { position: absolute; z-index: 500; top: 12px; left: 12px; right: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; pointer-events: none; }
 .dpr-tools > * { pointer-events: auto; }
 .dpr-search { display: flex; gap: 6px; flex: 1 1 260px; max-width: 420px; position: relative; }
@@ -36,6 +37,7 @@
 .legend-swatch.dpr-road { background: #e5484d; height: 4px; border-radius: 2px; }
 .dpr .legend-swatch { display: inline-block; vertical-align: -1px; flex: none; }
 
+.dpr-panel > .loading { padding: var(--up-space-2) 0; }
 .dpr-report { display: grid; gap: var(--up-space-3); align-content: start; transition: opacity 0.15s; }
 .dpr-report.busy { opacity: 0.55; }
 .dpr-report .eyebrow { margin: 0; }
@@ -99,8 +101,7 @@
 .rpt-pics { display: grid; grid-template-columns: 1fr 1fr; gap: var(--up-space-3); margin: var(--up-space-4) 0; }
 .rpt-pics figure { margin: 0; display: grid; gap: 6px; align-content: start; }
 .rpt-pics img, .rpt-pic-wait { width: 100%; aspect-ratio: 3 / 2; object-fit: cover; border-radius: var(--up-radius-lg); border: 1px solid var(--up-line); background: var(--up-surface-2); }
-.rpt-pic-wait { animation: rpt-wait 1.4s ease-in-out infinite; }
-@keyframes rpt-wait { 50% { opacity: 0.55; } }
+.rpt-pic-wait { display: grid; place-items: center; }
 .rpt-pics figure .rpt-lock { aspect-ratio: 3 / 2; align-content: center; }
 .rpt-pics figcaption { font-size: var(--up-text-xs); color: var(--up-muted); }
 .rpt h2 { display: flex; align-items: center; gap: 10px; }

@@ -5,9 +5,9 @@ import { authEvent, authReady, startAuth, emailLink, explain, ROLES, sendReset, 
 
 // (these pages need the account service: load it as soon as the page's code does)
 if (typeof window !== 'undefined') void startAuth();
-import { APP, Header, href, Icon, nextUrl, useSearch } from './ui';
+import { DASH, Header, href, Icon, Loading, nextUrl, PRO, useSearch } from './ui';
 
-/** The two-column frame: the city in 3D (left), the form (right). */
+/** The two-column frame: a scheme in Pro (left), the form (right). */
 function AuthFrame({ children }: { children: ComponentChildren }) {
   return (
     <>
@@ -15,9 +15,9 @@ function AuthFrame({ children }: { children: ComponentChildren }) {
       <Header />
       <main id="main" class="auth">
         <aside class="auth-side">
-          <img width={1220} height={740} src={href('site/city-clean.webp')} alt="" />
-          <h2>Your city, edited.</h2>
-          <p>Free in beta, with or without an account.</p>
+          <img width={1100} height={680} src={href('site/form-twins.webp')} alt="" />
+          <h2>From a plot to a project.</h2>
+          <p>Your projects, your team and your design systems in one place. Free in beta.</p>
         </aside>
         <div class="auth-main"><div class="auth-card">{children}</div></div>
       </main>
@@ -28,7 +28,7 @@ function AuthFrame({ children }: { children: ComponentChildren }) {
 const NotSetUp = () => (
   <div class="notice info" role="status">
     <Icon.info />
-    <div style="display:grid;gap:4px"><b>Accounts aren't switched on yet.</b><p>You can still use the whole editor without one: your maps are saved in your browser.</p><a href={APP}>Open the editor</a></div>
+    <div style="display:grid;gap:4px"><b>Accounts aren't switched on yet.</b><p>You can still use Pro without one: your projects are saved in your browser.</p><a href={PRO}>Start a project</a></div>
   </div>
 );
 
@@ -51,7 +51,7 @@ function SignedIn() {
   const u = session.value!.user;
   return (
     <Alert kind="ok">
-      <div style="display:grid;gap:8px"><span>You're signed in as <b>{shortName(u)}</b> ({u.email}).</span><span style="display:flex;gap:12px;flex-wrap:wrap"><a href={nextUrl()}>Continue</a><a href={APP}>Open the editor</a></span></div>
+      <div style="display:grid;gap:8px"><span>You're signed in as <b>{shortName(u)}</b> ({u.email}).</span><span style="display:flex;gap:12px;flex-wrap:wrap"><a href={nextUrl()}>Continue</a><a href={DASH}>Your dashboard</a></span></div>
     </Alert>
   );
 }
@@ -192,7 +192,7 @@ export function Reset() {
   return (
     <AuthFrame>
       <div style="display:grid;gap:8px"><h1>Choose a new password</h1></div>
-      {!authReady ? <NotSetUp /> : done ? <Alert kind="ok">Your password is changed. Taking you to your account…</Alert> : session.value === undefined ? <p class="muted">Checking your link…</p> : !ready ? (
+      {!authReady ? <NotSetUp /> : done ? <Alert kind="ok">Your password is changed. Taking you to your account…</Alert> : session.value === undefined ? <Loading label="Checking your link…" /> : !ready ? (
         <Alert kind="error">This reset link has expired or was already used. <a href={href('forgot/')}>Send a new one</a>.</Alert>
       ) : (
         <form class="form" onSubmit={submit}>

@@ -13,7 +13,7 @@ export function Terms() {
           <h1 style="font-size:var(--up-text-3xl)">Terms of use (beta)</h1>
           <p class="muted small">Last updated {UPDATED}. These terms cover the free beta of {SITE_NAME}.</p>
           <h2>What {SITE_NAME} is</h2>
-          <p>{SITE_NAME} is a map editor and design tool. It shows cities from open data and published planning documents, and lets you draw changes to them. It is offered as a beta: features change, and parts of the map are known to be wrong.</p>
+          <p>{SITE_NAME} is a planning and design tool. It shows plots and cities from open data and published planning documents, and lets you test what could be built on them. It is offered as a beta: features change, and parts of the map are known to be wrong.</p>
           <h2>Not advice, not a legal record</h2>
           <ul>
             <li>Nothing in {SITE_NAME} is engineering, legal, planning or financial advice.</li>
@@ -47,10 +47,10 @@ export function Privacy() {
           <h1 style="font-size:var(--up-text-3xl)">Privacy notice (beta)</h1>
           <p class="muted small">Last updated {UPDATED}.</p>
           <h2>Without an account</h2>
-          <p>The editor runs in your browser. Your maps and settings are stored in your browser's local storage and never sent to us, unless you publish or export a map. Map tiles and imagery you switch on are loaded from their providers (for example OpenStreetMap or a satellite provider), who see your request.</p>
+          <p>{SITE_NAME} runs in your browser. Your projects and settings are stored in your browser's local storage and never sent to us, unless you sign in and save them to your account, share them, or export them. When you look a plot up by its survey or CTS number, that number is sent through our server to the state's land records map, and only the plot's outline comes back; owner details are dropped and nothing is kept. Map tiles and imagery you switch on are loaded from their providers (for example OpenStreetMap or a satellite provider), who see your request.</p>
           <h2>With an account</h2>
           <ul>
-            <li><b>What we keep:</b> your email address, your name, and optionally your organisation and role.</li>
+            <li><b>What we keep:</b> your email address, your name, what you choose to add to your profile (organisation, role, photo, phone, city), and the projects you save to your account.</li>
             <li><b>Why:</b> to sign you in, to show your account, and to tell you about {SITE_NAME} features you signed up for.</li>
             <li><b>Where:</b> accounts are run on Supabase (our authentication and database provider).</li>
             <li><b>Not sold:</b> we don't sell your personal data.</li>

@@ -129,6 +129,9 @@ function App() {
     if (start === null) return;
     let city = DEFAULT_PROJECT.city;
     try { const a = (JSON.parse(localStorage.getItem('urbanplan:prefs') ?? '{}') as { authority?: ProProject['city'] }).authority; if (a) city = a; } catch { /* */ }
+    // (a city page's link names its city: Pune's rules, or Mumbai suburbs')
+    const asked = new URLSearchParams(location.search).get('city');
+    if (asked === 'pune') city = 'pune'; else if (asked === 'mumbai') city = 'mumbai-suburbs';
     fresh({ ...DEFAULT_PROJECT, city });
     if (start === 'blank') setDialog('welcome');
     if (start === 'survey' || start === 'import') { try { sessionStorage.setItem('urbanplan:pro:way', start); } catch { /* */ } go('site'); }
@@ -247,6 +250,8 @@ function App() {
       get: () => structuredClone(pRef.current),
       /** change it (as a panel would: undoable) */
       set: (o: Partial<ProProject>) => up(o),
+      /** pick a building by its id, or nothing */
+      pick: (id: string | null) => setPicked(id ? { k: 'building', id } : null),
       /** everything worked out from a project (this one unless given) */
       evaluate: (q?: ProProject) => evaluate(q ?? pRef.current),
       scrutiny: (q?: ProProject) => { const x = evaluate(q ?? pRef.current); return scrutiny(x, x.d.buildings.map((b, i) => fitRooms(b, x.plans[i], x.r.code))); },

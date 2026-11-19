@@ -3,8 +3,8 @@
 // pages. NATIVE REVIEW NEEDED: this Marathi was drafted without a native speaker's review; have it read by one before
 // relying on it (the page's <head> carries the same note as an HTML comment, see routes.ts `reviewNote`).
 import { CITY_LABEL, PLACES } from './places/data';
-import { appCity, Crumbs, MAPS, PlaceGroups } from './CityMap';
-import { href, Icon, Page } from './ui';
+import { Crumbs, MAPS, PlaceGroups } from './CityMap';
+import { href, Icon, Page, proStart } from './ui';
 import { SITE_NAME } from './brand';
 import './place.css';
 
@@ -48,7 +48,7 @@ export function MapPageMr() {
           <p class="answer">
             {SITE_NAME} चा पुणे आणि पिंपरी-चिंचवडचा नकाशा <b>{n(M.km2)} चौ. किमी</b> क्षेत्र व्यापतो: <b>{n(M.counts.roads)} रस्ते</b> ({n(M.counts.sections)} भाग),
             एकूण <b>{km(M.roadKm)}</b> लांबी (त्यापैकी {km(M.mainKm)} मुख्य रस्ते, {km(M.deckKm)} उड्डाणपूल आणि पुलांवर), <b>{n(M.counts.buildings)} इमारती</b> आणि
-            जमिनीचा उंच-सखलपणा, 2D आणि 3D मध्ये. नकाशा ब्राउझरमध्ये मोफत उघडतो, काहीही इन्स्टॉल करावे लागत नाही, आणि प्रत्येक रस्ता बदलून पाहता येतो.
+            जमिनीचा उंच-सखलपणा, 2D आणि 3D मध्ये. ठिकाणांची पाने, रस्ता रुंदी नकाशा आणि DP पाने याच नकाशावरून तयार केली आहेत.
           </p>
           <p class="small muted"><a href={href('pune/map/')} hrefLang="en" lang="en">Read this page in English: Pune 3D map</a></p>
           <div class="place-grid">
@@ -72,8 +72,8 @@ export function MapPageMr() {
                 ['विकास आराखडा', `जुनी PMC हद्द, ${M.dp!.sheets} नकाशे`],
                 ['नकाशा तयार केला', date(M.baked)],
               ]} />
-              <a class="btn btn-primary btn-lg btn-block" href={appCity('pune')}>पुण्याचा नकाशा उघडा <Icon.arrow /></a>
-              <p class="cta-note">मोफत, ब्राउझरमध्ये. तुमचे बदल तुमच्याच संगणकावर राहतात.</p>
+              <a class="btn btn-primary btn-lg btn-block" href={proStart('blank', 'pune')}>पुण्यातील भूखंडाचा हिशोब करा <Icon.arrow /></a>
+              <p class="cta-note">{SITE_NAME} Pro मध्ये: UDCPR नुसार FSI, मार्जिन आणि उंची. सुरुवात मोफत.</p>
             </aside>
           </div>
 
@@ -85,19 +85,21 @@ export function MapPageMr() {
             <li><b>विकास आराखडा</b> जुन्या PMC हद्दीसाठी: मंजूर DP नकाशे नकाशावर थर म्हणून, आणि पूर्व-मध्य पुण्याच्या काही भागात DP रस्ता रुंदी रेखांकित (पाहा <a href={href('mr/pune/dp-map/')}>पुणे विकास आराखडा नकाशा</a>).</li>
           </ul>
 
-          <h2>नकाशा कसा वापरायचा</h2>
-          <ol>
-            <li><a href={appCity('pune')}>पुण्याचा नकाशा उघडा</a> आणि रस्ता, भाग किंवा खूण शोधा.</li>
-            <li>2D आणि 3D मध्ये बदलण्यासाठी <kbd>Tab</kbd> दाबा. 3D मध्ये उजवे बटण दाबून ओढल्यास नकाशा फिरतो; <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> ने पुढे-मागे जाता येते.</li>
-            <li>विकास आराखड्याचे नकाशे नकाशावर पाहण्यासाठी <kbd>D</kbd> दाबा.</li>
-            <li>रस्त्यावर क्लिक करून त्याचा छेद (cross-section) पाहा; रुंदीची हँडल ओढून तो रुंद किंवा अरुंद करून पाहा, किंवा नवीन रस्ता, उड्डाणपूल किंवा बोगदा काढा.</li>
-            <li><kbd>F</kbd> दाबा आणि भूखंडाच्या कोपऱ्यांवर क्लिक करा: रस्त्याच्या रुंदीनुसार FSI, मार्जिन आणि उंची, 3D मधील ठोकळ्याच्या रूपात दिसते.</li>
-          </ol>
+          <h2>या नकाशाचा उपयोग</h2>
+          <ul>
+            <li><b>ठिकाण पाहा</b>: खालील प्रत्येक ठिकाणाचे स्वतंत्र पान आहे: तिथले रस्ते आणि त्यांची रुंदी, चौक आणि इमारती.</li>
+            <li><b>भूखंडाचा DP तपासा</b>: <a href={href('pune/dp-report/')}>पुणे DP अहवाल</a> कोणत्याही भूखंडावरचा झोन, आरक्षणे आणि DP रस्ते दाखवतो, मोफत.</li>
+            <li><b>FSI पटकन काढा</b>: <a href={href('pune/fsi-calculator/')}>पुणे FSI कॅल्क्युलेटर</a> (इंग्रजीत) ला फक्त भूखंडाचे क्षेत्रफळ आणि रस्त्याची रुंदी लागते.</li>
+            <li><b>भूखंडाचा पूर्ण हिशोब</b>: <a href={proStart('blank', 'pune')}>{SITE_NAME} Pro</a> भूखंड आणि समोरचा रस्ता घेऊन FSI, मार्जिन, उंची आणि त्यात बसणाऱ्या इमारती काढतो.</li>
+          </ul>
 
           <div class="cta-panel place-cta">
-            <h2>पुण्याचा नकाशा उघडा</h2>
-            <p>प्रत्येक रस्ता, उड्डाणपूल आणि इमारत, 2D आणि 3D मध्ये, तुमच्या ब्राउझरमध्ये.</p>
-            <div class="cta-row"><a class="btn btn-primary btn-lg" href={appCity('pune')}>एडिटरमध्ये पुणे उघडा <Icon.arrow /></a></div>
+            <h2>पुण्यातील भूखंडाचे नियोजन करा</h2>
+            <p>भूखंडाचा आकार आणि समोरच्या रस्त्याची रुंदी द्या. नियम किती बांधकाम देतात ते Pro काढतो, आणि इमारती व पार्किंग मांडतो.</p>
+            <div class="cta-row">
+              <a class="btn btn-primary btn-lg" href={proStart('blank', 'pune')}>भूखंडाचा हिशोब करा <Icon.arrow /></a>
+              <a class="btn btn-lg" href={href('pune/dp-report/')}>भूखंडाचा DP तपासा</a>
+            </div>
           </div>
 
           <h2>नकाशावरील ठिकाणे</h2>
@@ -123,14 +125,13 @@ export const DP_FAQ_MR: [string, string][] = [
   [`${SITE_NAME} मधील पुणे DP नकाशा अधिकृत आहे का?`, `नाही. हे पुणे महानगरपालिकेचे मंजूर DP नकाशे आहेत, स्कॅन करून आजच्या नकाशावर सुमारे 2–3 मीटर अचूकतेने बसवलेले: एखादी रस्ता-रेषा किंवा आरक्षण भूखंडाजवळ आहे का हे पाहण्यासाठी पुरेसे, मोजमापासाठी नाही. अधिकृत उत्तर म्हणजे PMC कडून मिळणारा DP अभिप्राय किंवा झोन दाखला.`],
   ['पिंपरी-चिंचवड, हिंजवडी किंवा समाविष्ट गावांचा DP यात आहे का?', `नाही. ${SITE_NAME} मधील DP नकाशे जुन्या PMC हद्दीचे आहेत. पिंपरी-चिंचवड (PCMC), हिंजवडी आणि नंतर PMC मध्ये समाविष्ट झालेल्या गावांचे DP नकाशे ${SITE_NAME} मध्ये नाहीत.`],
   ['DP रस्ता रुंदी कुठे रेखांकित आहे?', `फक्त पूर्व-मध्य पुण्याच्या काही भागात: बंड गार्डन रोड, कोरेगाव पार्क, कल्याणी नगर, नगर रोड आणि पुणे स्टेशन परिसर. इतरत्र DP नकाशा फक्त पाहण्यासाठी आहे, आणि ${SITE_NAME} मधील रुंदी आजच्या रस्त्यांची आहे.`],
-  ['माझ्या भूखंडावर DP कसा पाहायचा?', 'एडिटरमध्ये पुणे उघडा, भूखंड शोधा आणि D दाबा: DP नकाशा 2D मध्ये नकाशावर आणि 3D मध्ये जमिनीवर पसरलेला दिसतो. F दाबून भूखंडाच्या कोपऱ्यांवर क्लिक केल्यास, रेखांकित DP रस्ता भूखंडातून किती जागा घेतो ते दिसते.'],
+  ['माझ्या भूखंडावर DP कसा पाहायचा?', 'पुणे DP अहवाल उघडा, भाग शोधा आणि भूखंडावर क्लिक करा: उपग्रह छायाचित्रावर झोन, आरक्षण आणि जवळचे DP रस्ते दिसतात. DP रस्ता भूखंडातून किती जागा घेतो हे पाहण्यासाठी भूखंडाचा हिशोब Pro मध्ये करा.'],
 ];
 
 export function DpMapPageMr() {
   const M = MAPS.pune, D = M.dp!;
   const pune = PLACES.filter((p) => p.city === 'pune');
   const traced = pune.filter((p) => p.data.dp === 'traced'), sheets = pune.filter((p) => p.data.dp === 'sheets'), none = pune.filter((p) => p.data.dp === 'none');
-  const at: [number, number] = [traced[0].data.lat, traced[0].data.lon];
   const link = (p: (typeof pune)[number]) => <a href={href(`pune/${p.slug}/`)} lang="en">{p.name}</a>;
   return (
     <Page chrome="en">
@@ -140,8 +141,7 @@ export function DpMapPageMr() {
           <h1>पुणे विकास आराखडा नकाशा (DP map) ऑनलाइन</h1>
           <p class="answer">
             {SITE_NAME} पुणे महानगरपालिकेच्या मंजूर विकास आराखड्याचे (DP) <b>{D.sheets} नकाशे</b> आजच्या नकाशावर सुमारे 2–3 मीटर अचूकतेने बसवून दाखवते.
-            ते जुन्या PMC हद्दीतील सुमारे <b>{n(Math.round(D.km2))} चौ. किमी</b> क्षेत्र व्यापतात. एडिटरमध्ये <kbd>D</kbd> दाबून ते 2D मध्ये किंवा 3D मध्ये जमिनीवर
-            पसरलेले पाहता येतात. DP मधील रस्त्यांची रुंदी <b>फक्त पूर्व-मध्य पुण्याच्या काही भागात, {km(D.tracedKm)} रस्त्यांसाठी</b> रेखांकित केली आहे.
+            ते जुन्या PMC हद्दीतील सुमारे <b>{n(Math.round(D.km2))} चौ. किमी</b> क्षेत्र व्यापतात. DP मधील रस्त्यांची रुंदी <b>फक्त पूर्व-मध्य पुण्याच्या काही भागात, {km(D.tracedKm)} रस्त्यांसाठी</b> रेखांकित केली आहे.
             पिंपरी-चिंचवड, हिंजवडी आणि नंतर समाविष्ट झालेल्या गावांचे DP नकाशे {SITE_NAME} मध्ये नाहीत.
           </p>
           <p class="small muted"><a href={href('pune/dp-map/')} hrefLang="en" lang="en">Read this page in English: Pune DP map</a></p>
@@ -166,8 +166,8 @@ export function DpMapPageMr() {
                 ['PCMC, हिंजवडी, समाविष्ट गावे', 'DP नकाशे नाहीत'],
                 ['नकाशा तयार केला', date(M.baked)],
               ]} />
-              <a class="btn btn-primary btn-lg btn-block" href={appCity('pune', at)}>एडिटरमध्ये DP उघडा <Icon.arrow /></a>
-              <p class="cta-note">नंतर DP नकाशांसाठी <kbd>D</kbd> दाबा.</p>
+              <a class="btn btn-primary btn-lg btn-block" href={href('pune/dp-report/')}>भूखंडाचा DP तपासा <Icon.arrow /></a>
+              <p class="cta-note">कोणत्याही भूखंडावरचा झोन, आरक्षणे आणि DP रस्ते, मोफत.</p>
             </aside>
           </div>
 
@@ -182,7 +182,7 @@ export function DpMapPageMr() {
             <section>
               <h3><i class="legend-swatch round" style="background:#2f5fb3" /> DP नकाशा आहे, रुंदी रेखांकित नाही ({sheets.length})</h3>
               <ul>{sheets.map((p) => <li key={p.slug}>{link(p)}</li>)}</ul>
-              <p class="small muted">एडिटरमध्ये DP नकाशा पाहता येतो; पानावर DP रुंदी नाही.</p>
+              <p class="small muted">DP नकाशे हा भाग व्यापतात, पण पानांवर DP रुंदी नाही.</p>
             </section>
             <section>
               <h3><i class="legend-swatch round" style="background:#8a8178" /> {SITE_NAME} मध्ये DP नकाशा नाही ({none.length})</h3>
@@ -201,12 +201,11 @@ export function DpMapPageMr() {
             </table>
           </div>
 
-          <h2>एडिटरमध्ये DP कसा पाहायचा</h2>
+          <h2>तुमच्या भूखंडावर DP कसा तपासायचा</h2>
           <ol>
-            <li><a href={appCity('pune', at)}>एडिटरमध्ये पुणे उघडा</a> आणि तुमचा रस्ता किंवा भाग शोधा.</li>
-            <li><kbd>D</kbd> दाबा (किंवा वर डावीकडील माहिती-दृश्यांमधून <b>DP sheets</b> निवडा). <b>DP regions</b> निवडल्यास झोन रंगात दिसतात.</li>
-            <li>3D साठी <kbd>Tab</kbd> दाबा: DP नकाशा जमिनीवर पसरलेला दिसतो.</li>
-            <li><kbd>F</kbd> दाबा आणि भूखंडाच्या कोपऱ्यांवर क्लिक करा: DP रुंदी रेखांकित असेल तिथे, DP रस्ता भूखंडातून घेणारी पट्टी आणि DP रुंदी किंवा आजच्या रुंदीनुसार FSI दिसतो.</li>
+            <li><a href={href('pune/dp-report/')}>पुणे DP अहवाल</a> उघडा आणि तुमचा रस्ता किंवा भाग शोधा.</li>
+            <li>भूखंडावर क्लिक करा: अहवालात त्याचा झोन, त्यावरचे आरक्षण आणि जवळचे DP रस्ते दिसतात.</li>
+            <li>DP रस्ता भूखंडातून घेणारी पट्टी आणि DP रुंदी किंवा आजच्या रुंदीनुसार FSI पाहण्यासाठी, <a href={proStart('survey', 'pune')}>सर्व्हे क्रमांकावरून भूखंड Pro मध्ये शोधा</a>.</li>
           </ol>
 
           <h2>DP नकाशा काय सांगतो, आणि काय नाही</h2>
@@ -242,9 +241,12 @@ export function DpMapPageMr() {
           <div class="faq">{DP_FAQ_MR.map(([q, a]) => <details key={q}><summary>{q}</summary><p>{a}</p></details>)}</div>
 
           <div class="cta-panel place-cta">
-            <h2>आजच्या पुण्यावर DP पाहा</h2>
-            <p>एडिटरमध्ये DP नकाशांसाठी D, भूखंड काढण्यासाठी F दाबा.</p>
-            <div class="cta-row"><a class="btn btn-primary btn-lg" href={appCity('pune', at)}>एडिटरमध्ये {CITY_LABEL.pune} उघडा <Icon.arrow /></a></div>
+            <h2>पुण्याच्या DP नुसार भूखंडाचे नियोजन करा</h2>
+            <p>DP अहवालात भूखंडाचा झोन आणि आरक्षणे तपासा, मग Pro मध्ये हिशोब करा: DP रस्ता घेणारी पट्टी, त्याच्या रुंदीनुसार FSI, आणि त्यात बसणाऱ्या इमारती.</p>
+            <div class="cta-row">
+              <a class="btn btn-primary btn-lg" href={href('pune/dp-report/')}>भूखंडाचा DP तपासा <Icon.arrow /></a>
+              <a class="btn btn-lg" href={proStart('survey', 'pune')}>सर्व्हे क्रमांकावरून भूखंड शोधा</a>
+            </div>
           </div>
           <p>संपूर्ण शहर: <a href={href('mr/pune/map/')}>पुण्याचा 3D नकाशा</a>.</p>
           <Sources />

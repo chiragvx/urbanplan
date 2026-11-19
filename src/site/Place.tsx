@@ -1,10 +1,10 @@
 // A place page (/<city>/<slug>/) and a city page (/pune/, /mumbai/): what the base map says about a neighbourhood
 // or a road — widths, the Development Plan's widths where they're traced, junctions, buildings — and a few
-// what-ifs to try in the editor. Every number is measured by tools/places/bake-places.ts; this only words them.
+// questions the map raises. Every number is measured by tools/places/bake-places.ts; this only words them.
 import type { ComponentChildren } from 'preact';
 import { CITY_LABEL, PLACES, placeOf, roadName, type City, type Place } from './places/data';
 import type { Idea, PlaceData, RoadFact } from './places/facts';
-import { APP, href, Icon, Page } from './ui';
+import { href, Icon, Page, proStart } from './ui';
 import { SITE_NAME } from './brand';
 import { NotFoundBody } from './NotFound';
 import { DP_LINKS } from './dpreport/classes';
@@ -12,9 +12,6 @@ import './place.css';
 
 const n = (v: number) => v.toLocaleString('en-IN');
 const plural = (v: number, one: string, many = one + 's') => `${n(v)} ${v === 1 ? one : many}`;
-/** The editor, opened on the city at a point (lat, lon, web-map zoom). */
-export const appAt = (city: City, lat: number, lon: number, zoom: number) => `${APP}?region=${city}&at=${lat},${lon},${zoom}`;
-const appOf = (d: PlaceData) => appAt(d.city, d.lat, d.lon, d.zoom);
 
 function Crumbs({ trail }: { trail: [string, string | null][] }) {
   return (
@@ -63,7 +60,7 @@ function dpText(d: PlaceData): ComponentChildren {
   if (d.dp === 'sheets') {
     return (
       <>
-        Pune's Development Plan sheets cover {d.name}, and the editor shows them as a reference layer (press <kbd>D</kbd>),
+        Pune's Development Plan sheets cover {d.name},
         but their road widths haven't been traced here yet, so this page gives no DP widths: the widths below are today's
         network as {SITE_NAME} models it. For an official DP remark, ask the Pune Municipal Corporation.
       </>
@@ -86,30 +83,32 @@ function dpText(d: PlaceData): ComponentChildren {
   );
 }
 
-function idea(d: PlaceData, q: Idea): { title: string; body: string; at?: [number, number] } {
+/** A question the map raises about the place, and where to take it further (if anywhere on the site). */
+function idea(d: PlaceData, q: Idea): { title: string; body: string; link?: [string, string] } {
   switch (q.k) {
     case 'widen': return {
       title: `What would ${q.road} look like at its DP width of ${q.dp} m?`,
       body: `It is ${q.w} m wide in the map${q.gap !== undefined ? `, and the buildings along it stand about ${q.gap} m apart` : ''}.`
         + (q.n ? ` ${plural(q.n, 'building has', 'buildings have')} a corner inside the ${q.dp} m width, measured from today's centre line.` : '')
-        + " The planned width is for the whole corridor, service roads included. In the editor, the road's cross-section shows the DP width beside today's: drag the road out to it (the width handles snap to DP widths) and see the lanes and footpaths it would hold, and what it takes from the plots along it.",
+        + " The planned width is for the whole corridor, service roads included. Widened, it takes a strip from the plots along it, and lets them load more FSI.",
+      link: [href('guides/dp-road-widening/'), 'What DP widening does to a plot'],
     };
     case 'cluster': return {
       title: `Could the ${q.n} junctions${q.roads.length ? ` at ${q.roads.slice(0, 2).join(' and ')}` : ''} work as one?`,
-      body: `${q.n} junction points on main roads sit within ${q.span} m of each other here. A big crossing is often mapped this way (split carriageways, slip roads, flyover ramps). In the editor you can merge them, or redraw the crossing as a single junction, and compare.`,
-      at: q.at,
+      body: `${q.n} junction points on main roads sit within ${q.span} m of each other here. A big crossing is often mapped this way (split carriageways, slip roads, flyover ramps), so on the ground it may be a single junction.`,
     };
     case 'pinch': return {
       title: `Where does ${q.road} narrow to ${q.wMin} m?`,
-      body: `It is about ${q.w} m wide for most of its length here, but ${n(q.len)} m of it is under three quarters of that, down to ${q.wMin} m in the map. Is that a real pinch, or a gap in the map? Either way, the editor's width handles let you try it evened out.`,
+      body: `It is about ${q.w} m wide for most of its length here, but ${n(q.len)} m of it is under three quarters of that, down to ${q.wMin} m in the map. Is that a real pinch, or a gap in the map?`,
     };
     case 'signals': return {
       title: `Which of the ${q.of} main-road junctions need signals?`,
-      body: `OpenStreetMap shows signals at ${q.n} of them. Some of the rest may have signals nobody has mapped yet. In the editor you can mark them and set their phases.`,
+      body: `OpenStreetMap shows signals at ${q.n} of them. Some of the rest may have signals nobody has mapped yet.`,
     };
     case 'try': return {
       title: `What would ${q.road} be like at ${q.to} m?`,
-      body: `It is about ${q.w} m in the map. ${q.to} m is the next standard DP road width up: in the editor, drag its width handles (they snap to DP widths) and see the lanes, the footpaths and the buildings it reaches.`,
+      body: `It is about ${q.w} m in the map. ${q.to} m is the next standard DP road width up, and the FSI a plot along it can load goes up with the road's width.`,
+      link: [href(`${d.city}/fsi-calculator/`), `The FSI at ${q.w} m and at ${q.to} m`],
     };
   }
 }
@@ -219,8 +218,8 @@ export function PlacePage({ place }: { place: Place }) {
             </figure>
             <aside class="place-side">
               <Facts d={d} />
-              <a class="btn btn-primary btn-lg btn-block" href={appOf(d)}>Open {d.name} in {SITE_NAME} <Icon.arrow /></a>
-              <p class="cta-note">Free, in the browser: edit the roads, try the widths, see it in 3D.</p>
+              <a class="btn btn-primary btn-lg btn-block" href={proStart('blank', d.city)}>Work out a plot here <Icon.arrow /></a>
+              <p class="cta-note">In {SITE_NAME} Pro: the FSI, margins and height for a plot on these roads.</p>
             </aside>
           </div>
 
@@ -240,7 +239,7 @@ export function PlacePage({ place }: { place: Place }) {
                     <div class="place-idea" key={i}>
                       <h3>{x.title}</h3>
                       <p>{x.body}</p>
-                      <a href={x.at ? appAt(d.city, x.at[0], x.at[1], 18.5) : appOf(d)}>Try it in the editor <Icon.arrow /></a>
+                      {x.link && <a href={x.link[0]}>{x.link[1]} <Icon.arrow /></a>}
                     </div>
                   );
                 })}
@@ -249,9 +248,14 @@ export function PlacePage({ place }: { place: Place }) {
           )}
 
           <div class="cta-panel place-cta">
-            <h2>Open {d.name} in {SITE_NAME}</h2>
-            <p>The whole of {city} in 2D and 3D: drag a road's width, draw a flyover, see what a plot can hold. Your edits stay in your browser.</p>
-            <div class="cta-row"><a class="btn btn-primary btn-lg" href={appOf(d)}>Open {d.name} in {SITE_NAME}</a><a class="btn btn-lg" href={href('guides/')}>Read the guides</a></div>
+            <h2>Plan a plot near {d.name}</h2>
+            <p>Give Pro the plot's size and the road in front of it. It works out what the rules allow, lays out the buildings and parking, and costs it.</p>
+            <div class="cta-row">
+              <a class="btn btn-primary btn-lg" href={proStart('blank', d.city)}>Work out a plot <Icon.arrow /></a>
+              {d.city === 'pune'
+                ? <a class="btn btn-lg" href={href('pune/dp-report/')}>Check a plot's DP</a>
+                : <a class="btn btn-lg" href={href(`${d.city}/fsi-calculator/`)}>{city} FSI calculator</a>}
+            </div>
           </div>
 
           {near.length > 0 && (
@@ -309,7 +313,7 @@ export function CityPage({ city }: { city: City }) {
       <section class="wrap guide place">
         <article class="wide">
           <Crumbs trail={[['Home', ''], [label, null]]} />
-          <h1>{label}: road widths{city === 'pune' ? ', the Development Plan' : ''} and what-ifs, place by place</h1>
+          <h1>{label}: road widths{city === 'pune' ? ', the Development Plan' : ''} and what plots can hold, place by place</h1>
           <p class="answer">
             {list.length} places in {label}, each measured from {SITE_NAME}'s base map of the city: the length of road, the
             junctions, the buildings and how wide the main roads are{traced.length ? `, and, in the part of Pune where ${SITE_NAME} has traced the Development Plan, how that compares with the plan` : ''}.
@@ -327,10 +331,10 @@ export function CityPage({ city }: { city: City }) {
           {city === 'mumbai' && (
             <div class="notice info" role="note">
               <Icon.info />
-              <p><b>Mumbai's Development Plan (DP 2034) isn't in {SITE_NAME} yet.</b> There's no DP layer for Mumbai in the editor and no DP widths on these pages; for a DP remark, ask the Municipal Corporation of Greater Mumbai. The FSI rules of DCPR 2034 are in the <a href={href('guides/fsi-calculator-mumbai/')}>Mumbai FSI guide</a> and the plot sandbox.</p>
+              <p><b>Mumbai's Development Plan (DP 2034) isn't in {SITE_NAME} yet.</b> There are no DP widths on these pages; for a DP remark, ask the Municipal Corporation of Greater Mumbai. The FSI rules of DCPR 2034 are in the <a href={href('guides/fsi-calculator-mumbai/')}>Mumbai FSI guide</a>, the <a href={href('mumbai/fsi-calculator/')}>Mumbai FSI calculator</a> and Pro.</p>
             </div>
           )}
-          {traced.length > 0 && <p class="small muted">DP road widths traced: {traced.map((p, i) => <span key={p.slug}>{i ? ', ' : ''}<a href={href(`${city}/${p.slug}/`)}>{p.name}</a></span>)}. Elsewhere in Pune the DP sheets open as a reference layer in the editor.</p>}
+          {traced.length > 0 && <p class="small muted">DP road widths traced: {traced.map((p, i) => <span key={p.slug}>{i ? ', ' : ''}<a href={href(`${city}/${p.slug}/`)}>{p.name}</a></span>)}. Elsewhere in Pune the pages give today's widths only.</p>}
           <div class="guide-list">
             {list.map((p) => (
               <a key={p.slug} href={href(`${city}/${p.slug}/`)}>
@@ -341,11 +345,13 @@ export function CityPage({ city }: { city: City }) {
             ))}
           </div>
           <div class="cta-panel place-cta">
-            <h2>Open {label} in {SITE_NAME}</h2>
-            <p>Every road, flyover and building of {label} in 2D and 3D, in the browser. Try a width, draw a road, see what a plot can hold.</p>
+            <h2>Plan a plot in {label}</h2>
+            <p>Give Pro the plot's size and the road in front of it. It works out the FSI, margins and height under {city === 'pune' ? 'UDCPR' : 'DCPR 2034'}, lays out the buildings and parking, and costs it.</p>
             <div class="cta-row">
-              <a class="btn btn-primary btn-lg" href={`${APP}?region=${city}`}>Open {label} in {SITE_NAME}</a>
-              <a class="btn btn-lg" href={href('guides/')}>Read the guides</a>
+              <a class="btn btn-primary btn-lg" href={proStart('blank', city)}>Work out a plot in {label} <Icon.arrow /></a>
+              {city === 'pune'
+                ? <a class="btn btn-lg" href={proStart('survey', 'pune')}>Find a plot by survey number</a>
+                : <a class="btn btn-lg" href={href('guides/')}>Read the guides</a>}
             </div>
           </div>
           <p class="small muted">Base map © OpenStreetMap contributors (ODbL){city === 'pune' ? `, DP sheets traced by ${SITE_NAME} from the PMC Development Plan` : ''}. A survey aid, not an official DP remark.</p>

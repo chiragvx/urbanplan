@@ -12,7 +12,7 @@ import type { DpMap, Overlay } from './dpreport/map';
 import { Crumbs } from './CityMap';
 import { DP_LINKS } from './dpreport/classes';
 import { NotFoundBody } from './NotFound';
-import { APP, href, Icon, Page } from './ui';
+import { href, Icon, Loading, Page, proStart } from './ui';
 import { SITE_NAME } from './brand';
 import './place.css';
 import './dpreport/dpreport.css';
@@ -21,7 +21,6 @@ const n = (v: number) => v.toLocaleString('en-IN');
 const areaText = (ha: number) => (ha >= 1 ? `${ha.toFixed(ha >= 10 ? 0 : 1)} ha` : `${n(Math.round(ha * 1e4 / 10) * 10)} m²`);
 export const sqm = (m2: number) => (m2 >= 1e4 ? `${(m2 / 1e4).toFixed(1)} ha` : `${n(Math.round(m2 / 10) * 10)} m²`);
 export const Swatch = ({ cls }: { cls: string }) => <i class="legend-swatch" style={`background:${clsColor(cls)};border:1px solid rgba(0,0,0,.25)`} />;
-export const appAt = (lat: number, lon: number) => `${APP}?region=pune&at=${lat.toFixed(5)},${lon.toFixed(5)},18`;
 
 /** a reserved site or a table row asks the viewer to show a point (the links still work without JS: ?at=…#viewer) */
 const pickRequest = signal<{ lat: number; lon: number; t: number } | null>(null);
@@ -50,6 +49,8 @@ function Viewer({ lat, lon, zoom, ring, area, poster }: { lat: number; lon: numb
   const [rep, setRep] = useState<Report | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  // the map is on its way (set once mounted, so the prerendered page shows the poster without it)
+  const [loading, setLoading] = useState(false);
 
   const pick = async (la: number, lo: number, fly = false) => {
     M.current?.pick(la, lo, fly);
@@ -66,6 +67,7 @@ function Viewer({ lat, lon, zoom, ring, area, poster }: { lat: number; lon: numb
     let dead = false;
     const q = new URLSearchParams(location.search), at = q.get('at')?.split(',').map(Number);
     const start = at && at.length >= 2 && at.every(Number.isFinite) ? { lat: at[0], lon: at[1] } : null;
+    setLoading(true);
     import('./dpreport/map').then(({ createMap }) => createMap(el.current!, {
       lat: start?.lat ?? lat, lon: start?.lon ?? lon, zoom: start ? 18 : zoom, overlay: 'zones', opacity: 0.6,
       ring: ring ? { lat, lon, r: ring } : undefined,
@@ -73,8 +75,9 @@ function Viewer({ lat, lon, zoom, ring, area, poster }: { lat: number; lon: numb
     })).then((m) => {
       if (dead) { m.destroy(); return; }
       M.current = m;
+      setLoading(false);
       if (start) void pick(start.lat, start.lon);
-    }).catch((e) => { console.error(e); setFailed(true); });
+    }).catch((e) => { console.error(e); setFailed(true); setLoading(false); });
     return () => { dead = true; M.current?.destroy(); M.current = null; };
   }, []);
 
@@ -114,11 +117,12 @@ function Viewer({ lat, lon, zoom, ring, area, poster }: { lat: number; lon: numb
           )}
           <button class={`dpr-chip ${labels ? 'on' : ''}`} aria-pressed={labels} title="Road and place names" onClick={() => { setLabels(!labels); M.current?.setLabels(!labels); }}>Names</button>
         </div>
-        {z < 14 && !failed && <div class="dpr-hint">Zoom in to see the plan, or click a locality below</div>}
+        {loading && <Loading block label="Loading the map…" />}
+        {z < 14 && !failed && !loading && <div class="dpr-hint">Zoom in to see the plan, or click a locality below</div>}
         {failed && <div class="dpr-hint">The map couldn't load. Check your connection and reload the page.</div>}
       </div>
       <aside class="dpr-panel" aria-live="polite">
-        {rep ? <ReportCard r={rep} busy={busy} /> : (
+        {rep ? <ReportCard r={rep} busy={busy} /> : busy ? <Loading label="Reading the plan…" /> : (
           <div class="dpr-empty">
             <Icon.pin />
             <h2 class="h3">Click any plot on the map</h2>
@@ -137,8 +141,8 @@ function Search({ onSearch }: { onSearch: (t: string) => Promise<string | null> 
     <form class="dpr-search" role="search" onSubmit={async (e) => { e.preventDefault(); setBusy(true); setMsg(await onSearch(t)); setBusy(false); }}>
       <label class="sr-only" for="dpr-q">Find a place in Pune</label>
       <input id="dpr-q" class="input" type="search" placeholder="Find a road, society or landmark" value={t} onInput={(e) => setT((e.target as HTMLInputElement).value)} />
-      <button class="btn btn-primary" type="submit" disabled={busy}>{busy ? '…' : 'Go'}</button>
-      {msg && <p class="dpr-search-msg" role="status">{msg}</p>}
+      <button class="btn btn-primary" type="submit" disabled={busy}>Go</button>
+      {busy ? <div class="dpr-search-msg"><Loading label="Searching…" /></div> : msg && <p class="dpr-search-msg" role="status">{msg}</p>}
     </form>
   );
 }
@@ -160,6 +164,7 @@ function ReportCard({ r, busy }: { r: Report; busy: boolean }) {
   const p = r.parcel;
   return (
     <div class={`dpr-report ${busy ? 'busy' : ''}`}>
+      {busy && <Loading label="Reading the plan…" />}
       <p class="eyebrow">DP report · {r.lat.toFixed(5)}, {r.lon.toFixed(5)}</p>
       {!r.covered ? (
         <>
@@ -214,7 +219,7 @@ function ReportCard({ r, busy }: { r: Report; busy: boolean }) {
       <a class="btn btn-primary btn-block" href={reportHref(r.lat, r.lon)}><Icon.sheet /> Full report and PDF</a>
       <div class="dpr-actions">
         <CopyLink />
-        <a class="btn" href={appAt(r.lat, r.lon)}><Icon.cube /> Open in 3D</a>
+        <a class="btn" href={proStart('survey', 'pune')} title="Find this plot by its survey number and work out what it can build"><Icon.building /> Plan it in Pro</a>
       </div>
       <p class="tiny muted">Traced from the PMC's sanctioned DP sheets, accurate to a few metres. A survey aid, not an official DP remark or zone certificate.</p>
     </div>
@@ -338,7 +343,7 @@ function Links() {
       <a href={href('guides/dp-remark-zone-certificate-pune/')}><Icon.check /><span><b>How to get a DP remark in Pune</b><small>The zone certificate, step by step</small></span></a>
       <a href={href('guides/pune-dp-colour-code/')}><Icon.sheet /><span><b>Pune DP colour codes</b><small>What each colour on the sheet means</small></span></a>
       <a href={href('guides/what-is-development-plan/')}><Icon.info /><span><b>What is a Development Plan?</b><small>Zones, reservations, DP remarks</small></span></a>
-      <a href={href('guides/how-much-can-i-build/')}><Icon.building /><span><b>How much can I build?</b><small>FSI on your plot, in Site Studio</small></span></a>
+      <a href={href('guides/how-much-can-i-build/')}><Icon.building /><span><b>How much can I build?</b><small>FSI, margins and floors on your plot</small></span></a>
     </div>
   );
 }
@@ -425,7 +430,7 @@ export function DpAreaPage({ a }: { a: DprArea }) {
           <div class="cta-panel place-cta">
             <h2>Get the DP report for your plot</h2>
             <p>Click your plot on the map above for its zone, the reservations and DP roads around it, and download the PDF with the satellite and DP sheet maps. Free.</p>
-            <div class="cta-row"><a class="btn btn-primary btn-lg" href="#viewer">Pick my plot</a><a class="btn btn-lg" href={appAt(a.lat, a.lon)}>Open {a.name} in 3D</a></div>
+            <div class="cta-row"><a class="btn btn-primary btn-lg" href="#viewer">Pick my plot</a><a class="btn btn-lg" href={proStart('survey', 'pune')}>Plan your plot in Pro</a></div>
           </div>
 
           {near.length > 0 && (

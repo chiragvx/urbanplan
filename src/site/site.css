@@ -208,6 +208,7 @@ p { margin: 0; }
 .plan ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; font-size: var(--up-text-sm); color: var(--up-ink-2); align-content: start; }
 .plan li { display: grid; grid-template-columns: 16px 1fr; gap: 10px; }
 .plan li svg { width: 16px; height: 16px; margin-top: 2px; color: var(--up-ok); }
+.plan.feature li svg { color: var(--up-on-night); }
 .faq { display: grid; max-width: 760px; margin-inline: auto; border-top: 1px solid var(--up-line); }
 .faq details { border-bottom: 1px solid var(--up-line); padding: var(--up-space-5) 0; }
 .faq summary { cursor: pointer; font-weight: 500; letter-spacing: -0.02em; list-style: none; display: flex; justify-content: space-between; gap: 16px; }
@@ -432,3 +433,19 @@ p { margin: 0; }
 .rv .reveal:not(.in) { opacity: 0; transform: translateY(16px); }
 .rv .reveal { transition: opacity .7s ease, transform .8s cubic-bezier(.2,.8,.2,1); }
 .section { scroll-margin-top: 64px; }
+
+/* ---------- loading: the brand's dither and a word, as in Pro ---------- */
+.loading { display: inline-flex; align-items: center; gap: 8px; margin: 0; color: var(--up-muted); font-size: var(--up-text-sm); }
+.loading .dz { display: inline-block; width: 14px; height: 14px; border-radius: 3px; flex: none; }
+.loading.block { position: absolute; inset: 0; z-index: 2; display: flex; justify-content: center; background: color-mix(in srgb, var(--up-paper) 72%, transparent); backdrop-filter: blur(2px); }
+
+/* ---------- landing: what Pro can build ---------- */
+.forms { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--up-space-6) var(--up-space-5); }
+.forms li { display: grid; gap: 4px; align-content: start; }
+.forms b { font: 600 var(--up-text-lg)/1.2 var(--up-font-display); letter-spacing: -0.03em; margin-top: var(--up-space-2); }
+.forms span { color: var(--up-muted); font-size: var(--up-text-sm); line-height: 1.5; }
+.form-shot { display: block; overflow: hidden; border-radius: var(--up-radius); border: 1px solid var(--up-line); background: #dcdcdc; aspect-ratio: 1100 / 680; }
+.form-shot img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.4s ease; }
+.form-shot:hover img { transform: scale(1.03); }
+@media (max-width: 860px) { .forms { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+@media (max-width: 520px) { .forms { gap: var(--up-space-4) var(--up-space-3); } .forms span { display: none; } .forms b { font-size: var(--up-text-md); } }

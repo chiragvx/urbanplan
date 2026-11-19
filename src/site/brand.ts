@@ -13,4 +13,4 @@ export const SHORT_NAME = SITE_NAME;
 export const SITE_URL_FALLBACK = 'https://urbanplan-seven.vercel.app';
 /** The browser bar and home-screen colour (the dark of the logo). */
 export const THEME_COLOR = '#0c0c0d';
-export const TAGLINE = 'Edit the real city, see what it becomes';
+export const TAGLINE = 'From a plot to a project';

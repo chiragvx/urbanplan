@@ -1,16 +1,15 @@
 // The guides (/guides/ and /guides/<slug>/): a direct answer, a worked example, how to do it in UrbanPlan, questions,
 // related guides. The words and rule figures are in src/site/guides/data.ts; the worked examples here are worked out
-// with the same rule tables the plot sandbox uses.
+// with the same rule tables Pro uses.
 import type { ComponentChildren, FunctionComponent } from 'preact';
 import { sideMargin, type PlotCode } from '../doc/plot';
 import { envelope, f2, FIRE_H, FIRE_W, fsiAt, guide, GUIDES, m2, MARGIN_STEPS, pct, RG_FROM, RG_SHARE, rulesAt, STEPS, type Guide, type Source } from './guides/data';
 import { PLACES, type City } from './places/data';
-import { APP, href, Icon, Page } from './ui';
+import { href, Icon, Page, proStart } from './ui';
 import { SITE_NAME } from './brand';
 import { DP_CLASSES } from './dpreport/classes';
 
 export const CITY_NAME: Record<City, string> = { pune: 'Pune', mumbai: 'Mumbai' };
-const appIn = (city?: City) => (city ? `${APP}?region=${city}` : APP);
 
 const SOURCES: Record<Source, ComponentChildren> = {
   pmc: <><a href="https://www.pmc.gov.in/" rel="noopener">Pune Municipal Corporation</a> (DP remarks, zone certificates and building permission in Pune)</>,
@@ -68,24 +67,24 @@ function MarginTable() {
 const Example = ({ children }: { children: ComponentChildren }) => <section class="calc" aria-label="Worked example"><h2>Worked example</h2>{children}</section>;
 const Row = ({ k, v, b }: { k: string; v: string; b?: boolean }) => <div><dt>{k}</dt><dd>{b ? <b>{v}</b> : v}</dd></div>;
 
-/** The plot sandbox, step by step (most guides do it this way). */
-function SandboxSteps({ city, dp }: { city?: City; dp?: boolean }) {
+/** The plot in Pro, step by step (most guides do it this way). */
+function ProSteps({ city, dp }: { city?: City; dp?: boolean }) {
   return (
     <ol>
-      <li><a href={appIn(city)}>Open the editor</a>{city ? ` on ${CITY_NAME[city]}` : ''} and search for your street or area.</li>
-      {dp && <li>Turn on <b>DP sheets</b> (the info views at the top left, or <kbd>D</kbd>) to see the Development Plan over today’s map.</li>}
-      <li>Press <kbd>F</kbd> for the plot sandbox and click your plot’s corners; they snap to building corners. Press <kbd>Enter</kbd> to finish.</li>
-      <li>The panel shows the road the plot fronts, the strip the DP road takes (red), the area left, the FSI for that road width (basic, premium, TDR and ancillary), the footprint inside the margins, and the floors and height that fit, as a glass block in 3D.</li>
-      <li>Every rule can be changed for the plot, and the rules can go by the DP width or today’s.</li>
+      <li><a href={proStart('blank', city)}>Start a plot in {SITE_NAME} Pro</a>{city ? ` under ${CITY_NAME[city]}’s rules` : ''}: give its size, draw it, or <a href={proStart('survey', city)}>find it by its survey number</a>.</li>
+      <li>For each side on a road, pick the road’s width today{dp ? ' and, where the DP widens it, its DP width' : ''}.</li>
+      <li>Pro works out {dp ? 'the strip the DP road takes, the area left, ' : 'the plot’s area, '}the FSI for that road width (basic, premium, TDR and ancillary), the margins, and the floors and height that fit, in 3D.</li>
+      <li>Change a road’s width or a rule and it works it out again.</li>
     </ol>
   );
 }
 
-const StudioSteps = () => (
+/** Then the scheme: Pro lays out the buildings and makes the report. */
+const SchemeSteps = () => (
   <ol>
-    <li>Double-click the plot (or <b>Open in Site Studio</b>). It opens on the most the plot can build: buildings, the internal drive, parking and open space, with the rule checks across the top.</li>
-    <li>Try other road widths in the <b>Roads</b> list, or other settings (slabs or towers, floors, flat mix, parking), and it plans again.</li>
-    <li>Make the report: eight pages to print or save as PDF.</li>
+    <li>Press <b>Fill the plot</b>. Pro lays out the most the plot can build: the buildings, parking and open space, with the rule checks alongside.</li>
+    <li>Try other road widths or other settings (floors, flat mix, parking), and fill it again.</li>
+    <li>Print the report, or save it as a PDF.</li>
   </ol>
 );
 
@@ -112,7 +111,7 @@ const BODY: Record<string, FunctionComponent> = {
         <p>That is an FSI of {f2(EX.consumed / 1000)} before ancillary and {f2(EX.bua / 1000)} with it. Whether it all fits is a question of margins and height: see <a href={href('guides/how-much-can-i-build/')}>how much can I build</a>.</p>
       </Example>
       <h2>Do it in {SITE_NAME}</h2>
-      <SandboxSteps city="pune" dp />
+      <ProSteps city="pune" dp />
     </>
   ),
 
@@ -134,15 +133,15 @@ const BODY: Record<string, FunctionComponent> = {
           <p>The same plot builds about {m2(isl.bua - sub.bua)} more in the island city. {SITE_NAME} uses UDCPR’s margins for Mumbai plots as a placeholder, so check how it fits with your architect.</p>
         </Example>
         <h2>Do it in {SITE_NAME}</h2>
-        <SandboxSteps city="mumbai" />
-        <p>Mumbai’s DP road lines aren’t in {SITE_NAME} yet: if the DP widens your road, type its DP width in Site Studio’s <b>Roads</b> list and the plot and its FSI follow.</p>
+        <ProSteps city="mumbai" dp />
+        <p>Mumbai’s DP road lines aren’t in {SITE_NAME} yet: if the DP widens your road, pick its DP width beside today’s and the plot and its FSI follow.</p>
       </>
     );
   },
 
   'how-much-can-i-build': () => (
     <>
-      <p>There are three steps, and the plot sandbox does them on the map:</p>
+      <p>There are three steps, and Pro does them for your plot:</p>
       <ol>
         <li><b>Floor area.</b> Plot area × FSI for the road width, plus ancillary FSI. See the <a href={href('guides/fsi-calculator-pune/')}>Pune</a> and <a href={href('guides/fsi-calculator-mumbai/')}>Mumbai</a> tables.</li>
         <li><b>Footprint.</b> The plot minus the strip the DP road takes, minus the front margin and the side and rear margins. See <a href={href('guides/udcpr-setbacks/')}>setbacks</a>.</li>
@@ -159,12 +158,12 @@ const BODY: Record<string, FunctionComponent> = {
           <Row k="Floors" v={`${EX.floors} floors, ${EX.height} m`} b />
         </dl>
         <p>Kept under {EX.r.sideTo} m, the {m2((40 - 2 * EX.r.side) * (25 - EX.r.front - EX.r.side))} footprint takes {Math.floor(EX.r.sideTo / EX.r.floorH)} floors and uses only {m2(Math.floor(EX.r.sideTo / EX.r.floorH) * (40 - 2 * EX.r.side) * (25 - EX.r.front - EX.r.side))}.
-          {EX.height > FIRE_H && EX.side < FIRE_W && ` At ${EX.height} m the building is over ${FIRE_H} m, so Site Studio will also look for a ${FIRE_W} m way round it for a fire tender, which ${EX.side} m margins don’t give. That is the kind of thing the 3D massing shows straight away.`}</p>
+          {EX.height > FIRE_H && EX.side < FIRE_W && ` At ${EX.height} m the building is over ${FIRE_H} m, so Pro will also look for a ${FIRE_W} m way round it for a fire tender, which ${EX.side} m margins don’t give. That is the kind of thing the 3D massing shows straight away.`}</p>
       </Example>
       <h2>Do it in {SITE_NAME}</h2>
-      <SandboxSteps city="pune" dp />
-      <p>Then open it in Site Studio to lay out the actual buildings and parking:</p>
-      <StudioSteps />
+      <ProSteps city="pune" dp />
+      <p>Then let Pro lay out the actual buildings and parking:</p>
+      <SchemeSteps />
     </>
   ),
 
@@ -187,8 +186,8 @@ const BODY: Record<string, FunctionComponent> = {
         <p>The front margin is then measured from the new road line, not the old one. What that does to the FSI is worked through in <a href={href('guides/dp-road-widening/')}>what is DP road widening</a>.</p>
       </Example>
       <h2>Do it in {SITE_NAME}</h2>
-      <SandboxSteps city="pune" dp />
-      <p>The DP layer is traced from the scanned sheets and lined up to within a few metres. If the line is close to your plot, get the DP remark.</p>
+      <ProSteps city="pune" dp />
+      <p>To see whether the DP marks a road line or a reservation on the plot, click it on the <a href={href('pune/dp-report/')}>Pune DP plan on satellite</a>. The DP layer is traced from the scanned sheets and lined up to within a few metres. If the line is close to your plot, get the DP remark.</p>
     </>
   ),
 
@@ -211,11 +210,11 @@ const BODY: Record<string, FunctionComponent> = {
               </tbody>
             </table>
           </div>
-          <p>Here the plot loses 120 m² of land and still gains about {m2(dp.bua - today.bua)} of floor area, because the wider road allows more premium FSI and TDR. If the strip is handed over and its basic FSI counted on the rest of the plot (the sandbox has a switch for it), add {m2(credit)} plus ancillary, {m2(credit * (1 + dp.r.ancillary))} in all. On a deeper or smaller plot, or where the margins bind, the answer can go the other way: work it out for your plot.</p>
+          <p>Here the plot loses 120 m² of land and still gains about {m2(dp.bua - today.bua)} of floor area, because the wider road allows more premium FSI and TDR. If the strip is handed over and its basic FSI counted on the rest of the plot, add {m2(credit)} plus ancillary, {m2(credit * (1 + dp.r.ancillary))} in all. On a deeper or smaller plot, or where the margins bind, the answer can go the other way: work it out for your plot.</p>
         </Example>
         <h2>Do it in {SITE_NAME}</h2>
-        <SandboxSteps city="pune" dp />
-        <p>In Site Studio, the <b>Roads</b> list lets you try any width for each road, today’s or the DP’s, and see the plot, its FSI and its buildings follow.</p>
+        <ProSteps city="pune" dp />
+        <p>Each road on the plot has today’s width and the DP’s: try either and see the plot, its FSI and its buildings follow.</p>
       </>
     );
   },
@@ -236,8 +235,8 @@ const BODY: Record<string, FunctionComponent> = {
           <p>So a 30 m building on a 40 m wide plot keeps {f2(40 - 2 * sideMargin(r, 30))} m of width for itself; at {r.sideTo} m it would keep {f2(40 - 2 * r.side)} m.</p>
         </Example>
         <h2>Do it in {SITE_NAME}</h2>
-        <SandboxSteps dp />
-        <p>In Site Studio, a building that pushes past the margins at its height turns red, and the report lists the margins with the clause they come from.</p>
+        <ProSteps dp />
+        <p>In Pro, a building that pushes past the margins at its height is flagged, and the report lists the margins with the clause they come from.</p>
       </>
     );
   },
@@ -266,11 +265,11 @@ const BODY: Record<string, FunctionComponent> = {
               </tbody>
             </table>
           </div>
-          <p>The difference is all TDR: {m2((b.tdr - a.tdr) * 1000)} more can be loaded on the wider road. Whether it pays depends on the TDR price against what the extra flats sell for, which Site Studio works out.</p>
+          <p>The difference is all TDR: {m2((b.tdr - a.tdr) * 1000)} more can be loaded on the wider road. Whether it pays depends on the TDR price against what the extra flats sell for, which Pro works out.</p>
         </Example>
         <h2>Do it in {SITE_NAME}</h2>
-        <SandboxSteps />
-        <p>Site Studio has the premium and TDR rates as costs you can change, and the cash flow follows.</p>
+        <ProSteps />
+        <p>Pro has the premium and TDR rates as costs you can change, and the profit follows.</p>
       </>
     );
   },
@@ -283,7 +282,7 @@ const BODY: Record<string, FunctionComponent> = {
     return (
     <>
       <Example>
-        <p>The same plot, 40 m along the road and 25 m deep, in Pune, on roads of different widths (no DP widening, homes on {rows[0].e.r.floorH} m floors). Worked out as the plot sandbox does:</p>
+        <p>The same plot, 40 m along the road and 25 m deep, in Pune, on roads of different widths (no DP widening, homes on {rows[0].e.r.floorH} m floors). Worked out as Pro does:</p>
         <div class="table-wrap">
           <table class="rules">
             <thead><tr><th>Road width</th><th class="n">FSI with ancillary</th><th class="n">Floor area allowed</th><th class="n">Floor area that fits</th><th class="n">Floors</th><th class="n">Height</th></tr></thead>
@@ -295,7 +294,7 @@ const BODY: Record<string, FunctionComponent> = {
         <p>The road width doesn’t set the height here; the floor area it allows does, together with side margins that widen as the building rises.{short.length > 0 && ` On the ${list(short)} roads they widen faster than the floors add area, so this plot can’t use all it is allowed: a deeper or wider plot could.`}{tall.length > 0 && ` On the ${list(tall)} roads the building is over ${FIRE_H} m and needs a ${FIRE_W} m way round it for a fire tender as well.`}</p>
       </Example>
       <h2>Do it in {SITE_NAME}</h2>
-      <SandboxSteps dp />
+      <ProSteps dp />
       <p>The height limit is in the plot’s rules: set it to what applies to your plot (an airport clearance, say) and the envelope follows.</p>
     </>
     );
@@ -306,18 +305,19 @@ const BODY: Record<string, FunctionComponent> = {
       <Example>
         <p>Say the brief is a library on a site you’ve been given in Pune:</p>
         <ol>
-          <li><a href={appIn('pune')}>Open the editor</a>, search for the site and press <kbd>Tab</kbd> for 3D. Fly with <kbd>W A S D</kbd>; right-drag to orbit.</li>
-          <li>Switch on <b>satellite</b> or <b>DP sheets</b> under the 3D, and <b>terrain</b> to see the slope.</li>
-          <li>Press <kbd>F</kbd> and click the site’s corners. The panel shows its area, the road it fronts and the margins.</li>
-          <li>Open it in <b>Site Studio</b> and export the site and its surroundings as DXF, OBJ or glTF.</li>
+          <li><a href={proStart('survey', 'pune')}>Find the site by its survey number in Pro</a>. You get its shape and area from the land records, the road it fronts and the margins, and you can mass a building on it in 3D.</li>
+          <li>Click it on the <a href={href('pune/dp-report/')}>Pune DP plan on satellite</a> for its zone, the reserved sites near it and the DP roads.</li>
+          <li>Look it up on the <a href={href('pune/map/')}>Pune 3D map</a> and its place page: the roads round it with their widths, the buildings and the height of the ground.</li>
+          <li>Export from Pro: the site plan, floor plans and a section as DXF, or the model as IFC.</li>
         </ol>
       </Example>
       <h2>What you get</h2>
       <ul>
-        <li>Every building around the site in 3D, roads with their real widths, trees, and the ground’s shape.</li>
-        <li>The Pune Development Plan draped over the terrain: zones, reservations and road lines.</li>
-        <li>Sections through roads, flyovers and the ground, if the site sits by one.</li>
+        <li>The site’s real shape and area, with the road it fronts and its margins.</li>
+        <li>The Pune Development Plan over satellite imagery: zones, reservations and road lines.</li>
+        <li>Each city’s main roads with their widths, free to download as <a href={href('data/')}>GeoJSON</a>.</li>
       </ul>
+      <p>{SITE_NAME} doesn’t export the buildings round the site. OpenStreetMap’s are free to download, with the same attribution.</p>
     </>
   ),
 
@@ -327,8 +327,8 @@ const BODY: Record<string, FunctionComponent> = {
         <p>The <a href={href('site/sample-report.html')} target="_blank" rel="noopener">sample report</a> is a real plot on Mangaldas Road, Pune. Open it to see the eight pages: the scheme in 3D, the plans, the rule checks, the area statement, the money and the cash flow.</p>
       </Example>
       <h2>Do it in {SITE_NAME}</h2>
-      <SandboxSteps dp />
-      <StudioSteps />
+      <ProSteps dp />
+      <SchemeSteps />
       <h2>What it checks</h2>
       <ul>
         <li>FSI, by road width, as the road is or as the DP widens it.</li>
@@ -359,9 +359,9 @@ const BODY: Record<string, FunctionComponent> = {
       </Example>
       <h2>See it in {SITE_NAME}</h2>
       <ol>
-        <li><a href={appIn('pune')}>Open the editor on Pune</a> and turn on <b>DP sheets</b> (<kbd>D</kbd>) or <b>DP regions</b> in the info views at the top left.</li>
-        <li>Switch between 2D and 3D with <kbd>Tab</kbd>: the sheet drapes over the ground.</li>
-        <li>Draw a plot (<kbd>F</kbd>) to see what the DP road takes from it and what can be built.</li>
+        <li>Open the <a href={href('pune/dp-report/')}>Pune DP plan on satellite</a> and search for your street or area.</li>
+        <li>Click a plot for its zone, the reserved sites near it and the DP roads; switch to the DP sheet layer to see the sheet itself.</li>
+        <li><a href={proStart('survey', 'pune')}>Find the plot by its survey number in Pro</a> to see what the DP road takes from it and what can be built.</li>
       </ol>
     </>
   ),
@@ -493,7 +493,7 @@ export function GuidePage({ guide: g }: { guide: Guide }) {
           <p class="answer">{g.answer}</p>
           {Body && <Body />}
           <div class="cta-row start">
-            <a class="btn btn-primary btn-lg" href={appIn(g.city)}>Try it on your plot <Icon.arrow /></a>
+            <a class="btn btn-primary btn-lg" href={proStart('blank', g.city)}>Try it on your plot <Icon.arrow /></a>
             {g.city && <a class="btn btn-lg" href={href(`${g.city}/`)}>{CITY_NAME[g.city]} on {SITE_NAME}</a>}
           </div>
           {g.city && <CityLinks city={g.city} />}

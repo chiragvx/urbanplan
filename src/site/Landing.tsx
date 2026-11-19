@@ -1,14 +1,14 @@
-// The landing page, about Pro: what it does for a plot, its six steps with a picture of each, what it covers, the
-// report it makes, and one call to start. The free tools (the DP check, the city editor) get a line, not a section.
+// The landing page, about Pro: what it does for a plot, the buildings it can make (any shape, any use), its six
+// steps with a picture of each, what it covers, the report it makes, and one call to start. The free tools (the DP
+// check, the FSI calculators, the guides) get a line, not a section.
 // Black and white; the animated dither only in the brand (the mark, the closing band). Sections ease in as they
 // scroll into view (not when motion is reduced, and never hidden without JavaScript).
 import { useEffect, useState } from 'preact/hooks';
-import { APP, href, Icon, Page } from './ui';
+import { DASH, href, Icon, Page, PRO } from './ui';
 import { authReady, session } from '../auth/auth';
 import { Dither } from '../theme/Dither';
 
 const img = (name: string) => href(`site/${name}`);
-const PRO = href('pro/');
 const DP = href('pune/dp-report/');
 const REPORT = href('site/sample-report.html');
 
@@ -21,13 +21,23 @@ const STEPS = [
   { key: 'explore', label: 'Explore', title: 'Every option', body: 'Many schemes at once, a written brief, plots screened side by side.' },
 ];
 
+/** What Pro can build: each a template placed on a plot, as Pro draws it (public/site/form-*.webp). */
+const FORMS: { key: string; title: string; body: string }[] = [
+  { key: 'twins', title: 'Sculpted twins', body: 'Two towers that turn as they rise, fins all round.' },
+  { key: 'library', title: 'A public library', body: 'Three floors under one free-curved roof.' },
+  { key: 'taper', title: 'A tapered tower', body: 'Each floor a little smaller, terraces at every edge.' },
+  { key: 'courtyard', title: 'Homes round a court', body: 'A block of flats open to a garden in the middle.' },
+  { key: 'wave', title: 'A wave block', body: 'Shops below, homes above, a facade that flows.' },
+  { key: 'sky', title: 'A sky garden tower', body: 'Gardens carved into the tower, floors stepping in.' },
+];
+
 const FEATURES: { icon: keyof typeof Icon; title: string; body: string }[] = [
   { icon: 'check', title: 'The rules, live', body: 'UDCPR and Mumbai’s DCPR 2034, checked clause by clause every time you change something.' },
-  { icon: 'building', title: 'Shape it your way', body: 'Fill the plot to the most it can hold, or draw each building yourself. The rules flag, never block.' },
+  { icon: 'building', title: 'Any shape, any use', body: 'Taper, twist, curve and carve. Homes, offices, shops, a school or a clinic, stacked in one building. The rules flag, never block.' },
   { icon: 'cube', title: 'On the map, in 3D or plan', body: 'Draw and drag on a wireframe that updates with every change, or shade it with the sun on any date.' },
   { icon: 'sheet', title: 'Numbers you can take to a meeting', body: 'Revenue, cost, profit and IRR, the land deal and the cash month by month.' },
   { icon: 'section', title: 'Drawings for the authority', body: 'Plans, sections and the area statement; IFC, and a DXF on PreDCR’s layers.' },
-  { icon: 'people', title: 'Work on it together', body: 'Share a link, invite the team, leave comments on any step.' },
+  { icon: 'people', title: 'Your projects, your team', body: 'A dashboard for every project and design system. Invite the team, share a link, comment on any step.' },
 ];
 
 const REPORT_HAS = [
@@ -92,8 +102,25 @@ export function Landing() {
             <a class="btn btn-lg" href={REPORT} target="_blank" rel="noopener">See a sample report</a>
           </div>
           <a class="frame hero-shot" href={PRO} aria-label="Open UrbanPlan Pro">
-            <img width={1440} height={900} src={img('pro-scheme.webp')} alt="UrbanPlan Pro: two seventeen-storey towers on a plot in Baner, Pune, drawn as a wireframe, with the scheme panel and the results bar." fetchpriority="high" />
+            <img width={1440} height={900} src={img('pro-hero.webp')} alt="UrbanPlan Pro: two twelve-storey towers on a plot in Baner, Pune, in 3D, with the scheme panel and the results bar." fetchpriority="high" />
           </a>
+        </div>
+      </section>
+
+      <section class="section" id="forms">
+        <div class="wrap">
+          <div class="section-head center reveal">
+            <h2>Any building, any shape.</h2>
+            <p>Pick a template or draw your own. The floors, cores, flats and the rules follow it, from a tower to a public toilet.</p>
+          </div>
+          <ul class="forms reveal">
+            {FORMS.map((f) => (
+              <li key={f.key}>
+                <a href={PRO} class="form-shot"><img width={1100} height={680} src={img(`form-${f.key}.webp`)} alt={`${f.title}, drawn in UrbanPlan Pro: ${f.body}`} loading="lazy" /></a>
+                <b>{f.title}</b><span>{f.body}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       </section>
 
@@ -140,10 +167,10 @@ export function Landing() {
           <p>Free in beta. Nothing to install.</p>
           <div class="cta-row">
             <a class="btn btn-primary btn-lg" href={PRO}>Start a project <Icon.arrow /></a>
-            {authReady && !signedIn && <a class="btn btn-lg" href={href('signup/')}>Create an account</a>}
+            {authReady && (signedIn ? <a class="btn btn-lg" href={DASH}>Your dashboard</a> : <a class="btn btn-lg" href={href('signup/')}>Create an account</a>)}
           </div>
         </div>
-        <p class="also">Also free: <a href={DP}>check a plot on the Development Plan</a> · <a href={APP}>explore Pune and Mumbai in 3D</a></p>
+        <p class="also">Also free: <a href={DP}>check a plot on the Development Plan</a> · <a href={href('pune/fsi-calculator/')}>Pune</a> and <a href={href('mumbai/fsi-calculator/')}>Mumbai</a> FSI calculators · <a href={href('guides/')}>guides to the rules</a></p>
         <p class="beta-line">Beta: a planning aid, not a legal document. Check every figure with the authority.</p>
       </section>
     </Page>

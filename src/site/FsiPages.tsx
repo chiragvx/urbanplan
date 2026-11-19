@@ -4,7 +4,7 @@
 // below it, for the people who search for it.
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import { APP, href, Icon, Page } from './ui';
+import { href, Icon, Page, proStart } from './ui';
 import { SITE_NAME } from './brand';
 import { Crumbs, MAPS } from './CityMap';
 import { CITY_LABEL, placeOf, type City } from './places/data';
@@ -23,7 +23,6 @@ const sqft = (m2: number) => `${nf(m2 * SQFT)} sq ft`;
 const m2s = (m2: number) => `${nf(m2)} m²`;
 const AUTH: Record<City, string> = { pune: 'the Pune Municipal Corporation (PMC)', mumbai: 'the MCGM' };
 const CODE: Record<City, string> = { pune: 'UDCPR 2020', mumbai: 'DCPR 2034' };
-const appIn = (city: City) => `${APP}?region=${city}`;
 const TABLE_OF: Record<FsiZone, string> = { regular: 'UDCPR 2020 Table 6-G', congested: 'UDCPR 2020 Table 6-A (congested areas)', island: 'the island city’s table', suburbs: 'the suburbs’ table' };
 const DEF_ZONE: Record<City, FsiZone> = { pune: 'regular', mumbai: 'suburbs' };
 
@@ -182,7 +181,8 @@ function Calculator({ city }: { city: City }) {
               {r.limit === 'height' && <> The height limit in the tables stops it short by about {sqft(r.bua - r.built)}.</>}
             </p>
             <div class="fsi-cta">
-              <a class="btn btn-primary btn-block" href={appIn(city)}>Draw your exact plot in Site Studio <Icon.arrow /></a>
+              <a class="btn btn-primary btn-block" href={proStart('blank', city)}>Plan this plot in Pro <Icon.arrow /></a>
+              <a class="btn btn-block" href={proStart('survey', city)}>Find your plot by its survey number</a>
               {city === 'pune' && <a class="btn btn-block" href={href('pune/dp-report/')}>Check the DP for your plot</a>}
             </div>
           </>
@@ -198,7 +198,7 @@ function Calculator({ city }: { city: City }) {
             {ladder.map((l, i) => (
               <li key={l.w} class={i === cur ? 'on' : undefined}>
                 <span class="w">{stepLabel(steps, i)}</span>
-                <span class="bar"><i style={`width:${(100 * l.bua) / top}%;background:${fsiColor(fsiFor(l.w, s.zone))}`} /></span>
+                <span class="bar"><i style={`width:${(100 * l.bua) / top}%`} /></span>
                 <span class="v">{sqft(l.bua)} <span class="muted">· FSI {f2(fsiFor(l.w, s.zone))}</span>{i === cur ? <b class="tag">yours</b> : l.bua > ladder[cur].bua ? <span class="up">+{sqft(l.bua - ladder[cur].bua)}</span> : null}</span>
               </li>
             ))}
@@ -287,7 +287,7 @@ export function FsiCalculatorPage({ city }: { city: City }) {
           )}
           <h2>What the calculator doesn’t do</h2>
           <ul>
-            <li><b>Margins and height</b>: the floors it shows take the plot as a rectangle with {city === 'pune' ? 'UDCPR’s' : 'UDCPR’s (as a placeholder)'} margins. For your plot’s real shape, draw it in <a href={appIn(city)}>Site Studio</a>, which also checks parking, fire access and open space.</li>
+            <li><b>Margins and height</b>: the floors it shows take the plot as a rectangle with {city === 'pune' ? 'UDCPR’s' : 'UDCPR’s (as a placeholder)'} margins. For your plot’s real shape, <a href={proStart('survey', city)}>find it by its survey number in Pro</a>, which also checks parking, fire access and open space.</li>
             <li><b>Special schemes</b>: {city === 'pune' ? 'TOD zones along the metro, slum rehabilitation, inclusive housing and the newer amendments' : 'redevelopment under 33(7), 33(9) and 33(7)(B), slum schemes, and incentive FSI'} add FSI this doesn’t show.</li>
             <li><b>Limits the road doesn’t set</b>: reservations, {city === 'mumbai' ? 'coastal zone (CRZ), heritage precincts, ' : ''}airport height limits and the plot’s zone.</li>
           </ul>
