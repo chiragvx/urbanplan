@@ -109,14 +109,18 @@ The rule of thumb: we own whatever the authority checks and whatever the develop
 ## Where Pro is now (`/pro/`, beta)
 
 The first cut of the platform, in `src/pro/`:
-- **`project.ts`:** a plot set up by its size and roads (front road today and in the DP, an optional corner road), under UDCPR or DCPR. It runs on the editor's own engine (`analysePlot`, `optimise`, `solveSite`), so Pro and Site Studio give the same numbers.
+- **`project.ts`:** a plot as a rectangle (front road today and in the DP, an optional corner road) or a drawn outline with a road, or none, on any edge, under UDCPR or DCPR. It runs on the editor's own engine (`analysePlot`, `optimise`, `solveSite`), so Pro and Site Studio give the same numbers. Concave plots (an L, a T) get their margins from a true inset (`inset` in `src/doc/plot.ts`); convex plots are worked out exactly as before.
+- **`PlotEditor.tsx`:** the outline drawn in plan.
+  - Drag a corner in half-metre steps, or add one with the + on any edge; select a corner to delete it.
+  - Type an edge's exact length, and put a road on any edge (width today and in the DP).
+  - Or paste the corners as x, y in metres.
+- **`cloud.ts`:** signed in, the project saves to the account a few seconds after each change, with versions, through the editor's own project storage. Pro projects sit in the same table, marked `region` `pro:<city>`, so no database change was needed. The Projects menu opens, starts and deletes them, and `/pro/?p=<id>` links straight to one.
 - **`design.ts`:** the design system. Five presets (Pune Contemporary, Mumbai Glass Tower, Warm Earth, Value Housing, Signature Luxury), with every token editable. The spec adds to construction cost; each preset's price premium sets the sale price until one is typed in.
 - **`openings.ts`:** windows and doors placed from the catalog on each flat's outside walls (living, bedrooms, kitchen, toilet ventilators), entrance doors on the corridor. Produces the door and window schedule and a light and ventilation check per flat.
 - **`scene.ts`:** three.js 3D with instanced windows, doors, balconies, bands and fins in the design system's materials. An X-ray floor shows a level as a plan cut at 1.5 m (flats by type, walls, entrance doors). Pointing at a window or door shows its tag and size.
 
 Not yet:
-- accounts and cloud projects (the project is kept in the browser)
-- picking a plot from data
+- picking a plot from data (survey or CTS number, Bhunaksha)
 - rooms inside flats
 - drawings and exports
 

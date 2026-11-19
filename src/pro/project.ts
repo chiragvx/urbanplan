@@ -1,4 +1,4 @@
-// A Pro project: a plot set up by its size and the roads it fronts (no city map needed), the rules it falls under,
+// A Pro project: a plot set up by its outline and the roads along its edges (no city map needed), the rules it falls under,
 // the builder's design system, and what the generator is asked for. Turned into the same PlotReport and SiteReport
 // the editor's Site Studio works from (src/doc/plot.ts, site.ts, optimise.ts), so both give the same numbers.
 import { analysePlot, type PlotCode, type PlotReport } from '../doc/plot';
@@ -16,10 +16,17 @@ export const CITIES: { value: ProCity; label: string; code: PlotCode; note: stri
   { value: 'mumbai-island', label: 'Mumbai island city', code: 'dcpr-island', note: 'DCPR 2034, island city (values from published summaries)' },
 ];
 
+/** a road along one edge of a drawn plot: its width today and in the Development Plan (0: none wider) */
+export interface EdgeRoad { today: number; dp: number }
+
 export interface ProProject {
   v: 1;
   name: string;
   city: ProCity;
+  /** a rectangle by its size, or an outline drawn corner by corner */
+  shape?: 'rect' | 'poly';
+  /** the drawn outline (x, z, … in metres; z away from the front) and a road (or none) along each edge, from corner k to k + 1 */
+  ring?: number[]; edgeRoads?: (EdgeRoad | null)[];
   /** the plot as a rectangle: along the road (frontage) and back from it (m) */
   width: number; depth: number;
   /** the road in front: today's width and the Development Plan's (0: none wider) */
@@ -44,20 +51,67 @@ export const DEFAULT_PROJECT: ProProject = {
   typology: 'auto', maxFloors: 0, mix: [0.2, 0.5, 0.3], style: 'contemporary', custom: null, sale: 0,
 };
 
-/** The plot against its roads: a front road along x at z = 0, the plot behind it; a corner road down its left side. */
+/** The plot's outline and the road along each edge: the rectangle as an outline (front edge first, along x at z = 0,
+ *  the corner road down the left side), or the drawn one. */
+export function outline(p: ProProject): { ring: number[]; roads: (EdgeRoad | null)[] } {
+  if (p.shape === 'poly' && p.ring && p.ring.length >= 6) {
+    const n = p.ring.length / 2;
+    return { ring: p.ring, roads: Array.from({ length: n }, (_, k) => p.edgeRoads?.[k] ?? null) };
+  }
+  const hw = p.width / 2;
+  return {
+    ring: [-hw, 0, hw, 0, hw, p.depth, -hw, p.depth],
+    roads: [{ today: p.road, dp: p.dpRoad }, null, null, p.corner ? { today: p.sideRoad, dp: 0 } : null],
+  };
+}
+
+/** signed area of a ring (x, z): positive counter-clockwise as x right, z up */
+const signed = (r: number[]) => { let a = 0; for (let i = 0; i < r.length; i += 2) { const j = (i + 2) % r.length; a += r[i] * r[j + 1] - r[j] * r[i + 1]; } return a / 2; };
+
+/** Does any edge of the ring cross another (not its neighbours)? */
+export function crosses(r: number[]): boolean {
+  const n = r.length / 2;
+  const seg = (k: number) => [r[2 * k], r[2 * k + 1], r[(2 * k + 2) % r.length], r[(2 * k + 3) % r.length]];
+  const side = (ax: number, az: number, bx: number, bz: number, cx: number, cz: number) => Math.sign((bx - ax) * (cz - az) - (bz - az) * (cx - ax));
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+    if (j === i + 1 || (i === 0 && j === n - 1)) continue;
+    const [a, b, c, d] = seg(i), [e, f, g, h] = seg(j);
+    if (side(a, b, c, d, e, f) * side(a, b, c, d, g, h) < 0 && side(e, f, g, h, a, b) * side(e, f, g, h, c, d) < 0) return true;
+  }
+  return false;
+}
+
+/** Each road's centre line: the edge moved out by half the road, run on well past the plot. */
+export function roadLines(ring: number[], roads: (EdgeRoad | null)[]): { k: number; road: EdgeRoad; pts: [number, number, number, number] }[] {
+  const ccw = signed(ring) > 0, out: { k: number; road: EdgeRoad; pts: [number, number, number, number] }[] = [];
+  roads.forEach((road, k) => {
+    if (!road || road.today <= 0) return;
+    const i = 2 * k, j = (i + 2) % ring.length;
+    const ax = ring[i], az = ring[i + 1], bx = ring[j], bz = ring[j + 1], L = Math.hypot(bx - ax, bz - az);
+    if (L < 0.5) return;
+    const ux = (bx - ax) / L, uz = (bz - az) / L;
+    // outward: right of the edge on a counter-clockwise ring
+    const nx = ccw ? uz : -uz, nz = ccw ? -ux : ux, o = road.today / 2, ext = 300;
+    out.push({ k, road, pts: [ax + nx * o - ux * ext, az + nz * o - uz * ext, bx + nx * o + ux * ext, bz + nz * o + uz * ext] });
+  });
+  return out;
+}
+
+/** The plot against its roads, under its city's rules. */
 export function plotReport(p: ProProject, floorH = 3): PlotReport {
   const cfg = CITIES.find((c) => c.value === p.city) ?? CITIES[0];
-  const front = { kind: 'section', id: 'front', name: 'Front road', parts: [{ kind: 'lane', width: p.road }], reserve: p.dpRoad > p.road ? p.dpRoad : undefined, cls: 'tertiary', elevated: false };
-  const side = { kind: 'section', id: 'side', name: 'Side road', parts: [{ kind: 'lane', width: p.sideRoad }], cls: 'residential', elevated: false };
-  const hw = p.width / 2, sx = -hw - p.sideRoad / 2, z0 = p.road / 2;
-  const doc = { get: (id: string) => (id === 'front' ? front : id === 'side' && p.corner ? side : undefined) } as unknown as CityDoc;
-  const C = { geo: (id: string) => (id === 'front' ? { pts: [-hw - 400, 0, hw + 400, 0] } : id === 'side' && p.corner ? { pts: [sx, -400, sx, z0 + p.depth + 400] } : undefined) } as unknown as Compiler;
-  const plot: PlotObj = {
-    kind: 'plot', id: 'plot', name: p.name, use: 'residential', congested: p.city === 'pune-congested', rules: { floorH },
-    // (behind today's road edge: the DP line cuts the strip the widening takes)
-    ring: [-hw, p.road / 2, hw, p.road / 2, hw, p.road / 2 + p.depth, -hw, p.road / 2 + p.depth],
-  };
-  return analysePlot(doc, C, () => (p.corner ? ['front', 'side'] : ['front']), plot, cfg.code);
+  const { ring, roads } = outline(p);
+  const lines = roadLines(ring, roads);
+  const ids = lines.map((l) => `e${l.k}`);
+  const sections = new Map(lines.map((l, i) => [ids[i], {
+    kind: 'section', id: ids[i], name: i === 0 ? 'Front road' : `Road on edge ${l.k + 1}`, parts: [{ kind: 'lane', width: l.road.today }],
+    reserve: l.road.dp > l.road.today ? l.road.dp : undefined, cls: 'tertiary', elevated: false,
+  }]));
+  const geo = new Map(lines.map((l, i) => [ids[i], { pts: l.pts }]));
+  const doc = { get: (id: string) => sections.get(id) } as unknown as CityDoc;
+  const C = { geo: (id: string) => geo.get(id) } as unknown as Compiler;
+  const plot: PlotObj = { kind: 'plot', id: 'plot', name: p.name, use: 'residential', congested: p.city === 'pune-congested', rules: { floorH }, ring };
+  return analysePlot(doc, C, () => ids, plot, cfg.code);
 }
 
 /** The generated scheme on it. */

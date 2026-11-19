@@ -47,9 +47,11 @@ async function upload(path: string, blob: Blob) {
 
 // ---------------- projects ----------------
 
-export async function listProjects(): Promise<Project[]> {
+/** The signed-in user's projects: the editor's maps, or Pro's projects (kept in the same table, `region` 'pro:…'). */
+export async function listProjects(kind: 'map' | 'pro' = 'map'): Promise<Project[]> {
   if (!cloudOn()) return [];
-  const { data, error } = await sb().from('projects').select('*').eq('owner', uid()).order('updated_at', { ascending: false });
+  const q = sb().from('projects').select('*').eq('owner', uid());
+  const { data, error } = await (kind === 'pro' ? q.like('region', 'pro:%') : q.not('region', 'like', 'pro:%')).order('updated_at', { ascending: false });
   if (error) throw error;
   return data as Project[];
 }

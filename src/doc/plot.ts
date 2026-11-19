@@ -14,6 +14,7 @@ import type { Compiler } from './compile';
 import type { Near } from './issues';
 import type { Id, PlotObj, SectionObj } from './types';
 import { totalWidth } from './xsection';
+import { area as mpArea, diff, fromFlat, shrink } from './ground';
 
 /** What a plot (or a building on it) is for. Homes, offices and industry have their own rules; the rest go by the
  *  general ones for the road and the zone. `none`: not said yet (shape and massing checks only). */
@@ -241,8 +242,42 @@ export function analysePlot(doc: CityDoc, C: Compiler, near: Near, p: PlotObj, c
   };
 }
 
-/** A ring with each edge moved in: front edges by `f`, the others by `s`. */
+/** Is the ring convex (every turn the same way, straight runs allowed)? */
+function convex(r: number[]): boolean {
+  let sign = 0;
+  for (let i = 0; i < r.length; i += 2) {
+    const j = (i + 2) % r.length, k = (i + 4) % r.length;
+    const c = (r[j] - r[i]) * (r[k + 1] - r[j + 1]) - (r[j + 1] - r[i + 1]) * (r[k] - r[j]);
+    if (Math.abs(c) < 1e-6) continue;
+    if (sign && Math.sign(c) !== sign) return false;
+    sign = Math.sign(c);
+  }
+  return true;
+}
+
+/** A ring with each edge moved in: front edges by `f`, the others by `s`. A concave plot (an L, a T) is shrunk as a
+ *  whole by `s` and has a strip `f` deep taken off along each front edge; the largest piece left is the answer. */
 export function inset(net: number[], front: boolean[], f: number, s: number): number[] {
+  if (net.length >= 8 && !convex(net)) {
+    let m = shrink(fromFlat(net), s);
+    const strips: number[][] = [];
+    for (let i = 0, k = 0; i < net.length; i += 2, k++) {
+      if (!front[k] || f <= s) continue;
+      const j = (i + 2) % net.length;
+      const ex = net[j] - net[i], ez = net[j + 1] - net[i + 1], L = Math.hypot(ex, ez);
+      if (L < 0.01) continue;
+      const nx = -ez / L, nz = ex / L;
+      strips.push([net[i] - nx, net[i + 1] - nz, net[j] - nx, net[j + 1] - nz, net[j] + nx * f, net[j + 1] + nz * f, net[i] + nx * f, net[i + 1] + nz * f]);
+    }
+    if (strips.length) m = diff(m, ...strips.map(fromFlat));
+    let best: number[] = [], ba = 0;
+    for (const poly of m) {
+      const a = mpArea([[poly[0]]]);
+      if (a > ba) { ba = a; best = poly[0].flatMap((p) => [p[0], p[1]]); }
+    }
+    // (Clipper's rings run clockwise in x, z: wind it as the plot's)
+    return best.length >= 6 ? ccw(best) : [];
+  }
   let out = net;
   for (let i = 0, k = 0; i < net.length && out.length >= 6; i += 2, k++) {
     const j = (i + 2) % net.length;

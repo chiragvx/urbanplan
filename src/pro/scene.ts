@@ -10,7 +10,7 @@ import { UNIT_COLOR, type SiteReport } from '../doc/site';
 import type { DesignSystem } from './design';
 import type { FloorPlan, Opening } from './openings';
 
-export interface ViewData { r: PlotReport; d: SiteReport; plans: FloorPlan[]; ds: DesignSystem; xray: number | null; road: number; dpRoad: number; corner: boolean; sideRoad: number; width: number }
+export interface ViewData { r: PlotReport; d: SiteReport; plans: FloorPlan[]; ds: DesignSystem; xray: number | null; roads: { pts: [number, number, number, number]; today: number }[] }
 export interface Picked { tag: string; label: string; size: string; floor: number; x: number; y: number }
 
 const box = new THREE.BoxGeometry(1, 1, 1);
@@ -41,6 +41,8 @@ function prism(ring: number[], y0: number, y1: number, top = true): THREE.Buffer
 function flat(ring: number[], y: number): THREE.BufferGeometry {
   const pts: THREE.Vector2[] = [];
   for (let i = 0; i < ring.length; i += 2) pts.push(new THREE.Vector2(ring[i], ring[i + 1]));
+  // (wound one way, so every face looks up)
+  if (THREE.ShapeUtils.isClockWise(pts)) pts.reverse();
   const tri = THREE.ShapeUtils.triangulateShape(pts, []), pos: number[] = [];
   for (const [i, j, k] of tri) pos.push(pts[i].x, y, pts[i].y, pts[k].x, y, pts[k].y, pts[j].x, y, pts[j].y);
   const g = new THREE.BufferGeometry();
@@ -153,10 +155,13 @@ export class ProView {
     // the roads, the DP's widening, the plot
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
     for (let i = 0; i < r.net.length; i += 2) { minX = Math.min(minX, r.net[i]); maxX = Math.max(maxX, r.net[i]); minZ = Math.min(minZ, r.net[i + 1]); maxZ = Math.max(maxZ, r.net[i + 1]); }
-    const ext = 60;
-    mesh(flat([minX - ext, -v.road / 2, maxX + ext, -v.road / 2, maxX + ext, v.road / 2, minX - ext, v.road / 2], 0.01), M.road, false);
+    // each road as a strip along its centre line (run 60 m past the plot: the lines come 300 m past)
+    for (const rd of v.roads) {
+      const [x0, z0, x1, z1] = rd.pts, L = Math.hypot(x1 - x0, z1 - z0), ux = (x1 - x0) / L, uz = (z1 - z0) / L, nx = -uz * rd.today / 2, nz = ux * rd.today / 2;
+      const a = [x0 + ux * 240, z0 + uz * 240], b = [x1 - ux * 240, z1 - uz * 240];
+      mesh(flat([a[0] + nx, a[1] + nz, b[0] + nx, b[1] + nz, b[0] - nx, b[1] - nz, a[0] - nx, a[1] - nz], 0.01), M.road, false);
+    }
     for (const lr of r.lostRings) mesh(flat(lr, 0.03), M.dp, false);
-    if (v.corner) { const sx = -v.width / 2 - v.sideRoad / 2; mesh(flat([sx - v.sideRoad / 2, -v.road / 2, sx + v.sideRoad / 2, -v.road / 2, sx + v.sideRoad / 2, maxZ + ext, sx - v.sideRoad / 2, maxZ + ext], 0.012), M.road, false); }
     mesh(flat(r.net, 0.04), M.paving, false);
     if (r.footprint.length >= 6) {
       const p = r.footprint, pts: THREE.Vector3[] = [];

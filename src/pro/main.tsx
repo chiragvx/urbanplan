@@ -2,12 +2,16 @@
 // roads, the rules it falls under, and the builder's design system; the generator builds the scheme straight away
 // and everything follows from it: the 3D view with every window and door at its catalog size, the area and money
 // figures, the departures from the rules, the light and ventilation check and the door and window schedule.
-// Kept in this browser for now (localStorage); accounts and cloud projects come with the platform.
+// Kept in this browser (localStorage) and, signed in, in the account's projects a few seconds behind (./cloud.ts).
 import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import '../theme/tokens.css';
 import './pro.css';
-import { CITIES, DEFAULT_PROJECT, generate, plotReport, type ProProject } from './project';
+import { CITIES, DEFAULT_PROJECT, generate, outline, plotReport, roadLines, type ProProject } from './project';
+import { PlotEditor } from './PlotEditor';
+import { deletePro, listPro, openPro, savePro, toText, type CloudRef } from './cloud';
+import { authReady, explain, peekSession, session, startAuth } from '../auth/auth';
+import type { Project } from '../app/cloud';
 import { clone, presetOf, PRESETS, SPEC, specRate, type BalconyKind, type DesignSystem, type DoorType, type Railing, type WindowType } from './design';
 import { planFloor, schedule } from './openings';
 import { ProView, type Picked } from './scene';
@@ -20,6 +24,40 @@ function load(): ProProject {
   return DEFAULT_PROJECT;
 }
 const save = (p: ProProject) => { try { localStorage.setItem(KEY, JSON.stringify(p)); } catch { /* not kept */ } };
+const REF = 'urbanplan:pro:cloud';
+const loadRef = (): CloudRef => { try { return JSON.parse(localStorage.getItem(REF) || 'null'); } catch { return null; } };
+const saveRef = (r: CloudRef) => { try { localStorage.setItem(REF, JSON.stringify(r)); } catch { /* not kept */ } };
+const BASE = import.meta.env.BASE_URL;
+const hhmm = (d = new Date()) => d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+const ago = (iso: string) => `${new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}, ${hhmm(new Date(iso))}`;
+
+/** The account's Pro projects: open one, start a new one, delete (two clicks). */
+function Projects({ current, open, fresh, close }: { current: string | null; open: (id: string) => void; fresh: () => void; close: () => void }) {
+  const [list, setList] = useState<Project[] | null>(null);
+  const [err, setErr] = useState('');
+  const [sure, setSure] = useState('');
+  const reload = () => listPro().then(setList, (e) => setErr(explain(e)));
+  useEffect(() => { void reload(); }, []);
+  const del = async (id: string) => {
+    if (sure !== id) { setSure(id); return; }
+    try { await deletePro(id); setSure(''); void reload(); } catch (e) { setErr(explain(e)); }
+  };
+  return (
+    <div class="pro-menu" role="dialog" aria-label="Your projects">
+      <div class="pro-menu-head"><b>Your projects</b><button class="pbtn primary" onClick={fresh}>New project</button></div>
+      {err && <p class="ped-err">{err}</p>}
+      {!list && !err && <p class="pro-note">Loading…</p>}
+      {list && !list.length && <p class="pro-note">None yet: this one is saved here as you work.</p>}
+      {list && list.length > 0 && <ul>{list.map((x) => (
+        <li class={x.id === current ? 'on' : ''}>
+          <button class="pro-proj" onClick={() => open(x.id)}><b>{x.name}</b><span>{x.region.replace('pro:', '').replace('-', ' ')} · {ago(x.updated_at)}</span></button>
+          <button class="pbtn small" onClick={() => void del(x.id)}>{sure === x.id ? 'Delete?' : 'Delete'}</button>
+        </li>
+      ))}</ul>}
+      <button class="linkbtn" onClick={close}>Close</button>
+    </div>
+  );
+}
 
 const nf = (v: number, d = 0) => v.toLocaleString('en-IN', { maximumFractionDigits: d, minimumFractionDigits: d });
 const sqft = (m2: number) => `${nf(m2 * SQFT)} sq ft`;
@@ -56,6 +94,53 @@ function App() {
   const [xray, setXray] = useState<number | null>(null);
   const [hover, setHover] = useState<Picked | null>(null);
   const up = (o: Partial<ProProject>) => setP((x) => { const n = { ...x, ...o }; save(n); return n; });
+
+  // ---- the account: sign-in state, the cloud copy, the projects list ----
+  const [ref, setRefState] = useState<CloudRef>(loadRef);
+  const setRef = (r: CloudRef) => { saveRef(r); setRefState(r); };
+  const [cloud, setCloud] = useState<{ s: 'local' | 'saving' | 'saved' | 'error'; msg?: string }>({ s: 'local' });
+  const [menu, setMenu] = useState(false);
+  const user = session.value?.user ?? null;
+  // (what's in the cloud, or for a project never saved what it opened as: just opening Pro saves nothing)
+  const lastSaved = useRef(toText(p));
+  useEffect(() => { peekSession(); void startAuth(); }, []);
+  const openId = async (id: string) => {
+    try {
+      setCloud({ s: 'saving', msg: 'Opening…' });
+      const o = await openPro(id);
+      lastSaved.current = toText(o.p);
+      save(o.p); setP(o.p); setRef(o.ref); setMenu(false);
+      history.replaceState(null, '', `?p=${id}`);
+      setCloud({ s: 'saved', msg: `Opened ${hhmm()}` });
+    } catch (e) { setCloud({ s: 'error', msg: explain(e) }); }
+  };
+  // a project linked as /pro/?p=<id> opens once signed in
+  useEffect(() => {
+    const id = new URLSearchParams(location.search).get('p');
+    if (user && id && id !== ref?.id) void openId(id);
+  }, [user?.id]);
+  const fresh = () => {
+    const n = { ...DEFAULT_PROJECT };
+    save(n); setP(n); setRef(null); lastSaved.current = ''; setMenu(false);
+    history.replaceState(null, '', location.pathname);
+  };
+  // signed in: the cloud follows a few seconds behind every change (a version kept every 10 minutes)
+  useEffect(() => {
+    if (!user) { setCloud({ s: 'local' }); return; }
+    const text = toText(p);
+    if (text === lastSaved.current) return;
+    const t = setTimeout(async () => {
+      setCloud({ s: 'saving' });
+      try {
+        const r = await savePro(p, ref);
+        lastSaved.current = text;
+        setRef({ id: r.id, rev: r.revision });
+        history.replaceState(null, '', `?p=${r.id}`);
+        setCloud({ s: 'saved', msg: r.copied ? 'Newer work was in the cloud: saved this as a copy' : `Saved ${hhmm()}` });
+      } catch (e) { setCloud({ s: 'error', msg: explain(e) }); }
+    }, 2500);
+    return () => clearTimeout(t);
+  }, [JSON.stringify(p), user?.id]);
   const ds = p.custom ?? presetOf(p.style);
   const setDs = (f: (d: DesignSystem) => void) => { const d = clone(ds); f(d); up({ custom: d }); };
 
@@ -82,10 +167,17 @@ function App() {
   const xr = xray === null ? null : Math.min(xray, maxFloor);
   useEffect(() => {
     setHover(null);
-    view.current?.set({ r: out.r, d: out.d, plans: out.plans, ds, xray: xr, road: p.road, dpRoad: p.dpRoad, corner: p.corner, sideRoad: p.sideRoad, width: p.width });
+    const o = outline(p);
+    view.current?.set({ r: out.r, d: out.d, plans: out.plans, ds, xray: xr, roads: roadLines(o.ring, o.roads).map((l) => ({ pts: l.pts, today: l.road.today })) });
   }, [out, xr]);
 
   const { r, d } = out;
+  // drawing starts from the rectangle as it stands (once; after that the drawn outline is kept)
+  const setShape = (v: 'rect' | 'poly') => {
+    if (v === 'rect') { up({ shape: 'rect' }); return; }
+    const o = outline({ ...p, shape: 'rect' });
+    up({ shape: 'poly', ring: p.ring ?? o.ring, edgeRoads: p.edgeRoads ?? o.roads });
+  };
   const flatsOk = out.checks.filter((c) => c.t !== 3 && c.light && c.air).reduce((s, c) => s + c.floors, 0);
   const flatsAll = out.checks.filter((c) => c.t !== 3).reduce((s, c) => s + c.floors, 0);
   const failing = out.checks.filter((c) => c.t !== 3 && !(c.light && c.air));
@@ -99,7 +191,11 @@ function App() {
         <input class="pro-name" value={p.name} aria-label="Project name" onChange={(e) => up({ name: (e.target as HTMLInputElement).value || 'Untitled project' })} />
         <span class="pro-gap" />
         <span class="pro-beta">Beta · free while we build it</span>
-        <a class="pro-link" href="/app/">Simple editor</a>
+        {authReady && user && <span class={`pro-cloud ${cloud.s}`} title={cloud.msg}>{cloud.s === 'saving' ? (cloud.msg ?? 'Saving…') : cloud.s === 'saved' ? (cloud.msg ?? 'Saved') : cloud.s === 'error' ? 'Not saved' : ''}</span>}
+        {authReady && user && <button class="pro-link" onClick={() => setMenu(!menu)} aria-expanded={menu}>Projects</button>}
+        {authReady && session.value === null && <a class="pro-link" href={`${BASE}login/?next=${encodeURIComponent(location.pathname)}`} title="Keep your projects in your account">Sign in to save</a>}
+        <a class="pro-link" href={`${BASE}app/`}>Simple editor</a>
+        {menu && user && <Projects current={ref?.id ?? null} open={(id) => void openId(id)} fresh={fresh} close={() => setMenu(false)} />}
       </header>
 
       <aside class="pro-left">
@@ -114,12 +210,17 @@ function App() {
             </label>
             <p class="pro-note">{city.note}</p>
             <h3>Plot</h3>
-            <div class="pf-row"><Num label="Frontage" value={p.width} set={(v) => up({ width: v })} min={10} max={300} unit="m" /><Num label="Depth" value={p.depth} set={(v) => up({ depth: v })} min={10} max={300} unit="m" /></div>
-            <p class="pro-note">{nf(p.width * p.depth)} m² · {sqft(p.width * p.depth)}</p>
-            <h3>Roads</h3>
-            <div class="pf-row"><Num label="Front road today" value={p.road} set={(v) => up({ road: v })} min={3} max={60} unit="m" /><Num label="In the DP" value={p.dpRoad} set={(v) => up({ dpRoad: v })} min={0} max={60} unit="m" /></div>
-            <Toggle label="Corner plot (a road down the side)" value={p.corner} set={(v) => up({ corner: v })} />
-            {p.corner && <Num label="Side road" value={p.sideRoad} set={(v) => up({ sideRoad: v })} min={3} max={60} unit="m" />}
+            <Seg<'rect' | 'poly'> value={p.shape === 'poly' ? 'poly' : 'rect'} set={setShape} options={[{ value: 'rect', label: 'Rectangle' }, { value: 'poly', label: 'Draw the outline' }]} />
+            {p.shape === 'poly' && p.ring
+              ? <PlotEditor ring={p.ring} roads={outline(p).roads} set={(ring, edgeRoads) => up({ ring, edgeRoads })} />
+              : <>
+                <div class="pf-row"><Num label="Frontage" value={p.width} set={(v) => up({ width: v })} min={10} max={300} unit="m" /><Num label="Depth" value={p.depth} set={(v) => up({ depth: v })} min={10} max={300} unit="m" /></div>
+                <p class="pro-note">{nf(p.width * p.depth)} m² · {sqft(p.width * p.depth)}</p>
+                <h3>Roads</h3>
+                <div class="pf-row"><Num label="Front road today" value={p.road} set={(v) => up({ road: v })} min={3} max={60} unit="m" /><Num label="In the DP" value={p.dpRoad} set={(v) => up({ dpRoad: v })} min={0} max={60} unit="m" /></div>
+                <Toggle label="Corner plot (a road down the side)" value={p.corner} set={(v) => up({ corner: v })} />
+                {p.corner && <Num label="Side road" value={p.sideRoad} set={(v) => up({ sideRoad: v })} min={3} max={60} unit="m" />}
+              </>}
             <h3>Scheme</h3>
             <Seg<Typology> value={p.typology} set={(v) => up({ typology: v })} options={TYPOLOGIES} />
             <Num label="At most this many floors (0: as the rules allow)" value={p.maxFloors} set={(v) => up({ maxFloors: Math.round(v) })} max={80} />
