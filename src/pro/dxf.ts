@@ -26,6 +26,7 @@ import { union, type MP } from '../doc/ground';
 import { floorKind, UNIT_LABEL } from '../doc/site';
 import type { Evaluated } from './evaluate';
 import { outline, roadLines } from './project';
+import { buildingCores } from './coreDetail';
 
 interface Layer { name: string; color: number }
 /** the layers written, with AutoCAD colour numbers (PreDCR's own layer command sets its colours) */
@@ -216,6 +217,7 @@ export function predcrDxf(e: Evaluated): string {
   let rowY = -(pz1 + 40), maxX = px1;
   for (const x of blds) {
     const { b, bi, fp, ref, fh } = x;
+    const coreDetails = buildingCores(e, bi);
     let bx0 = Infinity, bz0 = Infinity, bx1 = -Infinity, bz1 = -Infinity;
     for (const q of b.quads) for (let i = 0; i < q.length; i += 2) { bx0 = Math.min(bx0, q[i]); bx1 = Math.max(bx1, q[i]); bz0 = Math.min(bz0, q[i + 1]); bz1 = Math.max(bz1, q[i + 1]); }
     const bw = bx1 - bx0, bd = bz1 - bz0;
@@ -265,7 +267,14 @@ export function predcrDxf(e: Evaluated): string {
       w.circle('_Floor', X(ref[0]), Y(ref[1]), 0.3); w.circle('_ResiFSI', X(ref[0]), Y(ref[1]), 0.4);
 
       const parking = (lv?: (typeof d.parking.levels)[number]) => { for (const bay of lv?.bays ?? []) if (whole || inB(bay)) named('_Parking', T(bay), ringArea(bay) >= 12.4 ? 'CP-L' : 'CP-S', 0.25); };
-      const cores = () => b.cores.forEach((c) => { const [s, l] = splitCore(c); named('_Staircase', T(s), 'STAIRCASE', 0.25); if (l.length) named('_Liftwell', T(l), 'LIFT', 0.25); });
+      // each staircase and lift shaft as laid out for the drawings (./coreDetail.ts), the rest of the core as passage
+      const cores = () => coreDetails.forEach((cd) => {
+        cd.stairs.forEach((st) => named('_Staircase', T(st.box), `${st.label} ${st.width.toFixed(2)}`, 0.25));
+        cd.lifts.forEach((l) => named('_Liftwell', T(l.shaft), l.fire ? 'FIRE LIFT' : 'LIFT', 0.2));
+        if (cd.lobby) named('_Passage', T(cd.lobby), 'LOBBY', 0.2);
+        if (cd.spare) named('_Passage', T(cd.spare), 'LOBBY', 0.2);
+        if (!cd.stairs.length && !cd.lifts.length) { const [s2, l2] = splitCore(cd.core); named('_Staircase', T(s2), 'STAIRCASE', 0.25); if (l2.length) named('_Liftwell', T(l2), 'LIFT', 0.25); }
+      });
       if (pl.kind === 'formed') {
         const lf = LF[pl.fi!], k = floorKind(lf, b.use), fsi = k === 'residential' ? '_ResiFSI' : '_CommFSI';
         if (k === 'parking') parking(d.parking.levels.filter((l) => l.kind === 'structure' && Math.abs(l.area - lf.area) < 0.01)[0]);

@@ -145,12 +145,12 @@ export const stairFor = (h: number) => (h <= 15 ? 1.0 : h <= 24 ? 1.2 : 1.5);
 /** NBC 2016 Part 4 Tables 21 / 22: residential occupant load 12.5 m² per person; 25 persons per 0.5 m unit of stair width */
 const OCC_M2 = 12.5, PER_UNIT = 25, UNIT_W = 0.5;
 /** riser 0.175 m, tread 0.25 m (UDCPR 9.x: riser ≤ 0.19 m, tread ≥ 0.25 m residential) */
-const RISER = 0.175, TREAD = 0.25, WALL = 0.23;
+export const RISER = 0.175, TREAD = 0.25, WALL = 0.23;
 /** lift traffic (CIBSE Guide D, residential): 5% of the population in 5 minutes, an interval of 90 s at most;
  *  cars load to 80%; 10 s a stop (doors and acceleration); 1.2 s a passenger in and out */
 const HC5 = 0.05, INTERVAL = 90, LOAD = 0.8, T_STOP = 10, T_PAX = 1.2;
 /** shaft area (m², with walls) by car size; a service / stretcher car is a 13-person shaft */
-const SHAFT: Record<LiftCap, number> = { 6: 3.2, 8: 3.8, 10: 4.4, 13: 5.3 };
+export const SHAFT: Record<LiftCap, number> = { 6: 3.2, 8: 3.8, 10: 4.4, 13: 5.3 };
 const speedFor = (h: number) => (h <= 24 ? 1.0 : h <= 45 ? 1.5 : h <= 75 ? 2.0 : h <= 105 ? 2.5 : 3.0);
 const capFor = (h: number): LiftCap => (h <= 24 ? 8 : h <= 60 ? 10 : 13);
 /** connected load per flat (kW): 1 BHK 5, 2 BHK 7, 3 BHK 10 (lights, power, kitchen, geyser and AC points, which

@@ -26,6 +26,8 @@ import { CITIES, outline, roadLines } from './project';
 import type { Check, CheckStatus } from './scrutiny';
 import type { FlatRooms } from './rooms';
 import { documents, fees, nocs, PERMISSION_LABEL, permissionOf, stages } from './approvals';
+import { buildingCores, type CoreDetail } from './coreDetail';
+import type { Opening } from './openings';
 
 const W = 420, H = 297, PAD = 10, TB = 92; // sheet, border, title block width (mm)
 const AREA = { x: PAD + 6, y: PAD + 6, w: W - 2 * PAD - TB - 12, h: H - 2 * PAD - 12 };
@@ -148,6 +150,85 @@ function EdgeDims({ ring, T, off = 5, min = 1.5, color }: { ring: number[]; T: (
     out.push(outward ? <Dim a={a} b={b} label={`${f2(len)} M`} off={off} color={color} /> : <Dim a={b} b={a} label={`${f2(len)} M`} off={off} color={color} />);
   }
   return <g>{out}</g>;
+}
+
+// ---------------- cores, openings and room sizes, as an approval plan shows them ----------------
+
+/** a ring read as a rectangle: its length and its depth (m), along its longest edge */
+function dims(q: number[]): [number, number] {
+  const n = q.length / 2;
+  let best = -1, ux = 1, uz = 0;
+  for (let i = 0; i < n; i++) { const j = (i + 1) % n, dx = q[2 * j] - q[2 * i], dz = q[2 * j + 1] - q[2 * i + 1], L = Math.hypot(dx, dz); if (L > best) { best = L; ux = dx / L; uz = dz / L; } }
+  let s0 = Infinity, s1 = -Infinity, t0 = Infinity, t1 = -Infinity;
+  for (let i = 0; i < n; i++) { const s = q[2 * i] * ux + q[2 * i + 1] * uz, t = -q[2 * i] * uz + q[2 * i + 1] * ux; s0 = Math.min(s0, s); s1 = Math.max(s1, s); t0 = Math.min(t0, t); t1 = Math.max(t1, t); }
+  const a = s1 - s0, b = t1 - t0;
+  return a >= b ? [a, b] : [b, a];
+}
+
+/** A core as built: walls, each stair's flights, treads, landings and the way up, lift shafts with their cars, the
+ *  lobby and ducts. `k` is sheet mm per metre (detail drops away when it would be a smudge). */
+function CoreDraw({ cd, T, k, fs }: { cd: CoreDetail; T: (x: number, z: number) => [number, number]; k: number; fs: number }) {
+  const thin = Math.max(0.1, 0.02 * k), wall = Math.max(0.35, 0.2 * k), lbl = Math.min(2.2, Math.max(1, fs * 0.62));
+  const line = (q: number[], w = thin, c = '#111') => { const a = T(q[0], q[1]), b = T(q[2], q[3]); return <line x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} stroke={c} stroke-width={w} />; };
+  return (
+    <g>
+      <polygon points={pts(cd.core, T)} fill="#fff" stroke="#111" stroke-width={wall} />
+      {cd.lobby && (() => { const [sx, sy] = T(...mid(cd.lobby)); return <g><polygon points={pts(cd.lobby, T)} fill="#f4f2ec" stroke="none" />{k >= 2.5 && <text x={sx} y={sy + lbl * 0.35} font-size={lbl * 0.85} text-anchor="middle" fill="#555">{cd.lobbyLabel}</text>}</g>; })()}
+      {cd.spare && (() => { const [sx, sy] = T(...mid(cd.spare)); return <g><polygon points={pts(cd.spare, T)} fill="#f4f2ec" stroke="#999" stroke-width={thin} />{k >= 2.5 && <text x={sx} y={sy + lbl * 0.35} font-size={lbl * 0.85} text-anchor="middle" fill="#555">COMMON LOBBY</text>}</g>; })()}
+      {cd.stairs.map((st) => {
+        const [sx, sy] = T(...mid(st.landings[0]));
+        const p = st.path, n = p.length / 2, a = T(p[2 * n - 4], p[2 * n - 3]), b = T(p[2 * n - 2], p[2 * n - 1]);
+        const ang = Math.atan2(b[1] - a[1], b[0] - a[0]), ah = Math.max(0.8, 0.25 * k);
+        return <g>
+          <polygon points={pts(st.box, T)} fill="#fff" stroke="#111" stroke-width={wall * 0.8} />
+          {st.flights.map((f) => <polygon points={pts(f, T)} fill="none" stroke="#111" stroke-width={thin * 1.5} />)}
+          {k >= 2 && st.treads.map((t) => line(t))}
+          {line(st.well, thin * 2)}
+          {k >= 1.5 && <g>
+            <polyline points={pts(p, T)} fill="none" stroke="#1b4fd8" stroke-width={thin * 1.4} />
+            <path d={`M${b[0]} ${b[1]}L${b[0] - ah * Math.cos(ang - 0.45)} ${b[1] - ah * Math.sin(ang - 0.45)}L${b[0] - ah * Math.cos(ang + 0.45)} ${b[1] - ah * Math.sin(ang + 0.45)}Z`} fill="#1b4fd8" />
+            {(() => { const s = T(p[0], p[1]); return <text x={s[0]} y={s[1] + lbl * 0.35} font-size={lbl * 0.8} text-anchor="middle" fill="#1b4fd8" font-weight="700">UP</text>; })()}
+          </g>}
+          {k >= 2.5 && <g><text x={sx} y={sy - lbl * 0.1} font-size={lbl} text-anchor="middle" font-weight="700">{st.label}</text><text x={sx} y={sy + lbl * 1.05} font-size={lbl * 0.75} text-anchor="middle">{`${f2(st.width)} M WIDE · ${st.risers} R`}</text></g>}
+        </g>;
+      })}
+      {cd.lifts.map((l) => {
+        const [sx, sy] = T(...mid(l.shaft)), c = l.car;
+        return <g>
+          <polygon points={pts(l.shaft, T)} fill="#fff" stroke="#111" stroke-width={wall * 0.8} />
+          <polygon points={pts(c, T)} fill="none" stroke="#111" stroke-width={thin} />
+          {line([c[0], c[1], c[4], c[5]])}{line([c[2], c[3], c[6], c[7]])}
+          {k >= 2.5 && <g><rect x={sx - l.label.length * lbl * 0.3 - 0.4} y={sy - lbl * 0.85} width={l.label.length * lbl * 0.6 + 0.8} height={lbl * 1.15} fill="#fff" /><text x={sx} y={sy} font-size={lbl * 0.85} text-anchor="middle" font-weight="700" fill={l.fire ? '#c62828' : '#111'}>{l.label}</text><text x={sx} y={sy + lbl * 0.95} font-size={lbl * 0.65} text-anchor="middle">{l.size}</text></g>}
+        </g>;
+      })}
+      {cd.ducts.map((q) => { const [sx, sy] = T(...mid(q)); return <g><polygon points={pts(q, T)} fill="none" stroke="#111" stroke-width={thin * 1.5} />{line([q[0], q[1], q[4], q[5]])}{line([q[2], q[3], q[6], q[7]])}{k >= 3 && <text x={sx} y={sy - 0.6} font-size={lbl * 0.7} text-anchor="middle">DUCT</text>}</g>; })}
+    </g>
+  );
+}
+
+/** an opening as a plan shows it: a window's three lines in the wall, a sliding door's two leaves, a hinged door's
+ *  leaf and swing (into the flat) */
+function OpeningDraw({ o, T, k, fs }: { o: Opening; T: (x: number, z: number) => [number, number]; k: number; fs: number }) {
+  const a = T(o.x - o.ux * o.w / 2, o.z - o.uz * o.w / 2), b = T(o.x + o.ux * o.w / 2, o.z + o.uz * o.w / 2);
+  const off = (m: number, p: [number, number]): [number, number] => { const q = T(o.x + o.nx * m, o.z + o.nz * m), c = T(o.x, o.z); return [p[0] + q[0] - c[0], p[1] + q[1] - c[1]]; };
+  const thin = Math.max(0.1, 0.02 * k), cut = Math.max(0.6, 0.23 * k) + 0.15;
+  const tag = T(o.x + o.nx * 0.9, o.z + o.nz * 0.9);
+  const door = o.tag.startsWith('D'), slide = o.tag === 'SD';
+  const L = (p: [number, number], q: [number, number], c = '#111', w = thin) => <line x1={p[0]} y1={p[1]} x2={q[0]} y2={q[1]} stroke={c} stroke-width={w} />;
+  let sym: JSX.Element;
+  if (door) {
+    // the leaf from the hinge (one end), opened into the flat (against the outward normal), and its arc to the other end
+    const leaf = T(o.x - o.ux * o.w / 2 - o.nx * o.w, o.z - o.uz * o.w / 2 - o.nz * o.w);
+    const p = [leaf[0] - a[0], leaf[1] - a[1]], q = [b[0] - a[0], b[1] - a[1]], r = Math.hypot(p[0], p[1]);
+    const sweep = p[0] * q[1] - p[1] * q[0] > 0 ? 1 : 0;
+    sym = <g>{L(a, leaf, '#8a5a3b', thin * 2)}<path d={`M${leaf[0]} ${leaf[1]}A${r} ${r} 0 0 ${sweep} ${b[0]} ${b[1]}`} fill="none" stroke="#8a5a3b" stroke-width={thin} /></g>;
+  } else if (slide) {
+    const m = (p: [number, number], q: [number, number], t: number): [number, number] => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
+    sym = <g>{L(off(0.05, a), off(0.05, m(a, b, 0.55)), '#8a5a3b', thin * 2)}{L(off(-0.05, m(a, b, 0.45)), off(-0.05, b), '#8a5a3b', thin * 2)}</g>;
+  } else {
+    sym = <g>{L(off(0.08, a), off(0.08, b), '#1b4fd8')}{L(a, b, '#1b4fd8')}{L(off(-0.08, a), off(-0.08, b), '#1b4fd8')}</g>;
+  }
+  return <g>{L(a, b, '#fff', cut)}{sym}{k >= 3 && <text x={tag[0]} y={tag[1] + 0.6} font-size={fs * 0.7} text-anchor="middle" fill="#333">{o.tag}</text>}</g>;
 }
 
 // ---------------- tables: blocks of rows flowed into columns and onto as many sheets as they need ----------------
@@ -440,16 +521,18 @@ function FloorPlan({ e, rooms, no, total }: { e: Evaluated; rooms: FlatRooms[][]
           const outer = b.laid ? floorRings(e, bi, b.typical ?? 0) : b.quads;
           return (
             <g>
-              {outer.map((q) => <polygon points={pts(q, T)} fill="#fff" stroke="#111" stroke-width="0.6" />)}
+              {/* walls at their thickness: 230 mm outside and round the flats, 115 mm partitions */}
+              {outer.map((q) => <polygon points={pts(q, T)} fill="#fff" stroke="#111" stroke-width={Math.max(0.6, 0.23 * k)} stroke-linejoin="miter" />)}
               {b.corridors.map((c) => <polygon points={pts(c, T)} fill="#f1efe9" stroke="#777" stroke-width="0.2" />)}
               {b.units.map((u, ui) => {
                 const shop = shops?.removed.get(bi)?.has(ui), fr = rooms[bi]?.find((x) => x.unit === ui);
                 const withRooms = roomsShown && fr && fr.rooms.length > 0;
                 // with rooms, the flat's label sits over its biggest room (inside the flat whatever its shape)
-                const big = withRooms ? fr!.rooms.reduce((a, x) => (x.area > a.area ? x : a)) : null;
+                const main = withRooms ? fr!.rooms.filter((x) => x.kind === 'living' || x.kind === 'bed') : [];
+                const big = withRooms ? (main.length ? main : fr!.rooms).reduce((a, x) => (x.area > a.area ? x : a)) : null;
                 const [cx, cy] = T(...mid(big ? big.ring : u.ring));
                 return <g>
-                  <polygon points={pts(u.ring, T)} fill={UNIT_COLOR[u.t]} fill-opacity="0.16" stroke="#111" stroke-width="0.35" />
+                  <polygon points={pts(u.ring, T)} fill={UNIT_COLOR[u.t]} fill-opacity="0.16" stroke="#111" stroke-width={Math.max(0.35, 0.2 * k)} />
                   {withRooms && fr!.rooms.map((rm) => {
                     const [sx, sy] = T(...mid(rm.ring));
                     // the name as fits the room: whole, its first word, or left off (the area stays)
@@ -458,32 +541,39 @@ function FloorPlan({ e, rooms, no, total }: { e: Evaluated; rooms: FlatRooms[][]
                     const room = (rx1 - rx0) - 1, sz = fs * 0.62, fits = (s: string) => s.length * sz * 0.6 <= room;
                     const full = rm.name.toUpperCase(), first = full.split(/\s+/)[0];
                     const name = fits(full) ? full : fits(first) ? first : '';
+                    // its size as a plan states it (length × width) when it fits, its area under
+                    const [rl, rw] = dims(rm.ring), size = `${f2(rl)} × ${f2(rw)}`, sizeFits = size.length * fs * 0.5 * 0.6 <= room;
+                    const c = rm.ok ? '#222' : '#c62828';
                     return <g>
                       <polygon points={pts(rm.ring, T)} fill="none" stroke="#666" stroke-width="0.12" />
-                      {name && <text x={sx} y={sy} font-size={sz} text-anchor="middle" fill={rm.ok ? '#222' : '#c62828'}>{name}</text>}
-                      <text x={sx} y={sy + (name ? fs * 0.75 : 0.6)} font-size={fs * 0.55} text-anchor="middle" fill={rm.ok ? '#555' : '#c62828'}>{f2(rm.area)}</text>
+                      {name && <text x={sx} y={sy - (sizeFits ? fs * 0.3 : 0)} font-size={sz} text-anchor="middle" fill={c}>{name}</text>}
+                      {sizeFits && <text x={sx} y={sy + fs * 0.42} font-size={fs * 0.5} text-anchor="middle" fill={c}>{size}</text>}
+                      <text x={sx} y={sy + (name ? fs * (sizeFits ? 1.05 : 0.75) : 0.6)} font-size={fs * 0.48} text-anchor="middle" fill={rm.ok ? '#666' : '#c62828'}>{`${f2(rm.area)} m²`}</text>
                     </g>;
                   })}
-                  {withRooms && fr!.walls.map((w) => { const a = T(w[0], w[1]), c = T(w[2], w[3]); return <line x1={a[0]} y1={a[1]} x2={c[0]} y2={c[1]} stroke="#111" stroke-width="0.3" />; })}
+                  {withRooms && fr!.walls.map((w) => { const a = T(w[0], w[1]), c = T(w[2], w[3]); return <line x1={a[0]} y1={a[1]} x2={c[0]} y2={c[1]} stroke="#111" stroke-width={Math.max(0.25, 0.115 * k)} />; })}
                   {withRooms
                     ? (() => { const s = `${UNIT_LABEL[u.t]}${shop ? ' *' : ''} · ${f2(u.carpet)} m²`, sz = fs * 0.78, w = s.length * sz * 0.58 + 1.4, top = cy - fs * 0.75 - sz * 1.6; return <g><rect x={cx - w / 2} y={top} width={w} height={sz * 1.35} fill="#fff" stroke="#111" stroke-width="0.12" /><text x={cx} y={top + sz * 1.02} font-size={sz} font-weight="700" text-anchor="middle">{s}</text></g>; })()
                     : <g><text x={cx} y={cy} font-size={fs * 1.1} font-weight="700" text-anchor="middle">{UNIT_LABEL[u.t]}{shop ? ' *' : ''}</text><text x={cx} y={cy + fs * 1.3} font-size={fs * 0.9} text-anchor="middle">{`${f2(u.carpet)} m²`}</text></g>}
                 </g>;
               })}
-              {b.cores.map((c) => { const [x, z] = mid(c), [sx, sy] = T(x, z); return <g><polygon points={pts(c, T)} fill="#bbb" stroke="#111" stroke-width="0.4" /><text x={sx} y={sy + 0.8} font-size={fs * 0.8} text-anchor="middle">STAIR + LIFT</text></g>; })}
-              {plans[bi]?.openings.map((o) => {
-                const a = T(o.x - o.ux * o.w / 2, o.z - o.uz * o.w / 2), c = T(o.x + o.ux * o.w / 2, o.z + o.uz * o.w / 2), t = T(o.x + o.nx * 0.9, o.z + o.nz * 0.9);
-                return <g><line x1={a[0]} y1={a[1]} x2={c[0]} y2={c[1]} stroke={o.tag.startsWith('D') || o.tag === 'SD' ? '#8a5a3b' : '#1b4fd8'} stroke-width="0.9" />
-                  {k >= 3 && <text x={t[0]} y={t[1] + 0.6} font-size={fs * 0.7} text-anchor="middle" fill="#333">{o.tag}</text>}</g>;
-              })}
+              {buildingCores(e, bi).map((cd) => <CoreDraw cd={cd} T={T} k={k} fs={fs} />)}
+              {plans[bi]?.openings.map((o) => <OpeningDraw o={o} T={T} k={k} fs={fs} />)}
               {/* overall dimensions: along the bottom and up the right */}
               {(() => {
                 let a = Infinity, c = -Infinity, lo = Infinity, hi = -Infinity;
                 for (const q of outer) for (let i = 0; i < q.length; i += 2) { a = Math.min(a, q[i]); c = Math.max(c, q[i]); lo = Math.min(lo, q[i + 1]); hi = Math.max(hi, q[i + 1]); }
                 if (!Number.isFinite(a)) return null;
+                // the section line A–A: across the building through its first core, looking up the sheet
+                const cz = b.cores[0] ? mid(b.cores[0])[1] : (lo + hi) / 2;
+                const sa = T(a - 3, cz), sb = T(c + 3, cz);
                 return <g>
                   <Dim a={T(a, lo)} b={T(c, lo)} label={`${f2(c - a)} M`} off={7} color="#111" />
                   <Dim a={T(c, hi)} b={T(c, lo)} label={`${f2(hi - lo)} M`} off={-7} color="#111" />
+                  {bi === 0 && <g stroke="#c62828" fill="#c62828">
+                    <line x1={sa[0]} y1={sa[1]} x2={sb[0]} y2={sb[1]} stroke-width="0.3" stroke-dasharray="6 1.5 1 1.5" />
+                    {[sa, sb].map((p) => <g><path d={`M${p[0] - 1.6} ${p[1]}L${p[0] + 1.6} ${p[1]}L${p[0]} ${p[1] - 3}Z`} stroke="none" /><text x={p[0]} y={p[1] + 3.6} font-size="2.8" font-weight="700" text-anchor="middle" stroke="none">A</text></g>)}
+                  </g>}
                 </g>;
               })()}
             </g>
@@ -494,8 +584,9 @@ function FloorPlan({ e, rooms, no, total }: { e: Evaluated; rooms: FlatRooms[][]
         <text x={AREA.x} y={AREA.y + 4} font-weight="700">TYPICAL FLOOR</text>
         <text x={AREA.x} y={AREA.y + 8}>{d.buildings.map((b, i) => `${letter(i)}: ${b.laid ? `${b.repeats ?? 1} of ${b.floors} floors (the rest on its floor plans)` : `${b.floors} floors`}`).join(' · ')}</text>
         {shops && shops.removedFlats > 0 && <text x={AREA.x} y={AREA.y + 12}>* shops instead on the lower floors</text>}
-        <text x={AREA.x} y={AREA.y + 16} fill="#1b4fd8">Windows (blue), doors (brown); tags as the door and window schedule</text>
-        {roomsShown && <text x={AREA.x} y={AREA.y + 20} fill="#555">Rooms with their carpet area (m²); in red, a room under its minimum size</text>}
+        <text x={AREA.x} y={AREA.y + 16} fill="#1b4fd8">Windows (blue), doors with their swing (brown); tags as the door and window schedule</text>
+        {roomsShown && <text x={AREA.x} y={AREA.y + 20} fill="#555">Rooms: length × width (m) and carpet area; in red, a room under its minimum size</text>}
+        <text x={AREA.x} y={AREA.y + 24} fill="#555">Walls 230 mm outside and between flats, 115 mm inside. Stairs: R = risers a floor, 175 mm; treads 250 mm.</text>
       </g>
       <North x={AREA.x + AREA.w - 8} y={AREA.y + 12} />
       <ScaleBar x={AREA.x} y={AREA.y + AREA.h - 6} k={k} scale={scale} />
@@ -519,7 +610,7 @@ function Elevation({ e, no, total }: { e: Evaluated; no: number; total: number }
     <Frame e={e} title="Elevation" no={no} total={total} scale={`1:${scale}`}>
       <line x1={AREA.x} y1={gy} x2={AREA.x + AREA.w} y2={gy} stroke="#111" stroke-width="0.6" />
       <text x={AREA.x} y={gy + 4} font-size="2.4">GROUND LEVEL ±0.00</text>
-      {r.rules.maxH > 0 && r.rules.maxH < 400 && <g><line x1={AREA.x} y1={Y(r.rules.maxH)} x2={AREA.x + AREA.w} y2={Y(r.rules.maxH)} stroke="#c62828" stroke-width="0.25" stroke-dasharray="3 1.5" /><text x={AREA.x + AREA.w} y={Y(r.rules.maxH) - 1} font-size="2.2" fill="#c62828" text-anchor="end">{`HEIGHT LIMIT +${f2(r.rules.maxH)}`}</text></g>}
+      {r.rules.maxH > 0 && Y(r.rules.maxH) > AREA.y + 14 && <g><line x1={AREA.x} y1={Y(r.rules.maxH)} x2={AREA.x + AREA.w} y2={Y(r.rules.maxH)} stroke="#c62828" stroke-width="0.25" stroke-dasharray="3 1.5" /><text x={AREA.x + AREA.w} y={Y(r.rules.maxH) - 1} font-size="2.2" fill="#c62828" text-anchor="end">{`HEIGHT LIMIT +${f2(r.rules.maxH)}`}</text></g>}
       {d.buildings.map((b, bi) => {
         const { x, w } = placed[bi], top = (under + b.floors) * fh;
         if (b.laid) {
@@ -565,6 +656,135 @@ function Elevation({ e, no, total }: { e: Evaluated; no: number; total: number }
       })}
       <text x={AREA.x} y={AREA.y + 4} font-size="2.6" font-weight="700">FRONT ELEVATION (SCHEMATIC)</text>
       <text x={AREA.x} y={AREA.y + 8} font-size="2.4">{`Height limit here ${f2(r.rules.maxH)} m. Heights to the terrace; parapet 1.0 m, lift room 3.0 m over.`}</text>
+      <ScaleBar x={AREA.x + AREA.w - 50} y={AREA.y + 6} k={k} scale={scale} />
+    </Frame>
+  );
+}
+
+/** the parking levels with a plan of their own (the stilt, podium decks, basements), alike basements together */
+type Lvl = Evaluated['d']['parking']['levels'][number];
+function parkingGroups(e: Evaluated): { title: string; lv: Lvl; n: number }[] {
+  const out: { title: string; lv: Lvl; n: number; a: number; z: number }[] = [];
+  let bn = 0, pn = 0;
+  for (const lv of e.d.parking.levels) {
+    if (!lv.bays.length || !(lv.kind === 'stilt' || lv.kind === 'podium' || lv.kind === 'basement')) continue;
+    const no = lv.kind === 'basement' ? ++bn : lv.kind === 'podium' ? ++pn : 0;
+    const last = out[out.length - 1];
+    if (last && last.lv.kind === lv.kind && last.lv.bays.length === lv.bays.length && lv.kind !== 'stilt') { last.z = no; last.n++; continue; }
+    out.push({ title: '', lv, n: 1, a: no, z: no });
+  }
+  for (const g of out) {
+    const name = g.lv.kind === 'stilt' ? 'Stilt' : g.lv.kind === 'podium' ? 'Podium' : 'Basement';
+    g.title = g.lv.kind === 'stilt' ? 'Stilt (parking) plan' : g.a === g.z ? `${name} ${g.a} plan` : `${name}s ${g.a}–${g.z} plan (each)`;
+  }
+  return out;
+}
+
+/** A parking level: its bays numbered, the ramp, the columns, exit stairs and the cores coming down. */
+function ParkingPlan({ e, title, lv, n, no, total }: { e: Evaluated; title: string; lv: Lvl; n: number; no: number; total: number }) {
+  const { d, r } = e, { ring } = outline(e.p);
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  const grow = (q: number[]) => { for (let i = 0; i < q.length; i += 2) { x0 = Math.min(x0, q[i]); x1 = Math.max(x1, q[i]); z0 = Math.min(z0, q[i + 1]); z1 = Math.max(z1, q[i + 1]); } };
+  grow(ring);
+  const { scale, k, T } = planFrame(x0 - 4, z0 - 4, x1 + 4, z1 + 4);
+  const fs = Math.min(2.6, Math.max(1.2, 0.9 * k));
+  const below = lv.kind === 'basement';
+  const [bl, bw] = lv.bays.length ? dims(lv.bays[0]) : [5, 2.5];
+  return (
+    <Frame e={e} title={title} no={no} total={total} scale={`1:${scale}`}>
+      <g>
+        <polygon points={pts(ring, T)} fill={below ? '#f6f5f1' : '#fbfaf6'} stroke="#111" stroke-width={below ? 0.25 : 0.5} stroke-dasharray={below ? '3 1.5' : undefined} />
+        {/* the buildings above: their outline (dashed below ground) */}
+        {d.buildings.map((b) => (b.laid ? [b.laid.outline] : b.quads).map((q) => <polygon points={pts(q, T)} fill={below ? 'none' : '#fff'} stroke="#111" stroke-width={below ? 0.25 : 0.6} stroke-dasharray={below ? '2 1' : undefined} />))}
+        {lv.bays.map((q, i) => { const [sx, sy] = T(...mid(q)); return <g><polygon points={pts(q, T)} fill="#fff" stroke="#555" stroke-width="0.18" />{k >= 1.8 && <text x={sx} y={sy + fs * 0.25} font-size={fs * 0.6} text-anchor="middle" fill="#333">{i + 1}</text>}</g>; })}
+        {lv.ramp && lv.ramp.length >= 6 && (() => { const [sx, sy] = T(...mid(lv.ramp)); return <g><polygon points={pts(lv.ramp, T)} fill="url(#hatch-open)" stroke="#111" stroke-width="0.35" /><rect x={sx - 12} y={sy - 2.8} width="24" height="4.4" fill="#fff" /><text x={sx} y={sy + 0.4} font-size="2.4" font-weight="700" text-anchor="middle">RAMP 1:8 UP</text></g>; })()}
+        {(lv.columns ?? []).map((q) => <polygon points={pts(q, T)} fill="#111" />)}
+        {(lv.stairs ?? []).map((q) => { const [sx, sy] = T(...mid(q)); return <g><polygon points={pts(q, T)} fill="#fff" stroke="#111" stroke-width="0.45" /><text x={sx} y={sy + 0.6} font-size={fs * 0.62} text-anchor="middle" font-weight="700">EXIT STAIR</text></g>; })}
+        {d.buildings.map((_, bi) => buildingCores(e, bi).map((cd) => <CoreDraw cd={cd} T={T} k={k} fs={fs} />))}
+        {r.lostRings.map((lr) => <polygon points={pts(lr, T)} fill="url(#hatch-dp)" stroke="#d33" stroke-width="0.25" />)}
+      </g>
+      <g font-size="2.6">
+        <text x={AREA.x} y={AREA.y + 4} font-weight="700">{title.toUpperCase()}</text>
+        <text x={AREA.x} y={AREA.y + 8}>{`${lv.bays.length} car bays${n > 1 ? ` on each of ${n} levels (${lv.bays.length * n} in all)` : ''} · bays ${f2(bl)} × ${f2(bw)} m · ${m2(lv.area)} of parking`}</text>
+        <text x={AREA.x} y={AREA.y + 12}>{`Parking for the whole scheme: ${d.parking.have} provided, ${d.parking.need} required`}</text>
+        <text x={AREA.x} y={AREA.y + 16} fill="#555">{below ? 'Below ground: the plot and the buildings above dashed. Free of FSI.' : 'Open on the sides, columns as the floors above. Free of FSI.'}</text>
+      </g>
+      <North x={AREA.x + AREA.w - 8} y={AREA.y + 12} />
+      <ScaleBar x={AREA.x} y={AREA.y + AREA.h - 6} k={k} scale={scale} />
+    </Frame>
+  );
+}
+
+/** Section A–A: across each building through its first core: the basements, the stilt, every floor's slab and
+ *  level, the walls, the stair flights rising floor to floor, the lift shaft with its pit and machine room, the
+ *  parapet; the heights dimensioned. */
+function Section({ e, no, total }: { e: Evaluated; no: number; total: number }) {
+  const { d, r } = e, fh0 = r.rules.floorH, under = d.under;
+  const nB = d.parking.levels.filter((l) => l.kind === 'basement').length, BH = 3.3, SLAB = 0.15, PIT = 1.5, MR = 3.0, PARA = 1.0;
+  const spans = d.buildings.map((b) => { let a = Infinity, c = -Infinity; for (const q of b.quads) for (let i = 0; i < q.length; i += 2) { a = Math.min(a, q[i]); c = Math.max(c, q[i]); } return [a, c]; });
+  let cursor = 0;
+  const placed = spans.map(([a, c]) => { const x = cursor; cursor += c - a + 10; return { x, w: c - a }; });
+  const levelsOf = (bi: number) => { const b = d.buildings[bi]; const hs = b.laid ? b.laid.floors.map((f) => f.h) : Array(b.floors).fill(fh0); return hs; };
+  const topOf = (bi: number) => under * fh0 + levelsOf(bi).reduce((s, h) => s + h, 0);
+  const totalW = Math.max(10, cursor - 10), up = Math.max(10, ...d.buildings.map((_, bi) => topOf(bi) + MR + 1)), down = nB * BH + PIT + 1;
+  const need = Math.max((totalW + 30) * 1000 / AREA.w, (up + down + 14) * 1000 / AREA.h);
+  const scale = SCALES.find((s) => s >= need) ?? 2000, k = 1000 / scale;
+  const gx = AREA.x + (AREA.w - totalW * k) / 2, gy = AREA.y + 14 + up * k;
+  const X = (m: number) => gx + m * k, Y = (m: number) => gy - m * k;
+  return (
+    <Frame e={e} title="Section A–A" no={no} total={total} scale={`1:${scale}`}>
+      <line x1={AREA.x} y1={gy} x2={AREA.x + AREA.w} y2={gy} stroke="#111" stroke-width="0.6" />
+      <text x={AREA.x} y={gy - 1} font-size="2.4">GROUND LEVEL ±0.00</text>
+      {d.buildings.map((b, bi) => {
+        const { x, w } = placed[bi], x0 = spans[bi][0];
+        const hs = levelsOf(bi), top = topOf(bi), bottom = -nB * BH;
+        const cd = buildingCores(e, bi)[0];
+        // the stair and the lift across the cut, by their x
+        const xr = (q: number[] | undefined) => { if (!q) return null; let a = Infinity, c = -Infinity; for (let i = 0; i < q.length; i += 2) { a = Math.min(a, q[i]); c = Math.max(c, q[i]); } return [a - x0 + x, c - x0 + x] as [number, number]; };
+        const st = xr(cd?.stairs[0]?.box), lf = xr(cd?.lifts[0]?.shaft);
+        const levels: { y: number; h: number; name: string }[] = [];
+        for (let i = nB; i >= 1; i--) levels.push({ y: -i * BH, h: BH, name: `BASEMENT ${i}` });
+        for (let i = 0; i < under; i++) levels.push({ y: i * fh0, h: fh0, name: i === 0 ? 'STILT' : `PODIUM ${i}` });
+        let yy = under * fh0;
+        hs.forEach((h, i) => { levels.push({ y: yy, h, name: `${i + 1}F` }); yy += h; });
+        return <g>
+          {/* walls: the outer two, full height */}
+          <rect x={X(x)} y={Y(top)} width={0.3 * k + 0.2} height={(top - bottom) * k} fill="#111" />
+          <rect x={X(x + w) - 0.3 * k - 0.2} y={Y(top)} width={0.3 * k + 0.2} height={(top - bottom) * k} fill="#111" />
+          {/* slabs, and each level's finished floor */}
+          {[...levels.map((l) => l.y), top].map((y) => <rect x={X(x)} y={Y(y)} width={w * k} height={Math.max(0.35, SLAB * k)} fill="#111" />)}
+          {nB > 0 && <rect x={X(x) - 1} y={Y(bottom)} width={w * k + 2} height={Math.max(0.5, 0.3 * k)} fill="#111" />}
+          {levels.map((l) => <text x={X(x) - 1.5} y={Y(l.y) - 0.6} font-size="1.9" text-anchor="end">{`${l.name} ${l.y >= 0 ? '+' : ''}${f2(l.y)}`}</text>)}
+          {/* the stair: flights rising half a floor each, to the landing and back */}
+          {st && levels.map((l) => {
+            const a = X(st[0] + 0.3), c = X(st[1] - 0.3), mid1 = Y(l.y + l.h / 2), y0 = Y(l.y), y1 = Y(l.y + l.h);
+            return <g stroke="#111" stroke-width="0.3" fill="none">
+              <polyline points={`${a},${y0} ${c - (c - a) * 0.3},${mid1} ${c},${mid1}`} />
+              <polyline points={`${c - (c - a) * 0.3},${mid1} ${a + (c - a) * 0.0},${y1}`} stroke-dasharray="1 0.8" />
+            </g>;
+          })}
+          {st && <text x={(X(st[0]) + X(st[1])) / 2} y={Y(top) - 1.2} font-size="2" text-anchor="middle" font-weight="700">STAIR</text>}
+          {/* the lift: the shaft from its pit to the machine room */}
+          {lf && <g>
+            <rect x={X(lf[0])} y={Y(top + MR)} width={(lf[1] - lf[0]) * k} height={(top + MR - (bottom - PIT)) * k} fill="none" stroke="#111" stroke-width="0.35" />
+            <rect x={X(lf[0])} y={Y(top + MR)} width={(lf[1] - lf[0]) * k} height={MR * k} fill="#e6e3dc" stroke="#111" stroke-width="0.35" />
+            <text x={X(lf[1]) + 1} y={Y(top + MR / 2) + 0.7} font-size="1.8">{`LIFT MACHINE ROOM ${f2(MR)}`}</text>
+            <rect x={X(lf[0])} y={Y(bottom)} width={(lf[1] - lf[0]) * k} height={PIT * k} fill="url(#hatch-dp)" stroke="#111" stroke-width="0.3" />
+            <text x={X(lf[1]) + 1} y={Y(bottom - PIT / 2) + 0.7} font-size="1.8">{`LIFT PIT ${f2(PIT)}`}</text>
+            <text x={(X(lf[0]) + X(lf[1])) / 2} y={Y(top / 2)} font-size="2" text-anchor="middle" font-weight="700" transform={`rotate(-90 ${(X(lf[0]) + X(lf[1])) / 2} ${Y(top / 2)})`}>LIFT SHAFT</text>
+          </g>}
+          {/* the parapet */}
+          <rect x={X(x)} y={Y(top + PARA)} width={0.25 * k + 0.2} height={PARA * k} fill="#111" />
+          <rect x={X(x + w) - 0.25 * k - 0.2} y={Y(top + PARA)} width={0.25 * k + 0.2} height={PARA * k} fill="#111" />
+          {/* heights */}
+          <Dim a={[X(x + w) + 8, Y(0)]} b={[X(x + w) + 8, Y(top)]} label={`${f2(top)} M`} />
+          {nB > 0 && <Dim a={[X(x + w) + 8, Y(bottom)]} b={[X(x + w) + 8, Y(0)]} label={`${f2(-bottom)} M`} />}
+          {levels.filter((l) => l.y >= 0).slice(0, 1).map((l) => <Dim a={[X(x + w) + 3, Y(l.y)]} b={[X(x + w) + 3, Y(l.y + l.h)]} label={`${f2(l.h)}`} />)}
+          <text x={X(x + w / 2)} y={Y(bottom - PIT) + 6} font-size="3" font-weight="700" text-anchor="middle">{`BUILDING ${letter(bi)}`}</text>
+        </g>;
+      })}
+      <text x={AREA.x} y={AREA.y + 4} font-size="2.6" font-weight="700">SECTION A–A (THROUGH THE STAIR AND LIFT)</text>
+      <text x={AREA.x} y={AREA.y + 8} font-size="2.3">{`Slabs ${SLAB * 1000} mm; floor to floor ${f2(fh0)} m${nB ? `, basements ${f2(BH)} m` : ''}; parapet ${f2(PARA)} m; lift pit ${f2(PIT)} m and machine room ${f2(MR)} m (as assumed). Section line on the floor plan.`}</text>
       <ScaleBar x={AREA.x + AREA.w - 50} y={AREA.y + 6} k={k} scale={scale} />
     </Frame>
   );
@@ -719,10 +939,10 @@ function formedGroups(e: Evaluated, bi: number): FloorGroup[] {
   for (let i = 1, s0 = 0; i <= L.floors.length; i++) if (i === L.floors.length || sig(i) !== sig(s0)) { out.push({ a: e.d.under + s0, z: e.d.under + i - 1, fi: s0, kind: floorKind(L.floors[s0], b.use), area: L.floors[s0].area }); s0 = i; }
   return out;
 }
-/** a sheet per formed building, at most twelve plans to a sheet */
+/** a sheet per formed building, at most four plans to a sheet (so they stay at a workable scale) */
 function formedSheets(e: Evaluated): { bi: number; groups: FloorGroup[] }[] {
   const out: { bi: number; groups: FloorGroup[] }[] = [];
-  e.d.buildings.forEach((_, bi) => { const g = formedGroups(e, bi); for (let i = 0; i < g.length; i += 12) out.push({ bi, groups: g.slice(i, i + 12) }); });
+  e.d.buildings.forEach((_, bi) => { const g = formedGroups(e, bi); for (let i = 0; i < g.length; i += 4) out.push({ bi, groups: g.slice(i, i + 4) }); });
   return out;
 }
 
@@ -747,14 +967,14 @@ function FormedPlans({ e, bi, groups, no, total }: { e: Evaluated; bi: number; g
             <polygon points={pts(u.ring, T)} fill={UNIT_COLOR[u.t]} fill-opacity="0.22" stroke="#111" stroke-width="0.25" />
             {fr.k >= 1 && <text x={sx} y={sy} font-size={fs} text-anchor="middle">{u.t === 3 ? `${f2(u.carpet)} m²` : UNIT_LABEL[u.t]}</text>}
           </g>; })}
-          {b.cores.map((c) => <polygon points={pts(c, T)} fill="#bbb" stroke="#111" stroke-width="0.3" />)}
+          {g.kind === 'parking' ? b.cores.map((c) => <polygon points={pts(c, T)} fill="#bbb" stroke="#111" stroke-width="0.3" />) : buildingCores(e, bi).map((cd) => <CoreDraw cd={cd} T={T} k={fr.k} fs={fs} />)}
           <text x={ox} y={oy + ch - 6} font-size="2.6" font-weight="700">{`${levelsName(g.a, g.z)} · ${USE_LABEL[g.kind].toUpperCase()}`}</text>
           <text x={ox} y={oy + ch - 2.8} font-size="2.2">{`${f2(f.area)} m² a floor · ${f.units.length} unit${f.units.length === 1 ? '' : 's'} · ${f2(f.h)} m floor to floor`}</text>
         </g>;
       })}
       <text x={AREA.x} y={AREA.y + 4} font-size="2.6" font-weight="700">{`BUILDING ${letter(bi)}: EVERY DISTINCT FLOOR (LEVEL 0 THE GROUND)`}</text>
       <North x={AREA.x + AREA.w - 8} y={AREA.y + 12} />
-      <ScaleBar x={AREA.x} y={AREA.y + AREA.h - 2} k={fr.k} scale={fr.scale} />
+      <ScaleBar x={AREA.x + AREA.w - 70} y={AREA.y + 4} k={fr.k} scale={fr.scale} />
     </Frame>
   );
 }
@@ -771,8 +991,10 @@ export function sheetDefs({ e, checks, rooms }: SetInput): SheetDef[] {
     { title: 'Typical floor plan', draw: (no, total) => <FloorPlan e={e} rooms={rooms} no={no} total={total} /> },
   ];
   formedSheets(e).forEach((x) => list.push({ title: `Floor plans, building ${letter(x.bi)}`, draw: (no, total) => <FormedPlans e={e} bi={x.bi} groups={x.groups} no={no} total={total} /> }));
+  parkingGroups(e).forEach((g) => list.push({ title: g.title, draw: (no, total) => <ParkingPlan e={e} title={g.title} lv={g.lv} n={g.n} no={no} total={total} /> }));
   list.push(
     { title: 'Elevation', draw: (no, total) => <Elevation e={e} no={no} total={total} /> },
+    ...(e.d.buildings.length ? [{ title: 'Section A–A', draw: (no: number, total: number) => <Section e={e} no={no} total={total} /> }] : []),
     { title: 'Area statement', draw: (no, total) => <AreaStatement e={e} no={no} total={total} /> },
   );
   const tables = (title: string, heading: string, pages: Placed[][]) => pages.forEach((page, i) => list.push({ title: pages.length > 1 ? `${title} (${i + 1} of ${pages.length})` : title, draw: (no, total) => <TableSheet e={e} title={title} heading={i ? `${heading} (continued)` : heading} page={page} no={no} total={total} /> }));
