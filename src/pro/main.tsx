@@ -32,7 +32,7 @@ import { encodeShare, decodeShare } from './share';
 import { exploreOptions } from './options';
 import { parseBrief, runBrief } from './brief';
 import { Sheets, SHEET_CSS } from './drawings';
-import { ApproveStep, ExploreStep, MoneyStep, STEPS, type Step, type StepProps } from './steps';
+import { ApproveStep, ExploreStep, MoneyStep, PdfButton, STEPS, type Step, type StepProps } from './steps';
 import { SchemeStep, SiteStep2 } from './sitePanels';
 import { DesignSystemStep } from './designStep';
 import { groundAt } from './terrain';
@@ -369,8 +369,8 @@ function App() {
       {dialog === 'drawings' && (
         <div class="sheets-wrap" role="dialog" aria-label="Drawing set">
           <style>{SHEET_CSS}</style>
-          <div class="sheets-bar"><b>Drawing set · {p.name}</b><span class="gap" /><Btn kind="primary" icon="print" onClick={() => print()}>Print or save as PDF</Btn><Btn icon="x" onClick={() => setDialog(null)}>Close</Btn></div>
-          <Sheets e={e} />
+          <div class="sheets-bar"><b>Drawing set · {p.name}</b><span class="gap" /><PdfButton p={p} e={e} checks={checks} rooms={rooms} toast={toast} /><Btn icon="print" onClick={() => print()}>Print</Btn><Btn icon="x" onClick={() => setDialog(null)}>Close</Btn></div>
+          <Sheets e={e} checks={checks} rooms={rooms} />
         </div>
       )}
     </div>

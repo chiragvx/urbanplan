@@ -247,6 +247,14 @@ details.chk.info summary .ico { color: var(--up-muted); }
 .export:hover { border-color: var(--up-ink); }
 .export .ico { grid-row: span 2; color: var(--up-ink); }
 .export b { font-size: 13.5px; } .export small { color: var(--up-muted); font-size: 12px; }
+.export.main { background: var(--up-ink); border-color: var(--up-ink); color: var(--up-paper); padding: 14px; }
+.export.main:hover:not(:disabled) { background: var(--up-ink-2); }
+.export.main .ico { color: var(--up-paper); }
+.export.main small { color: var(--up-paper); opacity: .72; }
+.export.main .dz { grid-row: span 2; width: 18px; height: 18px; }
+.export.main:disabled { cursor: progress; }
+.export-side { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 2px 2px 0; }
+.export-side .linkbtn { font-size: 12.5px; color: var(--up-ink-2); }
 .nocs, .docs { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .nocs li, .docs li { display: flex; gap: 10px; align-items: flex-start; padding: 7px 0; border-bottom: 1px dashed var(--up-line); font-size: 12.5px; color: var(--up-muted); }
 .nocs li .ico { margin-top: 2px; }

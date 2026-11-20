@@ -15,6 +15,7 @@ import { DEAL_LABEL, DEFAULT_DEAL, type Deal, type DealKind, type DealResult } f
 import { scrutinySummary, type Check, type CheckStatus } from './scrutiny';
 import { documents, fees, nocs, permissionOf, stages, PERMISSION_LABEL, PERMISSION_HINT, type PermissionKind } from './approvals';
 import { predcrDxf } from './dxf';
+import { downloadSet, sheetDefs } from './drawings';
 import { ROOM_COLOR, type FlatRooms } from './rooms';
 import { exploreOptions, type OptionRow } from './options';
 import { parseScreen, screen, screenCsv, type ScreenResult } from './screen';
@@ -240,7 +241,28 @@ function CashChart({ flow, cum, months }: { flow: number[]; cum: number[]; month
 
 // ================================================================ approval
 const STATUS_ICON: Record<CheckStatus, string> = { pass: 'check', fail: 'x', warn: 'warn', info: 'info' };
-export function ApproveStep({ p, e, up, checks, openDrawings, toast }: StepProps) {
+/** The drawing set and report as a PDF: drawn off screen and saved, with how many sheets it holds. */
+export function PdfButton({ p, e, checks, rooms, toast, big }: { p: ProProject; e: Evaluated; checks: Check[]; rooms: FlatRooms[][]; toast: (s: string) => void; big?: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const n = useMemo(() => sheetDefs({ e, checks, rooms }).length, [e, checks, rooms]);
+  const go = async () => {
+    if (busy) return;
+    setBusy(true);
+    try { await downloadSet({ e, checks, rooms }, `${slug(p.name)}-drawings`); toast(`PDF saved: ${n} A3 sheets.`); }
+    catch (err) { console.error(err); toast('Could not make the PDF. Try Print instead.'); }
+    finally { setBusy(false); }
+  };
+  if (!big) return <Btn kind="primary" icon="down" onClick={() => void go()} disabled={busy}>{busy ? 'Making the PDF…' : 'Download PDF'}</Btn>;
+  return (
+    <button type="button" class="export main" onClick={() => void go()} disabled={busy} aria-busy={busy}>
+      {busy ? <Dither class="dz" cell={2} /> : <Icon n="down" />}
+      <b>{busy ? 'Making the PDF…' : 'Download PDF'}</b>
+      <small>{n} A3 sheets: plans, area statement, schedules, scrutiny, NOCs and fees</small>
+    </button>
+  );
+}
+
+export function ApproveStep({ p, e, up, checks, rooms, openDrawings, toast }: StepProps) {
   const sum = scrutinySummary(checks);
   const [only, setOnly] = useState<'all' | 'issues'>('issues');
   const ex = p.approval ?? {};
@@ -277,10 +299,13 @@ export function ApproveStep({ p, e, up, checks, openDrawings, toast }: StepProps
         <ol class="stages">{steps.map((x) => <li><b>{x.title}</b><small>{x.note}</small></li>)}</ol>
       </Section>
 
-      <Section title="Drawings and files" sub="For an architect to check, sign and submit.">
+      <Section title="Drawings and report" sub="For an architect to check, sign and submit.">
         <div class="exports">
-          <button type="button" class="export" onClick={openDrawings}><Icon n="print" /><b>Drawing set</b><small>Plans, section, area statement · PDF (A3)</small></button>
-          <button type="button" class="export" onClick={() => { download(`${slug(p.name)}-predcr.dxf`, predcrDxf(e), 'application/dxf'); toast('DXF saved on PreDCR layers. Open it in PreDCR, mark stairs, lifts and FSI, then run Verify.'); }}><Icon n="down" /><b>PreDCR DXF</b><small>Site plan, floor plans and section on PreDCR’s layers.</small></button>
+          <PdfButton p={p} e={e} checks={checks} rooms={rooms} toast={toast} big />
+          <div class="export-side">
+            <button type="button" class="linkbtn" onClick={openDrawings}><Icon n="print" size={15} />Preview sheets</button>
+            <button type="button" class="linkbtn" data-tip="Site plan, floor plans and section on PreDCR’s layers. Opens in AutoCAD and PreDCR." onClick={() => { download(`${slug(p.name)}-predcr.dxf`, predcrDxf(e), 'application/dxf'); toast('DXF saved on PreDCR layers. Open it in PreDCR or AutoCAD, mark stairs, lifts and FSI, then run Verify.'); }}><Icon n="down" size={15} />CAD file (DXF)</button>
+          </div>
         </div>
       </Section>
 
