@@ -1,0 +1,9 @@
+- [Editor vision](editor-vision.md) — UrbanPlan (ex-Pune Remix) 2D/3D map editor; repo github.com/chiragvx/urbanplan, "prod" = push main; keep it city-generic
+- [Site Studio direction](site-studio-direction.md) — max-capacity realistic site, road what-ifs applied on close, slabs (Mumbai towers)
+- [UX direction](ux-direction.md) — rules flag never block, auto bridge/tunnel per segment, open plots for any use, icons over text
+- [DP vector rollout](dp-vector-rollout.md) — city-wide run ON HOLD for a quality push (gold tiles, re-registration) before mass run
+- [Monetization: DP report](monetization-dp-report.md) — citizens not gov; free indexed DP report pages, email-gated free PDF as the lead funnel
+- [Bhunaksha cadastre](bhunaksha-cadastre.md) — MahaBhunakasha plot polygons per village (UTM 43N); harvest cleared by user, no permission sought; never store owner names
+- [Pro platform direction](pro-platform-direction.md) — existing editor = free "simple" version; TestFit-like full platform separate, same brand
+- [Pro flow restructure](pro-flow-restructure.md) — Site→Design system→Scheme→Money; draw on main view; Fill-the-plot with controls; landing waits
+- [Platform dashboard](platform-dashboard.md) — /dashboard/ (src/dash) live; 0006 migration run 2026-11-20; /app/ editor deliberately unlinked
