@@ -17,6 +17,7 @@ import { PRESETS } from '../pro/design';
 import * as Lib from '../pro/designLibrary';
 import { clone } from '../pro/design';
 import { Builder } from './builder';
+import { dropVersions } from '../pro/designVersions';
 import { CITIES } from '../pro/project';
 import { I } from './icons';
 import * as D from './data';
@@ -448,7 +449,7 @@ function Designs({ sub }: { sub: string }) {
                 { label: 'Open in the builder', icon: 'edit', onSelect: () => go(`designs/${m.id}`) },
                 ...(libAny.rename ? [{ label: 'Rename', icon: 'edit', onSelect: () => setRen(m) }] : []),
                 { label: 'Download', icon: 'down', onSelect: () => download(`${m.name}.design.json`, JSON.stringify(m, null, 1), 'application/json') },
-                ...(libAny.remove ? [{ label: 'Delete', icon: 'trash', onSelect: () => void act(async () => { await libAny.remove!(m.id); reload(); }, 'Deleted.') }] : []),
+                ...(libAny.remove ? [{ label: 'Delete', icon: 'trash', onSelect: () => void act(async () => { await libAny.remove!(m.id); await dropVersions(m.id); reload(); }, 'Deleted.') }] : []),
               ]} /></span>
             </div>))}</div>
         )}
