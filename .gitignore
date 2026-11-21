@@ -12,3 +12,4 @@ tools/dev/*.json
 .env.*.local
 film/out/
 film/tts/
+render-out/

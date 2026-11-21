@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { SITE_URL_FALLBACK } from './src/site/brand';
 import { filmPlugin } from './tools/film/vite-film';
+import { renderPlugin } from './tools/render/vite-render';
 
 /**
  * Dev-server endpoints so the editor can keep maps as files in the project:
@@ -162,7 +163,7 @@ function sitePlugin(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [mapsPlugin(), sitePlugin(), filmPlugin()],
+  plugins: [mapsPlugin(), sitePlugin(), filmPlugin(), renderPlugin()],
   // osm2streets is a wasm-bindgen package; keep it out of dependency pre-bundling so its .wasm resolves cleanly
   optimizeDeps: { exclude: ['osm2streets-js'] },
   worker: { format: 'es' },

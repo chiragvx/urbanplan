@@ -339,3 +339,22 @@ Budget: no more than 150 KB gz added to the first load.
 - `src/render/engine.ts`: the reference for AgX, shadows on settle, dynamic resolution and `?perf`.
 - New modules in `src/pro/render/`: `pipeline`, `sky`, `shadows`, `pbr`, `textures`, `chunks`, `facade`, `glass`, `entourage`, `context`, `quality`, `still`, `perf`.
 - New tools in `tools/render/`: `shots.mjs`, `vite-render.ts`, `textures.mjs`.
+
+---
+
+## Status (2026-11-21): built
+
+| Phase | Done | Different from the plan |
+|---|---|---|
+| 1 Light and lens | `src/pro/render/pipeline.ts`, `sky.ts`, `shadows.ts`, `perf.ts`: GTAO, SMAA, night bloom, Neutral by day and AgX at night, fitted texel-snapped shadows re-rendered only on change, dielectric glass, merged ground, a "Render image" still, a `?perf` overlay, `proView.bench()` | three's own passes (GTAOPass, SMAAPass, UnrealBloomPass, OutputPass, SSAARenderPass), with no pmndrs or n8ao dependency. The Preetham sky is only the backdrop: its radiance is too strong and blue to light with, so the environment map comes from a measured gradient dome with a sun disc (`sky.ts`). |
+| 2 Real materials | `pbr.ts` (cached library: no more material leak), `textures.ts` (procedural maps at real module sizes: brick 230×75, tile, ashlar, plank, grooves, grain), world-projected UVs for instanced boxes, metre UVs on prisms, flats and formed buildings, `quality.ts` (tiers, GPU guess, step-down, Quality picker), road markings | Every texture is procedural. No ambientCG/KTX2 scans yet: no asset pipeline or downloads were needed. |
+| 3 Architectural geometry | `geo.ts` `cutFace`: openings cut into the faces with reveals by wall material; frames by kind (sliding, casement, fixed, louvre, transoms); sills; railings by kind (glass with posts, MS balusters, solid with coping); copings; chhajja drips; curtain-wall spandrels and transoms; level of detail for straight buildings' detail | No chamfered instance boxes. |
+| 4 Night, interiors, entourage | `glass.ts`: interior mapping behind every pane, lit rooms by hash and darkness with their own warmth, Fresnel; `entourage.ts`: the five species from `src/build/plants.ts`, cars in lots and on the street, people at entrances; additive wash glows | Cars and people are made in code, not CC0 models. Neighbouring buildings wait on the plot being placed on the map (no georeference yet), as the plan said. |
+| 5 Stills | `renderStill`: raster (32 samples a pixel offscreen, about 0.5 s at 1200×800) and path-traced (`three-gpu-pathtracer`, lazy, about 3.5 s for 24 samples at 480×320 on Intel UHD 630) with a progress bar and cancel | In the path tracer the instanced trees and cars are missing (not handled by its scene generator), and the sky is a procedural equirect. |
+| Verification | `tools/render/shots.mjs` (`npm run render:shots`): 9 reference stills (fit, street and top × day, low sun and night) and a benchmark through `?shots=<tier>`; pixelmatch against `tools/render/ref/<tier>/` | References are from the in-app browser (Intel UHD 630). Accept a fresh set on the machine that compares. |
+
+**Measured on the sample, standard tier, Intel UHD 630:**
+- Frames: p50 1.6–2.4 ms, p95 3.4–9 ms.
+- Load: 86–121 draw calls, 133–193k triangles.
+- Rebuild (`set()`): 8 ms.
+- No growth in geometries, textures or materials over 20 rebuilds.

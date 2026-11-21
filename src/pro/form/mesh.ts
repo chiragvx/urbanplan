@@ -200,18 +200,25 @@ export function loftPair(C: Canon, k: number, i: number, h: number): { A: Ring; 
 /** Triangles with their normals (and uvs, in metres), collected and turned into one BufferGeometry. */
 class Buf {
   p: number[] = []; n: number[] = []; uv: number[] = [];
-  private v(a: V3, na: V3, u: number, w: number) { this.p.push(a[0], a[1], a[2]); this.n.push(na[0], na[1], na[2]); this.uv.push(u, w); }
+  private v(a: V3, na: V3, uv: [number, number] | null) {
+    this.p.push(a[0], a[1], a[2]); this.n.push(na[0], na[1], na[2]);
+    // (no uv given: projected in metres, a wall along its run and up, a floor or roof in plan)
+    if (uv) this.uv.push(uv[0], uv[1]);
+    else if (Math.abs(na[1]) > 0.5) this.uv.push(a[0], a[2]);
+    else this.uv.push(-a[0] * na[2] + a[2] * na[0], a[1]);
+  }
   /** a triangle facing along its normals (the order is fixed to suit) */
-  tri(a: V3, b: V3, c: V3, na: V3, nb = na, nc = na, ua: [number, number] = [0, 0], ub: [number, number] = [0, 0], uc: [number, number] = [0, 0]) {
+  tri(a: V3, b: V3, c: V3, na: V3, nb = na, nc = na, ua: [number, number] | null = null, ub: [number, number] | null = null, uc: [number, number] | null = null) {
     const ex = b[0] - a[0], ey = b[1] - a[1], ez = b[2] - a[2], fx = c[0] - a[0], fy = c[1] - a[1], fz = c[2] - a[2];
     const gx = ey * fz - ez * fy, gy = ez * fx - ex * fz, gz = ex * fy - ey * fx;
     if (gx * gx + gy * gy + gz * gz < 1e-12) return;
-    if (gx * (na[0] + nb[0] + nc[0]) + gy * (na[1] + nb[1] + nc[1]) + gz * (na[2] + nb[2] + nc[2]) >= 0) { this.v(a, na, ua[0], ua[1]); this.v(b, nb, ub[0], ub[1]); this.v(c, nc, uc[0], uc[1]); }
-    else { this.v(a, na, ua[0], ua[1]); this.v(c, nc, uc[0], uc[1]); this.v(b, nb, ub[0], ub[1]); }
+    if (gx * (na[0] + nb[0] + nc[0]) + gy * (na[1] + nb[1] + nc[1]) + gz * (na[2] + nb[2] + nc[2]) >= 0) { this.v(a, na, ua); this.v(b, nb, ub); this.v(c, nc, uc); }
+    else { this.v(a, na, ua); this.v(c, nc, uc); this.v(b, nb, ub); }
   }
   /** a quad a b c d round its edge */
   quad(a: V3, b: V3, c: V3, d: V3, na: V3, nb: V3, nc: V3, nd: V3, uv?: number[]) {
-    const u = uv ?? [0, 0, 0, 0, 0, 0, 0, 0];
+    if (!uv) { this.tri(a, b, c, na, nb, nc); this.tri(a, c, d, na, nc, nd); return; }
+    const u = uv;
     this.tri(a, b, c, na, nb, nc, [u[0], u[1]], [u[2], u[3]], [u[4], u[5]]);
     this.tri(a, c, d, na, nc, nd, [u[0], u[1]], [u[4], u[5]], [u[6], u[7]]);
   }
@@ -469,12 +476,20 @@ function screenAlpha(): THREE.Texture {
   return (screenTex = t);
 }
 type MatKind = 'solid' | 'glass' | 'metal' | 'thin' | 'rail' | 'screen' | 'tint';
-function matOf(kind: MatKind, colour: string, env: THREE.Texture | null): THREE.Material {
+/** where the shaded view's shared materials come from (../render/pbr.ts, set by the scene): walls, metal and glass
+ *  then match the straight buildings', textures and all; unset, the plain ones below */
+type Resolver = (kind: MatKind | 'spandrel', colour: string, id?: string) => THREE.Material | null;
+let resolve: Resolver | null = null;
+export function setMaterialResolver(r: Resolver | null) { resolve = r; }
+function matOf(kind: MatKind | 'spandrel', colour: string, env: THREE.Texture | null, id?: string): THREE.Material {
+  const shared = resolve?.(kind, colour, id);
+  if (shared) return shared;
+  if (kind === 'spandrel') kind = 'glass';
   const k = `${kind}|${colour}|${env ? env.uuid : ''}`;
   let m = MATS.get(k);
   if (m) return m;
   const C = new THREE.Color(colour);
-  if (kind === 'glass') m = new THREE.MeshStandardMaterial({ color: C, roughness: 0.08, metalness: 0.75, envMap: env, envMapIntensity: 1.1 });
+  if (kind === 'glass') m = new THREE.MeshPhysicalMaterial({ color: C, roughness: 0.05, metalness: 0, ior: 1.52, envMap: env, envMapIntensity: 1.1 });
   else if (kind === 'metal') m = new THREE.MeshStandardMaterial({ color: C, roughness: 0.42, metalness: 0.55, envMap: env, envMapIntensity: 0.7 });
   else if (kind === 'thin') m = new THREE.MeshStandardMaterial({ color: C, roughness: 0.6, metalness: 0.2, side: THREE.DoubleSide, envMap: env, envMapIntensity: 0.5 });
   else if (kind === 'rail') m = new THREE.MeshStandardMaterial({ color: C, roughness: 0.05, metalness: 0.3, transparent: true, opacity: 0.32, side: THREE.DoubleSide, depthWrite: false, envMap: env });
@@ -495,6 +510,8 @@ export interface Look {
   zones?: { base: number; top: number; baseColour: string; topColour: string };
   /** a chhajja over each floor's glazing, how far it projects (m; 0 none) */
   chhajja?: number;
+  /** the materials (../materials.ts ids) of the wall, the accent and the base, for their textures */
+  ids?: { wall?: string; accent?: string; base?: string; roof?: string };
 }
 export interface BuildOpts {
   /** floors shown, the top one cut as a plan (null: all, with the roof) */
@@ -536,7 +553,7 @@ export function buildForm(L: FormLayout, look: Look, o: BuildOpts): Built {
   const F = L.floors, C = canonOf(L), env = o.env ?? null, skin = look.skin;
   const smoothCos = Math.cos(((25 + 35 * Math.max(0, Math.min(1, look.round))) * Math.PI) / 180);
   const B = {
-    wall: new Buf(), wallBase: new Buf(), wallTop: new Buf(), glass: new Buf(), slab: new Buf(), accent: new Buf(), thin: new Buf(), rail: new Buf(), screen: new Buf(), roof: new Buf(), core: new Buf(), shellScreen: new Buf(), shellThin: new Buf(),
+    wall: new Buf(), wallBase: new Buf(), wallTop: new Buf(), spandrel: new Buf(), glass: new Buf(), slab: new Buf(), accent: new Buf(), thin: new Buf(), rail: new Buf(), screen: new Buf(), roof: new Buf(), core: new Buf(), shellScreen: new Buf(), shellThin: new Buf(),
   };
   const fins = new Inst(), mull = new Inst(), shellFins = new Inst(), roofFins = new Inst(), cols = new Inst();
   const tints = new Map<number, Buf>();
@@ -606,6 +623,8 @@ export function buildForm(L: FormLayout, look: Look, o: BuildOpts): Built {
         const solid = glass < 0.05;
         vertical(mull, count(sp), solid ? 0.03 : 0.07, solid ? 0.025 : Math.max(0.06, Math.min(0.25, dep)), 0, false);
         if (!solid) band(B.accent, A, N, y - 0.06, y + 0.12, Math.max(0.05, Math.min(0.2, dep)), skinEdge, cum);
+        // (a spandrel over the slab, opaque glass to sill height, and a transom over it: a curtain wall's floor line)
+        if (!solid) { band(B.spandrel, A, N, y + 0.12, y + 0.9, 0.012, skinEdge, cum); band(B.accent, A, N, y + 0.9, y + 0.96, Math.max(0.04, Math.min(0.12, dep * 0.5)), skinEdge, cum); }
       } else if (pat === 'grid') {
         vertical(mull, count(Math.max(1.5, sp)), 0.35, Math.max(0.12, dep), 0, false);
         band(B.accent, A, N, y - 0.2, y + 0.3, Math.max(0.1, dep * 0.8), skinEdge, cum);
@@ -708,9 +727,10 @@ export function buildForm(L: FormLayout, look: Look, o: BuildOpts): Built {
   // into meshes: merged per material, instanced parts thinned by the level of detail
   const group = new THREE.Group(), parts: THREE.InstancedMesh[] = [];
   const add = (b: Buf, m: THREE.Material, cast = true) => { if (b.empty) return; const x = new THREE.Mesh(b.geo(), m); x.castShadow = cast; x.receiveShadow = true; group.add(x); };
-  add(B.wall, matOf('solid', look.wall, env)); add(B.wallBase, matOf('solid', look.zones?.baseColour ?? look.wall, env)); add(B.wallTop, matOf('solid', look.zones?.topColour ?? look.wall, env)); add(B.glass, matOf('glass', look.glass, env)); add(B.slab, matOf('solid', look.slab, env));
+  add(B.wall, matOf('solid', look.wall, env, look.ids?.wall)); add(B.wallBase, matOf('solid', look.zones?.baseColour ?? look.wall, env, look.ids?.base)); add(B.wallTop, matOf('solid', look.zones?.topColour ?? look.wall, env, look.ids?.accent));
+  add(B.spandrel, matOf('spandrel', look.glass, env)); add(B.glass, matOf('glass', look.glass, env)); add(B.slab, matOf('solid', look.slab, env));
   add(B.accent, matOf('metal', look.accent, env)); add(B.thin, matOf('thin', look.accent, env)); add(B.rail, matOf('rail', '#cfe0e8', env), false);
-  add(B.screen, matOf('screen', look.accent, env)); add(B.roof, matOf('solid', look.roof, env)); add(B.core, matOf('solid', look.core, env));
+  add(B.screen, matOf('screen', look.accent, env)); add(B.roof, matOf('solid', look.roof, env, look.ids?.roof)); add(B.core, matOf('solid', look.core, env));
   add(B.shellScreen, matOf('screen', look.wall, env)); add(B.shellThin, matOf('thin', look.wall, env));
   for (const [t, b] of tints) add(b, matOf('tint', UNIT_COLOR[t] ?? '#ccc', null), false);
   for (const [I, m] of [[fins, matOf('metal', look.accent, env)], [mull, matOf('metal', look.frame, env)], [shellFins, matOf('solid', look.wall, env)], [roofFins, matOf('metal', look.accent, env)], [cols, matOf('solid', look.base, env)]] as [Inst, THREE.Material][]) {

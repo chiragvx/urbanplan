@@ -14,6 +14,7 @@ import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import '../theme/tokens.css';
 import './pro.css';
+import { TIERS, type Tier } from './render/quality';
 import * as designLibrary from './designLibrary';
 import { presetOf } from './design';
 import { DEFAULT_PROJECT, outline, roadLines, type ProProject } from './project';
@@ -49,6 +50,8 @@ const store = {
 };
 const loadP = (): ProProject => { const p = store.get<ProProject | null>(KEY, null); return p?.v === 1 ? { ...DEFAULT_PROJECT, ...p } : DEFAULT_PROJECT; };
 const BASE = import.meta.env.BASE_URL;
+/** the address as the page was opened (the start code rewrites it to ?local) */
+const BOOT = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
 const hhmm = (d = new Date()) => d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 const ago = (iso: string) => `${new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}, ${hhmm(new Date(iso))}`;
 const hm = (h: number) => `${Math.floor(h)}:${String(Math.round((h % 1) * 60)).padStart(2, '0')}`;
@@ -231,6 +234,45 @@ function App() {
   };
   useEffect(applySun, [sun, p.city, p.north]);
   const cam = (k: CameraView) => view.current?.look(k);
+  // (the 3D's quality tier, and rendering an image of the view: ./render)
+  const [tier, setTierS] = useState<Exclude<Tier, 'still'>>('standard');
+  useEffect(() => { const v = view.current; if (v) { setTierS(v.tier); v.onTier = (t) => { setTierS(t); toast(`The 3D stepped down to ${t} quality to keep it smooth.`); }; } }, []);
+  // (?shots=<tier>: the reference shots for tools/render/shots.mjs: each view rendered as a still and sent to the dev
+  // server, then the frame-time benchmark)
+  useEffect(() => {
+    const set = BOOT.get('shots');
+    if (!set || !/^(draft|standard|high)$/.test(set)) return;
+    const t = window.setTimeout(async () => {
+      const v = view.current; if (!v) return;
+      v.setMode('shaded'); v.setTier(set as Exclude<Tier, 'still'>, false);
+      const suns: [string, [number, number, number] | null][] = [['day', null], ['low', [-0.7, 0.2, 0.68]], ['night', [0.3, -0.4, 0.45]]];
+      const t0 = performance.now();
+      for (const [sn, dir] of suns) for (const c of ['fit', 'street', 'top'] as CameraView[]) {
+        v.look(c); v.setSun(dir);
+        await new Promise((ok) => setTimeout(ok, 600));
+        const blob = await v.renderStill({ width: 1600, height: 1000, quality: 'raster' });
+        await fetch(`/__render/shot?set=${set}&name=${c}-${sn}`, { method: 'POST', body: blob });
+      }
+      v.look('fit'); v.setSun(null);
+      const bench = await v.bench(300);
+      await fetch(`/__render/done?set=${set}`, { method: 'POST', body: JSON.stringify({ seconds: Math.round((performance.now() - t0) / 1000), tier: set, bench }) });
+    }, 3000);
+    return () => clearTimeout(t);
+  }, []);
+  const [still, setStill] = useState<{ kind: 'raster' | 'path'; f: number; stop: AbortController } | null>(null);
+  const renderImage = async (kind: 'raster' | 'path') => {
+    const v = view.current; if (!v || still) return;
+    const stop = new AbortController();
+    setStill({ kind, f: 0, stop });
+    try {
+      const W = kind === 'path' ? 1600 : 2400, H = Math.round(W / Math.max(0.5, (canvas.current?.clientWidth || 16) / (canvas.current?.clientHeight || 9)));
+      const blob = await v.renderStill({ width: W, height: H, quality: kind, samples: 160, signal: stop.signal, onProgress: (f) => setStill((x) => (x ? { ...x, f } : x)) });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${(p.name || 'urbanplan').replace(/[^\w -]+/g, '')} ${kind === 'path' ? 'path-traced' : 'render'}.png`; a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      toast('Image saved.');
+    } catch (e) { if ((e as Error).name !== 'AbortError') toast(`Couldn’t render the image: ${(e as Error).message}`); }
+    finally { setStill(null); }
+  };
 
   // ---------- keys ----------
   useEffect(() => {
@@ -371,8 +413,16 @@ function App() {
               <b class="time" aria-hidden="true">{hm(sun.hour)}</b>
             </>}
           </div>
+          <div class="tgroup">
+            {(mode === 'shaded' || xr !== null) && <Select<Exclude<Tier, 'still'>> size="sm" quiet aria-label="Quality" value={tier} onChange={(t) => { setTierS(t); view.current?.setTier(t); }} options={TIERS} />}
+            <Menu label="Render an image" icon="camera" items={[
+              { label: 'Image (a few seconds)', icon: 'down', onSelect: () => void renderImage('raster') },
+              { label: 'Path-traced image (about a minute)', icon: 'spark', onSelect: () => void renderImage('path') },
+            ]} />
+          </div>
         </div>
         {xr !== null && <div class="legend floating">{[0, 1, 2].map((t) => <span><i style={`background:${UNIT_COLOR[t]}`} />{UNIT_LABEL[t]}</span>)}{(['living', 'bed', 'kitchen', 'toilet'] as const).map((k) => <span><i style={`background:${ROOM_COLOR[k]}`} />{k === 'bed' ? 'bedroom' : k}</span>)}</div>}
+        {still && <div class="still-prog" role="status"><span>{still.kind === 'path' ? 'Path tracing' : 'Rendering'} · {Math.round(still.f * 100)}%</span><i style={`width:${Math.round(still.f * 100)}%`} />{still.kind === 'path' && <button type="button" class="linkbtn" onClick={() => still.stop.abort()}>Cancel</button>}</div>}
         {hover && <div class="tip" style={`left:${hover.x + 14}px;top:${hover.y + 14}px`}><b>{hover.label}</b><span>{hover.size}</span><span>Floor {hover.floor}</span></div>}
       </main>
 

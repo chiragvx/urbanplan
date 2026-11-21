@@ -2,7 +2,7 @@
 // round-headed tree, a coconut palm with drooping fronds, the tall narrow ashoka that lines compound walls, and
 // shrubs. Each is one geometry at a canopy radius of 1 m (scaled per plant), trunks painted bark, leaves white so
 // the instance colour tints them.
-import * as THREE from 'three/webgpu';
+import * as THREE from 'three';
 
 const BARK = 0x6b5440, PALM_BARK = 0x8a7660;
 

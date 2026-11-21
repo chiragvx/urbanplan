@@ -622,3 +622,7 @@ li[aria-current="true"] > .bitem, li[aria-current="true"] > .fitem { border-colo
 .sil-svg .h:hover, .sil-svg .h.on { fill: var(--up-ink); }
 .sil-svg .h.mid { fill: var(--up-ink); }
 .sil-svg.dragging, .sil-svg.dragging .h { cursor: grabbing; }
+
+/* rendering an image: progress over the view */
+.still-prog { position: absolute; left: 50%; top: 64px; transform: translateX(-50%); z-index: 6; display: grid; grid-template-columns: auto auto; gap: 6px 12px; align-items: center; min-width: 240px; padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--up-surface) 90%, transparent); border: 1px solid var(--up-line); box-shadow: var(--up-shadow-sm); font-size: 12.5px; }
+.still-prog i { grid-column: 1 / -1; height: 3px; border-radius: 2px; background: var(--up-ink); transition: width .2s; }
