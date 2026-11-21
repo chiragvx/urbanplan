@@ -7,17 +7,16 @@
 // and the site's things, each the user's to place, shape and set: floors, mix, design system, its systems.
 import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
-import { UNIT_LABEL, type SiteElement } from '../doc/site';
+import { UNIT_LABEL } from '../doc/site';
 import { ACCESS, TYPOLOGIES, type Typology } from '../doc/optimise';
 import { CITIES, fillOf, outline, type EdgeRoad, type Fill, type ProBuilding } from './project';
 import { longestEdge } from './importPlot';
 import { presetOf, PRESETS } from './design';
 import { shopFloorsAllowed } from './mixed';
 import { buildModel, ifcLite, modelJson } from './model';
-import { ELEMENT_TOOLS, own, removed, type Tool } from './edit';
-import { Gallery } from './gallery';
+import { own } from './edit';
 import { ShapePanel } from './shapePanel';
-import { DEFAULT_LEVELS, FEATURES, featureOf, INTERNAL_WIDTHS, PLINTH_MIN, roadParts, roadWidths, type Levels, type SiteFeature } from './siteObjects';
+import { DEFAULT_LEVELS, featureOf, PLINTH_MIN, roadParts, roadWidths, type Levels } from './siteObjects';
 import { FindPlot, FlatPlan, ImportBox, slug, type StepProps } from './steps';
 import { Btn, download, Icon, Lines, Note, nf, Num, Row, Section, Seg, Select, Slider, sqft, Stat, Toggle } from './ui';
 import { SystemsPanel } from './systemsPanel';
@@ -38,14 +37,6 @@ function edgeFacing(ring: number[], k: number, north: number): string {
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 
 /** A row of tools: icon and word, the active one inverted. */
-function Tools({ items, tool, setTool, label }: { items: { t: Tool; label: string; icon: string }[]; tool: Tool; setTool: (t: Tool) => void; label: string }) {
-  const same = (a: Tool, b: Tool) => JSON.stringify(a) === JSON.stringify(b);
-  return (
-    <div class="toolgrid" role="group" aria-label={label}>
-      {items.map((x) => <button type="button" aria-pressed={same(x.t, tool)} onClick={() => setTool(same(x.t, tool) ? { k: 'select' } : x.t)}><Icon n={x.icon} size={16} /><span>{x.label}</span></button>)}
-    </div>
-  );
-}
 
 function Picked({ title, children, remove, copy }: { title: ComponentChildren; children?: ComponentChildren; remove?: () => void; copy?: () => void }) {
   return <div class="picked"><header><b>{title}</b><span>{copy && <Btn kind="quiet" icon="plus" title="Duplicate" onClick={copy} />}{remove && <Btn kind="quiet" icon="trash" title="Remove (Delete)" onClick={remove} />}</span></header>{children}</div>;
@@ -72,7 +63,6 @@ export function SiteStep2({ p, e, up, toast, tool, setTool, picked, pick }: Step
     else up({ shape: 'poly', ring: o.ring, edgeRoads: roads });
   };
   const fs = p.features ?? [];
-  const setF = (id: string, x: Partial<SiteFeature>) => up({ features: fs.map((f) => (f.id === id ? { ...f, ...x } : f)) });
   const fPicked = picked?.k === 'feature' ? fs.find((f) => f.id === picked.id) : undefined;
   // the ground off the city's terrain, where the plot has a real place
   const [reading, setReading] = useState(false);
@@ -148,22 +138,11 @@ export function SiteStep2({ p, e, up, toast, tool, setTool, picked, pick }: Step
         {L.slope >= 15 && <Note tone="warn">A steep plot ({nf(L.slope)}%): expect retaining walls and stepped floors, and a hill-slope check by the authority.</Note>}
       </Section>
 
-      <Section title="On the site" fold open={fs.length > 0 || tool.k === 'feature'} aside={<span class="sec-meta">{fs.length ? `${fs.length} marked` : 'none'}</span>} sub="What to build round. Click a tool, then the map.">
-        <Tools label="Draw on the site" tool={tool} setTool={setTool} items={FEATURES.map((f) => ({ t: { k: 'feature', kind: f.kind }, label: f.label, icon: f.icon }))} />
+      <Section title="On the site" fold open={fs.length > 0 || tool.k === 'feature'} aside={<span class="sec-meta">{fs.length ? `${fs.length} marked` : 'none'}</span>} sub="What to build round: draw it from the tools on the map's left edge (the tree), then drag its points and rings there.">
         {fs.length > 0 && <ul class="flist">{fs.map((f, i) => {
           const F = featureOf(f.kind), n = fs.slice(0, i).filter((x) => x.kind === f.kind).length + 1;
           return <li aria-current={fPicked?.id === f.id ? 'true' : undefined}><button type="button" class="fitem" onClick={() => pick({ k: 'feature', id: f.id })}><Icon n={F.icon} size={16} /><span>{F.label} {n}</span><small>{nf(f.clear ?? F.clear, 1)} m clear</small></button></li>;
         })}</ul>}
-        {fPicked && (() => { const F = featureOf(fPicked.kind); return (
-          <Picked title={F.label} remove={() => { up(removed(p, e, { k: 'feature', id: fPicked.id })); pick(null); }}>
-            <Row>
-              {F.shape === 'point' && <Num label={fPicked.kind === 'tree' ? 'Canopy radius' : 'Radius'} value={fPicked.r ?? F.r} set={(v) => setF(fPicked.id, { r: v })} min={0.2} max={30} step={0.5} unit="m" />}
-              <Num label="Kept clear round it" value={fPicked.clear ?? F.clear} set={(v) => setF(fPicked.id, { clear: v })} min={0} max={60} step={0.5} unit="m" />
-            </Row>
-            {fPicked.kind === 'nobuild' && <label class="f"><span class="f-l">Why</span><input class="txt" value={fPicked.note ?? ''} placeholder="An easement, a heritage buffer…" onChange={(ev) => setF(fPicked.id, { note: (ev.target as HTMLInputElement).value })} /></label>}
-            {fPicked.kind === 'power' && <Note>High-tension lines: about 7.5 m each side for 33 kV, more above (check with the power company).</Note>}
-          </Picked>
-        ); })()}
       </Section>
 
       <Section title="Allowed" fold open={false} sub={`On a ${nf(r.roadW)} m road${r.roadW !== (r.road?.today ?? r.roadW) ? ' (the DP width)' : ''}.`}>
@@ -201,7 +180,7 @@ const PARKING: { value: Fill['parking']; label: string; title: string }[] = [
   { value: 'surface', label: 'Open', title: 'Bays on the open ground' },
 ];
 
-export function SchemeStep({ p, e, up, rooms, toast, tool, setTool, picked, pick }: StepProps) {
+export function SchemeStep({ p, e, up, rooms, toast, picked, pick }: StepProps) {
   const { r, d, shops } = e;
   const f = fillOf(p), setFill = (x: Partial<Fill>) => up({ fill: { ...(p.fill ?? {}), ...x } });
   const owned = !!p.scheme;
@@ -215,11 +194,9 @@ export function SchemeStep({ p, e, up, rooms, toast, tool, setTool, picked, pick
   const br = bi >= 0 ? d.buildings[bi] : null;
   const setB = (fn: (b: ProBuilding) => ProBuilding) => { if (!br) return; const s = own(p, e); up({ scheme: { ...s, buildings: s.buildings.map((b) => (b.id === br.b.id ? fn(b) : b)) } }); };
   const ownB = br ? (p.scheme?.buildings.find((b) => b.id === br.b.id) ?? { ...br.b, floors: br.floors }) as ProBuilding : null;
-  const el = picked?.k === 'element' ? (d.site.elements ?? []).find((x) => x.id === picked.id) : undefined;
-  const setEl = (x: Partial<SiteElement>) => { if (!el) return; const s = own(p, e); up({ scheme: { ...s, elements: s.elements.map((y) => (y.id === el.id ? { ...y, ...x } : y)) } }); };
   const nameOf = (i: number) => (p.scheme?.buildings.find((b) => b.id === d.buildings[i].b.id)?.name) ?? `Building ${String.fromCharCode(65 + i)}`;
   const deps = br ? d.departures.filter((x) => x.ids.includes(br.b.id)) : [];
-  if ((br && ownB) || el) return (
+  if (br && ownB) return (
     <>
       <button type="button" class="backlink" onClick={() => pick(null)}><Icon n="chevron" size={14} /> All buildings</button>
         {br && ownB && (
@@ -235,13 +212,6 @@ export function SchemeStep({ p, e, up, rooms, toast, tool, setTool, picked, pick
         <Section title="Flat plans" fold open={false} sub="Rooms fitted into each flat of a typical floor, checked against the minimum room sizes.">
           <div class="flats">{(rooms[bi] ?? []).filter((fr, k, a) => fr.t < 3 && fr.rooms.length && a.findIndex((y) => y.t === fr.t) === k).map((fr) => <FlatPlan t={fr.t} fr={fr} />)}</div>
         </Section>
-      </Picked>
-    )}
-    {el && (
-      <Picked title={ELEMENT_TOOLS.find((x) => x.kind === el.kind)?.label ?? 'On the site'} remove={() => { up(removed(p, e, { k: 'element', id: el.id })); pick(null); }}>
-        {el.kind === 'road' && <Select<number> label="Width" value={el.depth} onChange={(v) => setEl({ depth: v })} options={INTERNAL_WIDTHS.map((w) => ({ value: w, label: `${w} m` }))} />}
-        {el.kind === 'parking' && <Num label="Levels" value={el.levels ?? 3} set={(v) => setEl({ levels: v })} min={1} max={12} />}
-        <Note>Drag it on the map to move it.</Note>
       </Picked>
     )}
     </>
@@ -278,13 +248,6 @@ export function SchemeStep({ p, e, up, rooms, toast, tool, setTool, picked, pick
         <Note>{[0, 1, 2].filter((t) => d.count[t]).map((t) => `${d.count[t]} × ${UNIT_LABEL[t]}`).join(' · ') || 'No flats fit.'}</Note>
       </Section>
 
-      <Section title="Add a building">
-        <Gallery tool={tool} setTool={setTool} />
-      </Section>
-      <Section title="Add to the grounds" fold open={tool.k === 'element'} aside={<span class="sec-meta">gardens, parking, roads</span>}>
-        <Tools label="On the site" tool={tool} setTool={setTool} items={ELEMENT_TOOLS.map((s) => ({ t: { k: 'element', kind: s.kind }, label: s.label, icon: s.icon }))} />
-      </Section>
-
       <Section title="Buildings" aside={<span class="sec-meta">{d.buildings.length}</span>}>
         <ul class="blist">{d.buildings.map((b, i) => (
           <li aria-current={bi === i ? 'true' : undefined}>
@@ -295,7 +258,8 @@ export function SchemeStep({ p, e, up, rooms, toast, tool, setTool, picked, pick
             </button>
           </li>
         ))}</ul>
-        {!d.buildings.length && <Note tone="warn">No buildings. Fill the plot, or add one from above.</Note>}
+        {!d.buildings.length && <Note tone="warn">No buildings. Fill the plot, or add one from the tools on the map's left edge.</Note>}
+        <Note>Add buildings, gardens, parking, roads, gates and walls from the tools on the map's left edge. Pick one on the map to edit it there.</Note>
       </Section>
 
       <Section title="Shops at the front" fold open={sh.floors > 0} aside={shops ? <span class="sec-meta">{shops.count} shops</span> : undefined}>

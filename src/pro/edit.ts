@@ -13,7 +13,7 @@
 // across the road) and a grid along the road, half a metre, a metre or five by how near the camera is. Each snap
 // shows a short dashed guide. Moving a building snaps its corners the same way. Escape cancels, Delete removes
 // what's picked, the arrow keys nudge it a grid step (Shift: ten). Everything goes through `up`, so it undoes.
-import { DEFAULT_SITE, roadFrame, buildingQuads, newBuildingId, pointIn, type SiteElement, type ElementKind } from '../doc/site';
+import { DEFAULT_SITE, ELEMENTS, elementRings, roadFrame, buildingQuads, newBuildingId, pointIn, type SiteElement, type ElementKind } from '../doc/site';
 import type { ProView, Overlay } from './scene';
 import type { Evaluated } from './evaluate';
 import { outline, ownScheme, type ProBuilding, type ProProject } from './project';
@@ -27,7 +27,9 @@ export type Tool =
   | { k: 'feature'; kind: FeatureKind }
   | { k: 'building'; shape: BuildingShape }
   | { k: 'template'; id: string }
-  | { k: 'element'; kind: Extract<ElementKind, 'garden' | 'play' | 'trees' | 'lot' | 'road' | 'parking'> };
+  | { k: 'element'; kind: Extract<ElementKind, 'garden' | 'play' | 'trees' | 'lot' | 'road' | 'parking' | 'roundabout' | 'gate' | 'wall' | 'tank'> }
+  /** two clicks: the distance between them, and from each to the buildable line */
+  | { k: 'measure' };
 export const SELECT: Tool = { k: 'select' };
 
 /** what's picked: a building, a thing on the site, a feature, or nothing */
@@ -48,6 +50,10 @@ export const ELEMENT_TOOLS: { kind: Extract<Tool, { k: 'element' }>['kind']; lab
   { kind: 'lot', label: 'Car lot', icon: 'car', hint: 'Surface bays: drag out the area, or click its corners.' },
   { kind: 'parking', label: 'Parking tower', icon: 'layers', hint: 'A multi-storey car park: drag out its area.' },
   { kind: 'road', label: 'Road', icon: 'road', hint: 'Click along it, double-click or Enter to finish.' },
+  { kind: 'roundabout', label: 'Roundabout', icon: 'rotate', hint: 'Click where it goes: a turning circle 18 m across.' },
+  { kind: 'gate', label: 'Gate', icon: 'link', hint: 'Click the plot’s edge where the gate goes: 6 m wide.' },
+  { kind: 'wall', label: 'Wall', icon: 'straight', hint: 'Click along it, double-click or Enter to finish.' },
+  { kind: 'tank', label: 'Water tank', icon: 'drop', hint: 'Click where it goes.' },
 ];
 
 /** how near (screen px) a corner or an edge pulls; the grid steps to choose from, finest first */
@@ -58,7 +64,8 @@ const modeOf = (t: Tool): Mode | null => {
   if (t.k === 'feature') return featureOf(t.kind).shape;
   if (t.k === 'building') return t.shape === 'draw' ? 'line' : 'point';
   if (t.k === 'template') return 'point';
-  if (t.k === 'element') return t.kind === 'road' ? 'line' : 'area';
+  if (t.k === 'element') return t.kind === 'road' || t.kind === 'wall' ? 'line' : t.kind === 'roundabout' || t.kind === 'gate' || t.kind === 'tank' ? 'point' : 'area';
+  if (t.k === 'measure') return 'line';
   return null;
 };
 const r2 = (q: number) => Math.round(q * 100) / 100;
@@ -206,6 +213,8 @@ export interface EditHost {
   /** a word for the user: what to do next */
   hint: (s: string | null) => void;
   readOnly: () => boolean;
+  /** a few words by the pointer: the length being drawn, what it snapped to, a typed number (null: none) */
+  readout?: (r: { text: string; sub?: string; x: number; y: number; typed?: boolean } | null) => void;
 }
 
 type Drag =
@@ -214,7 +223,7 @@ type Drag =
   | { kind: 'rect'; from: Pt; to: Pt }
   | { kind: 'plan'; id: string; i: number; moved: boolean; plan: { pts: Pt[]; sharp?: boolean[] } };
 
-interface Snapped { d: Pt; guide: number[]; hot: Pt | null }
+interface Snapped { d: Pt; guide: number[]; hot: Pt | null; why?: string }
 /** how a drag maps the screen to the ground, fixed at where it started: metres a pixel at that depth, and the ground's
  *  way for the screen's right and up there */
 interface DragScale { mpp: number; right: Pt; up: Pt }
@@ -263,7 +272,7 @@ export class CanvasEdit {
   dispose() { this.off.forEach((f) => f()); }
 
   setTool(t: Tool) {
-    this.tool = t; this.pts = []; this.drag = null; this.ghost = []; this.guide = []; this.hotPt = null;
+    this.tool = t; this.pts = []; this.drag = null; this.ghost = []; this.guide = []; this.hotPt = null; this.typed = ''; this.measured = []; this.h.readout?.(null);
     this.canvas.style.cursor = t.k === 'select' ? '' : 'crosshair';
     const v = this.h.view(); if (v) v.controls.enabled = true;
     this.h.hint(this.hintFor());
@@ -276,6 +285,7 @@ export class CanvasEdit {
     if (t.k === 'building') return BUILDING_SHAPES.find((s) => s.shape === t.shape)!.hint;
     if (t.k === 'template') return `${TEMPLATES.find((x) => x.id === t.id)?.name ?? 'It'}: click where it goes.`;
     if (t.k === 'element') return ELEMENT_TOOLS.find((s) => s.kind === t.kind)!.hint;
+    if (t.k === 'measure') return 'Click two points to measure between them; the readout gives the distance to the margin too.';
     return null;
   }
 
@@ -318,7 +328,7 @@ export class CanvasEdit {
     // 1. a corner onto a corner
     let best = SNAP_PX, hit: [number, number] | null = null;
     ts.forEach((s, j) => cs.forEach((c, k) => { const dd = Math.hypot(s[0] - c[0], s[1] - c[1]); if (dd < best) { best = dd; hit = [j, k]; } }));
-    if (hit) { const [j, k] = hit as [number, number], q: Pt = [tp[2 * j], tp[2 * j + 1]]; return { d: [q[0] - cand[k][0], q[1] - cand[k][1]], guide: [], hot: q }; }
+    if (hit) { const [j, k] = hit as [number, number], q: Pt = [tp[2 * j], tp[2 * j + 1]]; return { d: [q[0] - cand[k][0], q[1] - cand[k][1]], guide: [], hot: q, why: 'corner' }; }
     // 2. a corner onto an edge (measured on screen, then put on the edge itself)
     best = SNAP_PX; let eh: { k: number; i: number; t: number } | null = null;
     for (let i = 0; i + 3 < T.segs.length; i += 4) {
@@ -332,7 +342,7 @@ export class CanvasEdit {
       // (the nearest point on the edge in the world, so it lands square on it)
       const tw = Math.max(0, Math.min(1, ((cand[k][0] - ax) * (bx - ax) + (cand[k][1] - az) * (bz - az)) / (L * L)));
       const tt = Math.abs(tw - t) * L < 3 ? tw : t, q: Pt = [ax + (bx - ax) * tt, az + (bz - az) * tt], g = 5 / L;
-      return { d: [q[0] - cand[k][0], q[1] - cand[k][1]], guide: [ax + (bx - ax) * Math.max(0, tt - g), az + (bz - az) * Math.max(0, tt - g), ax + (bx - ax) * Math.min(1, tt + g), az + (bz - az) * Math.min(1, tt + g)], hot: q };
+      return { d: [q[0] - cand[k][0], q[1] - cand[k][1]], guide: [ax + (bx - ax) * Math.max(0, tt - g), az + (bz - az) * Math.max(0, tt - g), ax + (bx - ax) * Math.min(1, tt + g), az + (bz - az) * Math.min(1, tt + g)], hot: q, why: 'on the edge' };
     }
     const F = roadFrame(this.h.e().r), U: Pt = [F.ux, F.uz], V: Pt = [F.vx, F.vz];
     const g = this.gridAt(cand[0][0], cand[0][1]);
@@ -343,7 +353,8 @@ export class CanvasEdit {
       const step = ((o.shift ? 90 : 15) * Math.PI) / 180, a = Math.round(Math.atan2(dv, du) / step) * step, L = Math.max(g, Math.round(len / g) * g);
       const q: Pt = [fx + (Math.cos(a) * U[0] + Math.sin(a) * V[0]) * L, fz + (Math.cos(a) * U[1] + Math.sin(a) * V[1]) * L];
       const ext = 4 / L;
-      return { d: [q[0] - x, q[1] - z], guide: [fx, fz, q[0] + (q[0] - fx) * ext, q[1] + (q[1] - fz) * ext], hot: q };
+      const deg = Math.round((((a * 180) / Math.PI) % 360 + 360) % 360), why = deg % 180 === 0 ? 'along the road' : deg % 90 === 0 ? 'square to the road' : `${deg > 180 ? 360 - deg : deg}° to the road`;
+      return { d: [q[0] - x, q[1] - z], guide: [fx, fz, q[0] + (q[0] - fx) * ext, q[1] + (q[1] - fz) * ext], hot: q, why };
     }
     // 4. in line with a corner nearby, along or across the road; else on the grid along the road
     const guide: number[] = [], corr: [number, number] = [0, 0];
@@ -369,7 +380,7 @@ export class CanvasEdit {
     });
     const d: Pt = [corr[0] * U[0] + corr[1] * V[0], corr[0] * U[1] + corr[1] * V[1]], lines: number[] = [];
     for (let i = 0; i < guide.length; i += 3) { const j = guide[i], k = guide[i + 1]; lines.push(tp[j], tp[j + 1], cand[k][0] + d[0], cand[k][1] + d[1]); }
-    return { d, guide: lines, hot: cand.length === 1 ? [cand[0][0] + d[0], cand[0][1] + d[1]] : null };
+    return { d, guide: lines, hot: cand.length === 1 ? [cand[0][0] + d[0], cand[0][1] + d[1]] : null, why: lines.length ? 'in line with a corner' : `${g} m grid` };
   }
   /** the pointer on the ground, snapped (for drawing and placing) */
   private snap(px: number, py: number, ev: { shiftKey: boolean; altKey: boolean }, o: { ex?: string; extra?: number[]; from?: boolean } = {}): Pt | null {
@@ -379,8 +390,84 @@ export class CanvasEdit {
     if (!this.snapOn || ev.altKey) return [r2(g[0]), r2(g[1])];
     const from = o.from !== false && this.pts.length >= 2 ? [this.pts[this.pts.length - 2], this.pts[this.pts.length - 1]] as Pt : null;
     const s = this.snapSet([g], { ex: o.ex, from, shift: ev.shiftKey, extra: [...(o.extra ?? []), ...this.pts] });
-    this.guide = s.guide; this.hotPt = s.hot;
+    this.guide = s.guide; this.hotPt = s.hot; this.why = s.why ?? null;
     return [r2(g[0] + s.d[0]), r2(g[1] + s.d[1])];
+  }
+  /** what the last snap took */
+  private why: string | null = null;
+  /** A handle on the view (./hud.tsx) dragged to the pointer: snapped as drawing is (`extra`: more points to snap to,
+   *  such as the thing's own other points), its guide drawn. */
+  snapAt(px: number, py: number, ev: { shiftKey: boolean; altKey: boolean }, o: { ex?: string; extra?: number[] } = {}): Pt | null {
+    const g = this.snap(px, py, ev, { ...o, from: false });
+    this.draw();
+    return g;
+  }
+  /** the guide and point off (a handle let go) */
+  clearSnap() { this.guide = []; this.hotPt = null; this.why = null; this.draw(); }
+  /** lines the view's editor adds over the scene (a feature's radius and clearance rings) */
+  decor: Overlay | null = null;
+  /** a number typed while drawing (SketchUp's measurements box): Enter puts it in */
+  private typed = '';
+  /** the last measured: its two ends */
+  private measured: number[] = [];
+  private lastXY: Pt = [0, 0];
+  /** the distance from a point to the buildable line (the margins) */
+  private toMargin(x: number, z: number): number {
+    const R = this.h.e().r.footprint; if (!R || R.length < 6) return NaN;
+    let best = Infinity;
+    for (let i = 0; i + 1 < R.length; i += 2) {
+      const j = (i + 2) % R.length, ax = R[i], az = R[i + 1], ex = R[j] - ax, ez = R[j + 1] - az, L2 = ex * ex + ez * ez || 1;
+      const t = Math.max(0, Math.min(1, ((x - ax) * ex + (z - az) * ez) / L2));
+      best = Math.min(best, Math.hypot(ax + ex * t - x, az + ez * t - z));
+    }
+    return best;
+  }
+  /** the readout by the pointer: what's being drawn, measured or typed */
+  private tell() {
+    const out = this.h.readout; if (!out) return;
+    const m = modeOf(this.tool), [x, y] = this.lastXY, P = this.pts, n = P.length;
+    if (this.typed) { out({ text: this.typed, sub: m === 'area' && n === 2 ? 'width, depth · Enter' : 'm · Enter (a comma, then an angle to the road)', x, y, typed: true }); return; }
+    if (this.tool.k === 'measure') {
+      if (this.measured.length === 4 && !n) { const [ax, az, bx, bz] = this.measured; out({ text: `${Math.hypot(bx - ax, bz - az).toFixed(2)} m`, sub: 'measured · click to measure again', x, y }); return; }
+      if (!this.hover) { out(null); return; }
+      const mg = this.toMargin(this.hover[0], this.hover[1]);
+      if (n >= 2) { const L = Math.hypot(this.hover[0] - P[n - 2], this.hover[1] - P[n - 1]); out({ text: `${L.toFixed(2)} m`, sub: [this.why, Number.isFinite(mg) ? `${mg.toFixed(1)} m to the margin` : ''].filter(Boolean).join(' · '), x, y }); return; }
+      out({ text: Number.isFinite(mg) ? `${mg.toFixed(1)} m to the margin` : 'Click to start', sub: this.why ?? undefined, x, y }); return;
+    }
+    if (m && m !== 'point' && n >= 2 && this.hover) { const L = Math.hypot(this.hover[0] - P[n - 2], this.hover[1] - P[n - 1]); out({ text: `${L.toFixed(1)} m`, sub: [this.why, 'type a length'].filter(Boolean).join(' · '), x, y }); return; }
+    if (this.drag?.kind === 'rect') { const d = this.drag; out({ text: `${Math.abs(d.to[0] - d.from[0]).toFixed(1)} × ${Math.abs(d.to[1] - d.from[1]).toFixed(1)} m`, sub: this.why ?? undefined, x, y }); return; }
+    if (m && this.hover && this.why) { out({ text: this.why, x, y }); return; }
+    if (this.drag?.kind === 'move' && this.drag.moved && this.why) { out({ text: this.why, x, y }); return; }
+    out(null);
+  }
+  /** the typed number put in: a point that far from the last (toward the pointer, or at an angle to the road), or a
+   *  rectangle of two sizes from the first corner */
+  private applyTyped(): boolean {
+    const t = this.typed.trim(); this.typed = '';
+    const m = modeOf(this.tool), P = this.pts, n = P.length;
+    if (!m || n < 2) return false;
+    const nums = t.split(/[,;x×\s]+/).filter(Boolean).map(Number);
+    if (!nums.length || nums.some((q) => !Number.isFinite(q))) return false;
+    const F = roadFrame(this.h.e().r), U: Pt = [F.ux, F.uz], V: Pt = [F.vx, F.vz], lx = P[n - 2], lz = P[n - 1];
+    const h = this.hover ?? [lx + U[0], lz + U[1]];
+    if (m === 'area' && n === 2 && nums.length >= 2) {
+      // (a rectangle: along the road, then across it, toward where the pointer is)
+      const du = (h[0] - lx) * U[0] + (h[1] - lz) * U[1], dv = (h[0] - lx) * V[0] + (h[1] - lz) * V[1];
+      const a = nums[0] * (du < 0 ? -1 : 1), b = nums[1] * (dv < 0 ? -1 : 1), at = (u: number, v: number) => [r2(lx + U[0] * u + V[0] * v), r2(lz + U[1] * u + V[1] * v)];
+      this.pts = [lx, lz, ...at(a, 0), ...at(a, b), ...at(0, b)];
+      this.finish(); return true;
+    }
+    const L = Math.abs(nums[0]);
+    let dx: number, dz: number;
+    if (nums.length >= 2) { const a = (nums[1] * Math.PI) / 180; dx = Math.cos(a) * U[0] + Math.sin(a) * V[0]; dz = Math.cos(a) * U[1] + Math.sin(a) * V[1]; }
+    else { const D = Math.hypot(h[0] - lx, h[1] - lz) || 1; dx = (h[0] - lx) / D; dz = (h[1] - lz) / D; }
+    this.pts.push(r2(lx + dx * L), r2(lz + dz * L));
+    if (this.tool.k === 'measure') { this.measureDone(); return true; }
+    this.draw(); return true;
+  }
+  private measureDone() {
+    this.measured = this.pts.slice(-4); this.pts = []; this.hover = null;
+    this.draw(); this.tell();
   }
 
   // ---------- pointer ----------
@@ -411,7 +498,6 @@ export class CanvasEdit {
       }
       const f = this.featureAt(ev.clientX, ev.clientY);
       if (f) { this.h.pick({ k: 'feature', id: f.id }); this.startMove({ k: 'feature', id: f.id }, ev, v); return; }
-      return;
     }
     // a formed building's plan points, and the + on each edge for a new one
     const fb = this.pickedForm();
@@ -438,11 +524,14 @@ export class CanvasEdit {
     if (hit) { if (this.selPt?.id !== hit.id) this.selPt = null; this.h.pick({ k: 'building', id: hit.id }); this.startMove({ k: 'building', id: hit.id }, ev, v, hit.y); return; }
     const el = this.elementAt(ev.clientX, ev.clientY, e);
     if (el) { this.h.pick({ k: 'element', id: el.id }); this.startMove({ k: 'element', id: el.id }, ev, v); return; }
+    // (a feature anywhere, once no building or thing is under the pointer; on the Site step it came first)
+    const f = this.h.step() === 'site' ? null : this.featureAt(ev.clientX, ev.clientY);
+    if (f) { this.h.pick({ k: 'feature', id: f.id }); this.startMove({ k: 'feature', id: f.id }, ev, v); return; }
   }
   /** the picked building when it has a form (and can be edited here) */
   private pickedForm(): (ProBuilding & { form: Form }) | null {
     const pk = this.h.picked();
-    if (pk?.k !== 'building' || this.tool.k !== 'select' || this.h.step() === 'site' || this.h.readOnly()) return null;
+    if (pk?.k !== 'building' || this.tool.k !== 'select' || this.h.readOnly()) return null;
     const b = this.h.p().scheme?.buildings.find((x) => x.id === pk.id);
     return b?.form && b.form.plan.pts.length >= 3 ? (b as ProBuilding & { form: Form }) : null;
   }
@@ -478,6 +567,10 @@ export class CanvasEdit {
   }
   private move(ev: PointerEvent) {
     const v = this.h.view(); if (!v) return;
+    { const rc = this.canvas.getBoundingClientRect(); this.lastXY = [ev.clientX - rc.left, ev.clientY - rc.top]; }
+    try { this.moveIn(ev, v); } finally { this.tell(); }
+  }
+  private moveIn(ev: PointerEvent, v: ProView) {
     const d = this.drag;
     if (d?.kind === 'rect') { const g = this.snap(ev.clientX, ev.clientY, ev, { from: false }); if (g) { d.to = g; this.draw(); } return; }
     if (d?.kind === 'corner') {
@@ -519,7 +612,7 @@ export class CanvasEdit {
       this.guide = []; this.hotPt = null;
       if (this.snapOn && !ev.altKey && d.corners.length) {
         const s = this.snapSet(d.corners.map(([x, z]) => [x + dx, z + dz] as Pt), { ex: d.what?.k === 'building' ? d.what.id : undefined });
-        dx += s.d[0]; dz += s.d[1]; this.guide = s.guide; this.hotPt = s.hot;
+        dx += s.d[0]; dz += s.d[1]; this.guide = s.guide; this.hotPt = s.hot; this.why = s.why ?? null;
       }
       dx = r2(dx); dz = r2(dz);
       if (!d.moved && Math.hypot(ev.clientX - (this.downAt?.[0] ?? ev.clientX), ev.clientY - (this.downAt?.[1] ?? ev.clientY)) < 4) return;
@@ -563,12 +656,22 @@ export class CanvasEdit {
     if (m === 'point') { this.pts = g; this.finish(); return; }
     // closing an outline on its first corner
     if (m === 'area' && this.pts.length >= 6 && Math.hypot(g[0] - this.pts[0], g[1] - this.pts[1]) < 0.01) { this.finish(); return; }
-    this.pts.push(...g); this.draw();
+    if (this.tool.k === 'measure' && !this.pts.length) this.measured = [];
+    this.pts.push(...g);
+    if (this.tool.k === 'measure' && this.pts.length >= 4) { this.measureDone(); v.controls.enabled = true; return; }
+    this.draw(); this.tell();
     v.controls.enabled = true;
   }
   private key(ev: KeyboardEvent) {
-    const t = ev.target as HTMLElement | null;
+    const t = ev.target instanceof HTMLElement ? ev.target : null;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable || t.closest('[role="combobox"],[role="listbox"],[role="dialog"],[role="radiogroup"],[role="menu"],svg'))) return;
+    // (the measurements box: a number typed while drawing, until Enter or Escape)
+    const drawing = modeOf(this.tool) && this.pts.length >= 2 && !this.h.readOnly();
+    if (drawing && !ev.ctrlKey && !ev.metaKey && !ev.altKey && (/^[0-9.,x×-]$/.test(ev.key) || (ev.key === ' ' && this.typed))) { ev.preventDefault(); ev.stopImmediatePropagation(); this.typed += ev.key; this.tell(); return; }
+    if (this.typed && ev.key === 'Backspace') { ev.preventDefault(); ev.stopImmediatePropagation(); this.typed = this.typed.slice(0, -1); this.tell(); return; }
+    if (this.typed && ev.key === 'Escape') { ev.preventDefault(); ev.stopImmediatePropagation(); this.typed = ''; this.tell(); return; }
+    if (this.typed && ev.key === 'Enter') { ev.preventDefault(); ev.stopImmediatePropagation(); this.applyTyped(); this.tell(); return; }
+    if (ev.key === 'Escape' && this.tool.k === 'measure' && this.measured.length && !this.pts.length) { ev.stopImmediatePropagation(); this.measured = []; this.draw(); this.tell(); return; }
     if (ev.key === 'Escape' && (this.tool.k !== 'select' || this.pts.length)) { ev.stopPropagation(); if (this.pts.length) { this.pts = []; this.draw(); } else this.h.done(); return; }
     if (ev.key === 'Enter' && this.pts.length) { ev.preventDefault(); this.finish(); return; }
     if (ev.key === 'Backspace' && this.pts.length) { ev.preventDefault(); this.pts.splice(-2); this.draw(); return; }
@@ -631,9 +734,27 @@ export class CanvasEdit {
         this.h.pick({ k: 'building', id: named[0].id });
       }
     }
-    if (t.k === 'element') {
+    if (t.k === 'element' && (t.kind === 'roundabout' || t.kind === 'tank' || t.kind === 'gate')) {
+      const s = own(p, e), id = newBuildingId(), D = ELEMENTS.find((x) => x.value === t.kind)!;
+      const F = roadFrame(e.r);
+      let u: Pt = [F.ux, F.uz], c: Pt = [P[0], P[1]];
+      if (t.kind === 'gate') {
+        // (on the plot's edge nearest the click, along it)
+        const ring = outline(p).ring; let bd = Infinity;
+        for (let i = 0; i + 1 < ring.length; i += 2) {
+          const j = (i + 2) % ring.length, ax = ring[i], az = ring[i + 1], ex = ring[j] - ax, ez = ring[j + 1] - az, L = Math.hypot(ex, ez) || 1;
+          const tt = Math.max(D.len / 2, Math.min(L - D.len / 2, ((P[0] - ax) * ex + (P[1] - az) * ez) / L)), q: Pt = [ax + (ex / L) * tt, az + (ez / L) * tt], dd = Math.hypot(q[0] - P[0], q[1] - P[1]);
+          if (dd < bd) { bd = dd; c = q; u = [ex / L, ez / L]; }
+        }
+      }
+      // (a gate's spine is its opening; a roundabout's and a tank's a short stub at its middle, their width the depth)
+      const h = t.kind === 'gate' ? D.len / 2 : 0.5;
+      const el: SiteElement = { id, kind: t.kind, spine: [r2(c[0] - u[0] * h), r2(c[1] - u[1] * h), r2(c[0] + u[0] * h), r2(c[1] + u[1] * h)], depth: D.depth, floors: 0 };
+      this.h.up({ scheme: { ...s, elements: [...s.elements, el] } });
+      this.h.pick({ k: 'element', id });
+    } else if (t.k === 'element') {
       const s = own(p, e), id = newBuildingId();
-      const el: SiteElement = t.kind === 'road' ? { id, kind: 'road', spine: P, depth: 6, floors: 0 } : { id, kind: t.kind, spine: [], ring: P, depth: 0, floors: 0, ...(t.kind === 'parking' ? { levels: 3 } : {}) };
+      const el: SiteElement = t.kind === 'road' || t.kind === 'wall' ? { id, kind: t.kind, spine: P, depth: t.kind === 'wall' ? 0.23 : 6, floors: 0 } : { id, kind: t.kind, spine: [], ring: P, depth: 0, floors: 0, ...(t.kind === 'parking' ? { levels: 3 } : {}) };
       this.h.up({ scheme: { ...s, elements: [...s.elements, el] } });
       this.h.pick({ k: 'element', id });
     }
@@ -670,6 +791,8 @@ export class CanvasEdit {
         o.lines!.push(mx - s, 0.1, mz, mx + s, 0.1, mz, mx, 0.1, mz - s, mx, 0.1, mz + s);
       });
     }
+    if (this.measured.length === 4) { const M = this.measured; o.lines!.push(M[0], 0.15, M[1], M[2], 0.15, M[3]); o.points!.push(M[0], 0.15, M[1], M[2], 0.15, M[3]); }
+    if (this.decor) { o.lines!.push(...(this.decor.lines ?? [])); o.dashed!.push(...(this.decor.dashed ?? [])); o.points!.push(...(this.decor.points ?? [])); }
     v.overlay(o);
   }
 
@@ -687,7 +810,9 @@ export class CanvasEdit {
     const g = v.groundAt(px, py); if (!g) return null;
     for (const el of [...(e.d.site.elements ?? [])].reverse()) {
       if (el.ring && el.ring.length >= 6 && pointIn(el.ring, g[0], g[1])) return el;
-      if (el.kind === 'road') for (const q of buildingQuads(el)) if (pointIn(q, g[0], g[1])) return el;
+      // (a wall or a gate is thin: picked within a metre of it)
+      const thin = el.kind === 'wall' || el.kind === 'gate';
+      for (const q of elementRings(thin ? { ...el, depth: Math.max(el.depth, 2) } : el)) if (pointIn(q, g[0], g[1])) return el;
     }
     return null;
   }

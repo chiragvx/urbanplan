@@ -575,6 +575,24 @@ The core loop of placing and shaping buildings stops needing the panel.
 - Site › On the site: the tools, the list and the picked card (160-176).
 - The Buildings list (306-317) becomes a compact "Objects" list in the sheet. It's useful for screen readers and as an outline view.
 
+**Status (2026-11-22): built, in src/pro/shelf.tsx, src/pro/objHud.tsx and src/pro/edit.ts.**
+- Done:
+  - the tool shelf (Select, Building ▸, Grounds ▸, Site ▸, Plot, Measure);
+  - roundabout, gate (on the nearest plot edge), wall and tank as tools;
+  - the measurements box: a typed length toward the pointer, "length, angle" from the road, "width, depth" for a rectangle;
+  - the readout by the pointer: the length being drawn and what it snapped to (corner, on the edge, along or square to the road, n° to the road, in line with a corner, the grid);
+  - the measure tool (point to point, and to the margin);
+  - vertex and midpoint handles for areas, roads, walls and line or area features, with Delete on a focused point;
+  - a gate's ends; radius and clearance ring handles for point features;
+  - selection bars: road width chips, parking levels, roundabout or tank size, gate width, a feature's radius, clearance and note;
+  - features picked on any step;
+  - the panel's add sections, element card and feature tools and card removed (the feature list stays).
+- Not done yet:
+  - typed distance while moving;
+  - "x n" arrays after a Ctrl-drag copy;
+  - a width handle on a road and a levels height handle (chips and a stepper instead);
+  - the touch loupe.
+
 ### Phase 3: The plot in view
 
 **Deliverables:**

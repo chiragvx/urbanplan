@@ -42,6 +42,8 @@ import { DesignSystemStep } from './designStep';
 import { groundAt } from './terrain';
 import { CanvasEdit, duplicated, own, placeTemplate, SELECT, turned, type Picked as EditPicked, type Tool } from './edit';
 import { Hud, type Tx } from './hud';
+import { ObjectHud } from './objHud';
+import { Shelf } from './shelf';
 import { withFloors } from './shapePanel';
 import { pole } from './form/curve';
 import { Btn, cr, Dialog, Icon, Menu, nf, Num, pct, Range, Seg, Select, sqft, TooltipLayer } from './ui';
@@ -104,6 +106,8 @@ function App() {
   const [plan, setPlanS] = useState(false);
   const setPlan = (on: boolean) => { setPlanS(on); view.current?.setPlan(on); };
   const needle = useRef<HTMLSpanElement>(null);
+  // (the readout by the pointer while drawing: written straight to the DOM, as it changes with every move)
+  const readout = useRef<HTMLDivElement>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const toastT = useRef<number>();
   const toast = (s: string) => { setToastMsg(s); clearTimeout(toastT.current); toastT.current = window.setTimeout(() => setToastMsg(null), 4200); };
@@ -220,9 +224,11 @@ function App() {
     const ce = new CanvasEdit(canvas.current!, {
       view: () => view.current, p: () => pRef.current, e: () => eRef.current, up: (o) => up(o), step: () => stepRef.current,
       picked: () => pickedRef.current, pick: (x) => setPicked(x), done: () => { setToolS(SELECT); ce.setTool(SELECT); }, hint: setHint, readOnly: () => roRef.current,
+      readout: (o) => { const el = readout.current; if (!el) return; if (!o) { el.hidden = true; return; } el.hidden = false; el.classList.toggle('typed', !!o.typed); el.style.transform = `translate(${Math.round(o.x + 16)}px,${Math.round(o.y + 18)}px)`; el.firstElementChild!.textContent = o.text; el.lastElementChild!.textContent = o.sub ?? ''; },
     });
     ce.snapOn = store.get<boolean>('urbanplan:pro:snap', true);
     edit.current = ce;
+    (window as unknown as { proEdit?: CanvasEdit }).proEdit = ce; // (for the console)
     const theme = () => v.setTheme(document.documentElement.dataset.theme === 'dark');
     theme();
     const mo = new MutationObserver(theme);
@@ -313,6 +319,7 @@ function App() {
       if (ev.key === 't') cam('top');
       if (ev.key === 'p') setPlan(!plan);
       if (ev.key === 'v') setTool(SELECT);
+      if (ev.key === 'm' && !readOnly) setTool(tool.k === 'measure' ? SELECT : { k: 'measure' });
       if (ev.key === 's') cam('street');
       if (ev.key === '\\') setPanel((v) => !v);
       if (ev.key === '?') setDialog('keys');
@@ -405,7 +412,10 @@ function App() {
       <main class="stage">
         <canvas ref={canvas} onPointerMove={(ev) => setHover(view.current?.pick(ev.clientX, ev.clientY) ?? null)} onPointerLeave={() => setHover(null)} />
         <ResultBar e={e} deal={deal} sum={sum} go={go} />
-        {tool.k === 'select' && <Hud view={view.current} p={p} e={e} picked={picked} pick={setPicked} up={up} tx={tx} snap={snap} live={mode === 'wire' && xr === null} readOnly={readOnly || viewer} toast={toast}
+        {!readOnly && !viewer && <Shelf tool={tool} setTool={setTool} />}
+        <div class="readout" ref={readout} hidden aria-live="polite"><b /><span /></div>
+        {tool.k === 'select' && (picked?.k === 'element' || picked?.k === 'feature') && <ObjectHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} pick={setPicked} tx={tx} snap={snap} readOnly={readOnly || viewer} toast={toast} />}
+        {tool.k === 'select' && picked?.k === 'building' && <Hud view={view.current} p={p} e={e} picked={picked} pick={setPicked} up={up} tx={tx} snap={snap} live={mode === 'wire' && xr === null} readOnly={readOnly || viewer} toast={toast}
           inspect={() => { setStep('build'); store.set('urbanplan:pro:step', 'build'); setPanel(true); }} />}
         {hint && <div class="drawhint" role="status"><span>{hint}</span><button type="button" class="linkbtn" onClick={() => setTool(SELECT)}>Done</button></div>}
         <button type="button" class="compass" aria-label="North (the map from above)" data-tip="North · the plan from above" onClick={() => setPlan(true)}><span ref={needle} class="needle"><Icon n="north" size={22} /><b>N</b></span></button>

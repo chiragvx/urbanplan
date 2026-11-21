@@ -48,22 +48,13 @@ function geomOf(b: ProBuilding, quads: number[][]) {
   return { c: [cx, cz] as Pt, u: [ux, uz] as Pt, nrm: [-uz, ux] as Pt, pts };
 }
 
-export function Hud({ view, p, e, picked, pick, up, tx, snap, live, readOnly, inspect, toast }: Props) {
+/** Pinning DOM to world points (re-placed each frame straight through the DOM): `at` the anchors by key, `ref(key)` the
+ *  element for each, `box` the world points the selection bar sits over (above them, else below, between the result
+ *  bar and the view's toolbar). */
+export function usePins(view: ProView | null) {
   const root = useRef<HTMLDivElement>(null), bar = useRef<HTMLDivElement>(null);
   const els = useRef(new Map<string, HTMLElement>()), at = useRef(new Map<string, [number, number, number]>());
   const box = useRef<[number, number, number][]>([]);
-  const [dragging, setDragging] = useState<HKind | null>(null);
-  const [typing, setTyping] = useState<'len' | 'depth' | 'h' | null>(null);
-  /** the building as the drag has it, before the scheme is worked out again */
-  const [preview, setPreview] = useState<ProBuilding | null>(null);
-  const drag = useRef<null | { k: HKind; base: ProProject; e: Evaluated; b: ProBuilding; g0: Pt | null; y0: number; ppm: number; floors: number; timer: number; pending: Partial<ProProject> | null; changed?: boolean }>(null);
-
-  const bi = picked?.k === 'building' ? e.d.buildings.findIndex((x) => x.b.id === picked.id) : -1;
-  const br = bi >= 0 ? e.d.buildings[bi] : null;
-  const saved = br ? ((p.scheme?.buildings.find((b) => b.id === br.b.id) ?? { ...br.b, floors: br.floors }) as ProBuilding) : null;
-  const ownB = preview && saved && preview.id === saved.id ? preview : saved;
-  const show = !!(br && ownB && !readOnly && view);
-
   // ---------- pinning to the world ----------
   const place = () => {
     const v = view, R = root.current; if (!v || !R) return;
@@ -92,6 +83,24 @@ export function Hud({ view, p, e, picked, pick, up, tx, snap, live, readOnly, in
   };
   useEffect(() => { if (!view) return; view.onFrame = place; return () => { if (view.onFrame === place) view.onFrame = undefined; }; });
   useLayoutEffect(place);
+  const ref = (k: string) => (el: HTMLElement | null) => { if (el) els.current.set(k, el); else els.current.delete(k); };
+  return { root, bar, at, box, ref };
+}
+
+export function Hud({ view, p, e, picked, pick, up, tx, snap, live, readOnly, inspect, toast }: Props) {
+  const { root, bar, at, box, ref } = usePins(view);
+  const [dragging, setDragging] = useState<HKind | null>(null);
+  const [typing, setTyping] = useState<'len' | 'depth' | 'h' | null>(null);
+  /** the building as the drag has it, before the scheme is worked out again */
+  const [preview, setPreview] = useState<ProBuilding | null>(null);
+  const drag = useRef<null | { k: HKind; base: ProProject; e: Evaluated; b: ProBuilding; g0: Pt | null; y0: number; ppm: number; floors: number; timer: number; pending: Partial<ProProject> | null; changed?: boolean }>(null);
+
+  const bi = picked?.k === 'building' ? e.d.buildings.findIndex((x) => x.b.id === picked.id) : -1;
+  const br = bi >= 0 ? e.d.buildings[bi] : null;
+  const saved = br ? ((p.scheme?.buildings.find((b) => b.id === br.b.id) ?? { ...br.b, floors: br.floors }) as ProBuilding) : null;
+  const ownB = preview && saved && preview.id === saved.id ? preview : saved;
+  const show = !!(br && ownB && !readOnly && view);
+
   useEffect(() => {
     if (!dragging) return;
     const k = (ev: KeyboardEvent) => { if (ev.key === 'Escape' && drag.current) { ev.stopImmediatePropagation(); clearTimeout(drag.current.timer); drag.current = null; setDragging(null); setPreview(null); tx.cancel(); view?.overlay(null); } };
@@ -125,7 +134,6 @@ export function Hud({ view, p, e, picked, pick, up, tx, snap, live, readOnly, in
   }
   at.current = new Map(A);
   box.current = g.pts.flatMap(([x, z]) => [[x, 0, z], [x, h, z]] as [number, number, number][]);
-  const ref = (k: string) => (el: HTMLElement | null) => { if (el) els.current.set(k, el); else els.current.delete(k); };
 
   // ---------- changing it ----------
   const name = ownB.name ?? `Building ${String.fromCharCode(65 + bi)}`;

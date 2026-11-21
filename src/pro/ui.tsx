@@ -29,6 +29,7 @@ const P: Record<string, string> = {
   fit: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5',
   plus: 'M12 5v14M5 12h14',
   copy: 'M8 8h11v11H8zM5 16V5h11',
+  ruler: 'M3 17L17 3l4 4L7 21zM7 13l2 2M10 10l2 2M13 7l2 2',
   move: 'M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3',
   updown: 'M12 4v16M8 8l4-4 4 4M8 16l4 4 4-4',
   sideways: 'M4 12h16M8 8l-4 4 4 4M16 8l4 4-4 4',
