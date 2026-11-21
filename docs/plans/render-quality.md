@@ -357,9 +357,12 @@ Budget: no more than 150 KB gz added to the first load.
 - **Scanned textures.** `npm run render:textures` fetched all 10 ambientCG CC0 sets (plaster, concrete, brick, stone, asphalt, grass, ground, pavers, wood, tile). It shrank them to 512 px (1.7 MB in all, inside the 4 MB budget) and they're committed in `public/assets/render/tex/` with `LICENSES.md`. In the app every surface map comes from the scans: plaster grain on render, brick courses on Brick Vernacular.
   - Normal maps are KTX2: UASTC with mipmaps, made by Basis Universal compiled to wasm (the `ktx2-encoder` npm package), or by `toktx` when it's installed. They load through `KTX2Loader`, with the transcoder in `public/basis`. Colour maps stay JPEG because they're made into detail maps on a canvas.
   - The sets total 3.3 MB, inside the 4 MB budget.
-- **CC0 models.** `npm run render:models` fetches Kenney's motorcycle, three trucks and character from his starter kits on GitHub (CC0 models, 481 kB, `public/assets/render/models/` with `LICENSES.md`).
-  - About a third of parking slots become a pair of motorcycles and one in ten a truck; people are the character.
-  - Kenney's car-kit and character pages block automated downloads, so sedans are still made in code.
+- **CC0 models.** `npm run render:models` fetches all of Kenney's CC0 models (1.5 MB, `public/assets/render/models/<kit>/`, each kit with its own colour atlas, plus `LICENSES.md`):
+  - cars (sedan, SUV, hatchback, taxi, delivery van) from his Car Kit, via its OpenGameArt mirror;
+  - a motorcycle and three trucks from his Racing starter kit;
+  - a character from his 3D Platformer kit.
+  
+  In the scene, cars are a weighted mix of those (few taxis and vans), about a third of parking slots become a pair of motorcycles and one in ten a truck, and people are the character. The code-made cars and people remain only as a fallback.
 - **Neighbours** load at Bandra and Fort (Mumbai) and Kothrud (Pune): 2,253, 1,751 and 3,435 triangles of massing.
 - **Chamfers** show on window surrounds, bands and parapets on the High tier.
 - **Path-traced stills** show green trees, coloured cars and people.
@@ -369,7 +372,6 @@ Budget: no more than 150 KB gz added to the first load.
 - **The comparison against Forma, the APS viewer and Revit** needs Autodesk products and accounts, which this environment doesn't have. So the plan's Phase 2 and Phase 5 gates (level with Forma; ahead of Revit Realistic on glass, night and stills) are unmeasured.
   - The protocol, cameras, scoring sheet and our captured side are in `docs/plans/render-benchmark.md`.
   - No scores have been made up for the Autodesk tools.
-- **Sedans** are still made in code. The CC0 car kit sits behind a site that refuses automated downloads, and the other free packs found were CC-BY or behind Google Drive.
 
 **Measured on the sample, Intel UHD 630:**
 

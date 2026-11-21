@@ -1216,7 +1216,14 @@ export class ProView {
       for (const im of modelMeshes(this.models.get('motorcycle') ?? [], bikes.slice(0, 300))) add(im);
       const tk = ['truck-red', 'truck-yellow', 'truck-green'].filter((k) => this.models.has(k));
       tk.forEach((k, j) => { for (const im of modelMeshes(this.models.get(k)!, trucks.filter((_, i) => i % tk.length === j))) add(im); });
-      for (const im of carMeshes(cars.slice(0, 400), this.lib.other('car', () => new THREE.MeshStandardMaterial({ roughness: 0.32, metalness: 0.55 })), this.lib.glass('#1c2430', { roughness: 0.08 }))) add(im);
+      // (the cars: Kenney's Car Kit models when fetched, a mix of sedans, SUVs, hatchbacks, taxis and vans; else our own)
+      const ck = ['car-sedan', 'car-suv', 'car-hatchback', 'car-taxi', 'car-van'].filter((k) => this.models.has(k)), parked = cars.slice(0, 400);
+      if (ck.length) {
+        const weight = (k: string) => (k === 'car-taxi' ? 0.12 : k === 'car-van' ? 0.1 : 1);
+        const total = ck.reduce((s2, k) => s2 + weight(k), 0);
+        const pickKey = (x: number, z: number) => { let t = h01(x, z, 11) * total; for (const k of ck) { t -= weight(k); if (t <= 0) return k; } return ck[0]; };
+        for (const k of ck) for (const im of modelMeshes(this.models.get(k)!, parked.filter(([x, z]) => pickKey(x, z) === k))) add(im);
+      } else for (const im of carMeshes(parked, this.lib.other('car', () => new THREE.MeshStandardMaterial({ roughness: 0.32, metalness: 0.55 })), this.lib.glass('#1c2430', { roughness: 0.08 }))) add(im);
       if (this.models.has('person')) { for (const im of modelMeshes(this.models.get('person')!, people.slice(0, 200).map(([x, z]) => [x, z, h01(z, x, 4) * Math.PI * 2] as [number, number, number]))) add(im); }
       else for (const im of peopleMeshes(people.slice(0, 200), this.lib.other('people', () => new THREE.MeshStandardMaterial({ roughness: 0.85 })), mat('#a77b5a'))) add(im);
     }

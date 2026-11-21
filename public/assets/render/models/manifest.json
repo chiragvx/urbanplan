@@ -1,32 +1,62 @@
 {
  "motorcycle": {
-  "file": "motorcycle.glb",
+  "file": "racing/vehicle-motorcycle.glb",
   "length": 2,
   "source": "https://github.com/KenneyNL/Starter-Kit-Racing",
   "licence": "CC0 1.0 (Kenney)"
  },
  "truck-red": {
-  "file": "truck-red.glb",
+  "file": "racing/vehicle-truck-red.glb",
   "length": 5.5,
   "source": "https://github.com/KenneyNL/Starter-Kit-Racing",
   "licence": "CC0 1.0 (Kenney)"
  },
  "truck-yellow": {
-  "file": "truck-yellow.glb",
+  "file": "racing/vehicle-truck-yellow.glb",
   "length": 5.5,
   "source": "https://github.com/KenneyNL/Starter-Kit-Racing",
   "licence": "CC0 1.0 (Kenney)"
  },
  "truck-green": {
-  "file": "truck-green.glb",
+  "file": "racing/vehicle-truck-green.glb",
   "length": 5.5,
   "source": "https://github.com/KenneyNL/Starter-Kit-Racing",
   "licence": "CC0 1.0 (Kenney)"
  },
  "person": {
-  "file": "person.glb",
+  "file": "platformer/character.glb",
   "height": 1.7,
   "source": "https://github.com/KenneyNL/Starter-Kit-3D-Platformer",
+  "licence": "CC0 1.0 (Kenney)"
+ },
+ "car-sedan": {
+  "file": "cars/sedan.glb",
+  "length": 4.5,
+  "source": "https://opengameart.org/content/car-kit",
+  "licence": "CC0 1.0 (Kenney)"
+ },
+ "car-suv": {
+  "file": "cars/suv.glb",
+  "length": 4.7,
+  "source": "https://opengameart.org/content/car-kit",
+  "licence": "CC0 1.0 (Kenney)"
+ },
+ "car-hatchback": {
+  "file": "cars/hatchback-sports.glb",
+  "length": 4,
+  "source": "https://opengameart.org/content/car-kit",
+  "licence": "CC0 1.0 (Kenney)"
+ },
+ "car-taxi": {
+  "file": "cars/taxi.glb",
+  "length": 4.5,
+  "source": "https://opengameart.org/content/car-kit",
+  "licence": "CC0 1.0 (Kenney)"
+ },
+ "car-van": {
+  "file": "cars/delivery.glb",
+  "length": 5.2,
+  "source": "https://opengameart.org/content/car-kit",
   "licence": "CC0 1.0 (Kenney)"
  }
 }
