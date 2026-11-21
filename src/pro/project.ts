@@ -232,7 +232,9 @@ export function generate(p: ProProject, r: PlotReport, specRate = 0, premium = 0
   if (p.scheme) {
     // (copies: `laid` is worked out afresh every time and must never reach the saved project)
     const buildings = p.scheme.buildings.map((b) => { const L = b.form ? forms[b.id] : undefined; return L ? { ...b, laid: laidOf(L, b.form?.roof) } : b; });
-    let own: PlotSite = { ...base, buildings, elements: p.scheme.elements, manual: true };
+    // (the optimiser's own roads are dropped: the site derives them afresh from the buildings as they now stand)
+    const handEls = (p.scheme.elements ?? []).filter((e) => !(e.auto && (e.kind === 'road' || e.kind === 'roundabout')));
+    let own: PlotSite = { ...base, buildings, elements: handEls, manual: true, design: { ...DEFAULT_DESIGN, ...base.design, deriveRoads: true } };
     own = f.basements === undefined ? park(r, own, 'residential') : { ...own, basements: f.basements };
     const sh = p.shops;
     if (!sh || sh.floors <= 0) return { d: solveSite(r, own, 'residential'), shops: null };

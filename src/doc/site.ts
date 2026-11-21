@@ -602,7 +602,7 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
   cars = Math.ceil(cars * 1.05); scooters = Math.ceil(scooters * 1.05);
   trucks = Math.ceil(trucks);
   const need = cars + Math.ceil(scooters / 4) + trucks * 3;
-  const ground = groundOf(r, site, height > FIRE_H, buildings.map((b) => ({ quads: b.quads, tall: b.height > FIRE_H })));
+  const ground = groundOf(r, site, height > FIRE_H, buildings.map((b) => ({ quads: b.quads, tall: b.height > FIRE_H, cores: b.cores })));
   const playOrTrees = els.filter((e) => e.kind === 'play' || e.kind === 'trees').map(ringOf);
   // the ground laid out: what's left of each lot and garden, bays packed into the lots (and, asked for, the open
   // ground), the rest paved and planted
@@ -996,7 +996,7 @@ function hull(r: number[]): number[] {
  *  as they stand every time (never stored), a lane round each building over 15 m at FIRE_GAP from its faces, kept on
  *  the plot and clear of the other buildings, with a spur out to a road side where it doesn't reach one; its ends are
  *  gates. (The old drive round the plot's edge is what the 'perimeter' access used to mean.) */
-function groundOf(r: PlotReport, site: PlotSite, tall: boolean, built: { quads: number[][]; tall: boolean }[] = []): Ground {
+function groundOf(r: PlotReport, site: PlotSite, tall: boolean, built: { quads: number[][]; tall: boolean; cores?: number[][] }[] = []): Ground {
   const N = r.net, n = N.length / 2;
   const els = site.elements ?? [];
   const roads = els.filter((e) => e.kind === 'road' && e.spine.length >= 4).map((e) => ({ pts: e.spine, w: e.depth }));
@@ -1089,6 +1089,99 @@ function groundOf(r: PlotReport, site: PlotSite, tall: boolean, built: { quads: 
         gate(e, s1, fireGate);
         drive.push(pts);
       }
+    }
+  }
+  // ---- roads derived from the buildings as they stand, never stored: spine and grid access through the gaps between
+  // them (a scheme the user owns), and a spur from each building's entrance to the nearest road, lane or road side.
+  // Their ends on a road side become gates below, as any road's do.
+  if (built.length && access !== 'none') {
+    const F = roadFrame(r), roadW = site.design?.roadW ?? 7, spurW = Math.max(3.5, Math.min(site.design?.roadW ?? 6, 6));
+    const allB = union(...built.flatMap((b) => b.quads.map(fromFlat))), netIn = offset(fromFlat(N), -0.6);
+    const clearOf = new Map<number, ReturnType<typeof offset>>();
+    const blockedAt = (w: number) => { let m = clearOf.get(w); if (!m) { m = offset(allB, w / 2 + ROAD_CLEAR); clearOf.set(w, m); } return m; };
+    /** a polyline clear of the buildings (by half its width and ROAD_CLEAR) and on the plot; its first `skip` m excused */
+    const clearPath = (pts: number[], w: number, skip = 0, bl = blockedAt(w)) => {
+      let run = 0;
+      for (let i = 0; i + 3 < pts.length; i += 2) {
+        const L = Math.hypot(pts[i + 2] - pts[i], pts[i + 3] - pts[i + 1]);
+        for (let t = 0; t <= L; t += 0.8) { if (run + t < skip) continue; const x = pts[i] + ((pts[i + 2] - pts[i]) * t) / (L || 1), z = pts[i + 1] + ((pts[i + 3] - pts[i + 1]) * t) / (L || 1); if (!mpInside(netIn, x, z) || mpInside(bl, x, z)) return false; }
+        run += L;
+      }
+      return true;
+    };
+    const flatW = (pl: [number, number][]) => pl.flatMap(([u, v]) => F.toW(u, v));
+    const Nl = F.toL(N);
+    let U0 = Infinity, U1 = -Infinity, V0 = Infinity, V1 = -Infinity;
+    for (let i = 0; i < Nl.length; i += 2) { U0 = Math.min(U0, Nl[i]); U1 = Math.max(U1, Nl[i]); V0 = Math.min(V0, Nl[i + 1]); V1 = Math.max(V1, Nl[i + 1]); }
+    // the buildings in the road frame, grown by a road's clearance: where roads can't go
+    const boxes = built.map((b) => { let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity; for (const q of b.quads) { const l = F.toL(q); for (let i = 0; i < l.length; i += 2) { u0 = Math.min(u0, l[i]); u1 = Math.max(u1, l[i]); v0 = Math.min(v0, l[i + 1]); v1 = Math.max(v1, l[i + 1]); } } return { u0, u1, v0, v1 }; });
+    const gapsOf = (iv: [number, number][], lo: number, hi: number) => {
+      const s2 = [...iv].sort((a, b) => a[0] - b[0]), out: [number, number][] = []; let at = lo;
+      for (const [a, b] of s2) { if (a > at) out.push([at, a]); at = Math.max(at, b); }
+      if (hi > at) out.push([at, hi]);
+      return out;
+    };
+    const grow = roadW / 2 + ROAD_CLEAR;
+    if (site.design?.deriveRoads && (access === 'spine' || access === 'grid')) {
+      // the spine: up from the road side through the widest gap between the buildings (nearest the middle), as deep as they go
+      const gaps = gapsOf(boxes.map((x) => [x.u0 - grow, x.u1 + grow]), U0 + roadW / 2 + 1, U1 - roadW / 2 - 1).filter(([a, b]) => b - a >= 0.5);
+      const mid = (U0 + U1) / 2, vEnd = Math.min(V1 - 2, Math.max(...boxes.map((x) => x.v1)) + 2);
+      const pick = gaps.map(([a, b]) => (a + b) / 2).sort((a, b) => Math.abs(a - mid) - Math.abs(b - mid));
+      let spineU: number | null = null;
+      for (const u of pick) { const pts = flatW([[u, V0 + 0.7], [u, vEnd]]); if (clearPath(pts, roadW)) { roads.push({ pts, w: roadW }); spineU = u; break; } }
+      // the grid: roads across through the gaps between rows of buildings, joining the spine
+      if (access === 'grid' && spineU !== null) {
+        const rows = gapsOf(boxes.map((x) => [x.v0 - grow, x.v1 + grow]), V0 + roadW, vEnd - roadW).filter(([a, b]) => b - a >= 0.5);
+        const uLo = Math.max(U0 + roadW / 2 + 1, Math.min(...boxes.map((x) => x.u0))), uHi = Math.min(U1 - roadW / 2 - 1, Math.max(...boxes.map((x) => x.u1)));
+        for (const [a, b] of rows) { const v = (a + b) / 2, pts = flatW([[uLo, v], [uHi, v]]); if (clearPath(pts, roadW)) roads.push({ pts, w: roadW }); }
+      }
+    }
+    // the spurs: from each building's entrance (the face toward the road, in line with its core) to the nearest stretch of
+    // road, fire lane or road side, two straight legs in the road frame, clear of every building
+    const targets: [number, number][] = [];
+    for (const pl of [...drive, ...roads.map((x) => x.pts)]) for (let i = 0; i + 3 < pl.length; i += 2) { const L = Math.hypot(pl[i + 2] - pl[i], pl[i + 3] - pl[i + 1]), m = Math.max(1, Math.ceil(L / 2)); for (let k = 0; k <= m; k++) targets.push([pl[i] + ((pl[i + 2] - pl[i]) * k) / m, pl[i + 1] + ((pl[i + 3] - pl[i + 1]) * k) / m]); }
+    for (let k = 0; k < n; k++) { if (!front[k]) continue; const L = len(k), m = Math.max(1, Math.ceil(L / 2)); for (let j = 0; j <= m; j++) targets.push(at(k, Math.min(L, (L * j) / m))); }
+    for (const b of built) {
+      const shape = union(...b.quads.map(fromFlat));
+      let best: { x: number; z: number; nx: number; nz: number; score: number } | null = null;
+      let cx = 0, cz = 0, cn = 0;
+      for (const c of b.cores ?? []) for (let i = 0; i < c.length; i += 2) { cx += c[i]; cz += c[i + 1]; cn++; }
+      for (const poly of shape) {
+        const ring = poly[0]; if (!ring) continue;
+        if (!cn) for (const p of ring) { cx += p[0]; cz += p[1]; cn++; }
+        for (let i = 0; i < ring.length; i++) {
+          const a = ring[i], c = ring[(i + 1) % ring.length], L = Math.hypot(c[0] - a[0], c[1] - a[1]);
+          if (L < 3) continue;
+          const ux = (c[0] - a[0]) / L, uz = (c[1] - a[1]) / L;
+          let nx = uz, nz = -ux;
+          if (mpInside(shape, (a[0] + c[0]) / 2 + nx * 0.05, (a[1] + c[1]) / 2 + nz * 0.05)) { nx = -nx; nz = -nz; }
+          const score = nx * -F.vx + nz * -F.vz;
+          if (best && score <= best.score) continue;
+          const mx = cn ? cx / cn : (a[0] + c[0]) / 2, mz = cn ? cz / cn : (a[1] + c[1]) / 2;
+          const t = Math.max(1.5, Math.min(L - 1.5, (mx - a[0]) * ux + (mz - a[1]) * uz));
+          best = { x: a[0] + ux * t, z: a[1] + uz * t, nx, nz, score };
+        }
+      }
+      if (!best) continue;
+      // (it starts half a road out from the door; its own building need only be clear by its half width, the others by
+      // their clearance too)
+      const sx = best.x + best.nx * (spurW / 2 + 0.3), sz = best.z + best.nz * (spurW / 2 + 0.3);
+      const others = union(...built.filter((o) => o !== b).flatMap((o) => o.quads.map(fromFlat)));
+      const bl = union(offset(others, spurW / 2 + ROAD_CLEAR), offset(shape, spurW / 2 + 0.1));
+      // (a front door within a few metres of the road needs no road of its own: the walk does)
+      if (front.some((f, k) => f && Math.hypot(...((): [number, number] => { const [px, pz] = at(k, along(k, sx, sz)); return [px - sx, pz - sz]; })()) < 4)) continue;
+      const [su, sv] = F.toL([sx, sz]);
+      // (the targets nearest first: the first clear route is the shortest; at most 40 tried)
+      let route: number[] | null = null;
+      const cands = targets.map(([tx, tz]) => { const [tu, tv] = F.toL([tx, tz]); return { tu, tv, L1: Math.abs(tu - su) + Math.abs(tv - sv) }; }).filter((x) => x.L1 >= 1).sort((p, q) => p.L1 - q.L1).slice(0, 40);
+      for (const { tu, tv } of cands) {
+        for (const legs of [[[su, sv], [su, tv], [tu, tv]], [[su, sv], [tu, sv], [tu, tv]]] as [number, number][][]) {
+          const pts = flatW(legs.filter((p, i) => i === 0 || Math.hypot(p[0] - legs[i - 1][0], p[1] - legs[i - 1][1]) > 0.05));
+          if (clearPath(pts, spurW, 0, bl)) { route = [best.x + best.nx * 0.05, best.z + best.nz * 0.05, ...pts]; break; }
+        }
+        if (route) break;
+      }
+      if (route) roads.push({ pts: route, w: spurW });
     }
   }
   // the gates placed by hand: on the edge nearest each, as wide as it's drawn

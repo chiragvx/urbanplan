@@ -37,6 +37,9 @@ export interface Design {
   /** the design system's site kit: a vehicle gate's clear width and an internal road's width (m; unset: 4.5 to 6 m
    *  gates as the case asks, 7 m roads) */
   gateW?: number; roadW?: number;
+  /** derive the spine / grid roads from the buildings as they stand (a scheme the user owns: its stored roads were the
+   *  optimiser's and are dropped, so the roads follow the buildings) */
+  deriveRoads?: boolean;
 }
 export const DEFAULT_DESIGN: Design = { type: 'auto', maxFloors: 0, maxBuildings: 0 };
 export type Access = 'perimeter' | 'plot-edge' | 'spine' | 'grid' | 'none';

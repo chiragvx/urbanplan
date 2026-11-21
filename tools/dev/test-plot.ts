@@ -184,6 +184,21 @@ check(G.gates.length >= 1 && G.drive.length >= 1 && runEnds.every(([x, z]) => at
   const dx = mid(D2) - mid(pune.D);
   check(D2.ground.drive.length >= 1 && dx > 1 && dx < 5, `the fire way follows its buildings: moved 3 m, it moved ${dx.toFixed(1)} m`);
 }
+{
+  // roads derived from the buildings: a spur from each entrance, clear of every building; a spine through the gaps
+  // that moves when the buildings move (a scheme the user owns: its stored roads dropped)
+  const own = (dx: number, access: 'spine' | 'grid' | 'perimeter') => solveSite(pune.R, { ...pune.st, elements: [], manual: true, design: { ...(pune.st.design ?? { type: 'auto', maxFloors: 0, maxBuildings: 0 }), access, deriveRoads: true }, buildings: pune.st.buildings.map((b) => ({ ...b, spine: b.spine.map((v, i) => (i % 2 === 0 ? v + dx : v)) })) }, 'residential');
+  const D0 = own(0, 'spine'), D1 = own(3, 'spine');
+  const under = (D: typeof pune.D) => D.ground.roads.some((rd) => { for (let i = 0; i < rd.pts.length; i += 2) if (D.buildings.some((b) => b.quads.some((q) => pointIn(q, rd.pts[i], rd.pts[i + 1], 0)))) return true; return false; });
+  const spine = (D: typeof pune.D) => D.ground.roads.find((rd) => rd.w >= 7);
+  const s0 = spine(D0), s1 = spine(D1);
+  check(D0.ground.roads.length >= 1 && !under(D0) && !under(D1), `derived roads: ${D0.ground.roads.length} (a spine and the entrance spurs), none under a building`);
+  check(!!s0 && !!s1 && Math.abs(s1.pts[0] - s0.pts[0]) > 0.5, `the spine follows the buildings: moved 3 m, it moved ${s0 && s1 ? Math.abs(s1.pts[0] - s0.pts[0]).toFixed(1) : '—'} m`);
+  const P = own(0, 'perimeter');
+  const spurs = P.ground.roads.filter((rd) => rd.w < 7);
+  const reaches = spurs.every((rd) => { const x = rd.pts[rd.pts.length - 2], z = rd.pts[rd.pts.length - 1]; return P.ground.gates.some((g) => Math.hypot((g[0] + g[2]) / 2 - x, (g[1] + g[3]) / 2 - z) < 8) || P.ground.drive.some((d) => { for (let i = 0; i < d.length; i += 2) if (Math.hypot(d[i] - x, d[i + 1] - z) < 3) return true; return false; }); });
+  check(reaches && !under(P), `entrance spurs: ${spurs.length}, each ending at a gate or on the fire way, clear of the buildings`);
+}
 const lowG = opt([-10, 7, 10, 7, 10, 37, -10, 37]).D.ground;
 check(lowG.drive.length === 0 && lowG.gates.length === 1, 'a low building: one gate, no drive');
 
