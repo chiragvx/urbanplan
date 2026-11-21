@@ -22,6 +22,7 @@ import { GLASS, litShare, withRooms } from './render/glass';
 import { carMeshes, gridIn, loadModels, markings, modelMeshes, peopleMeshes, treeMeshes, type ModelPart, type Tree } from './render/entourage';
 import { pathSky, pixelsToPng } from './render/still';
 import { neighbourMesh, neighbours } from './render/context';
+import type { CoreDetail } from './coreDetail';
 import { PerfOverlay, type BenchResult } from './render/perf';
 import type { Material as LibMaterial } from './materials';
 import type { PlotReport } from '../doc/plot';
@@ -53,6 +54,8 @@ export interface ViewData {
   features?: SiteFeature[]; levels?: Levels; north?: number; sel?: string | null;
   /** where the plot is ([lat, lon] of its middle) and its authority: the neighbours drawn round it (./render/context.ts) */
   at?: [number, number] | null; city?: string;
+  /** what's inside each building's cores, laid out (./coreDetail.ts): the X-ray floor draws its stairs, lifts and lobby */
+  cores?: CoreDetail[][];
   /** the formed buildings' layouts by building id (Evaluated.forms); unset, worked out here from each one's form */
   forms?: Record<string, FormLayout>;
 }
@@ -852,6 +855,46 @@ export class ProView {
     if (mk) { const mm = mesh(mk, mat('#f1efe8', { roughness: 0.7, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), false); mm.renderOrder = 1; }
     flush();
     const entrances: [number, number, number, number][] = [];
+    /** a rectangle (4 corners, x,z…) as its corner, its two axes and their lengths */
+    const rectOf = (q: number[]) => { const ox = q[0], oz = q[1], ax = q[2] - ox, az = q[3] - oz, bx = q[6] - ox, bz = q[7] - oz, lu = Math.hypot(ax, az) || 1e-6, lv = Math.hypot(bx, bz) || 1e-6; return { ox, oz, ux: ax / lu, uz: az / lu, vx: bx / lv, vz: bz / lv, lu, lv }; };
+    const steps = new Boxes(), shafts = new Boxes(), cars = new Boxes(), ducts = new Boxes(), rails2 = new Boxes();
+    const ringWalls = (q: number[], fy: number, h: number, t: number) => { for (let i = 0; i < q.length; i += 2) { const j = (i + 2) % q.length, L = Math.hypot(q[j] - q[i], q[j + 1] - q[i + 1]); if (L > 0.05) parts.add((q[i] + q[j]) / 2, fy + h / 2, (q[i + 1] + q[j + 1]) / 2, (q[j] - q[i]) / L, (q[j + 1] - q[i + 1]) / L, L, h, t); } };
+    /** the cut floor's cores as they are: each dog-leg stair's two flights of steps and its half landing (the flight up
+     *  from this floor, the landing half a floor up, the flight on to the next), a handrail over the well, the lift shafts
+     *  with their walls and a car standing at this floor in some, the lift lobby's floor, and the ducts */
+    const coreInside = (list: CoreDetail[], fy: number) => {
+      for (const cd of list) {
+        if (cd.lobby && cd.lobby.length >= 6) mesh(flat(cd.lobby, fy + 0.05), mat('#e2ddd3', { roughness: 0.6 }), false);
+        for (const st of cd.stairs) {
+          const perFlight = Math.max(2, Math.ceil(st.risers / 2)), rise = fh / 2 / perFlight;
+          const [f1, f2] = st.flights.map(rectOf);
+          // flight one: up from this floor along v; flight two: from the landing back along v to the next floor
+          for (let i = 0; i < perFlight; i++) {
+            const t = (i + 0.5) / perFlight, h = (i + 1) * rise;
+            steps.add(f1.ox + f1.ux * f1.lu / 2 + f1.vx * f1.lv * t, fy + h / 2, f1.oz + f1.uz * f1.lu / 2 + f1.vz * f1.lv * t, f1.ux, f1.uz, f1.lu, h, f1.lv / perFlight);
+            const top2 = fh / 2 + (i + 1) * rise, t2 = 1 - t;
+            steps.add(f2.ox + f2.ux * f2.lu / 2 + f2.vx * f2.lv * t2, fy + top2 - (rise + 0.15) / 2, f2.oz + f2.uz * f2.lu / 2 + f2.vz * f2.lv * t2, f2.ux, f2.uz, f2.lu, rise + 0.15, f2.lv / perFlight);
+          }
+          // the half landing at the far end, and the stair's own walls (to the cut)
+          const far = st.landings[1] ? rectOf(st.landings[1]) : null;
+          if (far) steps.add(far.ox + far.ux * far.lu / 2 + far.vx * far.lv / 2, fy + fh / 2 - 0.075, far.oz + far.uz * far.lu / 2 + far.vz * far.lv / 2, far.ux, far.uz, far.lu, 0.15, far.lv);
+          ringWalls(st.box, fy, CUT, 0.15);
+          // the wall between the flights, a handrail on it
+          if (st.well.length >= 4) { const [x0, z0, x1, z1] = st.well, L = Math.hypot(x1 - x0, z1 - z0) || 1; rails2.add((x0 + x1) / 2, fy + fh / 4 + 0.9, (z0 + z1) / 2, (x1 - x0) / L, (z1 - z0) / L, L, 0.05, 0.05); parts.add((x0 + x1) / 2, fy + (fh / 4 + 0.88) / 2, (z0 + z1) / 2, (x1 - x0) / L, (z1 - z0) / L, L, fh / 4 + 0.88, 0.12); }
+        }
+        cd.lifts.forEach((lf, li) => {
+          const sh = rectOf(lf.shaft);
+          // the pit dark, the shaft's walls to the cut, a car at this floor in every other one
+          shafts.add(sh.ox + sh.ux * sh.lu / 2 + sh.vx * sh.lv / 2, fy + 0.06, sh.oz + sh.uz * sh.lu / 2 + sh.vz * sh.lv / 2, sh.ux, sh.uz, sh.lu - 0.1, 0.02, sh.lv - 0.1);
+          ringWalls(lf.shaft, fy, CUT, 0.15);
+          if ((li + Math.round(fy / fh)) % 2 === 0) { const cr = rectOf(lf.car); cars.add(cr.ox + cr.ux * cr.lu / 2 + cr.vx * cr.lv / 2, fy + Math.min(CUT, 2.3) / 2 + 0.05, cr.oz + cr.uz * cr.lu / 2 + cr.vz * cr.lv / 2, cr.ux, cr.uz, cr.lu, Math.min(CUT, 2.3), cr.lv); }
+        });
+        for (const dq of cd.ducts) { const du = rectOf(dq); ducts.add(du.ox + du.ux * du.lu / 2 + du.vx * du.lv / 2, fy + CUT / 2, du.oz + du.uz * du.lu / 2 + du.vz * du.lv / 2, du.ux, du.uz, du.lu, CUT, du.lv); }
+      }
+      add(steps.mesh(mat('#d4cfc5', { roughness: 0.8 }), true)); add(shafts.mesh(mat('#1f2023', { roughness: 0.9 }), false)); add(cars.mesh(mat('#b9bcc0', { roughness: 0.3, metalness: 0.8 }), true));
+      add(ducts.mesh(mat('#8d8a84'), true)); add(rails2.mesh(mat('#2b2b2e', { roughness: 0.4, metalness: 0.7 }), false));
+      steps.m = []; steps.meta = []; shafts.m = []; shafts.meta = []; cars.m = []; cars.meta = []; ducts.m = []; ducts.meta = []; rails2.m = []; rails2.meta = [];
+    };
     d.buildings.forEach((b, bi) => {
       const plan = plans[bi];
       // (each building in its own design system: its materials, then its instanced meshes flushed at the end)
@@ -1020,7 +1063,8 @@ export class ProView {
       }
       // (the cores: inside the walls they'd only fight the facade for depth, so drawn where they show: down the stilt and up
       // past the roof as the lift room; X-ray shows the cut floor's core open, its walls to the cut like the flats')
-      for (const c of b.cores) { if (v.xray !== null) { if (top > 0.05) mesh(prism(c, 0, top, false), M.core); mesh(flat(c, top + 0.04), M.core, false); for (let i = 0; i < c.length; i += 2) { const j = (i + 2) % c.length, L = Math.hypot(c[j] - c[i], c[j + 1] - c[i + 1]); if (L > 0.05) parts.add((c[i] + c[j]) / 2, top + CUT / 2, (c[i + 1] + c[j + 1]) / 2, (c[j] - c[i]) / L, (c[j + 1] - c[i + 1]) / L, L, CUT, 0.2); } } else { if (y0 > 0.05) mesh(prism(c, 0, y0, false), M.core); mesh(prism(c, y0 + all * fh - 0.05, y0 + all * fh + 2.4), M.core); } }
+      for (const c of b.cores) { if (v.xray !== null) { if (top > 0.05) mesh(prism(c, 0, top, false), M.core); mesh(flat(c, top + 0.04), M.core, false); for (let i = 0; i < c.length; i += 2) { const j = (i + 2) % c.length, L = Math.hypot(c[j] - c[i], c[j + 1] - c[i + 1]); if (L > 0.05) parts.add((c[i] + c[j]) / 2, top + CUT / 2, (c[i + 1] + c[j + 1]) / 2, (c[j] - c[i]) / L, (c[j + 1] - c[i + 1]) / L, L, CUT, 0.2); } }
+      if (v.xray !== null) coreInside(v.cores?.[bi] ?? [], top); else { if (y0 > 0.05) mesh(prism(c, 0, y0, false), M.core); mesh(prism(c, y0 + all * fh - 0.05, y0 + all * fh + 2.4), M.core); } }
       // floors: bands on the slab edges, the openings
       const floorsShown = v.xray === null ? all : show;
       for (let f = 0; f < floorsShown; f++) {

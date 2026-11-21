@@ -14,6 +14,7 @@ import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import '../theme/tokens.css';
 import './pro.css';
+import { buildingCores } from './coreDetail';
 import { TIERS, type Tier } from './render/quality';
 import * as designLibrary from './designLibrary';
 import { presetOf } from './design';
@@ -220,7 +221,7 @@ function App() {
       r: e.r, d: e.d, plans: e.plans, ds: e.ds, xray: xr, shops: e.shops,
       roads: roadLines(o.ring, o.roads).map((l) => ({ pts: l.pts, today: l.road.today })),
       dsOf: (i) => dsOfBuilding(p, i, e.ds, e.d.buildings[i]?.b.id), rooms, roomColor: ROOM_COLOR,
-      features: p.features, levels: p.levels, north: p.north, sel: picked?.k === 'building' ? picked.id : null, forms: e.forms, at: p.at ?? null, city: p.city,
+      features: p.features, levels: p.levels, north: p.north, sel: picked?.k === 'building' ? picked.id : null, forms: e.forms, at: p.at ?? null, city: p.city, cores: xr !== null ? e.d.buildings.map((_, i) => buildingCores(e, i)) : undefined,
     });
     edit.current?.draw();
     applySun();
