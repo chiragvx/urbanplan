@@ -75,7 +75,7 @@ export function usePins(view: ProView | null) {
       // (between the result bar and the view's toolbar: above the building, else below it, else at the top)
       const tools = R.parentElement?.querySelector<HTMLElement>('.tools'), bottom = (tools ? tools.offsetTop : H - 60) - bh - 8;
       let y = y0 - bh - 26;
-      if (y < top) y = y1 + 22 <= bottom ? y1 + 22 : top;
+      if (y < top) y = y1 + 40 <= bottom ? y1 + 40 : top;
       y = Math.max(top, Math.min(bottom, y));
       const x = Math.max(8, Math.min(W - bw - 8, (x0 + x1) / 2 - bw / 2));
       B.style.visibility = 'visible'; B.style.transform = `translate(${Math.round(x)}px,${Math.round(y)}px)`;

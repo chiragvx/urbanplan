@@ -619,6 +619,23 @@ The core loop of placing and shaping buildings stops needing the panel.
 - North and levels from "Levels and north" (142-157). The terrain notes go to the plot bar's popover.
 - What's left in the Site sheet: Rules, Allowed, Constraints.
 
+**Status (2026-11-22): built, in src/pro/plotHud.tsx and src/pro/plotOps.ts.**
+- Done:
+  - the plot picked by a click on open ground inside it (never a drag), and on the Site step whenever nothing else is picked;
+  - corner handles (snapped), midpoint inserts, Delete on a focused corner;
+  - edge lengths typed in place;
+  - a rectangle becoming a drawn outline on its first edit (said once in a toast);
+  - road chips on each edge with today's width, the DP's and the carriageway;
+  - a "No road" warning in the bar;
+  - the slope arrow (direction in 45° steps, steeper as it lengthens);
+  - the compass as a north dial (drag, or the arrow keys in 5° and 45° steps), locked when the plot's place set north, with a lock/free toggle in the bar;
+  - the plot bar: area, Size, Redraw, Survey no. and Import (open the panel there), Levels and the terrain, the authority;
+  - the panel's Size/Draw, Roads and Levels-and-north sections removed.
+- Done differently: in shaded or X-ray view a corner drag moves a dashed outline, and the plot is worked out on release. In a perspective view the dial turns less than the pointer moves; the arrow keys give exact steps.
+- Not done yet:
+  - the empty-start call to action;
+  - frontage and depth edge handles on a rectangle (Size has them as numbers).
+
 ### Phase 4: Forms, uses, mix and X-ray in view
 
 **Deliverables:**

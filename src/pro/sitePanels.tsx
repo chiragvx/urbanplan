@@ -2,89 +2,52 @@
 // where things are drawn, picked and moved (./edit.ts).
 //
 // Site: the plot (drawn, found by its survey number, imported, or a rectangle by its size), the road along each
-// edge at a width the plan uses, the levels and north, and what's on the site (obstructions and no-build zones).
+// edge, its levels and north on the map (./plotHud.tsx); here its survey number or an import, and what's on the site (obstructions and no-build zones).
 // Scheme: "Fill the plot" (how much, what, the green, the play area, the roads, the parking), then the buildings
 // and the site's things, each the user's to place, shape and set: floors, mix, design system, its systems.
 import type { ComponentChildren } from 'preact';
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { UNIT_LABEL } from '../doc/site';
 import { ACCESS, TYPOLOGIES, type Typology } from '../doc/optimise';
-import { CITIES, fillOf, outline, type EdgeRoad, type Fill, type ProBuilding } from './project';
+import { CITIES, fillOf, type Fill, type ProBuilding } from './project';
 import { longestEdge } from './importPlot';
+import { readGround } from './plotOps';
 import { presetOf, PRESETS } from './design';
 import { shopFloorsAllowed } from './mixed';
 import { buildModel, ifcLite, modelJson } from './model';
 import { own } from './edit';
 import { ShapePanel } from './shapePanel';
-import { DEFAULT_LEVELS, featureOf, PLINTH_MIN, roadParts, roadWidths, type Levels } from './siteObjects';
+import { featureOf } from './siteObjects';
 import { FindPlot, FlatPlan, ImportBox, slug, type StepProps } from './steps';
 import { Btn, download, Icon, Lines, Note, nf, Num, Row, Section, Seg, Select, Slider, sqft, Stat, Toggle } from './ui';
 import { SystemsPanel } from './systemsPanel';
-import { groundAt, groundOpen, plotOverRoad, type Ground } from './terrain';
 import { mergeSettings, splitSettings } from './systems';
 
-type PlotWay = 'size' | 'draw' | 'survey' | 'import';
-const DIRS = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
-/** an edge's outward side as a compass point */
-function edgeFacing(ring: number[], k: number, north: number): string {
-  let sa = 0; for (let i = 0; i < ring.length; i += 2) { const j = (i + 2) % ring.length; sa += ring[i] * ring[j + 1] - ring[j] * ring[i + 1]; }
-  const i = 2 * k, j = (i + 2) % ring.length, dx = ring[j] - ring[i], dz = ring[j + 1] - ring[i + 1], L = Math.hypot(dx, dz) || 1;
-  // outward normal (x east, z south), then its bearing clockwise from north
-  const sg = sa > 0 ? 1 : -1, nx = (dz / L) * sg, nz = (-dx / L) * sg;
-  const b = ((Math.atan2(nx, -nz) * 180) / Math.PI - north + 720) % 360;
-  return DIRS[Math.round(b / 45) % 8];
-}
-const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
-
-/** A row of tools: icon and word, the active one inverted. */
+type PlotWay = 'view' | 'survey' | 'import';
 
 function Picked({ title, children, remove, copy }: { title: ComponentChildren; children?: ComponentChildren; remove?: () => void; copy?: () => void }) {
   return <div class="picked"><header><b>{title}</b><span>{copy && <Btn kind="quiet" icon="plus" title="Duplicate" onClick={copy} />}{remove && <Btn kind="quiet" icon="trash" title="Remove (Delete)" onClick={remove} />}</span></header>{children}</div>;
 }
 
 // ================================================================ site
-export function SiteStep2({ p, e, up, toast, tool, setTool, picked, pick }: StepProps) {
+export function SiteStep2({ p, e, up, toast, tool, picked, pick }: StepProps) {
   const { r } = e;
   const city = CITIES.find((c) => c.value === p.city)!;
   // (the dashboard can ask for a plot found by its survey number or imported: that way open, once)
   const [way, setWay] = useState<PlotWay>(() => {
     try { const w = sessionStorage.getItem('urbanplan:pro:way'); if (w === 'survey' || w === 'import') { sessionStorage.removeItem('urbanplan:pro:way'); return w; } } catch { /* */ }
-    return p.shape === 'poly' ? 'draw' : 'size';
+    return 'view';
   });
-  const o = outline(p), north = p.north ?? 0;
-  const L: Levels = { ...DEFAULT_LEVELS, ...(p.levels ?? {}) };
-  const setLv = (x: Partial<Levels>) => up({ levels: { ...L, ...x } });
+  useEffect(() => { const on = (ev: Event) => setWay((ev as CustomEvent<PlotWay>).detail); addEventListener('urbanplan:way', on); return () => removeEventListener('urbanplan:way', on); }, []);
   const LM = p.limits ?? { maxH: 0, tod: false, todFsi: 4 };
   const setLM = (x: Partial<typeof LM>) => up({ limits: { ...LM, ...x } });
-  const widths = roadWidths(r.code);
-  const setEdge = (k: number, rd: EdgeRoad | null) => {
-    const roads = o.roads.map((x, i) => (i === k ? rd : x));
-    if (p.shape === 'poly') up({ edgeRoads: roads });
-    else up({ shape: 'poly', ring: o.ring, edgeRoads: roads });
-  };
   const fs = p.features ?? [];
   const fPicked = picked?.k === 'feature' ? fs.find((f) => f.id === picked.id) : undefined;
-  // the ground off the city's terrain, where the plot has a real place
-  const [reading, setReading] = useState(false);
-  const [noTerrain, setNoTerrain] = useState(false);
-  const readGround = async (at: [number, number], ring: number[], quiet = false, front?: { k: number; w: number } | null, open = false) => {
-    setReading(true);
-    let r0 = 0; for (let i = 0; i < ring.length; i += 2) r0 = Math.max(r0, Math.hypot(ring[i], ring[i + 1]));
-    const g: Ground | null = open ? await groundOpen(at[0], at[1], r0).catch(() => null) : await groundAt(at[0], at[1], Math.max(20, Math.min(80, r0))).catch(() => null);
-    setReading(false);
-    setNoTerrain(!g && !open);
-    if (!g) { if (!quiet) toast(open ? 'The elevation service didn’t answer: set the levels by hand.' : 'No city terrain here: use open elevation data, or set the levels by hand.'); return; }
-    // (the plot's middle over its front road: the road edge is the one with a road, else the longest)
-    const er = outline(p).roads, ek = er.findIndex((x) => !!x), f = front ?? (ek >= 0 ? { k: ek, w: er[ek]!.today || 12 } : null);
-    const over = f ? plotOverRoad(g, ring, f.k, f.w) : L.plot;
-    up({ at, north: 0, levels: { ...L, src: g.region === 'open' ? 'open' : 'city', plot: over, slope: g.slope < 0.5 ? 0 : g.slope, dir: (Math.round(g.dir / 45) * 45) % 360, asl: g.elevation, terrain: true } });
-    toast(`The ground: ${nf(g.elevation)} m over sea level, ${g.slope < 0.5 ? 'about level' : `${nf(g.slope)}% falling ${DIRS[Math.round(g.dir / 45) % 8]}`}, the plot ${over >= 0 ? `${nf(over, 1)} m over` : `${nf(-over, 1)} m under`} its road.`);
-  };
   const found = (ring: number[], src: string, name?: string, at?: [number, number] | null) => {
     const k = longestEdge(ring);
     up({ shape: 'poly', ring, at: at ?? undefined, edgeRoads: Array.from({ length: ring.length / 2 }, (_, i) => (i === k ? { today: 12, dp: 0 } : null)), ...(name ? { name } : {}) });
-    toast(`${src}. The longest edge has the road: set the real roads below.`);
-    if (at) void readGround(at, ring, true, { k, w: 12 });
+    toast(`${src}. The longest edge has the road: set the real roads with the chips on the map.`);
+    if (at) void readGround({ ...p, shape: 'poly', ring, at }, at, ring, { front: { k, w: 12 } }).then((res) => { if ('change' in res) up(res.change); });
   };
   return (
     <>
@@ -93,49 +56,10 @@ export function SiteStep2({ p, e, up, toast, tool, setTool, picked, pick }: Step
       </Section>
 
       <Section title="Plot" aside={<span class="sec-meta">{nf(r.area)} m² · {sqft(r.area)}</span>}>
-        <Seg<PlotWay> value={way} set={(v) => { setWay(v); if (v === 'draw') setTool({ k: 'plot' }); else if (tool.k === 'plot') setTool({ k: 'select' }); }} options={[
-          { value: 'size', label: 'Size' }, { value: 'draw', label: 'Draw' }, { value: 'survey', label: 'Survey no.' }, { value: 'import', label: 'Import' },
-        ]} ariaLabel="Set the plot by" />
-        {way === 'size' && <Row><Num label="Frontage" value={p.width} set={(v) => up({ width: v, shape: 'rect' })} min={10} max={600} unit="m" /><Num label="Depth" value={p.depth} set={(v) => up({ depth: v, shape: 'rect' })} min={10} max={600} unit="m" /></Row>}
-        {way === 'draw' && <p class="hint-line"><Icon n="edit" size={14} />{p.shape === 'poly' ? 'Drag its corners on the map, or click to draw it again.' : 'Click its corners on the map, Enter to finish.'}</p>}
-        {way === 'survey' && <FindPlot start cancel={() => setWay('size')} done={(ring, src, at) => { found(ring, src, src.split(' · ')[0], at); setWay('draw'); }} />}
-        {way === 'import' && <ImportBox done={(ring, src, at) => { found(ring, `Outline from ${src}`, undefined, at); setWay('draw'); }} />}
-      </Section>
-
-      <Section title="Roads">
-        <div class="edges">{o.roads.map((rd, k) => {
-          const i = 2 * k, j = (i + 2) % o.ring.length, len = Math.hypot(o.ring[j] - o.ring[i], o.ring[j + 1] - o.ring[i + 1]);
-          const pr = rd ? roadParts(Math.max(rd.today, rd.dp)) : null;
-          return (
-            <div class="edge">
-              <span class="edge-n"><b>{cap(edgeFacing(o.ring, k, north))}</b><small>{nf(len, 1)} m</small></span>
-              <Select<number> size="sm" aria-label={`Road on the ${edgeFacing(o.ring, k, north)} edge today`} value={rd?.today ?? 0} onChange={(v) => setEdge(k, v ? { today: v, dp: Math.max(rd?.dp ?? 0, 0) } : null)}
-                options={[{ value: 0, label: 'No road' }, ...widths.map((w) => ({ value: w, label: `${w} m road` }))]} />
-              {rd && <Select<number> size="sm" aria-label="Its width in the DP" value={rd.dp > rd.today ? rd.dp : 0} onChange={(v) => setEdge(k, { today: rd.today, dp: v })}
-                options={[{ value: 0, label: 'DP: same' }, ...widths.filter((w) => w > rd.today).map((w) => ({ value: w, label: `DP: ${w} m` }))]} />}
-              {pr && pr.foot > 0 && <small class="edge-p">{nf(pr.carriage, 1)} m carriageway, {nf(pr.foot, 1)} m footpaths</small>}
-            </div>
-          );
-        })}</div>
-        {!o.roads.some(Boolean) && <Note tone="warn">No road along the plot: give one edge a road.</Note>}
-      </Section>
-
-      <Section title="Levels and north" fold open={!!(p.levels || p.north)}>
-        <Row>
-          <Num label="Plot over the road" value={L.plot} set={(v) => setLv({ plot: v, terrain: false })} min={-10} max={30} step={0.1} unit="m" />
-          <Num label="Slope" value={L.slope} set={(v) => setLv({ slope: v, terrain: false })} min={0} max={60} step={0.5} unit="%" />
-        </Row>
-        {p.at
-          ? <><Note>{L.terrain ? `Off ${L.src === 'open' ? 'open elevation data (90 m)' : 'the city’s terrain'}${L.asl !== undefined ? `, ${nf(L.asl)} m over sea level` : ''}. A first figure: a contour survey beats it.` : 'Set by hand.'}</Note>
-            {noTerrain || L.src === 'open'
-              ? <><Row><Btn icon="level" disabled={reading} onClick={() => readGround(p.at!, outline(p).ring, false, null, true)}>{reading ? 'Reading…' : L.src === 'open' ? 'Read it again' : 'Use open elevation data'}</Btn></Row>
-                <p class="hint-line">No city terrain here: this sends the plot’s location to Open-Meteo (free, Copernicus 90 m data).</p></>
-              : <Row><Btn icon="level" disabled={reading} onClick={() => readGround(p.at!, outline(p).ring)}>{reading ? 'Reading…' : L.terrain ? 'Read it again' : 'Read the terrain'}</Btn></Row>}</>
-          : <Note>Find or import the plot to read its slope off the terrain.</Note>}
-        {L.slope > 0 && <Select<number> label="Falls toward" value={L.dir} onChange={(v) => setLv({ dir: v, terrain: false })} options={DIRS.map((d, i) => ({ value: i * 45, label: cap(d) }))} />}
-        <Num label="North, turned clockwise" value={north} set={(v) => up({ north: ((v % 360) + 360) % 360 })} min={-360} max={360} step={5} unit="°" hint={p.at ? "Set from where the plot is. The compass on the map follows." : "0: the front road is on the north side. The compass on the map follows."} />
-        {L.plot < PLINTH_MIN && <Note tone="warn">The plinth must stand at least {PLINTH_MIN} m over the road: {L.plot < 0 ? 'the plot is below it, so plan the drainage and fill' : `about ${nf(PLINTH_MIN - L.plot, 2)} m of fill or a raised plinth`}.</Note>}
-        {L.slope >= 15 && <Note tone="warn">A steep plot ({nf(L.slope)}%): expect retaining walls and stepped floors, and a hill-slope check by the authority.</Note>}
+        <p class="hint-line"><Icon n="edit" size={14} />Drag its corners on the map, type its edges' lengths there, and set each edge's road with its chip. The plot's bar on the map has its size, levels and the authority.</p>
+        <Seg<PlotWay> value={way} set={setWay} options={[{ value: 'view', label: 'On the map' }, { value: 'survey', label: 'Survey no.' }, { value: 'import', label: 'Import' }]} ariaLabel="Set the plot by" />
+        {way === 'survey' && <FindPlot start cancel={() => setWay('view')} done={(ring, src, at) => { found(ring, src, src.split(' · ')[0], at); setWay('view'); }} />}
+        {way === 'import' && <ImportBox done={(ring, src, at) => { found(ring, `Outline from ${src}`, undefined, at); setWay('view'); }} />}
       </Section>
 
       <Section title="On the site" fold open={fs.length > 0 || tool.k === 'feature'} aside={<span class="sec-meta">{fs.length ? `${fs.length} marked` : 'none'}</span>} sub="What to build round: draw it from the tools on the map's left edge (the tree), then drag its points and rings there.">

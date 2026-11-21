@@ -33,7 +33,7 @@ export type Tool =
 export const SELECT: Tool = { k: 'select' };
 
 /** what's picked: a building, a thing on the site, a feature, or nothing */
-export type Picked = { k: 'building'; id: string } | { k: 'element'; id: string } | { k: 'feature'; id: string } | null;
+export type Picked = { k: 'building'; id: string } | { k: 'element'; id: string } | { k: 'feature'; id: string } | { k: 'plot' } | null;
 
 export const BUILDING_SHAPES: { shape: BuildingShape; label: string; icon: string; hint: string }[] = [
   { shape: 'slab', label: 'Slab', icon: 'slab', hint: 'Click where it goes: a block 36 m long, flats both sides of a corridor.' },
@@ -219,7 +219,6 @@ export interface EditHost {
 
 type Drag =
   | { kind: 'move'; what: Picked; base: ProProject; moved: boolean; y: number; acc: Pt; last: Pt; scale: DragScale; corners: Pt[] }
-  | { kind: 'corner'; i: number; base: ProProject }
   | { kind: 'rect'; from: Pt; to: Pt }
   | { kind: 'plan'; id: string; i: number; moved: boolean; plan: { pts: Pt[]; sharp?: boolean[] } };
 
@@ -486,16 +485,6 @@ export class CanvasEdit {
     // select: a corner of the plot (on the Site step), else what's under the pointer
     const p = this.h.p(), e = this.h.e(), rect = this.canvas.getBoundingClientRect(), sx = ev.clientX - rect.left, sy = ev.clientY - rect.top;
     if (this.h.step() === 'site') {
-      const o = outline(p);
-      for (let i = 0; i < o.ring.length; i += 2) {
-        const [qx, qy] = v.toScreen(o.ring[i], 0, o.ring[i + 1]);
-        if (Math.hypot(qx - sx, qy - sy) < SNAP_PX + 2) {
-          v.controls.enabled = false;
-          const base = p.shape === 'poly' ? p : { ...p, shape: 'poly' as const, ring: o.ring, edgeRoads: o.roads };
-          this.drag = { kind: 'corner', i: i / 2, base };
-          return;
-        }
-      }
       const f = this.featureAt(ev.clientX, ev.clientY);
       if (f) { this.h.pick({ k: 'feature', id: f.id }); this.startMove({ k: 'feature', id: f.id }, ev, v); return; }
     }
@@ -573,15 +562,6 @@ export class CanvasEdit {
   private moveIn(ev: PointerEvent, v: ProView) {
     const d = this.drag;
     if (d?.kind === 'rect') { const g = this.snap(ev.clientX, ev.clientY, ev, { from: false }); if (g) { d.to = g; this.draw(); } return; }
-    if (d?.kind === 'corner') {
-      const ring0 = d.base.ring ?? [], extra: number[] = [];
-      for (let i = 0; i + 1 < ring0.length; i += 2) if (i / 2 !== d.i) extra.push(ring0[i], ring0[i + 1]);
-      const g = this.snap(ev.clientX, ev.clientY, ev, { extra, from: false }); if (!g) return;
-      const ring = [...ring0]; ring[d.i * 2] = g[0]; ring[d.i * 2 + 1] = g[1];
-      this.h.up({ shape: 'poly', ring, edgeRoads: d.base.edgeRoads });
-      this.draw();
-      return;
-    }
     if (d?.kind === 'plan') {
       const b = this.h.p().scheme?.buildings.find((x) => x.id === d.id); if (!b?.form) return;
       // (the drag keeps its own copy of the plan: the next move builds on it, not on a render yet to come)
@@ -649,8 +629,14 @@ export class CanvasEdit {
       return;
     }
     v.controls.enabled = !modeOf(this.tool);
-    if (d) { if (d.kind === 'corner' || d.kind === 'plan' || d.moved) return; }
+    if (d) { if (d.kind === 'plan' || d.moved) return; }
     const m = modeOf(this.tool);
+    // (a click on open ground, not a drag: inside the plot picks the plot; outside it, nothing)
+    if (!m && click && !d && this.tool.k === 'select') {
+      const g = v.groundAt(ev.clientX, ev.clientY);
+      this.h.pick(g && pointIn(outline(this.h.p()).ring, g[0], g[1]) ? { k: 'plot' } : null);
+      return;
+    }
     if (!m || !click) { if (m) v.controls.enabled = true; return; }
     const g = this.snap(ev.clientX, ev.clientY, ev); if (!g) return;
     if (m === 'point') { this.pts = g; this.finish(); return; }
@@ -776,8 +762,6 @@ export class CanvasEdit {
     // the snap: its guide and the point it took
     for (let i = 0; i + 3 < this.guide.length; i += 4) o.dashed!.push(this.guide[i], 0.12, this.guide[i + 1], this.guide[i + 2], 0.12, this.guide[i + 3]);
     if (this.hotPt && !(this.hover && modeOf(this.tool))) o.hot!.push(this.hotPt[0], 0.12, this.hotPt[1]);
-    // the plot's corners, to drag, on the Site step
-    if (this.tool.k === 'select' && this.h.step() === 'site' && !this.h.readOnly()) { const r = outline(this.h.p()).ring; for (let i = 0; i < r.length; i += 2) o.points!.push(r[i], 0.1, r[i + 1]); }
     // a formed building's plan: its points, and a small + in the middle of each edge
     const fb = this.pickedForm();
     if (fb) {
@@ -827,7 +811,7 @@ const shift = (pts: number[], dx: number, dz: number) => pts.map((q, i) => r2(q 
 
 /** the project with a building, a thing or a feature moved (a formed building moves with its spine) */
 export function moved(p: ProProject, e: Evaluated, what: Picked, dx: number, dz: number): Partial<ProProject> {
-  if (!what) return {};
+  if (!what || what.k === 'plot') return {};
   if (what.k === 'feature') return { features: (p.features ?? []).map((f) => (f.id === what.id ? { ...f, pts: shift(f.pts, dx, dz) } : f)) };
   const s = own(p, e);
   if (what.k === 'building') return { scheme: { ...s, buildings: s.buildings.map((b) => (b.id === what.id ? { ...b, spine: shift(b.spine, dx, dz) } : b)) } };
@@ -835,7 +819,7 @@ export function moved(p: ProProject, e: Evaluated, what: Picked, dx: number, dz:
 }
 /** the project without it */
 export function removed(p: ProProject, e: Evaluated, what: Picked): Partial<ProProject> {
-  if (!what) return {};
+  if (!what || what.k === 'plot') return {};
   if (what.k === 'feature') return { features: (p.features ?? []).filter((f) => f.id !== what.id) };
   const s = own(p, e);
   if (what.k === 'building') return { scheme: { ...s, buildings: s.buildings.filter((b) => b.id !== what.id) } };

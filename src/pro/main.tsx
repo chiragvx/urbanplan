@@ -44,6 +44,7 @@ import { CanvasEdit, duplicated, own, placeTemplate, SELECT, turned, type Picked
 import { Hud, type Tx } from './hud';
 import { ObjectHud } from './objHud';
 import { Shelf } from './shelf';
+import { PlotHud } from './plotHud';
 import { withFloors } from './shapePanel';
 import { pole } from './form/curve';
 import { Btn, cr, Dialog, Icon, Menu, nf, Num, pct, Range, Seg, Select, sqft, TooltipLayer } from './ui';
@@ -106,6 +107,10 @@ function App() {
   const [plan, setPlanS] = useState(false);
   const setPlan = (on: boolean) => { setPlanS(on); view.current?.setPlan(on); };
   const needle = useRef<HTMLSpanElement>(null);
+  // (north may be turned on the compass though the plot's place set it)
+  const [northFree, setNorthFree] = useState(false);
+  /** the compass dragged to turn north: where it began */
+  const dial = useRef<{ a0: number; n0: number; moved: boolean; x: number; y: number } | null>(null);
   // (the readout by the pointer while drawing: written straight to the DOM, as it changes with every move)
   const readout = useRef<HTMLDivElement>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
@@ -352,6 +357,8 @@ function App() {
     };
   }, []);
 
+  /** the plot's editor is on: picked, or on the Site step with nothing else picked */
+  const plotOn = picked?.k === 'plot' || (step === 'site' && !picked);
   const cur = STEPS.find((s) => s.key === step)!;
   const props: StepProps = { p, e, up, rooms, checks, deal, go, openDrawings: () => setDialog('drawings'), toast, tool, setTool, picked, pick: setPicked };
   const Body = { site: SiteStep2, build: SchemeStep, design: DesignSystemStep, money: MoneyStep, approve: ApproveStep, explore: ExploreStep }[step];
@@ -401,7 +408,7 @@ function App() {
             {readOnly && <p class="note">A shared scheme, view only. <button type="button" class="linkbtn" onClick={keepCopy}>Make it your own copy</button> to change it.</p>}
             <fieldset disabled={readOnly || viewer}><Body {...props} /></fieldset>
           </div>
-          {!(step === 'build' && picked && picked.k !== 'feature') && <footer class="panel-f">
+          {!(step === 'build' && picked?.k === 'building') && <footer class="panel-f">
             {STEPS.findIndex((s) => s.key === step) > 0 && <Btn kind="quiet" onClick={() => go(STEPS[STEPS.findIndex((s) => s.key === step) - 1].key)}>Back</Btn>}
             <span class="gap" />
             {STEPS.findIndex((s) => s.key === step) < STEPS.length - 1 && <Btn kind="primary" onClick={() => go(STEPS[STEPS.findIndex((s) => s.key === step) + 1].key)}>Next: {STEPS[STEPS.findIndex((s) => s.key === step) + 1].label}<Icon n="chevron" size={15} /></Btn>}
@@ -414,11 +421,28 @@ function App() {
         <ResultBar e={e} deal={deal} sum={sum} go={go} />
         {!readOnly && !viewer && <Shelf tool={tool} setTool={setTool} />}
         <div class="readout" ref={readout} hidden aria-live="polite"><b /><span /></div>
+        {tool.k === 'select' && plotOn && <PlotHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} pick={setPicked} tx={tx} snap={snap} live={mode === 'wire' && xr === null} readOnly={readOnly || viewer} toast={toast} setTool={setTool}
+          openWay={(w) => { try { sessionStorage.setItem('urbanplan:pro:way', w); } catch { /* */ } setStep('site'); store.set('urbanplan:pro:step', 'site'); setPanel(true); dispatchEvent(new CustomEvent('urbanplan:way', { detail: w })); }} northFree={northFree} setNorthFree={setNorthFree} />}
         {tool.k === 'select' && (picked?.k === 'element' || picked?.k === 'feature') && <ObjectHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} pick={setPicked} tx={tx} snap={snap} readOnly={readOnly || viewer} toast={toast} />}
         {tool.k === 'select' && picked?.k === 'building' && <Hud view={view.current} p={p} e={e} picked={picked} pick={setPicked} up={up} tx={tx} snap={snap} live={mode === 'wire' && xr === null} readOnly={readOnly || viewer} toast={toast}
           inspect={() => { setStep('build'); store.set('urbanplan:pro:step', 'build'); setPanel(true); }} />}
         {hint && <div class="drawhint" role="status"><span>{hint}</span><button type="button" class="linkbtn" onClick={() => setTool(SELECT)}>Done</button></div>}
-        <button type="button" class="compass" aria-label="North (the map from above)" data-tip="North · the plan from above" onClick={() => setPlan(true)}><span ref={needle} class="needle"><Icon n="north" size={22} /><b>N</b></span></button>
+        {(() => {
+          // the compass: a click shows the plan from above; with the plot picked it's a dial: drag it (or the arrow keys)
+          // to turn north, in 5° steps (unless the plot's place set it and it's locked)
+          const turnable = plotOn && !readOnly && !viewer && (!p.at || northFree);
+          const angleAt = (ev: PointerEvent) => { const r = (ev.currentTarget as HTMLElement).getBoundingClientRect(); return (Math.atan2(ev.clientX - (r.left + r.width / 2), -(ev.clientY - (r.top + r.height / 2))) * 180) / Math.PI; };
+          const setNorth = (v: number) => ((Math.round(v / 5) * 5) % 360 + 360) % 360;
+          return <button type="button" class={`compass${turnable ? ' dial' : ''}`} aria-label={turnable ? `North: ${p.north ?? 0}° (drag it, or the arrow keys, to turn it; click for the plan)` : 'North (the map from above)'}
+            data-tip={turnable ? `North ${p.north ?? 0}° · drag to turn it · click: the plan` : plotOn && p.at && !northFree ? 'North · set from the plot’s location' : 'North · the plan from above'}
+            onPointerDown={(ev) => { if (!turnable || ev.button !== 0) return; (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId); dial.current = { a0: angleAt(ev), n0: p.north ?? 0, moved: false, x: ev.clientX, y: ev.clientY }; }}
+            onPointerMove={(ev) => { const d = dial.current; if (!d) return; if (!d.moved && Math.hypot(ev.clientX - d.x, ev.clientY - d.y) < 4) return; if (!d.moved) { d.moved = true; tx.begin(); } up({ north: setNorth(d.n0 + angleAt(ev) - d.a0) }); }}
+            onPointerUp={() => { const d = dial.current; if (d?.moved) tx.commit(); else dial.current = null; }}
+            onClick={() => { if (dial.current?.moved) { dial.current = null; return; } setPlan(true); }}
+            onKeyDown={(ev) => { if (!turnable) return; const dir = ev.key === 'ArrowRight' || ev.key === 'ArrowUp' ? 1 : ev.key === 'ArrowLeft' || ev.key === 'ArrowDown' ? -1 : 0; if (!dir) return; ev.preventDefault(); ev.stopPropagation(); tx.once({ north: setNorth((p.north ?? 0) + dir * (ev.shiftKey ? 45 : 5)) }); }}>
+            <span ref={needle} class="needle"><Icon n="north" size={22} /><b>N</b></span>
+          </button>;
+        })()}
         <div class="tools">
           <Seg<'3d' | 'plan'> class="tgroup" value={plan ? 'plan' : '3d'} set={(v) => setPlan(v === 'plan')} options={[
             { value: '3d', label: '3D', icon: 'cube', title: 'Orbit round it' },

@@ -692,3 +692,27 @@ li[aria-current="true"] > .bitem, li[aria-current="true"] > .fitem { border-colo
 .hchips button { height: 26px; padding: 0 7px; border: 0; border-radius: 7px; background: none; font: 500 12px var(--up-font-mono); color: var(--up-ink-2); }
 .hchips button[aria-checked="true"] { background: var(--up-ink); color: var(--up-paper); }
 .hnote { width: 150px; height: 26px; border: 1px solid var(--up-line); border-radius: 6px; padding: 0 6px; background: var(--up-paper); color: var(--up-ink); font-size: 12px; }
+
+/* the plot edited on the view (./plotHud.tsx) */
+.hh.plot { width: 15px; height: 15px; border-radius: 50%; background: var(--up-paper); color: var(--up-ink); border: 2.5px solid var(--up-ink); }
+.hh-ring.slope { background: #2f6fed; }
+.hroad { z-index: 1; }
+.hroad > button { height: 22px; padding: 0 8px; border-radius: 11px; border: 1px solid transparent; font: 500 11.5px/1 var(--up-font-mono); white-space: nowrap; cursor: pointer; }
+.hroad > button.on { background: #3b3b40; color: #fafafa; }
+.hroad > button.on small { color: #c9c9c9; font-size: 10.5px; }
+.hroad > button.none { background: color-mix(in srgb, var(--up-surface) 70%, transparent); color: var(--up-muted); border: 1px dashed var(--up-line-strong); }
+.hroad > button:hover { outline: 2px solid var(--up-ink); }
+.hpopwrap { position: relative; display: inline-flex; }
+.hpopwrap > button { display: inline-flex; align-items: center; gap: 5px; height: 30px; min-width: 30px; padding: 0 7px; border: 0; border-radius: 8px; background: none; font-size: 12.5px; font-weight: 500; color: var(--up-ink-2); }
+.hpopwrap > button:hover, .hpopwrap > button[aria-expanded="true"] { background: var(--up-surface-2); color: var(--up-ink); }
+.hpop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 5; display: grid; gap: 8px; width: 270px; padding: 12px; border-radius: 12px; background: var(--up-surface); color: var(--up-ink); border: 1px solid var(--up-line); box-shadow: var(--up-shadow); font-size: 12.5px; text-align: left; white-space: normal; }
+.hroad .hpop { left: 50%; transform: translateX(-50%); }
+.hpop b { font-size: 13px; }
+.hpop small { color: var(--up-muted); font-size: 11.5px; }
+.hwarn { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; padding: 0 7px; height: 22px; border-radius: 11px; background: #fdecec; color: #b42318; font-size: 11.5px; font-weight: 600; }
+.hbar .sel.quiet { height: 30px; font-size: 12.5px; }
+.compass.dial { border: 2px solid var(--up-ink); cursor: grab; touch-action: none; }
+.compass.dial:active { cursor: grabbing; }
+.hpop.up { top: auto; bottom: calc(100% + 6px); }
+.hud > .hbar { z-index: 4; }
+.hud > .hroad:has(.hpop) { z-index: 5; }
