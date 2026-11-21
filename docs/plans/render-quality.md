@@ -353,10 +353,19 @@ Budget: no more than 150 KB gz added to the first load.
 | 5 Stills | <ul><li>`renderStill` raster: about 0.5 s at 1200×800</li><li>`renderStill` path-traced: lazily loaded `three-gpu-pathtracer`, with instanced trees, cars and people baked into a plain mesh per colour so they appear</li><li>Progress and cancel</li></ul> |
 | Verification | <ul><li>`npm run render:shots`: reference stills and the benchmark, compared with pixelmatch against `tools/render/ref/{standard,high}`</li><li>Competitor protocol and kit in `docs/plans/render-benchmark.md`</li></ul> |
 
+**Verified on 2026-11-21:**
+- **Scanned textures.** `npm run render:textures` fetched all 10 ambientCG CC0 sets (plaster, concrete, brick, stone, asphalt, grass, ground, pavers, wood, tile). It shrank them to 512 px (1.7 MB in all, inside the 4 MB budget) and they're committed in `public/assets/render/tex/` with `LICENSES.md`. In the app every surface map comes from the scans: plaster grain on render, brick courses on Brick Vernacular.
+  - They're JPEG, because `toktx` isn't installed here. The tool makes KTX2 normal maps when it is.
+- **Neighbours** load at Bandra and Fort (Mumbai) and Kothrud (Pune): 2,253, 1,751 and 3,435 triangles of massing.
+- **Chamfers** show on window surrounds, bands and parapets on the High tier.
+- **Path-traced stills** show green trees, coloured cars and people.
+- **Reference sets** were re-captured with the scans for both tiers.
+
 **Not done here:**
-- The comparison against Forma, the APS viewer and Revit needs Autodesk access. The protocol, cameras, scoring and our captured side are ready.
-- The scanned textures aren't downloaded yet: `npm run render:textures` does it when run.
-- Cars and people are made in code rather than CC0 models.
+- **The comparison against Forma, the APS viewer and Revit** needs Autodesk products and accounts, which this environment doesn't have. So the plan's Phase 2 and Phase 5 gates (level with Forma; ahead of Revit Realistic on glass, night and stills) are unmeasured.
+  - The protocol, cameras, scoring sheet and our captured side are in `docs/plans/render-benchmark.md`.
+  - No scores have been made up for the Autodesk tools.
+- **Cars and people** are made in code rather than CC0 models.
 
 **Measured on the sample, Intel UHD 630:**
 

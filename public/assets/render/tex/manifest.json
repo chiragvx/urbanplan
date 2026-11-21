@@ -1,0 +1,102 @@
+{
+ "plaster": {
+  "size": [
+   2,
+   2
+  ],
+  "color": "plaster/color.jpg",
+  "normal": "plaster/normal.jpg",
+  "source": "https://ambientcg.com/view?id=Plaster003",
+  "licence": "CC0 1.0"
+ },
+ "concrete": {
+  "size": [
+   2,
+   2
+  ],
+  "color": "concrete/color.jpg",
+  "normal": "concrete/normal.jpg",
+  "source": "https://ambientcg.com/view?id=Concrete034",
+  "licence": "CC0 1.0"
+ },
+ "brick": {
+  "size": [
+   1.2,
+   1.2
+  ],
+  "color": "brick/color.jpg",
+  "normal": "brick/normal.jpg",
+  "source": "https://ambientcg.com/view?id=Bricks076C",
+  "licence": "CC0 1.0"
+ },
+ "stone": {
+  "size": [
+   2,
+   2
+  ],
+  "color": "stone/color.jpg",
+  "normal": "stone/normal.jpg",
+  "source": "https://ambientcg.com/view?id=Rock030",
+  "licence": "CC0 1.0"
+ },
+ "asphalt": {
+  "size": [
+   4,
+   4
+  ],
+  "color": "asphalt/color.jpg",
+  "normal": "asphalt/normal.jpg",
+  "source": "https://ambientcg.com/view?id=Asphalt012",
+  "licence": "CC0 1.0"
+ },
+ "grass": {
+  "size": [
+   3,
+   3
+  ],
+  "color": "grass/color.jpg",
+  "normal": "grass/normal.jpg",
+  "source": "https://ambientcg.com/view?id=Grass004",
+  "licence": "CC0 1.0"
+ },
+ "ground": {
+  "size": [
+   3,
+   3
+  ],
+  "color": "ground/color.jpg",
+  "normal": "ground/normal.jpg",
+  "source": "https://ambientcg.com/view?id=Ground037",
+  "licence": "CC0 1.0"
+ },
+ "pavers": {
+  "size": [
+   2,
+   2
+  ],
+  "color": "pavers/color.jpg",
+  "normal": "pavers/normal.jpg",
+  "source": "https://ambientcg.com/view?id=PavingStones070",
+  "licence": "CC0 1.0"
+ },
+ "wood": {
+  "size": [
+   1.5,
+   1.5
+  ],
+  "color": "wood/color.jpg",
+  "normal": "wood/normal.jpg",
+  "source": "https://ambientcg.com/view?id=Wood066",
+  "licence": "CC0 1.0"
+ },
+ "tile": {
+  "size": [
+   1.2,
+   1.2
+  ],
+  "color": "tile/color.jpg",
+  "normal": "tile/normal.jpg",
+  "source": "https://ambientcg.com/view?id=Tiles074",
+  "licence": "CC0 1.0"
+ }
+}

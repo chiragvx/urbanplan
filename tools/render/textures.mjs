@@ -11,6 +11,18 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import jpeg from 'jpeg-js';
+
+/** a JPEG halved (box filter) until it's at most `max` px, re-encoded: 1K scans become 512 px, about a tenth the size */
+function shrink(file, max = 512, quality = 82) {
+  let img = jpeg.decode(fs.readFileSync(file), { useTArray: true, maxMemoryUsageInMB: 512 });
+  while (img.width > max) {
+    const w = img.width >> 1, h = img.height >> 1, d = new Uint8Array(w * h * 4), s = img.data, W = img.width;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) for (let c = 0; c < 4; c++) d[(y * w + x) * 4 + c] = (s[((2 * y) * W + 2 * x) * 4 + c] + s[((2 * y) * W + 2 * x + 1) * 4 + c] + s[((2 * y + 1) * W + 2 * x) * 4 + c] + s[((2 * y + 1) * W + 2 * x + 1) * 4 + c]) >> 2;
+    img = { width: w, height: h, data: d };
+  }
+  fs.writeFileSync(file, jpeg.encode(img, quality).data);
+}
 
 /** key: what it stands for in the app; id: the ambientCG asset; size: the metres one tile covers */
 const SETS = [
@@ -45,18 +57,22 @@ for (const s of SETS) {
     const x = path.join(tmp, s.id);
     fs.mkdirSync(x, { recursive: true });
     // (Windows 10+ and macOS ship bsdtar as tar, which unpacks zips)
-    const un = spawnSync('tar', ['-xf', zip, '-C', x], { stdio: 'ignore' });
+    // (bsdtar unpacks zips: Windows ships it in System32; GNU tar, Git Bash's, doesn't read zips)
+    const sysTar = process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:/Windows', 'System32', 'tar.exe') : 'tar';
+    const un = spawnSync(fs.existsSync(sysTar) ? sysTar : 'tar', ['-xf', zip, '-C', x], { stdio: 'ignore' });
     if (un.status !== 0) { console.log('could not unpack: skipped'); continue; }
     fs.mkdirSync(dir, { recursive: true });
     const files = fs.readdirSync(x);
     const pick = (re) => files.find((f) => re.test(f));
     const copy = (re, name) => { const f = pick(re); if (f) fs.copyFileSync(path.join(x, f), path.join(dir, name)); return !!f; };
-    copy(/_Color\.jpg$/i, 'color.jpg'); copy(/_NormalGL\.jpg$/i, 'normal.jpg'); copy(/_Roughness\.jpg$/i, 'rough.jpg');
+    copy(/_Color\.jpg$/i, 'color.jpg'); copy(/_NormalGL\.jpg$/i, 'normal.jpg');
+    // (512 px is plenty at a metre or two a tile; the app uses no roughness maps)
+    for (const f of ['color.jpg', 'normal.jpg']) if (fs.existsSync(path.join(dir, f))) shrink(path.join(dir, f));
     console.log('ok');
   }
   if (!fs.existsSync(path.join(dir, 'color.jpg'))) continue;
   const entry = { size: s.size, color: `${s.key}/color.jpg` };
-  for (const [name, field] of [['normal', 'normal'], ['rough', 'rough']]) {
+  for (const [name, field] of [['normal', 'normal']]) {
     const jpg = path.join(dir, `${name}.jpg`);
     if (!fs.existsSync(jpg)) continue;
     const ktx = path.join(dir, `${name}.ktx2`);
@@ -70,6 +86,6 @@ fs.writeFileSync(path.join(out, 'LICENSES.md'), ['# Scanned textures', '', 'All 
   ...Object.entries(manifest).map(([k, v]) => `- ${k}: ${v.source}`), ''].join('\n'));
 // (the KTX2 transcoder, for the loader)
 const basis = path.resolve('node_modules', 'three', 'examples', 'jsm', 'libs', 'basis'), pub = path.resolve('public', 'basis');
-if (fs.existsSync(basis)) { fs.mkdirSync(pub, { recursive: true }); for (const f of fs.readdirSync(basis)) fs.copyFileSync(path.join(basis, f), path.join(pub, f)); }
+if (fs.existsSync(basis) && Object.values(manifest).some((e) => String(e.normal ?? '').endsWith('.ktx2'))) { fs.mkdirSync(pub, { recursive: true }); for (const f of fs.readdirSync(basis)) fs.copyFileSync(path.join(basis, f), path.join(pub, f)); }
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`${Object.keys(manifest).length} sets in ${out}${hasToktx ? '' : ' (no toktx: normal and roughness maps kept as JPG)'}`);
