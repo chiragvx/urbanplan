@@ -158,6 +158,8 @@ export class ProView {
   get cam(): THREE.Camera { return this.plan ? this.ortho : this.camera; }
   /** where north points on screen (degrees clockwise from up): for the compass */
   onNorth?: (deg: number) => void;
+  /** called after each frame is drawn (and the camera has moved): the HUD re-places what it pins to the world */
+  onFrame?: () => void;
   north = 0;
   private lastNorth = NaN;
   private over = new THREE.Group();
@@ -370,6 +372,7 @@ export class ProView {
       this.compass();
       this.updateNear();
       this.draw(false);
+      this.onFrame?.();
       if (moving && this.piped) this.watch.tick(performance.now()); else this.watch.rest();
       // (on the high tier, once the camera rests, the settled image: supersampled)
       clearTimeout(this.restT);

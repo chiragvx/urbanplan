@@ -229,3 +229,6 @@ export function ShapePanel({ b, floors, set }: { b: ProBuilding; floors: number;
     </div>
   );
 }
+
+/** a building at a number of floors: a formed one through its uses (the top band grows or the top bands shrink) */
+export const withFloors = (b: ProBuilding, n: number): ProBuilding => (b.form ? withForm(b, setFloors(b.form, n)) : { ...b, floors: Math.max(1, Math.round(n)) });

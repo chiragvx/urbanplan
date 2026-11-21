@@ -40,7 +40,9 @@ import { ApproveStep, ExploreStep, MoneyStep, PdfButton, STEPS, type Step, type 
 import { SchemeStep, SiteStep2 } from './sitePanels';
 import { DesignSystemStep } from './designStep';
 import { groundAt } from './terrain';
-import { CanvasEdit, own, placeTemplate, SELECT, type Picked as EditPicked, type Tool } from './edit';
+import { CanvasEdit, duplicated, own, placeTemplate, SELECT, turned, type Picked as EditPicked, type Tool } from './edit';
+import { Hud, type Tx } from './hud';
+import { withFloors } from './shapePanel';
 import { pole } from './form/curve';
 import { Btn, cr, Dialog, Icon, Menu, nf, Num, pct, Range, Seg, Select, sqft, TooltipLayer } from './ui';
 
@@ -64,12 +66,23 @@ function App() {
   const [p, setP] = useState<ProProject>(loadP);
   const past = useRef<ProProject[]>([]), future = useRef<ProProject[]>([]), lastPush = useRef(0);
   const [readOnly, setReadOnly] = useState(false);
+  // (a drag on the view is one undo step: begun on pointerdown, its changes live, committed on release)
+  const txOpen = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const tx: Tx & { once(o: Partial<ProProject>): void } = {
+    begin: () => { if (txOpen.current || readOnly) return; past.current = [...past.current.slice(-80), pRef.current]; future.current = []; txOpen.current = true; setBusy(true); },
+    live: (o) => up(o),
+    commit: () => { txOpen.current = false; lastPush.current = 0; setBusy(false); },
+    /** a change of its own (a key, a button): one undo step */
+    once: (o) => { tx.begin(); up(o); tx.commit(); },
+    cancel: () => { if (!txOpen.current) return; txOpen.current = false; const x = past.current.pop(); if (x) { store.set(KEY, x); setP(x); } setBusy(false); },
+  };
   const up = (o: Partial<ProProject>) => {
     if (readOnly) return;
     setP((x) => {
       // (a burst of changes, typing a number, is one undo step)
       const now = Date.now();
-      if (now - lastPush.current > 700) { past.current = [...past.current.slice(-80), x]; future.current = []; }
+      if (!txOpen.current && now - lastPush.current > 700) { past.current = [...past.current.slice(-80), x]; future.current = []; }
       lastPush.current = now;
       const n = { ...x, ...o }; store.set(KEY, n); return n;
     });
@@ -105,10 +118,14 @@ function App() {
   const keepCopy = () => { store.set(KEY, p); setReadOnly(false); history.replaceState(null, '', '?local'); toast('This scheme is now your own copy.'); };
 
   // ---------- everything worked out from it ----------
-  const e = useMemo(() => evaluate(p), [JSON.stringify(p)]);
-  const rooms = useMemo(() => e.d.buildings.map((b, i) => fitRooms(b, e.plans[i], e.r.code)), [e]);
-  const checks = useMemo(() => scrutiny(e, rooms), [e, rooms]);
-  const deal = useMemo(() => applyDeal(e, p.deal ?? DEFAULT_DEAL), [e]);
+  // (every change makes a new project, so its identity is the key)
+  const e = useMemo(() => evaluate(p), [p]);
+  // (the rooms, the rules and the money wait while a drag is on: worked out when it's let go)
+  const settled = useRef(e); if (!busy || settled.current.d.buildings.length !== e.d.buildings.length) settled.current = e;
+  const eS = settled.current;
+  const rooms = useMemo(() => eS.d.buildings.map((b, i) => fitRooms(b, eS.plans[i], eS.r.code)), [eS]);
+  const checks = useMemo(() => scrutiny(eS, rooms), [eS, rooms]);
+  const deal = useMemo(() => applyDeal(eS, eS.p.deal ?? DEFAULT_DEAL), [eS]);
   const sum = scrutinySummary(checks);
 
   // ---------- the account ----------
@@ -279,9 +296,14 @@ function App() {
   useEffect(() => {
     const on = (ev: KeyboardEvent) => {
       if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') { if (typing(ev.target)) return; ev.preventDefault(); if (ev.shiftKey) redo(); else undo(); return; }
+      if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'd' && picked?.k === 'building' && !readOnly && !typing(ev.target)) { ev.preventDefault(); const s = own(p, e), src = s.buildings.find((b) => b.id === picked.id); if (!src) return; const c = duplicated(src); tx.once({ scheme: { ...s, buildings: [...s.buildings, c] } }); setPicked({ k: 'building', id: c.id }); return; }
       if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'y') { if (typing(ev.target)) return; ev.preventDefault(); redo(); return; }
       if (ev.ctrlKey || ev.metaKey || ev.altKey || typing(ev.target)) return;
-      if (ev.key === 'Escape') { setDialog(null); return; }
+      if (ev.key === 'Escape') { if (dialog) setDialog(null); else if (picked && tool.k === 'select') setPicked(null); return; }
+      // (the picked building: R turns it, + and − its floors, Ctrl+D below)
+      const pb = picked?.k === 'building' && !readOnly ? picked : null;
+      if (pb && (ev.key === 'r' || ev.key === 'R')) { const s = own(p, e); tx.once({ scheme: { ...s, buildings: s.buildings.map((b) => (b.id === pb.id ? turned(b, ev.shiftKey ? -15 : 15) : b)) } }); return; }
+      if (pb && (ev.key === '+' || ev.key === '=' || ev.key === '-')) { const s = own(p, e), br = e.d.buildings.find((x) => x.b.id === pb.id); if (!br) return; tx.once({ scheme: { ...s, buildings: s.buildings.map((b) => (b.id === pb.id ? withFloors(b, Math.max(1, br.floors + (ev.key === '-' ? -1 : 1))) : b)) } }); return; }
       const i = '123456'.indexOf(ev.key);
       if (i >= 0) { go(STEPS[i].key); return; }
       if (ev.key === 'x') setXray((v) => (v === null ? Math.max(1, Math.round(maxFloor / 2)) : null));
@@ -383,6 +405,8 @@ function App() {
       <main class="stage">
         <canvas ref={canvas} onPointerMove={(ev) => setHover(view.current?.pick(ev.clientX, ev.clientY) ?? null)} onPointerLeave={() => setHover(null)} />
         <ResultBar e={e} deal={deal} sum={sum} go={go} />
+        {tool.k === 'select' && <Hud view={view.current} p={p} e={e} picked={picked} pick={setPicked} up={up} tx={tx} snap={snap} live={mode === 'wire' && xr === null} readOnly={readOnly || viewer} toast={toast}
+          inspect={() => { setStep('build'); store.set('urbanplan:pro:step', 'build'); setPanel(true); }} />}
         {hint && <div class="drawhint" role="status"><span>{hint}</span><button type="button" class="linkbtn" onClick={() => setTool(SELECT)}>Done</button></div>}
         <button type="button" class="compass" aria-label="North (the map from above)" data-tip="North · the plan from above" onClick={() => setPlan(true)}><span ref={needle} class="needle"><Icon n="north" size={22} /><b>N</b></span></button>
         <div class="tools">

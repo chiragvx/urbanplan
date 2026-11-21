@@ -14,7 +14,7 @@ import { longestEdge } from './importPlot';
 import { presetOf, PRESETS } from './design';
 import { shopFloorsAllowed } from './mixed';
 import { buildModel, ifcLite, modelJson } from './model';
-import { duplicated, ELEMENT_TOOLS, own, removed, spineLength, stretched, turned, type Tool } from './edit';
+import { ELEMENT_TOOLS, own, removed, type Tool } from './edit';
 import { Gallery } from './gallery';
 import { ShapePanel } from './shapePanel';
 import { DEFAULT_LEVELS, FEATURES, featureOf, INTERNAL_WIDTHS, PLINTH_MIN, roadParts, roadWidths, type Levels, type SiteFeature } from './siteObjects';
@@ -45,15 +45,6 @@ function Tools({ items, tool, setTool, label }: { items: { t: Tool; label: strin
       {items.map((x) => <button type="button" aria-pressed={same(x.t, tool)} onClick={() => setTool(same(x.t, tool) ? { k: 'select' } : x.t)}><Icon n={x.icon} size={16} /><span>{x.label}</span></button>)}
     </div>
   );
-}
-
-/** Turn a building a step at a time (a formed one turns with its spine, about its middle). */
-function Turns({ setB }: { setB: (fn: (b: ProBuilding) => ProBuilding) => void }) {
-  return <div class="f"><span class="f-l">Turn</span><div class="turns">
-    <Btn kind="ghost" title="Turn 15° anticlockwise" onClick={() => setB((b) => turned(b, -15))}>−15°</Btn>
-    <Btn kind="ghost" title="Turn 15° clockwise" onClick={() => setB((b) => turned(b, 15))}>+15°</Btn>
-    <Btn kind="ghost" title="Turn a quarter" onClick={() => setB((b) => turned(b, 90))}>90°</Btn>
-  </div></div>;
 }
 
 function Picked({ title, children, remove, copy }: { title: ComponentChildren; children?: ComponentChildren; remove?: () => void; copy?: () => void }) {
@@ -232,19 +223,10 @@ export function SchemeStep({ p, e, up, rooms, toast, tool, setTool, picked, pick
     <>
       <button type="button" class="backlink" onClick={() => pick(null)}><Icon n="chevron" size={14} /> All buildings</button>
         {br && ownB && (
-      <Picked title={<>{nameOf(bi)}<small> · {nf(br.plate)} m² plate</small></>} remove={() => { up(removed(p, e, { k: 'building', id: br.b.id })); pick(null); }} copy={() => { const s = own(p, e), src = s.buildings.find((b) => b.id === br.b.id); if (!src) return; const c = duplicated(src); up({ scheme: { ...s, buildings: [...s.buildings, c] } }); pick({ k: 'building', id: c.id }); }}>
+      <Picked title={<>{nameOf(bi)}<small> · {br.floors} floors · {nf(br.plate)} m² plate</small></>}>
         {deps.map((x) => <Note tone="bad">{x.text}</Note>)}
-        <label class="f"><span class="f-l">Name</span><input class="txt" value={ownB.name ?? nameOf(bi)} onChange={(ev) => setB((b) => ({ ...b, name: (ev.target as HTMLInputElement).value }))} /></label>
-        {!ownB.form && <><Row>
-          <Num label="Floors" value={br.floors} set={(v) => setB((b) => ({ ...b, floors: Math.max(1, v) }))} min={1} max={300} hint={`Up to ${br.maxFloors} within the margins`} />
-          <Num label="Depth" value={ownB.depth} set={(v) => setB((b) => ({ ...b, depth: v }))} min={6} max={80} step={0.5} unit="m" />
-        </Row>
-        <Row>
-          <Num label="Length" value={Math.round(spineLength(ownB) * 10) / 10} set={(v) => setB((b) => stretched(b, v))} min={4} max={600} step={0.5} unit="m" />
-          <Turns setB={setB} />
-        </Row></>}
-        <ShapePanel b={ownB} floors={br.floors} set={setB} />
-        {ownB.form && <Turns setB={setB} />}
+        <Note>Its name, floors, length, depth and turn are set on the view: drag the handles on it, or click a measurement to type one. R turns it, + and − change its floors, Ctrl+D duplicates it, Delete removes it.</Note>
+        {ownB.form && <ShapePanel b={ownB} floors={br.floors} set={setB} />}
         {(!ownB.form || ownB.form.uses.some((u) => u.use === 'residential')) && <Toggle label="Its own flat mix" value={!!ownB.mix} set={(v) => setB((b) => ({ ...b, mix: v ? [...p.mix] as [number, number, number] : undefined }))} />}
         {ownB.mix && <Row n={3}>{[0, 1, 2].map((t) => <Num label={UNIT_LABEL[t]} value={Math.round(ownB.mix![t] * 100)} set={(v) => setB((b) => { const m = [...(b.mix ?? p.mix)] as [number, number, number]; m[t] = v / 100; const s = m[0] + m[1] + m[2] || 1; return { ...b, mix: m.map((x) => x / s) as [number, number, number] }; })} max={100} step={5} unit="%" />)}</Row>}
         <Select<string> label="Design system" value={ownB.style ?? ''} onChange={(v) => setB((b) => ({ ...b, style: v || undefined }))} options={[{ value: '', label: `Project default (${presetOf(p.style).name})` }, ...PRESETS.map((x) => ({ value: x.id, label: x.name }))]} />

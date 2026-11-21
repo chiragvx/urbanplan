@@ -527,6 +527,23 @@ The core loop of placing and shaping buildings stops needing the panel.
 - In the picked-building card (sitePanels.tsx:235-247): Floors, Depth, Length, Turns (both places), duplicate and remove, Name, "Shape it".
 - The card keeps: departures (Notes), own mix, design system (until Phase 4), Systems, Flat plans.
 
+**Status (2026-11-21): built, in src/pro/hud.tsx.**
+- Done:
+  - the selection bar: name, floors stepper, turns, Shape it, duplicate, remove, Inspect, deselect;
+  - handles for height, both ends, side, turn and move, each a focusable slider with arrow keys;
+  - editable length, depth and height labels;
+  - undo transactions (a drag, a key or a button is one step; Escape cancels a drag);
+  - the memo keyed by identity, with rooms, rules and money deferred while a drag is open;
+  - R, + and −, Ctrl+D and Esc;
+  - the panel card trimmed.
+- Done differently: there is no per-building preview transform. In shaded or X-ray view a drag moves an outline ghost, the handles and the labels, and the scheme is worked out on release. Measured: a plain shaded frame already stalls 250–330 ms on the high tier in the app's pane, so a drag now costs no more than orbiting. Wireframe updates live, every 120 ms.
+- Not done yet:
+  - selection.ts and handles.ts as separate modules (the logic lives in hud.tsx);
+  - Tab cycling objects; F framing the selection;
+  - fading occluded handles;
+  - the limit plane while dragging height;
+  - labelled "Undo: …" tooltips.
+
 ### Phase 2: Tools on the view; elements and features edited in place
 
 **Deliverables:**
