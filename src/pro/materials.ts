@@ -61,6 +61,7 @@ export const MATERIALS: Material[] = [
   M('acp-grey', 'cladding', 'ACP, dark grey', '#5d6266', 'satin', 3800, 'tile'),
   M('acp-champagne', 'cladding', 'ACP, champagne', '#b9a88a', 'satin', 4000, 'tile'),
   M('fibre-cement', 'cladding', 'Fibre-cement board', '#a7a59f', 'matt', 2400, 'tile'),
+  M('concrete-fair', 'cladding', 'Fair-faced concrete', '#a9a7a1', 'matt', 1800, 'tile'),
   M('terracotta-panel', 'cladding', 'Terracotta panels', '#b0623f', 'matt', 5500, 'plank'),
   M('terracotta-louvre', 'cladding', 'Terracotta louvres', '#b1633f', 'matt', 7500, 'louvre'),
 

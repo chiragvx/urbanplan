@@ -92,9 +92,108 @@ export interface DesignSystem {
   /** its design language for formed buildings (./form): the skin laid over every face, the roof it likes, how
    *  round it likes its corners (0 sharp … 1 fully smooth). Unset: read through `languageOf`, which derives one. */
   language?: Language;
+  /** how the facade is composed: zones, bays, corners, entrance (unset: read through `compositionOf`) */
+  composition?: Composition;
+  /** the share of the facade each tone and the glass should be (unset: read through `paletteOf`) */
+  palette?: PaletteTargets;
+  /** the climate's elements: sunshades and screens (unset: read through `climateOf`) */
+  climate?: Climate;
+  /** the preset a style was built on (./design.ts `derive`) */
+  basedOn?: string;
 }
 
+/** Climate elements, the shading and screening Indian buildings have always carried. */
+export interface Climate {
+  /** a chhajja, the sunshade over each window: how far it projects (m; 0 none) */
+  chhajja: number;
+  /** deeper on the faces the sun beats on (south and west), shallower to the north */
+  orient: boolean;
+  /** a jaali, a pierced screen, in front of the ventilators, or the smaller windows too */
+  jaali: 'none' | 'vents' | 'windows';
+}
+const CLIMATES: Record<string, Climate> = {
+  earth: { chhajja: 0.6, orient: false, jaali: 'none' },
+  value: { chhajja: 0.45, orient: false, jaali: 'none' },
+};
+const NO_CLIMATE: Climate = { chhajja: 0, orient: false, jaali: 'none' };
+/** A design system's climate elements: its own, else its preset's. */
+export const climateOf = (d: DesignSystem): Climate => d.climate ?? CLIMATES[d.id] ?? NO_CLIMATE;
+/** How deep a chhajja is on a face whose outward normal points `bearing` degrees clockwise from north: the full depth
+ *  to the south, a little more to the west (the hot afternoon), about a third to the north. */
+export function chhajjaOn(c: Climate, bearing: number): number {
+  if (!c.orient) return c.chhajja;
+  const r = (bearing * Math.PI) / 180, south = -Math.cos(r), west = -Math.sin(r);
+  return c.chhajja * Math.max(0.3, Math.min(1.2, 0.65 + 0.35 * south + 0.2 * Math.max(0, west)));
+}
+
+/** target shares of the facade: walls, accent, base, glass (they should add to 1) */
+export interface PaletteTargets { wall: number; accent: number; base: number; glass: number }
+const PT = (wall: number, accent: number, base: number, glass: number): PaletteTargets => ({ wall, accent, base, glass });
+/** each preset's palette: a dominant, a secondary and an accent, as guidelines write them */
+const PALETTES: Record<string, PaletteTargets> = {
+  contemporary: PT(0.6, 0.12, 0.05, 0.23), glass: PT(0.25, 0.1, 0.05, 0.6), earth: PT(0.55, 0.2, 0.05, 0.2),
+  value: PT(0.7, 0.08, 0.02, 0.2), signature: PT(0.45, 0.2, 0.08, 0.27), fluid: PT(0.3, 0.25, 0.05, 0.4),
+  monolith: PT(0.65, 0.05, 0.03, 0.27), sculpted: PT(0.35, 0.2, 0.05, 0.4),
+};
+/** A design system's palette targets: its own, else its preset's. */
+export const paletteOf = (d: DesignSystem): PaletteTargets => d.palette ?? PALETTES[d.id] ?? PALETTES.contemporary;
+
 export interface Language { skin: Skin; roof: RoofKind; round: number }
+
+// ---------------------------------------------------------------- composition: zones, bays, entrance, corners
+// How the facade is composed, the part of a design language that isn't materials: the building split into a base, a
+// middle and a top, the middle set out on a rhythm of bays the windows snap to (so they line up across the flats and
+// up the floors), how deep the openings sit, and the rules for the corners, the entrance and the crown. As design
+// codes write it (Palo Alto's base, middle and top from 3 storeys up, bays about 3–5 m; window reveals about 75 mm
+// and more), and as CityEngine's facade rules do. Each zone is drawn in one of the facade's three tones.
+export type Tone = 'wall' | 'accent' | 'base';
+/** free: windows spread flat by flat (as before); even: on the bay grid; paired: on the grid, drawn in twos */
+export type Rhythm = 'free' | 'even' | 'paired';
+/** plain: as any bay; solid: no openings in the end bays; glazed: glass wrapping the corner; accent: a pier in the accent */
+export type Corner = 'plain' | 'solid' | 'glazed' | 'accent';
+export type Entrance = 'none' | 'canopy' | 'portal';
+/** parapet: the plain roof edge; cornice: a deep projecting band; pergola: a frame over the terrace */
+export type Crown = 'parapet' | 'cornice' | 'pergola';
+export interface Composition {
+  /** the lowest floors (above any stilt), in their own tone with a string course over them */
+  base: { floors: number; tone: Tone };
+  /** the highest floors, in their own tone, and what finishes the building */
+  top: { floors: number; tone: Tone; crown: Crown };
+  /** bay width (m), the facade divided into equal bays as near this as fit */
+  bay: number;
+  rhythm: Rhythm;
+  /** the bay lines drawn as shallow piers through the middle */
+  piers: boolean;
+  /** how far the window surrounds stand out from the wall (m): 0 none */
+  reveal: number;
+  corner: Corner;
+  entrance: Entrance;
+}
+/** fewer storeys than this and the building is one zone (the codes ask for a base, middle and top from 3 up) */
+export const ZONED_FROM = 3;
+const CO = (base: [number, Tone], top: [number, Tone, Crown], bay: number, rhythm: Rhythm, piers: boolean, reveal: number, corner: Corner, entrance: Entrance): Composition =>
+  ({ base: { floors: base[0], tone: base[1] }, top: { floors: top[0], tone: top[1], crown: top[2] }, bay, rhythm, piers, reveal, corner, entrance });
+/** each preset's composition (kept apart from the presets so they read as before) */
+const COMPOSITIONS: Record<string, Composition> = {
+  contemporary: CO([1, 'base'], [1, 'accent', 'cornice'], 3.0, 'even', false, 0.1, 'plain', 'canopy'),
+  glass: CO([2, 'base'], [1, 'accent', 'parapet'], 3.0, 'even', true, 0, 'glazed', 'portal'),
+  earth: CO([1, 'base'], [1, 'accent', 'pergola'], 3.6, 'paired', false, 0.25, 'solid', 'portal'),
+  value: CO([0, 'base'], [0, 'wall', 'parapet'], 3.0, 'free', false, 0, 'plain', 'canopy'),
+  signature: CO([2, 'base'], [2, 'accent', 'pergola'], 3.6, 'even', true, 0.3, 'accent', 'portal'),
+  fluid: CO([1, 'base'], [1, 'accent', 'cornice'], 3.0, 'even', true, 0, 'glazed', 'canopy'),
+  monolith: CO([0, 'base'], [0, 'wall', 'cornice'], 3.6, 'even', false, 0.4, 'solid', 'portal'),
+  sculpted: CO([2, 'base'], [1, 'accent', 'pergola'], 3.0, 'even', true, 0.15, 'glazed', 'portal'),
+};
+const NO_COMPOSITION = CO([0, 'base'], [0, 'wall', 'parapet'], 3.0, 'free', false, 0, 'plain', 'none');
+/** A design system's composition: its own, else its preset's (designs saved before compositions had none). */
+export const compositionOf = (d: DesignSystem): Composition => d.composition ?? COMPOSITIONS[d.id] ?? NO_COMPOSITION;
+/** The zones of a building of `floors` storeys: how many base and top floors it actually gets (a short building has
+ *  none; the middle always keeps at least one floor). */
+export function zonesOf(c: Composition, floors: number): { base: number; top: number } {
+  if (floors < ZONED_FROM) return { base: 0, top: 0 };
+  const base = Math.min(c.base.floors, Math.floor((floors - 1) / 2));
+  return { base, top: Math.max(0, Math.min(c.top.floors, floors - base - 1)) };
+}
 
 /** Room kinds that get a floor material of their own. */
 export type FloorRoom = 'living' | 'bed' | 'kitchen' | 'toilet' | 'balcony' | 'common';
@@ -291,13 +390,18 @@ export const FINISH_BASELINE: Finish = {
 };
 const slotId = (f: Finish, s: FinishSlot) => (s === 'wall' || s === 'accent' || s === 'base' || s === 'roof' || s === 'railing' ? f[s] : f.flooring[s]);
 
-/** Surface by surface: the material, its quantity (m² per m² of built-up) and what it adds over the plain finish
- *  (₹ per m² of built-up). */
-export function finishBreakdown(d: DesignSystem): { slot: FinishSlot; material: Material; qty: number; extra: number }[] {
+/** measured quantities (m² per m² of built-up) that replace FINISH_QTY's figures for the slots they name: the facade's
+ *  tones from the model's take-off (./palette.ts) */
+export type FinishQty = Partial<Record<FinishSlot, number>>;
+
+/** Surface by surface: the material, its quantity (m² per m² of built-up: measured where `qty` has it, else the rule
+ *  of thumb) and what it adds over the plain finish (₹ per m² of built-up). */
+export function finishBreakdown(d: DesignSystem, qty: FinishQty = {}): { slot: FinishSlot; material: Material; qty: number; extra: number; measured: boolean }[] {
   const f = finishOf(d);
   return (Object.keys(FINISH_QTY) as FinishSlot[]).map((slot) => {
     const material = materialOf(slotId(f, slot)), base = materialOf(slotId(FINISH_BASELINE, slot));
-    return { slot, material, qty: FINISH_QTY[slot], extra: FINISH_QTY[slot] * (material.rate - base.rate) };
+    const measured = qty[slot] !== undefined, q = qty[slot] ?? FINISH_QTY[slot];
+    return { slot, material, qty: q, extra: q * (material.rate - base.rate), measured };
   });
 }
 
@@ -306,7 +410,88 @@ export function finishBreakdown(d: DesignSystem): { slot: FinishSlot; material: 
  *  `specRate`, so it can be added to it. Σ (material rate − plain rate) × quantity per m² built (FINISH_QTY), ÷ 10.7639.
  *  Can be a little negative when a surface is cheaper than plain. Note SPEC's 'flooring' and 'facade' lines price the
  *  same surfaces as a coarse choice: add this instead of them, not on top, once Money uses it. */
-export const finishRate = (d: DesignSystem) => Math.round(finishBreakdown(d).reduce((s, x) => s + x.extra, 0) / 10.7639);
+export const finishRate = (d: DesignSystem, qty: FinishQty = {}) => Math.round(finishBreakdown(d, qty).reduce((s, x) => s + x.extra, 0) / 10.7639);
 
 /** The finishes' addition to the cost of a scheme (₹), from its built-up area (m²). */
-export const finishCost = (d: DesignSystem, buaM2: number) => finishRate(d) * buaM2 * 10.7639;
+export const finishCost = (d: DesignSystem, buaM2: number, qty: FinishQty = {}) => finishRate(d, qty) * buaM2 * 10.7639;
+
+// ---------------------------------------------------------------- styles that build on the presets
+/** an object with `over` laid on it, key by key, objects merged, the rest replaced */
+function merge<T>(base: T, over: unknown): T {
+  if (!over || typeof over !== 'object' || Array.isArray(over)) return over as T;
+  const out: Record<string, unknown> = { ...(base as Record<string, unknown>) };
+  for (const [k, v] of Object.entries(over)) out[k] = v && typeof v === 'object' && !Array.isArray(v) && out[k] && typeof out[k] === 'object' ? merge(out[k], v) : v;
+  return out as T;
+}
+type Over = { [K in keyof DesignSystem]?: NonNullable<DesignSystem[K]> extends object ? Partial<NonNullable<DesignSystem[K]>> : DesignSystem[K] };
+/** A style built on another: the parent's every token (its composition, palette and climate made explicit), with
+ *  `over` changed, and the facade colours following the materials named in `over.finish`. */
+export function derive(parentId: string, over: Over & { id: string; name: string; blurb: string }): DesignSystem {
+  const p = PRESETS.find((x) => x.id === parentId)!;
+  const full: DesignSystem = { ...clone(p), composition: compositionOf(p), palette: paletteOf(p), climate: climateOf(p), finish: finishOf(p), origin: undefined };
+  const d = merge(full, { ...over, basedOn: parentId });
+  const f = d.finish!;
+  for (const s of ['wall', 'accent', 'base'] as const) if ((over.finish as Partial<Finish> | undefined)?.[s]) setFinish(d, s, f[s]);
+  return d;
+}
+
+/** the styles of Indian architecture, in Start from's own group */
+export const STYLE_IDS = ['bombay-deco', 'indo-saracenic', 'chandigarh', 'courtyard', 'brick-vernacular', 'tropical'];
+PRESETS.push(
+  derive('contemporary', {
+    id: 'bombay-deco', name: 'Bombay Deco', blurb: 'Marine Drive’s Art Deco: cream and ochre, eyebrow sunshades over every window, deco piers, a stepped cornice.',
+    finish: { wall: 'paint-cream', accent: 'paint-ochre', base: 'sandstone-beige' },
+    facade: { bands: true, fins: false },
+    windows: { W1: W('W1', 'Casement window', 1.5, 1.5, 0.75, 'casement'), W2: W('W2', 'Casement window', 1.0, 1.35, 0.9, 'casement') },
+    balcony: { kind: 'cantilever', depth: 1.2, railing: 'ms' },
+    composition: CO([1, 'base'], [1, 'accent', 'cornice'], 3.0, 'even', true, 0.1, 'accent', 'portal'),
+    palette: PT(0.62, 0.18, 0.06, 0.14),
+    climate: { chhajja: 0.6, orient: false, jaali: 'none' },
+  }),
+  derive('earth', {
+    id: 'indo-saracenic', name: 'Indo-Saracenic', blurb: 'Sandstone over a basalt base, jaali screens and deep chhajjas, a pavilion crown: Bombay’s 19th-century civic look.',
+    finish: { wall: 'sandstone-beige', accent: 'paint-terracotta', base: 'basalt', railing: 'rail-parapet' },
+    balcony: { kind: 'recessed', depth: 1.5, railing: 'solid' },
+    composition: CO([2, 'base'], [1, 'accent', 'pergola'], 3.6, 'paired', true, 0.3, 'accent', 'portal'),
+    palette: PT(0.52, 0.18, 0.15, 0.15),
+    climate: { chhajja: 0.75, orient: false, jaali: 'windows' },
+  }),
+  derive('earth', {
+    id: 'chandigarh', name: 'Chandigarh Modern', blurb: 'Brick infill in a concrete frame, deep brise-soleil turned to the sun, pilotis: Chandigarh’s modernism.',
+    finish: { wall: 'brick-red', accent: 'concrete-fair', base: 'concrete-fair' },
+    facade: { bands: true, fins: true },
+    glazing: { frame: '#3a3a3c', frameName: 'Steel, painted' },
+    balcony: { kind: 'recessed', depth: 1.8, railing: 'solid' },
+    composition: CO([0, 'base'], [1, 'accent', 'cornice'], 3.0, 'even', true, 0.45, 'plain', 'canopy'),
+    palette: PT(0.42, 0.33, 0.05, 0.2),
+    climate: { chhajja: 0.9, orient: true, jaali: 'vents' },
+  }),
+  derive('contemporary', {
+    id: 'courtyard', name: 'Courtyard Modern', blurb: 'White walls, deep shaded verandahs, a pergola over the terrace, few small windows: after Charles Correa.',
+    finish: { wall: 'paint-white', accent: 'paint-terracotta', base: 'sandstone-beige', railing: 'rail-parapet' },
+    facade: { bands: false, fins: false },
+    windows: { W1: W('W1', 'Casement window', 1.2, 1.5, 0.75, 'casement'), W2: W('W2', 'Casement window', 0.9, 1.2, 0.9, 'casement') },
+    balcony: { kind: 'recessed', depth: 2.4, railing: 'solid' },
+    composition: CO([1, 'base'], [1, 'wall', 'pergola'], 3.6, 'paired', false, 0.2, 'solid', 'canopy'),
+    palette: PT(0.66, 0.1, 0.06, 0.18),
+    climate: { chhajja: 0.6, orient: true, jaali: 'none' },
+  }),
+  derive('earth', {
+    id: 'brick-vernacular', name: 'Brick Vernacular', blurb: 'Exposed brick, jaali walls for light and air, deep sunshades, clay tiles: after Laurie Baker.',
+    finish: { wall: 'brick-red', accent: 'brick-tile', base: 'basalt', roof: 'roof-clay', railing: 'rail-ms-black' },
+    facade: { bands: false, fins: false },
+    composition: CO([0, 'base'], [0, 'wall', 'parapet'], 3.0, 'free', false, 0.1, 'plain', 'canopy'),
+    palette: PT(0.72, 0.08, 0.05, 0.15),
+    climate: { chhajja: 0.75, orient: true, jaali: 'windows' },
+  }),
+  derive('contemporary', {
+    id: 'tropical', name: 'Tropical Modern', blurb: 'White walls and teak, wide balconies under deep overhangs, a pergola roof: after Geoffrey Bawa.',
+    finish: { wall: 'paint-white', accent: 'wpc-teak', base: 'basalt' },
+    facade: { bands: true, fins: false },
+    glazing: { frame: '#5a4632', frameName: 'Teak-finish aluminium' },
+    balcony: { kind: 'cantilever', depth: 2.1, railing: 'ms' },
+    composition: CO([1, 'base'], [1, 'accent', 'pergola'], 3.6, 'even', false, 0, 'plain', 'canopy'),
+    palette: PT(0.56, 0.16, 0.05, 0.23),
+    climate: { chhajja: 1.0, orient: true, jaali: 'none' },
+  }),
+);

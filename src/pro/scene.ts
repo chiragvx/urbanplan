@@ -11,12 +11,12 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { PlotReport } from '../doc/plot';
 import { UNIT_COLOR, type SiteReport } from '../doc/site';
-import { finishOf, languageOf, type DesignSystem } from './design';
+import { chhajjaOn, climateOf, compositionOf, finishOf, languageOf, zonesOf, ZONED_FROM, type DesignSystem, type Tone } from './design';
 import { materialOf } from './materials';
 import { DEFAULT_SITE } from '../doc/site';
 import { frameOf, layForm, type Form, type FormLayout } from './form';
 import { buildForm, disposeBuilt, layoutHash, type Built, type Look } from './form/mesh';
-import type { FloorPlan, Opening } from './openings';
+import { facadeBays, type FloorPlan, type Opening } from './openings';
 
 import { SHOP_W, type Shops } from './mixed';
 import { roadFrame } from '../doc/site';
@@ -86,6 +86,20 @@ function flat(ring: number[], y: number): THREE.BufferGeometry {
 }
 
 /** Instanced boxes: add() each, then mesh() builds it. */
+/** a jaali's pierced pattern as an alpha map (white solid, black open): drawn once, shared */
+let jaaliTex: THREE.Texture | null = null;
+function jaaliTexture(): THREE.Texture | null {
+  if (jaaliTex || typeof document === 'undefined') return jaaliTex;
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d');
+  if (!g) return null;
+  g.fillStyle = '#fff'; g.fillRect(0, 0, 64, 64); g.fillStyle = '#000';
+  for (const [x, y] of [[16, 16], [48, 16], [16, 48], [48, 48], [32, 32], [0, 32], [64, 32], [32, 0], [32, 64]]) { g.beginPath(); g.arc(x, y, 9, 0, Math.PI * 2); g.fill(); }
+  jaaliTex = new THREE.CanvasTexture(c);
+  jaaliTex.wrapS = jaaliTex.wrapT = THREE.RepeatWrapping; jaaliTex.repeat.set(4, 4);
+  return jaaliTex;
+}
+
 class Boxes {
   m: THREE.Matrix4[] = []; meta: unknown[] = [];
   /** centred at x,y,z, `sx` along u (angle from x), `sy` up, `sz` across */
@@ -373,6 +387,8 @@ export class ProView {
     this.clear();
     const seen = new Set<string>(), forms: Record<string, FormLayout> = {};
     const { r, d, plans, ds } = v;
+    // (a face's bearing, degrees clockwise from north, from its outward normal: plan −z is north, turned by v.north)
+    const nr = ((v.north ?? 0) * Math.PI) / 180, bearingOf = (nx: number, nz: number) => (Math.atan2(nx * Math.cos(nr) + nz * Math.sin(nr), nx * Math.sin(nr) - nz * Math.cos(nr)) * 180) / Math.PI;
     const fh = r.rules.floorH, mat = (color: string, o: Partial<THREE.MeshStandardMaterialParameters> = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.85, ...o });
     const mats = (ds: DesignSystem) => ({
       wall: mat(ds.facade.wall), accent: mat(ds.facade.accent, { roughness: 0.6 }), base: mat(ds.facade.base),
@@ -381,6 +397,7 @@ export class ProView {
       slab: mat('#d8d4cc'), road: mat('#5b5e66', { roughness: 0.95 }), dp: mat('#e5484d', { transparent: true, opacity: 0.28 }), paving: mat('#d3cfc5'),
       shop: mat('#efe2c8', { emissive: '#ffd9a0', emissiveIntensity: 0.25 }), sign: mat('#1d1f24', { roughness: 0.4 }),
       core: mat('#a7a39b'), door: mat('#8a5a3b', { roughness: 0.6 }), partition: mat('#f5f3ef'),
+      jaali: mat(ds.facade.accent, { alphaMap: jaaliTexture(), alphaTest: 0.5, side: THREE.DoubleSide }),
     });
     let M = mats(ds);
     const site = M;
@@ -424,15 +441,15 @@ export class ProView {
     }
     add(trunks.mesh(mat('#6b5440'), true, trunkGeo)); add(crowns.mesh(mat('#5f7f4c', { roughness: 0.9, flatShading: true }), true, crownGeo));
 
-    let bands = new Boxes(), fins = new Boxes(), frames = new Boxes(), panes = new Boxes(), slabs = new Boxes(), rails = new Boxes(), cols = new Boxes(), parts = new Boxes(), doors = new Boxes(), parapets = new Boxes(), signs = new Boxes();
+    let bands = new Boxes(), fins = new Boxes(), frames = new Boxes(), panes = new Boxes(), slabs = new Boxes(), rails = new Boxes(), cols = new Boxes(), parts = new Boxes(), doors = new Boxes(), parapets = new Boxes(), signs = new Boxes(), jaalis = new Boxes();
     const flush = () => {
-      for (const [B, m, cast] of [[bands, M.accent, true], [fins, M.accent, true], [frames, M.frame, true], [panes, M.glass, false], [slabs, M.slab, true], [rails, M.rail, false], [cols, M.base, true], [parts, M.partition, true], [doors, M.door, true], [parapets, M.wall, true], [signs, M.sign, true]] as [Boxes, THREE.Material, boolean][]) {
+      for (const [B, m, cast] of [[bands, M.accent, true], [fins, M.accent, true], [frames, M.frame, true], [panes, M.glass, false], [slabs, M.slab, true], [rails, M.rail, false], [cols, M.base, true], [parts, M.partition, true], [doors, M.door, true], [parapets, M.wall, true], [signs, M.sign, true], [jaalis, M.jaali, false]] as [Boxes, THREE.Material, boolean][]) {
         const im = B.mesh(m, cast);
         if (!im) continue;
         add(im);
         if (B === frames || B === panes || B === doors) this.pickables.push(im);
       }
-      bands = new Boxes(); fins = new Boxes(); frames = new Boxes(); panes = new Boxes(); slabs = new Boxes(); rails = new Boxes(); cols = new Boxes(); parts = new Boxes(); doors = new Boxes(); parapets = new Boxes(); signs = new Boxes();
+      bands = new Boxes(); fins = new Boxes(); frames = new Boxes(); panes = new Boxes(); slabs = new Boxes(); rails = new Boxes(); cols = new Boxes(); parts = new Boxes(); doors = new Boxes(); parapets = new Boxes(); signs = new Boxes(); jaalis = new Boxes();
     };
     const under = d.under, y0 = under * fh;
     // shops at the front: the road-facing edges of each strip, and which flats are shops on the floors above
@@ -501,13 +518,61 @@ export class ProView {
       }
       const all = b.floors, show = v.xray === null ? all : Math.min(all, Math.max(1, v.xray));
       const top = y0 + (v.xray === null ? all : show - 1) * fh;
+      // the composition: the base, middle and top, each zone in its tone; the faces in bays
+      const comp = compositionOf(ds_), Z = zonesOf(comp, all), cl = climateOf(ds_);
+      const toneM = (t: Tone) => (t === 'wall' ? M.wall : t === 'accent' ? M.accent : M.base);
+      const yBase = Math.min(top, y0 + Z.base * fh), yTop = Math.max(yBase, Math.min(top, y0 + (all - Z.top) * fh));
+      const faces = facadeBays(b.quads, comp.bay).filter((f) => !f.inner);
       // stilt / podium: columns round the edge, the cores carried down
       for (const q of b.quads) {
         if (under) for (let i = 0; i < q.length; i += 2) {
           const j = (i + 2) % q.length, L = Math.hypot(q[j] - q[i], q[j + 1] - q[i + 1]), n = Math.max(1, Math.round(L / 6));
           for (let k = 0; k < n; k++) cols.add(q[i] + ((q[j] - q[i]) * k) / n, y0 / 2, q[i + 1] + ((q[j + 1] - q[i + 1]) * k) / n, 1, 0, 0.5, y0, 0.5);
         }
-        if (top > y0) mesh(prism(q, y0, top), M.wall);
+        if (yBase > y0) mesh(prism(q, y0, yBase), toneM(comp.base.tone));
+        if (yTop > yBase) mesh(prism(q, yBase, yTop), M.wall);
+        if (top > yTop) mesh(prism(q, yTop, top), toneM(comp.top.tone));
+      }
+      const along = (f: (typeof faces)[number], s: number, out: number) => [f.ax + f.ux * s + f.nx * out, f.az + f.uz * s + f.nz * out] as const;
+      // a string course over the base and under the top
+      for (const f of faces) {
+        const [mx, mz] = along(f, f.L / 2, 0);
+        if (Z.base && yBase < top) bands.add(mx, yBase, mz, f.ux, f.uz, f.L + 0.4, 0.45, 0.4);
+        if (Z.top && yTop < top) bands.add(mx, yTop, mz, f.ux, f.uz, f.L + 0.3, 0.3, 0.3);
+      }
+      // the bay lines as piers through the middle (not through a window that spans two bays)
+      if (comp.piers && comp.rhythm !== 'free' && yTop > yBase) for (const f of faces) for (let k = 1; k < f.n; k++) {
+        const s = k * f.bw;
+        const blocked = plan.openings.some((o) => o.outside && Math.abs((o.x - f.ax) * -f.uz + (o.z - f.az) * f.ux) < 0.15 && Math.abs((o.x - f.ax) * f.ux + (o.z - f.az) * f.uz - s) < o.w / 2 + 0.1);
+        if (blocked) continue;
+        const [x, z] = along(f, s, 0.08);
+        fins.add(x, (yBase + yTop) / 2, z, f.ux, f.uz, 0.35, yTop - yBase, 0.16);
+      }
+      // the corners: a pier in the accent, or glass wrapping round (the end bays are kept free of windows for it)
+      if (comp.corner === 'accent' && top > y0) for (const f of faces) {
+        const [x, z] = along(f, f.L, 0);
+        fins.add(x - f.ux * 0.3 - f.nx * 0.3, (y0 + top) / 2, z - f.uz * 0.3 - f.nz * 0.3, f.ux, f.uz, 0.7, top - y0, 0.7);
+      }
+      const corners = comp.corner === 'glazed' && comp.rhythm !== 'free' ? faces.filter((f) => f.n >= 3) : [];
+      // the entrance: on the face that looks most at the road, in line with the core, a canopy or a portal
+      const front = comp.entrance === 'none' ? undefined : faces.filter((f) => f.L >= 7).sort((a, c) => (c.nx * -F.vx + c.nz * -F.vz) - (a.nx * -F.vx + a.nz * -F.vz))[0];
+      if (front) {
+        const core = b.cores[0], [kx, kz] = core ? [core.filter((_, i) => i % 2 === 0).reduce((a, c) => a + c, 0) / (core.length / 2), core.filter((_, i) => i % 2 === 1).reduce((a, c) => a + c, 0) / (core.length / 2)] : along(front, front.L / 2, 0);
+        const s = Math.max(3.2, Math.min(front.L - 3.2, (kx - front.ax) * front.ux + (kz - front.az) * front.uz));
+        const he = under ? Math.max(2.8, y0 - 0.25) : Math.min(4.2, Math.max(3.2, fh * Math.max(1, Z.base) - 0.3));
+        const [x, z] = along(front, s, 0), at = (out: number, t = 0) => [x + front.nx * out + front.ux * t, z + front.nz * out + front.uz * t] as const;
+        // the lobby's glass doors
+        const dh = Math.min(2.7, he - 0.3), [gx, gz] = at(0.08);
+        frames.add(gx, dh / 2 + 0.05, gz, front.ux, front.uz, 3.4, dh + 0.1, 0.12);
+        panes.add(gx + front.nx * 0.05, dh / 2 + 0.05, gz + front.nz * 0.05, front.ux, front.uz, 3.2, dh - 0.06, 0.04);
+        if (comp.entrance === 'canopy') { const [cx2, cz2] = at(1.5); slabs.add(cx2, he, cz2, front.ux, front.uz, 5.4, 0.22, 3.0); }
+        else {
+          // a portal: a frame in the accent standing out from the face, as tall as the base
+          const hp = Math.max(he + 0.6, Math.min(7.5, y0 + Z.base * fh)), dep = 2.4;
+          for (const sgn of [-1, 1]) { const [px, pz] = at(dep - 0.3, sgn * 2.9); fins.add(px, hp / 2, pz, front.ux, front.uz, 0.6, hp, 0.6); }
+          const [lx, lz] = at(dep / 2);
+          fins.add(lx, hp - 0.3, lz, front.ux, front.uz, 6.4, 0.6, dep);
+        }
       }
       for (const c of b.cores) mesh(prism(c, 0, (v.xray === null ? y0 + all * fh + 2.4 : top + fh)), M.core);
       // floors: bands on the slab edges, the openings
@@ -523,6 +588,11 @@ export class ProView {
         const cut = v.xray !== null && f === show - 1;
         const shopHere = !!v.shops && f < v.shops.upperOf[bi], gone = shopHere ? v.shops!.removed.get(bi) : undefined;
         if (shopHere && !cut) for (const st of v.shops!.strips) if (st.b === bi) for (const e of shopFronts(st.ring)) glazeRun(e, fy, fh, false);
+        if (!cut && !shopHere && f >= Z.base) for (const c of corners) for (const s of [c.bw / 2, c.L - c.bw / 2]) {
+          const gw = c.bw - 0.2, gh = fh - 0.45, [x, z] = along(c, s, 0.07);
+          frames.add(x, fy + 0.15 + gh / 2, z, c.ux, c.uz, gw + 0.1, gh + 0.1, 0.1);
+          panes.add(x + c.nx * 0.04, fy + 0.15 + gh / 2, z + c.nz * 0.04, c.ux, c.uz, gw - 0.04, gh - 0.04, 0.04);
+        }
         for (const o of plan.openings) {
           if (gone?.has(o.unit)) continue;
           if (!o.outside && !cut) continue;
@@ -535,6 +605,22 @@ export class ProView {
           if (o.tag === 'D1') { doors.add(o.x - o.ux * o.w / 2 - o.nx * o.w / 2, fy + Math.min(o.h, CUT + 0.3) / 2, o.z - o.uz * o.w / 2 - o.nz * o.w / 2, o.nx, o.nz, o.w, Math.min(o.h, CUT + 0.3), 0.05, meta); continue; }
           frames.add(o.x + o.nx * off, cy, o.z + o.nz * off, o.ux, o.uz, o.w + 0.12, o.h + 0.12, 0.1, meta);
           panes.add(o.x + o.nx * (off + 0.04), cy, o.z + o.nz * (off + 0.04), o.ux, o.uz, o.w - 0.06, o.h - 0.06, 0.04, meta);
+          // a deep reveal: the surround stands out from the wall (not round a balcony's door, which has the balcony)
+          const rv = comp.reveal;
+          if (rv > 0.01 && !(o.tag === 'SD' && ds_.balcony.kind !== 'none' && ds_.balcony.kind !== 'french')) {
+            const hx = o.x + o.nx * rv / 2, hz = o.z + o.nz * rv / 2, sw = o.w + 0.36;
+            parapets.add(hx, cy + o.h / 2 + 0.08, hz, o.ux, o.uz, sw, 0.16, rv);
+            parapets.add(hx, cy - o.h / 2 - 0.08, hz, o.ux, o.uz, sw, 0.16, rv);
+            for (const sgn of [-1, 1]) parapets.add(hx + o.ux * sgn * (o.w / 2 + 0.09), cy, hz + o.uz * sgn * (o.w / 2 + 0.09), o.ux, o.uz, 0.18, o.h, rv);
+          }
+          // the climate: a chhajja over the window (not over a balcony's door: the balcony above shades it), as deep as
+          // the face's sun asks; a jaali in front of the ventilators (and the smaller windows)
+          const shaded = o.tag === 'SD' && (ds_.balcony.kind === 'cantilever' || ds_.balcony.kind === 'recessed');
+          if (cl.chhajja > 0.05 && !shaded) {
+            const dep = chhajjaOn(cl, bearingOf(o.nx, o.nz)), y = cy + o.h / 2 + (rv > 0.01 ? 0.24 : 0.12);
+            parapets.add(o.x + o.nx * dep / 2, y, o.z + o.nz * dep / 2, o.ux, o.uz, o.w + 0.6, 0.1, dep);
+          }
+          if (o.tag === 'V1' ? cl.jaali !== 'none' : o.tag === 'W2' && cl.jaali === 'windows') jaalis.add(o.x + o.nx * 0.2, cy, o.z + o.nz * 0.2, o.ux, o.uz, o.w + 0.2, o.h + 0.2, 0.05);
           if (ds_.facade.fins && (o.tag === 'W1' || o.tag === 'SD')) for (const sgn of [-1, 1]) {
             const fx = o.x + o.ux * sgn * (o.w / 2 + 0.25), fz = o.z + o.uz * sgn * (o.w / 2 + 0.25);
             fins.add(fx + o.nx * 0.3, fy + fh / 2, fz + o.nz * 0.3, o.nx, o.nz, 0.6, fh, 0.12);
@@ -556,6 +642,24 @@ export class ProView {
           const j = (i + 2) % q.length, L = Math.hypot(q[j] - q[i], q[j + 1] - q[i + 1]);
           if (L < 0.5) continue;
           parapets.add((q[i] + q[j]) / 2, ry + 0.5, (q[i + 1] + q[j + 1]) / 2, (q[j] - q[i]) / L, (q[j + 1] - q[i + 1]) / L, L + 0.1, 1.0, 0.2);
+        }
+        // the crown: a deep cornice, or a pergola's frame over the terrace
+        const crown = all >= ZONED_FROM ? comp.top.crown : 'parapet';
+        if (crown === 'cornice') for (const f of faces) { const [x, z] = along(f, f.L / 2, 0.1); bands.add(x, ry + 0.75, z, f.ux, f.uz, f.L + 1.0, 0.5, 1.0); }
+        if (crown === 'pergola') for (const q of b.quads) {
+          if (q.length !== 8) continue;
+          const [cx, cz] = [(q[0] + q[2] + q[4] + q[6]) / 4, (q[1] + q[3] + q[5] + q[7]) / 4];
+          const P = [0, 1, 2, 3].map((k) => { const x = q[2 * k], z = q[2 * k + 1], d = Math.hypot(cx - x, cz - z) || 1; return [x + (cx - x) * 0.6 / d, z + (cz - z) * 0.6 / d]; });
+          const ph = 3.0, yb = ry + ph;
+          for (const [x, z] of P) fins.add(x, ry + ph / 2, z, 1, 0, 0.3, ph, 0.3);
+          const beam = (a: number[], c: number[], y: number, t: number) => { const L = Math.hypot(c[0] - a[0], c[1] - a[1]); if (L > 0.1) fins.add((a[0] + c[0]) / 2, y, (a[1] + c[1]) / 2, (c[0] - a[0]) / L, (c[1] - a[1]) / L, L, t, t); };
+          for (let k = 0; k < 4; k++) beam(P[k], P[(k + 1) % 4], yb, 0.3);
+          // slats across the longer way, a metre apart
+          const long = Math.hypot(P[1][0] - P[0][0], P[1][1] - P[0][1]) >= Math.hypot(P[3][0] - P[0][0], P[3][1] - P[0][1]);
+          const [A, B, C, D] = long ? [P[0], P[1], P[2], P[3]] : [P[1], P[2], P[3], P[0]];
+          const n = Math.max(2, Math.round(Math.hypot(B[0] - A[0], B[1] - A[1]) / 1.0));
+          const lerp = (p: number[], r: number[], t: number) => [p[0] + (r[0] - p[0]) * t, p[1] + (r[1] - p[1]) * t];
+          for (let k = 1; k < n; k++) beam(lerp(A, B, k / n), lerp(D, C, k / n), yb + 0.2, 0.12);
         }
       } else {
         // the cut floor: its slab, the flats tinted by type, the walls (dolls'-house height), the entrance doors

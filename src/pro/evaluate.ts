@@ -3,7 +3,8 @@
 // options explorer, the screening table, the brief runner and the API all go through this, so they can't disagree.
 import type { PlotReport } from '../doc/plot';
 import type { SiteReport } from '../doc/site';
-import { finishRate, languageOf, presetOf, specRateNet, type DesignSystem } from './design';
+import { finishRate, languageOf, presetOf, specRateNet, type DesignSystem, type FinishQty } from './design';
+import { facadeTakeoff, type Takeoff } from './palette';
 import type { Shops } from './mixed';
 import { planFloor, schedule, type FloorPlan, type ScheduleRow, type UnitCheck } from './openings';
 import { generate, plotReport, type ProProject } from './project';
@@ -26,6 +27,11 @@ export interface Evaluated {
    *  3D, the editor and the drawings to reuse rather than lay out again. A form that lays out to nothing is absent
    *  (its building stays the plain one of its spine). */
   forms: Record<string, FormLayout>;
+  /** the outside of the slab buildings measured by tone and glass (./palette.ts): the palette's shares and the facade
+   *  finishes' quantities */
+  facade: Takeoff;
+  /** those quantities per m² of built-up, as the finishes were priced with */
+  finishQty: FinishQty;
 }
 
 /** the systems a typical construction rate already carries, ₹ per sq ft of built-up (as assumed) */
@@ -57,13 +63,25 @@ export function evaluate(p: ProProject): Evaluated {
   let { d, shops } = generate(p, r, rate, ds.premium, forms);
   const sysOf = (x: typeof d) => siteSystems(x.buildings.map((b) => ({ b, settings: p.systems?.byBuilding?.[b.b.id] })), { under: x.under, floorH: ds.floorH, code: r.code, basements: x.site.basements, bays: x.parking.have, site: p.systems?.site });
   let sys = sysOf(d);
-  // (the systems as sized, over a typical construction rate's: the money worked out again with them)
-  const bua = d.bua * SQFT, sysRate = bua > 0 ? Math.round(sys.cost / bua - TYPICAL_SYSTEMS) : 0;
-  if (sysRate) { ({ d, shops } = generate(p, r, rate + sysRate, ds.premium, forms)); sys = sysOf(d); }
   // (a building with a style of its own takes that one's windows and doors)
-  const plans = d.buildings.map((b, i) => planFloor(b, dsOfBuilding(p, i, ds, b.b.id), r.code === 'udcpr' ? 1 / 10 : 1 / 6));
+  const planAll = (x: typeof d) => x.buildings.map((b, i) => planFloor(b, dsOfBuilding(p, i, ds, b.b.id), r.code === 'udcpr' ? 1 / 10 : 1 / 6));
+  // (the facade measured from the model: its tones priced by their measured areas, not the rule of thumb)
+  const measure = (x: typeof d, pl: FloorPlan[]) => {
+    const T = facadeTakeoff(x, pl, (i) => dsOfBuilding(p, i, ds, x.buildings[i].b.id), r.rules.floorH);
+    const q: FinishQty = T.total > 0 && x.bua > 0 ? { wall: T.area.wall / x.bua, accent: T.area.accent / x.bua, base: T.area.base / x.bua } : {};
+    return { T, q, rate: specRateNet(ds) + finishRate(ds, q) };
+  };
+  let plans = planAll(d), M = measure(d, plans);
+  // (the systems as sized, over a typical construction rate's, and the measured finishes: the money worked out again)
+  const bua = d.bua * SQFT, sysRate = bua > 0 ? Math.round(sys.cost / bua - TYPICAL_SYSTEMS) : 0;
+  let used = rate;
+  if (sysRate || M.rate !== rate) {
+    used = M.rate;
+    ({ d, shops } = generate(p, r, used + sysRate, ds.premium, forms)); sys = sysOf(d);
+    plans = planAll(d); M = measure(d, plans);
+  }
   const rows = schedule(d, plans, ds, (bi, ui) => (shops?.removed.get(bi)?.has(ui) ? shops.upperOf[bi] : 0));
   // (a formed building's typical floor repeats only on the floors like it)
   const checks = plans.flatMap((pl, i) => pl.checks.map((c) => ({ ...c, floors: d.buildings[i].repeats ?? d.buildings[i].floors })));
-  return { p, ds, r, d, shops, plans, rows, checks, rate, sys, sysRate, forms };
+  return { p, ds, r, d, shops, plans, rows, checks, rate: used, sys, sysRate, forms, facade: M.T, finishQty: M.q };
 }

@@ -69,3 +69,19 @@
 .dsl-ic:focus-visible { outline: 2px solid var(--up-ink); outline-offset: 2px; }
 .dsl-sliders { display: grid; gap: 4px; margin: 4px 0; }
 @media (max-width: 420px) { .dsl-icons { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+/* the palette: measured shares against the targets (the bars in the materials' colours: the colour is the data) */
+.dsp-bars { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; margin: 2px 0 10px; }
+.dsp-bars small { font: 400 10px/1.2 var(--up-font-mono); text-transform: uppercase; letter-spacing: 0.04em; color: var(--up-muted); }
+.dsp-bar { display: flex; height: 14px; border-radius: 4px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--up-line); }
+.dsp-bar + small + .dsp-bar { height: 6px; }
+.dsp-bar i { display: block; min-width: 2px; }
+.dsp-t { width: 100%; border-collapse: collapse; font-size: 12px; }
+.dsp-t th { text-align: left; font: 400 10px/1.2 var(--up-font-mono); text-transform: uppercase; color: var(--up-muted); padding: 0 6px 6px 0; }
+.dsp-t td { padding: 5px 6px 5px 0; border-top: 1px solid var(--up-line); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dsp-t td small { color: var(--up-muted); }
+.dsp-t input { width: 3.4em; font: inherit; padding: 2px 4px; border: 1px solid var(--up-line-strong); border-radius: 6px; background: var(--up-surface); color: var(--up-ink); text-align: right; }
+.dsp-sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15); }
+.dsp-off { font-weight: 600; }
+
+.dss-group { grid-column: 1 / -1; margin: 6px 0 0; font: 400 10px/1.2 var(--up-font-mono); text-transform: uppercase; letter-spacing: 0.04em; color: var(--up-muted); }

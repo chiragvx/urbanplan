@@ -8,14 +8,15 @@ import type { JSX } from 'preact';
 import { useEffect, useId, useState } from 'preact/hooks';
 import './designStep.css';
 import {
-  clone, finishOf, finishRate, FINISHED, FLOOR_ROOMS, languageOf, presetOf, PRESETS, ROOF_KINDS, setFinish, SKIN_PATTERNS, SPEC,
-  type BalconyKind, type DesignSystem, type DoorType, type FinishSlot, type Language, type WindowType,
+  climateOf, clone, compositionOf, finishOf, finishRate, FINISHED, FLOOR_ROOMS, languageOf, paletteOf, presetOf, PRESETS, ROOF_KINDS, setFinish, SKIN_PATTERNS, SPEC, STYLE_IDS, ZONED_FROM,
+  type BalconyKind, type Climate, type Composition, type Corner, type Crown, type DesignSystem, type DoorType, type Entrance, type FinishSlot, type Language, type Rhythm, type Tone, type WindowType,
 } from './design';
 import type { RoofKind, SkinPattern } from './form/types';
 import { byCategory, materialOf, SLOT_CATEGORIES, type Material } from './materials';
 import * as library from './designLibrary';
 import type { SavedDesign } from './designLibrary';
 import type { StepProps } from './steps';
+import { PALETTE_SLOTS, PALETTE_TOLERANCE, sharesOf, type PaletteSlot } from './palette';
 import { Btn, Color, Icon, Note, nf, Num, Row, Section, Seg, Select, Slider, Toggle } from './ui';
 
 // ---------------------------------------------------------------- colour helpers (for drawing materials only)
@@ -147,20 +148,27 @@ function Elevation({ ds }: { ds: DesignSystem }) {
   const Wd = bayA + bayB + bayC, H = fh + N * fh + parapet;
   const top = (k: number) => parapet + (N - k) * fh; // the top of typical floor k (1 … N)
   const bot = (k: number) => top(k) + fh;            // its floor level
-  const P = { wall: `${uid}w`, acc: `${uid}a`, base: `${uid}b`, roof: `${uid}r` };
+  const P = { wall: `${uid}w`, acc: `${uid}a`, base: `${uid}b`, roof: `${uid}r`, jaali: `${uid}j` };
   const fill = (k: keyof typeof P) => `url(#${P[k]})`;
+  // (the composition: the lowest typical floor, 1, stands for the base, the highest, N, for the top)
+  const C = compositionOf(ds), tone = (t: Tone) => fill(t === 'accent' ? 'acc' : t), sky = C.top.crown === 'pergola' ? 2.6 : 0.5;
 
-  const win = (x: number, yFloor: number, w: number, h0: number, sill: number, kind: WindowType['kind'] | DoorType['kind']) => {
-    const h = Math.max(0.3, Math.min(h0, fh - sill - 0.15)), y = yFloor - sill - h;
+  const CL = climateOf(ds);
+  const win = (x: number, yFloor: number, w: number, h0: number, sill: number, kind: WindowType['kind'] | DoorType['kind'], tag = '') => {
+    const screened = tag === 'V1' ? CL.jaali !== 'none' : tag === 'W2' && CL.jaali === 'windows', shade_ = CL.chhajja > 0.05 && tag !== 'SD';
+    const h = Math.max(0.3, Math.min(h0, fh - sill - 0.15)), y = yFloor - sill - h, rv = C.reveal > 0.01 && kind !== 'glass-sliding';
     const mull = kind === 'sliding' || kind === 'glass-sliding' ? [x + w / 2] : kind === 'casement' ? [x + w / 3, x + (2 * w) / 3] : kind === 'fixed' && w > 1.6 ? [x + w / 2] : [];
     return (
       <g>
+        {rv && <rect x={x - 0.16} y={y - 0.16} width={w + 0.32} height={h + 0.32} fill={shade(ds.facade.wall, -0.16)} />}
         <rect x={x} y={y} width={w} height={h} fill={glass} stroke={frame} stroke-width=".07" />
         {kind === 'louvre'
           ? Array.from({ length: Math.max(2, Math.floor(h / 0.1)) }, (_, i) => <path d={`M${x} ${y + (i + 0.5) * (h / Math.max(2, Math.floor(h / 0.1)))}h${w}`} stroke={frame} stroke-width=".035" />)
           : <path d={`M${x + 0.08} ${y + h - 0.08}L${x + Math.min(w, h) * 0.55} ${y + 0.08}h${Math.min(w, h) * 0.2}L${x + 0.08 + Math.min(w, h) * 0.2} ${y + h - 0.08}Z`} fill="#fff" opacity=".13" />}
         {mull.map((mx) => <path d={`M${mx} ${y}v${h}`} stroke={frame} stroke-width=".06" />)}
         {kind === 'casement' && <path d={`M${x} ${y + 0.45}h${w}`} stroke={frame} stroke-width=".05" />}
+        {screened && <rect x={x - 0.1} y={y - 0.1} width={w + 0.2} height={h + 0.2} fill={`url(#${P.jaali})`} />}
+        {shade_ && <><rect x={x - 0.3} y={y - (rv ? 0.3 : 0.2)} width={w + 0.6} height=".12" fill={shade(ds.facade.wall, -0.25)} /><rect x={x - 0.3} y={y - (rv ? 0.18 : 0.08)} width={w + 0.6} height={Math.min(0.5, CL.chhajja * 0.4)} fill="#000" opacity=".12" /></>}
       </g>
     );
   };
@@ -175,18 +183,27 @@ function Elevation({ ds }: { ds: DesignSystem }) {
   const floors = Array.from({ length: N }, (_, i) => i + 1);
   const xB = bayA, xC = bayA + bayB;
   return (
-    <svg class="dss-elev" viewBox={`-0.6 -0.5 ${Wd + 1.2} ${H + 0.75}`} role="img"
+    <svg class="dss-elev" viewBox={`-0.6 ${-sky} ${Wd + 1.2} ${H + sky + 0.25}`} role="img"
       aria-label={`Facade preview: ${mWall.name} walls, ${mAcc.name} accents, ${mBase.name} at the base, ${bal.kind === 'none' ? 'no balconies' : `${bal.kind} balconies`}`}>
       <defs>
         <Pat id={P.wall} m={mWall} colour={ds.facade.wall} />
         <Pat id={P.acc} m={mAcc} colour={ds.facade.accent} />
         <Pat id={P.base} m={mBase} colour={ds.facade.base} />
         <Pat id={P.roof} m={mRoof} />
+        <pattern id={P.jaali} patternUnits="userSpaceOnUse" width=".16" height=".16"><rect width=".16" height=".16" fill={ds.facade.accent} /><circle cx=".08" cy=".08" r=".05" fill="#000" opacity=".55" /></pattern>
       </defs>
       {/* the roof's edge, the walls, the stilt */}
       <rect x=".3" y="-0.28" width={Wd - 0.6} height=".3" fill={fill('roof')} />
       <rect x="0" y="0" width={Wd} height={H - fh} fill={fill('wall')} />
       <rect x="-0.05" y="0" width={Wd + 0.1} height=".12" fill={shade(ds.facade.wall, -0.18)} />
+      {C.base.floors > 0 && <rect x="0" y={top(1)} width={Wd} height={fh} fill={tone(C.base.tone)} />}
+      {C.top.floors > 0 && <rect x="0" y="0" width={Wd} height={bot(N)} fill={tone(C.top.tone)} />}
+      {C.base.floors > 0 && <rect x="-0.2" y={top(1) - 0.22} width={Wd + 0.4} height=".45" fill={fill('acc')} />}
+      {C.top.floors > 0 && <rect x="-0.15" y={bot(N) - 0.15} width={Wd + 0.3} height=".3" fill={fill('acc')} />}
+      {C.top.crown === 'cornice' && <rect x="-0.5" y="-0.3" width={Wd + 1} height=".5" fill={fill('acc')} />}
+      {C.top.crown === 'pergola' && <g fill={fill('acc')}>{[0.6, Wd / 2, Wd - 0.6].map((x) => <rect x={x - 0.15} y="-2.3" width=".3" height="2.3" />)}<rect x="0.3" y="-2.45" width={Wd - 0.6} height=".3" /></g>}
+      {C.piers && C.rhythm !== 'free' && [xB, xC].map((x) => <rect x={x - 0.14} y={C.top.floors > 0 ? bot(N) : 0} width=".28" height={(C.base.floors > 0 ? top(1) : H - fh) - (C.top.floors > 0 ? bot(N) : 0)} fill={fill('acc')} />)}
+      {C.corner === 'accent' && [0, Wd - 0.5].map((x) => <rect x={x} y="0" width=".5" height={H - fh} fill={fill('acc')} />)}
       <rect x="0" y={H - fh} width={Wd} height={fh} fill={fill('base')} />
       {[[0.45, xB - 0.225], [xB + 0.225, xC - 0.225], [xC + 0.225, Wd - 0.45]].map(([a, b]) => <rect x={a} y={H - fh + 0.45} width={b - a} height={fh - 0.45} fill="#1b1b1d" opacity=".82" />)}
       {/* recessed balconies sit in a shadowed bay */}
@@ -205,12 +222,12 @@ function Elevation({ ds }: { ds: DesignSystem }) {
             {bal.kind === 'none'
               ? win(xB + (bayB - W2.w) / 2, yf, W2.w, W2.h, W2.sill, W2.kind)
               : <>
-                {win(dx, yf, dw, Math.min(SD.h, fh - 0.3), 0, SD.kind)}
+                {win(dx, yf, dw, Math.min(SD.h, fh - 0.3), 0, SD.kind, 'SD')}
                 {bal.kind === 'cantilever' && <><rect x={xB + 0.2} y={yf} width={bayB - 0.4} height=".16" fill={shade(ds.facade.wall, -0.12)} /><rect x={xB + 0.2} y={yf + 0.16} width={bayB - 0.4} height=".3" fill="#000" opacity=".12" /></>}
                 {railing(bal.kind === 'french' ? dx - 0.1 : xB + 0.25, bal.kind === 'french' ? dw + 0.2 : bayB - 0.5, yf)}
               </>}
-            {win(w2x, yf, W2.w, W2.h, W2.sill, W2.kind)}
-            {win(v1x, yf, V1.w, V1.h, Math.min(V1.sill, fh - V1.h - 0.2), V1.kind)}
+            {win(w2x, yf, W2.w, W2.h, W2.sill, W2.kind, 'W2')}
+            {win(v1x, yf, V1.w, V1.h, Math.min(V1.sill, fh - V1.h - 0.2), V1.kind, 'V1')}
           </g>
         );
       })}
@@ -284,6 +301,95 @@ function LanguageSection({ ds, setDs }: { ds: DesignSystem; setDs: (fn: (d: Desi
   );
 }
 
+// ---------------------------------------------------------------- composition
+const TONES: { value: Tone; label: string }[] = [{ value: 'wall', label: 'Walls' }, { value: 'accent', label: 'Accent' }, { value: 'base', label: 'Base' }];
+
+/** How the facade is composed: the base, middle and top, the bays the windows snap to, the reveals, the corners, the
+ *  entrance and the crown. Shows on the slab buildings in the 3D view, the preview above and the elevation. */
+function CompositionSection({ ds, setDs }: { ds: DesignSystem; setDs: (fn: (d: DesignSystem) => void) => void }) {
+  const c = compositionOf(ds);
+  const setC = (fn: (c: Composition) => void) => setDs((d) => { const x: Composition = JSON.parse(JSON.stringify(compositionOf(d))); fn(x); d.composition = x; });
+  const m = (v: number) => `${nf(v, 2)} m`;
+  return (
+    <Section title="Composition" sub={`A base, a middle and a top (from ${ZONED_FROM} storeys up), the windows set out on bays.`}>
+      <Row>
+        <Num label="Base floors" value={c.base.floors} step={1} min={0} max={4} set={(v) => setC((x) => { x.base.floors = Math.round(v); })} />
+        <Num label="Top floors" value={c.top.floors} step={1} min={0} max={4} set={(v) => setC((x) => { x.top.floors = Math.round(v); })} />
+      </Row>
+      {c.base.floors > 0 && <Seg<Tone> label="Base in" value={c.base.tone} set={(v) => setC((x) => { x.base.tone = v; })} options={TONES} />}
+      {c.top.floors > 0 && <Seg<Tone> label="Top in" value={c.top.tone} set={(v) => setC((x) => { x.top.tone = v; })} options={TONES} />}
+      <Seg<Crown> label="Crown" value={c.top.crown} set={(v) => setC((x) => { x.top.crown = v; })} options={[{ value: 'parapet', label: 'Parapet' }, { value: 'cornice', label: 'Cornice' }, { value: 'pergola', label: 'Pergola' }]} />
+      <Seg<Rhythm> label="Windows" value={c.rhythm} set={(v) => setC((x) => { x.rhythm = v; })} options={[{ value: 'free', label: 'Flat by flat', title: 'Spread along each flat’s walls' }, { value: 'even', label: 'Even bays', title: 'One to a bay, lined up across the facade' }, { value: 'paired', label: 'Paired', title: 'On the bays, drawn together in twos' }]} />
+      {c.rhythm !== 'free' && <>
+        <Slider label="Bay width" value={c.bay} min={2.4} max={6} step={0.1} fmt={m} set={(v) => setC((x) => { x.bay = v; })} />
+        <Toggle label="Piers on the bay lines" value={c.piers} set={(v) => setC((x) => { x.piers = v; })} />
+      </>}
+      <Slider label="Window reveal" value={c.reveal} min={0} max={0.5} step={0.05} fmt={(v) => (v ? m(v) : 'None')} set={(v) => setC((x) => { x.reveal = v; })} />
+      <Seg<Corner> label="Corners" value={c.corner} set={(v) => setC((x) => { x.corner = v; })} options={[{ value: 'plain', label: 'Plain' }, { value: 'solid', label: 'Solid', title: 'No windows in the end bays' }, { value: 'glazed', label: 'Glazed', title: 'Glass round the corner (on bays)' }, { value: 'accent', label: 'Accent', title: 'A pier in the accent' }]} />
+      <Seg<Entrance> label="Entrance" value={c.entrance} set={(v) => setC((x) => { x.entrance = v; })} options={[{ value: 'none', label: 'Plain' }, { value: 'canopy', label: 'Canopy' }, { value: 'portal', label: 'Portal' }]} />
+      {(c.corner === 'glazed' || c.corner === 'solid') && c.rhythm === 'free' && <Note>Solid and glazed corners keep the end bays clear, so they need the windows on bays.</Note>}
+    </Section>
+  );
+}
+
+// ---------------------------------------------------------------- climate
+/** The climate's elements: a chhajja over each window, turned to the sun or not, and jaali screens. */
+function ClimateSection({ ds, setDs }: { ds: DesignSystem; setDs: (fn: (d: DesignSystem) => void) => void }) {
+  const c = climateOf(ds);
+  const setC = (fn: (c: Climate) => void) => setDs((d) => { const x: Climate = { ...climateOf(d) }; fn(x); d.climate = x; });
+  return (
+    <Section title="Climate" sub="Sunshades and screens, as Indian buildings have long been shaded.">
+      <Slider label="Chhajja over the windows" value={c.chhajja} min={0} max={1.5} step={0.05} fmt={(v) => (v > 0.04 ? `${nf(v, 2)} m` : 'None')} set={(v) => setC((x) => { x.chhajja = v; })} />
+      {c.chhajja > 0.04 && <Toggle label="Deeper to the south and west" value={c.orient} set={(v) => setC((x) => { x.orient = v; })} hint="Full depth facing south, a little more facing west, about a third facing north." />}
+      <Seg<Climate['jaali']> label="Jaali" value={c.jaali} set={(v) => setC((x) => { x.jaali = v; })} options={[{ value: 'none', label: 'None' }, { value: 'vents', label: 'Ventilators' }, { value: 'windows', label: 'Small windows too' }]} />
+    </Section>
+  );
+}
+
+// ---------------------------------------------------------------- palette
+/** The facade's palette as shares: what the model measures for each tone and the glass, against the design system's
+ *  targets. The bar is drawn in the materials' colours (the colour is the data), every state also in words. */
+function PaletteSection({ ds, e, setDs }: { ds: DesignSystem; e: StepProps['e']; setDs: (fn: (d: DesignSystem) => void) => void }) {
+  const t = paletteOf(ds), T = e.facade, now = sharesOf(T), measured = T.total > 0;
+  const setT = (k: PaletteSlot, v: number) => setDs((d) => { d.palette = { ...paletteOf(d), [k]: v }; });
+  const colour: Record<PaletteSlot, string> = { wall: ds.facade.wall, accent: ds.facade.accent, base: ds.facade.base, glass: ds.glazing.glass };
+  const sum = t.wall + t.accent + t.base + t.glass, pc = (v: number) => `${Math.round(v * 100)}%`;
+  const state = (k: PaletteSlot) => {
+    const dlt = now[k] - t[k];
+    return Math.abs(dlt) <= PALETTE_TOLERANCE ? 'On target' : `${dlt > 0 ? 'Over' : 'Under'} by ${Math.round(Math.abs(dlt) * 100)}`;
+  };
+  const off = measured ? PALETTE_SLOTS.filter((s) => Math.abs(now[s.key] - t[s.key]) > PALETTE_TOLERANCE).length : 0;
+  const bar = (sh: Record<PaletteSlot, number>, label: string) => (
+    <div class="dsp-bar" role="img" aria-label={`${label}: ${PALETTE_SLOTS.map((s) => `${s.label} ${pc(sh[s.key])}`).join(', ')}`}>
+      {PALETTE_SLOTS.map((s) => sh[s.key] > 0.001 && <i style={`flex:${sh[s.key]};background:${colour[s.key]}`} title={`${s.label} ${pc(sh[s.key])}`} />)}
+    </div>
+  );
+  return (
+    <Section title="Palette" sub="How much of the facade each tone and the glass is, measured from the model." aside={measured ? <span class="sec-meta">{off ? `${off} off target` : 'On target'}</span> : undefined}>
+      {measured ? <>
+        <div class="dsp-bars"><small>Measured</small>{bar(now, 'Measured')}<small>Target</small>{bar(t, 'Target')}</div>
+        <table class="dsp-t">
+          <thead><tr><th>Slot</th><th>Now</th><th>Target</th><th /></tr></thead>
+          <tbody>
+            {PALETTE_SLOTS.map((s) => (
+              <tr>
+                <td><span class="dsp-sw" style={`background:${colour[s.key]}`} aria-hidden="true" />{s.label}</td>
+                <td>{pc(now[s.key])}<small> · {nf(Math.round(T.area[s.key]))} m²</small></td>
+                <td><input type="number" min={0} max={100} step={1} value={Math.round(t[s.key] * 100)} aria-label={`${s.label} target, %`}
+                  onChange={(ev) => { const v = parseFloat((ev.target as HTMLInputElement).value); if (Number.isFinite(v) && v >= 0 && v <= 100) setT(s.key, v / 100); }} />%</td>
+                <td class={Math.abs(now[s.key] - t[s.key]) > PALETTE_TOLERANCE ? 'dsp-off' : ''}>{state(s.key)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {Math.abs(sum - 1) > 0.005 && <Note>The targets add to {pc(sum)}, not 100%.</Note>}
+        {T.skipped > 0 && <Note>{T.skipped === 1 ? 'One formed building isn’t' : `${T.skipped} formed buildings aren’t`} measured yet; the shares are of the rest.</Note>}
+        <Note>The walls, accent and base are priced by these areas now, not a rule of thumb.</Note>
+      </> : <Note>Nothing to measure yet: the shares show once there’s a slab building in the scheme.</Note>}
+    </Section>
+  );
+}
+
 // ---------------------------------------------------------------- start from: presets and saved ones
 /** Stable comparison of two design systems (key order doesn't matter). */
 const stable = (v: unknown): string => (v && typeof v === 'object' ? (Array.isArray(v) ? `[${v.map(stable).join(',')}]` : `{${Object.keys(v as object).sort().map((k) => `${k}:${stable((v as Record<string, unknown>)[k])}`).join(',')}}`) : JSON.stringify(v));
@@ -320,8 +426,10 @@ function StartFrom({ p, up, toast }: Pick<StepProps, 'p' | 'up' | 'toast'>) {
   const preset = presetOf(custom?.id ?? p.style);
   const ds = custom ?? presetOf(p.style);
 
+  const preset_ = (x: DesignSystem) => ({ key: x.id, d: x, on: !custom && p.style === x.id, pick: () => up({ style: x.id, custom: null }) });
   const cards: { key: string; d: DesignSystem; on: boolean; mine?: boolean; pick: () => void }[] = [
-    ...PRESETS.map((x) => ({ key: x.id, d: x, on: !custom && p.style === x.id, pick: () => up({ style: x.id, custom: null }) })),
+    ...PRESETS.filter((x) => !STYLE_IDS.includes(x.id)).map(preset_),
+    ...PRESETS.filter((x) => STYLE_IDS.includes(x.id)).map(preset_),
     ...mine.map((s) => ({ key: s.id, d: s.ds, mine: true, on: activeSaved?.id === s.id, pick: () => up({ style: presetOf(s.ds.id).id, custom: clone(s.ds) }) })),
   ];
   const tab = Math.max(0, cards.findIndex((c) => c.on));
@@ -339,12 +447,16 @@ function StartFrom({ p, up, toast }: Pick<StepProps, 'p' | 'up' | 'toast'>) {
     <Section title="Start from" aside={changed ? <span class="sec-meta">Changed</span> : undefined}>
       <div class="dss-cards" role="radiogroup" aria-label="Start from" onKeyDown={(e) => { const n = gridKey(e); if (n >= 0) cards[n].pick(); }}>
         {cards.map((c, i) => (
-          <button type="button" role="radio" aria-checked={c.on} tabIndex={i === tab ? 0 : -1} class="dss-card" title={c.mine ? undefined : c.d.blurb} onClick={c.pick}>
+          <>
+          {i > 0 && STYLE_IDS.includes(c.key) !== STYLE_IDS.includes(cards[i - 1].key) && STYLE_IDS.includes(c.key) && <p class="dss-group">Indian styles</p>}
+          {c.mine && !cards[i - 1]?.mine && <p class="dss-group">Yours</p>}
+          <button type="button" role="radio" aria-checked={c.on} tabIndex={i === tab ? 0 : -1} class="dss-card" title={c.mine ? undefined : c.d.basedOn ? `${c.d.blurb} Built on ${presetOf(c.d.basedOn).name}.` : c.d.blurb} onClick={c.pick}>
             <Strip d={c.d} />
             <b>{c.d.name}</b>
             {c.mine && <small>Mine</small>}
             {c.on && <span class="dss-ck" aria-hidden="true"><Icon n="check" size={11} stroke={3} /></span>}
           </button>
+          </>
         ))}
       </div>
 
@@ -387,7 +499,7 @@ export function DesignSystemStep({ p, e, up, toast }: StepProps) {
   const row = (key: string, label: string, value: string, slot: keyof typeof SLOT_CATEGORIES, fs: FinishSlot) => (
     <MaterialRow label={label} value={value} slot={slot} open={open === key} toggle={() => setOpen(open === key ? null : key)} set={pick(fs)} />
   );
-  const fr = finishRate(ds);
+  const fr = finishRate(ds, e.finishQty);
   return (
     <>
       <StartFrom p={p} up={up} toast={toast} />
@@ -409,6 +521,12 @@ export function DesignSystemStep({ p, e, up, toast }: StepProps) {
         </Row>
         <Num label="Floor to floor" value={ds.floorH} step={0.05} min={2.8} max={4.5} unit="m" set={(v) => setDs((d) => { d.floorH = v; })} />
       </Section>
+
+      <CompositionSection ds={ds} setDs={setDs} />
+
+      <PaletteSection ds={ds} e={e} setDs={setDs} />
+
+      <ClimateSection ds={ds} setDs={setDs} />
 
       <LanguageSection ds={ds} setDs={setDs} />
 

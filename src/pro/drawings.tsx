@@ -15,6 +15,7 @@
 //  then a sheet of plans per formed building (every distinct floor).
 // Each sheet has a title block; drawings have a scale (the largest standard scale that fits), a scale bar and a
 // north arrow. For discussion: an architect checks everything before it goes in for approval.
+import { compositionOf, zonesOf, ZONED_FROM, type Tone } from './design';
 import { featureOf } from './siteObjects';
 import type { ComponentChildren, JSX } from 'preact';
 import { render } from 'preact';
@@ -633,6 +634,10 @@ function Elevation({ e, no, total }: { e: Evaluated; no: number; total: number }
           </g>;
         }
         const shopFloors = shops && shops.strips.some((s) => s.b === bi) ? 1 + shops.upperOf[bi] : 0;
+        // the composition's zones, each in its tone, a string course between
+        const C = compositionOf(ds), Z = zonesOf(C, b.floors), col = (t: Tone) => ds.facade[t];
+        const fillOf = (f: number) => (f < Z.base ? col(C.base.tone) : f >= b.floors - Z.top ? col(C.top.tone) : ds.facade.wall);
+        const course = [Z.base ? under + Z.base : 0, Z.top ? under + b.floors - Z.top : 0].filter((v) => v > 0);
         return (
           <g>
             {/* stilt: columns */}
@@ -641,10 +646,12 @@ function Elevation({ e, no, total }: { e: Evaluated; no: number; total: number }
             {Array.from({ length: b.floors }, (_, f) => {
               const y = (under + f) * fh, shop = f < (shopFloors ? shopFloors - 1 : 0);
               return <g>
-                <rect x={X(x)} y={Y(y + fh)} width={w * k} height={fh * k} fill={shop ? '#cfe3f3' : ds.facade.wall} stroke="#111" stroke-width="0.3" />
+                <rect x={X(x)} y={Y(y + fh)} width={w * k} height={fh * k} fill={shop ? '#cfe3f3' : fillOf(f)} stroke="#111" stroke-width="0.3" />
                 <text x={X(x) - 1.5} y={Y(y + fh / 2) + 0.8} font-size="1.9" text-anchor="end">{`${f + 1}F +${f2(y)}`}</text>
               </g>;
             })}
+            {course.map((fl) => <line x1={X(x) - 0.4} y1={Y(fl * fh)} x2={X(x + w) + 0.4} y2={Y(fl * fh)} stroke="#111" stroke-width="0.9" />)}
+            {b.floors >= ZONED_FROM && C.top.crown === 'cornice' && <rect x={X(x) - 0.5} y={Y(top + 1.2)} width={w * k + 1} height={0.5 * k} fill="#111" />}
             {/* parapet and the lift room */}
             <rect x={X(x)} y={Y(top + 1)} width={w * k} height={1 * k} fill="none" stroke="#111" stroke-width="0.3" />
             <rect x={X(x + w / 2 - 2.5)} y={Y(top + 3)} width={5 * k} height={3 * k} fill="#ccc" stroke="#111" stroke-width="0.3" />
