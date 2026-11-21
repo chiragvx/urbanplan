@@ -48,16 +48,18 @@ Score each view 1 to 5 on each row, and average the views. Two people score inde
 | Colour fidelity | the design system's swatches match the render (ΔE2000 under 6 in Studio light) |
 | Frame time | p50 and p95 on the same laptop, standard tier |
 
-## 5. Gates
+## 5. Gates: dropped
 
-- After the materials phase: at least level with Forma on every row.
-- After the stills phase: ahead of Revit Realistic on glass, night and stills.
+The plan's two gates (after the materials phase, at least level with Forma on every row; after the stills phase, ahead of Revit Realistic on glass, night and stills) were **dropped by the user's decision on 2026-11-21**. Running the comparison needs Autodesk products and accounts, which the build environment doesn't have. The render plan's completion doesn't depend on it.
 
-Record results under `docs/plans/render-benchmark-results.md`: the date, the machine, each tool's version, the scores, and links to the images.
+The comparison stays available as an optional check. Whoever runs it records the date, the machine, each tool's version, the scores and links to the images in `docs/plans/render-benchmark-results.md`.
 
 ## 6. Status
 
-- **Not yet run.** It needs Autodesk access.
-- **Our side is ready.** High-tier references and the benchmark were captured on 2026-11-21 on Intel UHD 630:
-  - p50 1.5 ms, p95 19.6 ms;
-  - 90 draw calls, 465k triangles.
+- **Optional, not run.** No scores exist for the Autodesk tools, and none have been made up.
+- **Our side is ready.** The latest references and benchmark were captured on 2026-11-21 on Intel UHD 630, with the scanned textures and CC0 models:
+
+  | Tier | p50 | p95 | Draw calls | Triangles |
+  |---|---|---|---|---|
+  | Standard | 1.7 ms | 13.7 ms | 90 | 246k |
+  | High | 1.4 ms | 20 ms | 90 | 519k |

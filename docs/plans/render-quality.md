@@ -368,10 +368,10 @@ Budget: no more than 150 KB gz added to the first load.
 - **Path-traced stills** show green trees, coloured cars and people.
 - **Reference sets** were re-captured with the scans for both tiers.
 
-**Not done here:**
-- **The comparison against Forma, the APS viewer and Revit** needs Autodesk products and accounts, which this environment doesn't have. So the plan's Phase 2 and Phase 5 gates (level with Forma; ahead of Revit Realistic on glass, night and stills) are unmeasured.
-  - The protocol, cameras, scoring sheet and our captured side are in `docs/plans/render-benchmark.md`.
-  - No scores have been made up for the Autodesk tools.
+**Gates dropped:**
+- The competitor-comparison gates (Phase 2: level with Forma; Phase 5: ahead of Revit Realistic on glass, night and stills) were **dropped by the user's decision on 2026-11-21**: running them needs Autodesk products and accounts.
+- The comparison remains an optional check. Its protocol, cameras, scoring sheet and our captured side are in `docs/plans/render-benchmark.md`.
+- No Autodesk scores exist or were made up.
 
 **Measured on the sample, Intel UHD 630:**
 
