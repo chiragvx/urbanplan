@@ -1019,8 +1019,8 @@ export class ProView {
         }
       }
       // (the cores: inside the walls they'd only fight the facade for depth, so drawn where they show: down the stilt and up
-      // past the roof as the lift room; X-ray shows them whole)
-      for (const c of b.cores) { if (v.xray !== null) mesh(prism(c, 0, top + fh), M.core); else { if (y0 > 0.05) mesh(prism(c, 0, y0, false), M.core); mesh(prism(c, y0 + all * fh - 0.05, y0 + all * fh + 2.4), M.core); } }
+      // past the roof as the lift room; X-ray shows the cut floor's core open, its walls to the cut like the flats')
+      for (const c of b.cores) { if (v.xray !== null) { if (top > 0.05) mesh(prism(c, 0, top, false), M.core); mesh(flat(c, top + 0.04), M.core, false); for (let i = 0; i < c.length; i += 2) { const j = (i + 2) % c.length, L = Math.hypot(c[j] - c[i], c[j + 1] - c[i + 1]); if (L > 0.05) parts.add((c[i] + c[j]) / 2, top + CUT / 2, (c[i + 1] + c[j + 1]) / 2, (c[j] - c[i]) / L, (c[j + 1] - c[i + 1]) / L, L, CUT, 0.2); } } else { if (y0 > 0.05) mesh(prism(c, 0, y0, false), M.core); mesh(prism(c, y0 + all * fh - 0.05, y0 + all * fh + 2.4), M.core); } }
       // floors: bands on the slab edges, the openings
       const floorsShown = v.xray === null ? all : show;
       for (let f = 0; f < floorsShown; f++) {
