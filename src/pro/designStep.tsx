@@ -11,7 +11,7 @@ import type { ComponentChildren, JSX } from 'preact';
 import { useEffect, useId, useState } from 'preact/hooks';
 import './designStep.css';
 import {
-  climateOf, clone, compositionOf, landscapeOf, lightingOf, signageOf, siteKitOf, finishOf, finishRate, FINISHED, FLOOR_ROOMS, languageOf, paletteOf, presetOf, PRESETS, ROOF_KINDS, setFinish, SKIN_PATTERNS, SPEC, STYLE_IDS, ZONED_FROM,
+  climateOf, clone, compositionOf, specRateNet, landscapeOf, lightingOf, signageOf, siteKitOf, finishOf, finishRate, FINISHED, FLOOR_ROOMS, languageOf, paletteOf, presetOf, PRESETS, ROOF_KINDS, setFinish, SKIN_PATTERNS, SPEC, STYLE_IDS, ZONED_FROM,
   type BalconyKind, type Climate, type Landscape, type Lighting, type Signage, type SiteKit, type Composition, type Corner, type Crown, type DesignSystem, type DoorType, type Entrance, type FinishSlot, type Language, type Rhythm, type Tone, type WindowType,
 } from './design';
 import type { RoofKind, SkinPattern } from './form/types';
@@ -545,6 +545,21 @@ function Strip({ d }: { d: DesignSystem }) {
   );
 }
 
+/** What tells one design system from another at a glance: what it sells for and adds to build, how much glass,
+ *  the floor height, the balconies and the shading. */
+function factsOf(d: DesignSystem): { k: string; v: string; title: string }[] {
+  const pm = Math.round(d.premium * 100), build = specRateNet(d) + finishRate(d), b = d.balcony, cl = climateOf(d), glass = paletteOf(d).glass;
+  const shade = cl.chhajja > 0.05 ? `${nf(cl.chhajja, 2)} m` : d.facade.fins ? 'Fins' : b.kind === 'recessed' ? 'Recessed' : '—';
+  return [
+    { k: 'Price', v: pm ? `${pm > 0 ? '+' : '−'}${Math.abs(pm)}%` : 'Base', title: 'What the flats sell for over the city’s starting price' },
+    { k: 'Build', v: `${build >= 0 ? '+' : '−'}₹${nf(Math.abs(build))}`, title: 'What the specification and finishes add to construction, ₹ per sq ft of built-up' },
+    { k: 'Glass', v: `${Math.round(glass * 100)}%`, title: 'The share of the facade it aims to glaze' },
+    { k: 'Floors', v: `${nf(d.floorH, 2)} m`, title: 'Floor to floor' },
+    { k: 'Balcony', v: b.kind === 'none' ? 'None' : b.kind === 'french' ? 'French' : `${nf(b.depth, 1)} m`, title: b.kind === 'none' ? 'No balconies' : `${b.kind[0].toUpperCase()}${b.kind.slice(1)} balconies` },
+    { k: 'Shade', v: shade, title: cl.chhajja > 0.05 ? `A chhajja over each window${cl.orient ? ', deeper to the south and west' : ''}` : 'Shading over the windows' },
+  ];
+}
+
 function StartFrom({ p, up, toast }: Pick<StepProps, 'p' | 'up' | 'toast'>) {
   const [mine, setMine] = useState<SavedDesign[]>([]);
   const [mode, setMode] = useState<null | 'save' | 'rename' | 'delete'>(null);
@@ -594,9 +609,8 @@ function StartFrom({ p, up, toast }: Pick<StepProps, 'p' | 'up' | 'toast'>) {
           {i > 0 && STYLE_IDS.includes(c.key) !== STYLE_IDS.includes(cards[i - 1].key) && STYLE_IDS.includes(c.key) && <p class="dss-group">Indian styles</p>}
           {c.mine && !cards[i - 1]?.mine && <p class="dss-group">Yours</p>}
           <button type="button" role="radio" aria-checked={c.on} tabIndex={i === tab ? 0 : -1} class="dss-card" title={c.mine ? undefined : c.d.basedOn ? `${c.d.blurb} Built on ${presetOf(c.d.basedOn).name}.` : c.d.blurb} onClick={c.pick}>
-            <Strip d={c.d} />
-            <b>{c.d.name}</b>
-            {c.mine && <small>Mine</small>}
+            <span class="dss-card-h"><Strip d={c.d} /><b>{c.d.name}</b>{c.mine && <small>Mine</small>}</span>
+            <span class="dss-facts">{factsOf(c.d).map((x) => <span title={x.title}><i>{x.k}</i>{x.v}</span>)}</span>
             {c.on && <span class="dss-ck" aria-hidden="true"><Icon n="check" size={11} stroke={3} /></span>}
           </button>
           </>
