@@ -1,0 +1,32 @@
+{
+ "motorcycle": {
+  "file": "motorcycle.glb",
+  "length": 2,
+  "source": "https://github.com/KenneyNL/Starter-Kit-Racing",
+  "licence": "CC0 1.0 (Kenney)"
+ },
+ "truck-red": {
+  "file": "truck-red.glb",
+  "length": 5.5,
+  "source": "https://github.com/KenneyNL/Starter-Kit-Racing",
+  "licence": "CC0 1.0 (Kenney)"
+ },
+ "truck-yellow": {
+  "file": "truck-yellow.glb",
+  "length": 5.5,
+  "source": "https://github.com/KenneyNL/Starter-Kit-Racing",
+  "licence": "CC0 1.0 (Kenney)"
+ },
+ "truck-green": {
+  "file": "truck-green.glb",
+  "length": 5.5,
+  "source": "https://github.com/KenneyNL/Starter-Kit-Racing",
+  "licence": "CC0 1.0 (Kenney)"
+ },
+ "person": {
+  "file": "person.glb",
+  "height": 1.7,
+  "source": "https://github.com/KenneyNL/Starter-Kit-3D-Platformer",
+  "licence": "CC0 1.0 (Kenney)"
+ }
+}

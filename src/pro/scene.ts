@@ -19,7 +19,7 @@ import { cutFace, flat, GeoBuf, prism, type Hole } from './render/geo';
 import { buildingOutline, crossings, endExt } from './render/outline';
 import { inside as inMP, union as unionMP, fromFlat as mpOf, offset as offsetMP } from '../doc/ground';
 import { GLASS, litShare, withRooms } from './render/glass';
-import { carMeshes, gridIn, markings, peopleMeshes, treeMeshes, type Tree } from './render/entourage';
+import { carMeshes, gridIn, loadModels, markings, modelMeshes, peopleMeshes, treeMeshes, type ModelPart, type Tree } from './render/entourage';
 import { pathSky, pixelsToPng } from './render/still';
 import { neighbourMesh, neighbours } from './render/context';
 import { PerfOverlay, type BenchResult } from './render/perf';
@@ -197,6 +197,8 @@ export class ProView {
   /** the neighbouring buildings (kept across rebuilds; made again when the plot moves) */
   private ctx = new THREE.Group();
   private ctxKey = '';
+  /** the CC0 entourage models, once fetched (tools/render/models.mjs): motorcycles, trucks, people */
+  private models = new Map<string, ModelPart[]>();
 
   constructor(public canvas: HTMLCanvasElement) {
     // (the canvas keeps MSAA for the draft tier and the wireframe; the pipeline does its own anti-aliasing)
@@ -247,6 +249,7 @@ export class ProView {
     this.resize();
     this.setSun(null);
     // (the scanned textures, when the texture tool has fetched them: the materials made again with them)
+    void loadModels(import.meta.env.BASE_URL).then((m) => { if (m.size) { this.models = m; if (this.last) this.set(this.last); } });
     void loadScans(import.meta.env.BASE_URL, this.renderer).then((ok) => { if (ok && this.lib.tex) { this.lib.reset(); for (const e of this.formed.values()) disposeBuilt(e.built); this.formed.clear(); if (this.last) this.set(this.last); } });
   }
 
@@ -600,7 +603,7 @@ export class ProView {
   }
 
   clear() {
-    this.root.traverse((o) => { const m = o as THREE.Mesh; if (m.geometry && m.geometry !== box && m.geometry !== CHAMFER_BOX && m.geometry !== crownGeo && m.geometry !== trunkGeo) m.geometry.dispose(); });
+    this.root.traverse((o) => { const m = o as THREE.Mesh; if (m.geometry && m.geometry !== box && m.geometry !== CHAMFER_BOX && m.geometry !== crownGeo && m.geometry !== trunkGeo && !m.geometry.userData.keep) m.geometry.dispose(); });
     this.root.clear();
     this.pickables = [];
   }
@@ -1203,8 +1206,19 @@ export class ProView {
       }
       for (const [x, z, nx, nz] of entrances) for (let k = 0; k < 3; k++) people.push([x + nx * (2.5 + k * 0.9) + -nz * (k - 1) * 1.1, z + nz * (2.5 + k * 0.9) + nx * (k - 1) * 1.1]);
       for (const ln of d.ground.roads) for (let i = 0; i + 3 < ln.pts.length; i += 2) { const mx = (ln.pts[i] + ln.pts[i + 2]) / 2, mz = (ln.pts[i + 1] + ln.pts[i + 3]) / 2; if (h01(mx, mz, 7) < 0.5) people.push([mx + 3.5, mz + 1]); }
+      // (with the CC0 models: about a third of the slots a pair of motorcycles, one in ten a truck)
+      const bikes: [number, number, number][] = [], trucks: [number, number, number][] = [];
+      if (this.models.has('motorcycle')) for (let i = cars.length - 1; i >= 0; i--) {
+        const [x, z, a] = cars[i], h = h01(x, z, 9);
+        if (h < 0.3) { cars.splice(i, 1); bikes.push([x - Math.cos(a) * 0.5, z + Math.sin(a) * 0.5, a], [x + Math.cos(a) * 0.5, z - Math.sin(a) * 0.5, a]); }
+        else if (h > 0.9 && this.models.has('truck-red')) { cars.splice(i, 1); trucks.push([x, z, a]); }
+      }
+      for (const im of modelMeshes(this.models.get('motorcycle') ?? [], bikes.slice(0, 300))) add(im);
+      const tk = ['truck-red', 'truck-yellow', 'truck-green'].filter((k) => this.models.has(k));
+      tk.forEach((k, j) => { for (const im of modelMeshes(this.models.get(k)!, trucks.filter((_, i) => i % tk.length === j))) add(im); });
       for (const im of carMeshes(cars.slice(0, 400), this.lib.other('car', () => new THREE.MeshStandardMaterial({ roughness: 0.32, metalness: 0.55 })), this.lib.glass('#1c2430', { roughness: 0.08 }))) add(im);
-      for (const im of peopleMeshes(people.filter(([x, z]) => r.net.length < 6 || pointIn(r.net, x, z, 2) || true).slice(0, 200), this.lib.other('people', () => new THREE.MeshStandardMaterial({ roughness: 0.85 })), mat('#a77b5a'))) add(im);
+      if (this.models.has('person')) { for (const im of modelMeshes(this.models.get('person')!, people.slice(0, 200).map(([x, z]) => [x, z, h01(z, x, 4) * Math.PI * 2] as [number, number, number]))) add(im); }
+      else for (const im of peopleMeshes(people.slice(0, 200), this.lib.other('people', () => new THREE.MeshStandardMaterial({ roughness: 0.85 })), mat('#a77b5a'))) add(im);
     }
 
     // the neighbours, when the plot is on the map (loaded once per place)

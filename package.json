@@ -27,6 +27,7 @@
     "film": "node tools/film/film.mjs",
     "render:shots": "node tools/render/shots.mjs",
     "render:textures": "node tools/render/textures.mjs",
+    "render:models": "node tools/render/models.mjs",
     "cadastre": "node tools/cadastre/harvest.mjs"
   },
   "dependencies": {
@@ -52,6 +53,7 @@
     "@types/leaflet": "^1.9.12",
     "@webgpu/types": "^0.1.51",
     "jpeg-js": "^0.4.4",
+    "ktx2-encoder": "^0.6.0",
     "pixelmatch": "^7.2.0",
     "pngjs": "^7.0.0",
     "preact-render-to-string": "^6.8.2",

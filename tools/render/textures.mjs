@@ -74,10 +74,21 @@ for (const s of SETS) {
   const entry = { size: s.size, color: `${s.key}/color.jpg` };
   for (const [name, field] of [['normal', 'normal']]) {
     const jpg = path.join(dir, `${name}.jpg`);
-    if (!fs.existsSync(jpg)) continue;
+    if (!fs.existsSync(jpg) && !fs.existsSync(path.join(dir, `${name}.ktx2`))) continue;
     const ktx = path.join(dir, `${name}.ktx2`);
-    if (hasToktx && (!fs.existsSync(ktx) || force)) spawnSync('toktx', ['--t2', '--encode', 'uastc', '--genmipmap', '--assign_oetf', 'linear', ktx, jpg], { shell: true, stdio: 'ignore' });
+    if (!fs.existsSync(ktx) || force) {
+      if (hasToktx) spawnSync('toktx', ['--t2', '--encode', 'uastc', '--genmipmap', '--assign_oetf', 'linear', ktx, jpg], { shell: true, stdio: 'ignore' });
+      else {
+        // (no toktx: Basis Universal compiled to wasm, from npm: UASTC with mipmaps, a normal map, linear)
+        const { encodeToKTX2 } = await import('ktx2-encoder');
+        const decode = async (b) => { const im = jpeg.decode(b, { useTArray: true }); return { data: new Uint8Array(im.data), width: im.width, height: im.height }; };
+        try { fs.writeFileSync(ktx, await encodeToKTX2(new Uint8Array(fs.readFileSync(jpg)), { isUASTC: true, generateMipmap: true, isNormalMap: true, isPerceptual: false, isSetKTX2SRGBTransferFunc: false, imageDecoder: decode })); }
+        catch (e) { console.log(`${s.key}: KTX2 failed (${e.message}): JPEG kept`); }
+      }
+    }
     entry[field] = fs.existsSync(ktx) ? `${s.key}/${name}.ktx2` : `${s.key}/${name}.jpg`;
+    // (the KTX2 replaces the JPEG: only one ships)
+    if (fs.existsSync(ktx) && fs.existsSync(jpg)) fs.rmSync(jpg);
   }
   manifest[s.key] = { ...entry, source: `https://ambientcg.com/view?id=${s.id}`, licence: 'CC0 1.0' };
 }
@@ -88,4 +99,4 @@ fs.writeFileSync(path.join(out, 'LICENSES.md'), ['# Scanned textures', '', 'All 
 const basis = path.resolve('node_modules', 'three', 'examples', 'jsm', 'libs', 'basis'), pub = path.resolve('public', 'basis');
 if (fs.existsSync(basis) && Object.values(manifest).some((e) => String(e.normal ?? '').endsWith('.ktx2'))) { fs.mkdirSync(pub, { recursive: true }); for (const f of fs.readdirSync(basis)) fs.copyFileSync(path.join(basis, f), path.join(pub, f)); }
 fs.rmSync(tmp, { recursive: true, force: true });
-console.log(`${Object.keys(manifest).length} sets in ${out}${hasToktx ? '' : ' (no toktx: normal and roughness maps kept as JPG)'}`);
+console.log(`${Object.keys(manifest).length} sets in ${out}, normal maps as ${Object.values(manifest).filter((e) => String(e.normal).endsWith('.ktx2')).length ? 'KTX2' : 'JPEG'}`);

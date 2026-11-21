@@ -103,3 +103,60 @@ export function markings(lines: { pts: number[]; w: number; edges: boolean }[], 
   }
   return g;
 }
+
+// ---------------------------------------------------------------- CC0 models (tools/render/models.mjs)
+export interface ModelPart { geometry: THREE.BufferGeometry; material: THREE.Material }
+/** the fetched models by key, each as parts (one per material), at real size, standing on y = 0, facing along z */
+export async function loadModels(base: string): Promise<Map<string, ModelPart[]>> {
+  const out = new Map<string, ModelPart[]>();
+  let man: Record<string, { file: string; length?: number; height?: number }>;
+  try { const r = await fetch(`${base}assets/render/models/manifest.json`); if (!r.ok || !(r.headers.get('content-type') ?? '').includes('json')) return out; man = await r.json(); } catch { return out; }
+  const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
+  const { mergeGeometries } = await import('three/addons/utils/BufferGeometryUtils.js');
+  const loader = new GLTFLoader();
+  for (const [key, e] of Object.entries(man)) {
+    try {
+      const g = await loader.loadAsync(`${base}assets/render/models/${e.file}`);
+      g.scene.updateMatrixWorld(true);
+      const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
+      g.scene.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh) return;
+        const geo = (m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone()).applyMatrix4(m.matrixWorld);
+        for (const k of Object.keys(geo.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv') geo.deleteAttribute(k);
+        if (!geo.attributes.uv) geo.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(geo.attributes.position.count * 2), 2));
+        const mats = Array.isArray(m.material) ? m.material : [m.material];
+        const mat = mats[0];
+        const list = byMat.get(mat) ?? []; list.push(geo); byMat.set(mat, list);
+      });
+      // (normalised: the long way along z, scaled to its real length or height, centred, on the ground)
+      const all = new THREE.Box3();
+      for (const gs of byMat.values()) for (const geo of gs) { geo.computeBoundingBox(); all.union(geo.boundingBox!); }
+      const size = all.getSize(new THREE.Vector3()), c = all.getCenter(new THREE.Vector3());
+      const turn = e.length && size.x > size.z ? Math.PI / 2 : 0;
+      const s = e.height ? e.height / size.y : (e.length ?? 4) / Math.max(size.x, size.z);
+      const M = new THREE.Matrix4().makeRotationY(turn).multiply(new THREE.Matrix4().makeScale(s, s, s)).multiply(new THREE.Matrix4().makeTranslation(-c.x, -all.min.y, -c.z));
+      const parts: ModelPart[] = [];
+      for (const [mat, gs] of byMat) {
+        const merged = mergeGeometries(gs); gs.forEach((x) => x.dispose());
+        if (!merged) continue;
+        merged.applyMatrix4(M); merged.computeBoundingSphere();
+        merged.userData.keep = true;
+        parts.push({ geometry: merged, material: mat });
+      }
+      if (parts.length) out.set(key, parts);
+    } catch { /* that model skipped */ }
+  }
+  return out;
+}
+
+/** a model placed at (x, z, heading) many times: one instanced mesh per part */
+export function modelMeshes(parts: ModelPart[], at: [number, number, number][]): THREE.InstancedMesh[] {
+  if (!at.length) return [];
+  return parts.map((p) => {
+    const im = new THREE.InstancedMesh(p.geometry, p.material, at.length);
+    at.forEach(([x, z, a], i) => { dummy.position.set(x, 0, z); dummy.rotation.set(0, a, 0); dummy.scale.setScalar(1); dummy.updateMatrix(); im.setMatrixAt(i, dummy.matrix); });
+    im.castShadow = true; im.receiveShadow = true; im.computeBoundingSphere();
+    return im;
+  });
+}
