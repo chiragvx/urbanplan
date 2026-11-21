@@ -85,3 +85,18 @@
 .dsp-off { font-weight: 600; }
 
 .dss-group { grid-column: 1 / -1; margin: 6px 0 0; font: 400 10px/1.2 var(--up-font-mono); text-transform: uppercase; letter-spacing: 0.04em; color: var(--up-muted); }
+
+/* parts a heritage precinct controls */
+.dss-lock { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: inherit; }
+.dss-lock:disabled { opacity: 0.55; }
+.dss-locked { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; font: 400 11px/1.3 var(--up-font-mono); color: var(--up-ink); opacity: 1; }
+/* the review */
+.dsr-g { display: grid; gap: 4px; margin-bottom: 10px; }
+.dsr-g > small { font: 400 10px/1.2 var(--up-font-mono); text-transform: uppercase; letter-spacing: 0.04em; color: var(--up-muted); }
+.dsr-g ul { list-style: none; margin: 0; padding: 0; display: grid; }
+.dsr-g li { display: grid; grid-template-columns: 16px 1fr; gap: 8px; align-items: start; padding: 6px 0; border-top: 1px solid var(--up-line); font-size: 12px; }
+.dsr-g li svg { margin-top: 2px; }
+.dsr-g li span { display: grid; gap: 1px; }
+.dsr-g li b { font-weight: 500; }
+.dsr-g li em { font-style: normal; color: var(--up-muted); font-size: 11px; }
+.dsr-g li.no b { font-weight: 650; }

@@ -47,6 +47,7 @@ const P: Record<string, string> = {
   redo: 'M15 14l5-5-5-5M20 9H9a5 5 0 000 10h3',
   team: 'M9 11a4 4 0 100-8 4 4 0 000 8zM2 21a7 7 0 0114 0M16 3.5a4 4 0 010 7.5M18 14a6 6 0 014 7',
   chat: 'M4 5h16v11H9l-5 4z',
+  lock: 'M6 11h12v10H6zM8 11V7a4 4 0 0 1 8 0v4',
   key: 'M3 7h18v10H3zM7 11h0M11 11h0M15 11h0M7 14h10',
   tree: 'M12 22v-7M12 3l6 9H6zM12 8l5 7H7z',
   bolt: 'M13 2L4 14h7l-1 8 9-12h-7z',

@@ -359,7 +359,7 @@ function App() {
             <button type="button" aria-label="Sun" data-tip="Sun and shadows on a date and time" aria-pressed={sun.on} onClick={() => { if (!sun.on && mode === 'wire') setMode('shaded'); setSun({ ...sun, on: !sun.on }); }}><Icon n="sun" size={16} />{sun.on ? '' : 'Sun'}</button>
             {sun.on && <>
               <Select<number> size="sm" quiet aria-label="Month" value={sun.month} onChange={(v) => setSun({ ...sun, month: v })} options={MONTHS.map((m, i) => ({ value: i + 1, label: `21 ${m}` }))} />
-              <Range min={6} max={19} step={0.25} value={sun.hour} label="Time of day" valueText={hm(sun.hour)} onInput={(v) => setSun({ ...sun, hour: v })} />
+              <Range min={6} max={22} step={0.25} value={sun.hour} label="Time of day" valueText={hm(sun.hour)} onInput={(v) => setSun({ ...sun, hour: v })} />
               <b class="time" aria-hidden="true">{hm(sun.hour)}</b>
             </>}
           </div>

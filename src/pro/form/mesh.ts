@@ -490,6 +490,11 @@ function matOf(kind: MatKind, colour: string, env: THREE.Texture | null): THREE.
 export interface Look {
   wall: string; glass: string; accent: string; frame: string; slab: string; roof: string; base: string; core: string;
   skin: Skin; roofKind: Roof; round: number;
+  /** the design system's composition: how many floors at the bottom and the top take their own colour, with a
+   *  string course between (none: one zone) */
+  zones?: { base: number; top: number; baseColour: string; topColour: string };
+  /** a chhajja over each floor's glazing, how far it projects (m; 0 none) */
+  chhajja?: number;
 }
 export interface BuildOpts {
   /** floors shown, the top one cut as a plan (null: all, with the roof) */
@@ -531,7 +536,7 @@ export function buildForm(L: FormLayout, look: Look, o: BuildOpts): Built {
   const F = L.floors, C = canonOf(L), env = o.env ?? null, skin = look.skin;
   const smoothCos = Math.cos(((25 + 35 * Math.max(0, Math.min(1, look.round))) * Math.PI) / 180);
   const B = {
-    wall: new Buf(), glass: new Buf(), slab: new Buf(), accent: new Buf(), thin: new Buf(), rail: new Buf(), screen: new Buf(), roof: new Buf(), core: new Buf(), shellScreen: new Buf(), shellThin: new Buf(),
+    wall: new Buf(), wallBase: new Buf(), wallTop: new Buf(), glass: new Buf(), slab: new Buf(), accent: new Buf(), thin: new Buf(), rail: new Buf(), screen: new Buf(), roof: new Buf(), core: new Buf(), shellScreen: new Buf(), shellThin: new Buf(),
   };
   const fins = new Inst(), mull = new Inst(), shellFins = new Inst(), roofFins = new Inst(), cols = new Inst();
   const tints = new Map<number, Buf>();
@@ -564,7 +569,12 @@ export function buildForm(L: FormLayout, look: Look, o: BuildOpts): Built {
       const skinEdge = (e: number) => cls[e] === 0, cutGlass = (e: number) => cls[e] === 1;
       const top = cut ? CUT / h : 1, yB = y + h;
       const s = glass < 0.04 ? top : Math.min(top, (1 - glass) * 0.75);
-      if (s > 0) strip(B.wall, A, Bt, y, yB, 0, s, N, skinEdge, cum);
+      // (the zone's wall: the base and top floors in their own colours, a string course where they meet the middle)
+      const Zb = look.zones?.base ?? 0, Zt = look.zones?.top ?? 0, WB = k < Zb ? B.wallBase : k >= F.length - Zt ? B.wallTop : B.wall;
+      if (s > 0) strip(WB, A, Bt, y, yB, 0, s, N, skinEdge, cum);
+      if (!cut && ((Zb && k === Zb) || (Zt && k === F.length - Zt))) band(B.accent, A, N, y - 0.2, y + 0.22, 0.3, skinEdge, cum);
+      // (a chhajja over the glazing, the wall's own projection)
+      if (!cut && (look.chhajja ?? 0) > 0.05 && glass >= 0.04 && pat !== 'curtain') band(WB, A, N, yB - 0.32, yB - 0.22, look.chhajja!, skinEdge, cum);
       if (s < top) strip(B.glass, A, Bt, y, yB, s, top, N, skinEdge, cum);
       strip(B.glass, A, Bt, y, yB, 0, top, N, cutGlass, cum);
       if (cut) return;
@@ -698,7 +708,7 @@ export function buildForm(L: FormLayout, look: Look, o: BuildOpts): Built {
   // into meshes: merged per material, instanced parts thinned by the level of detail
   const group = new THREE.Group(), parts: THREE.InstancedMesh[] = [];
   const add = (b: Buf, m: THREE.Material, cast = true) => { if (b.empty) return; const x = new THREE.Mesh(b.geo(), m); x.castShadow = cast; x.receiveShadow = true; group.add(x); };
-  add(B.wall, matOf('solid', look.wall, env)); add(B.glass, matOf('glass', look.glass, env)); add(B.slab, matOf('solid', look.slab, env));
+  add(B.wall, matOf('solid', look.wall, env)); add(B.wallBase, matOf('solid', look.zones?.baseColour ?? look.wall, env)); add(B.wallTop, matOf('solid', look.zones?.topColour ?? look.wall, env)); add(B.glass, matOf('glass', look.glass, env)); add(B.slab, matOf('solid', look.slab, env));
   add(B.accent, matOf('metal', look.accent, env)); add(B.thin, matOf('thin', look.accent, env)); add(B.rail, matOf('rail', '#cfe0e8', env), false);
   add(B.screen, matOf('screen', look.accent, env)); add(B.roof, matOf('solid', look.roof, env)); add(B.core, matOf('solid', look.core, env));
   add(B.shellScreen, matOf('screen', look.wall, env)); add(B.shellThin, matOf('thin', look.wall, env));

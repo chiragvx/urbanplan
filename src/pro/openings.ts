@@ -5,7 +5,7 @@
 // least 1/10 of the floor area for light, half that opening for air, as UDCPR's habitable-room rule asks; checked
 // by flat until rooms are modelled).
 import { pointIn, type SiteReport, type Unit } from '../doc/site';
-import { compositionOf, openable, type Composition, type DesignSystem } from './design';
+import { climateOf, compositionOf, openable, type Composition, type DesignSystem } from './design';
 
 export type Tag = 'W1' | 'W2' | 'V1' | 'SD' | 'D1';
 /** An opening on a typical floor: centred at x,z on its wall, `n` pointing out of the flat, `u` along the wall. */
@@ -102,6 +102,9 @@ const sizeOf = (tag: Tag, ds: DesignSystem) => (tag === 'SD' || tag === 'D1' ? {
 /** the habitable rooms' share of a flat's carpet (living, bedrooms, kitchen: not the toilets, foyer and passages),
  *  which the light rules are a share of; roughly, until the check reads the fitted rooms */
 const HABITABLE = 0.8;
+/** the share of a jaali that's open: a screened opening gives this much of its light and air (a typical pierced
+ *  screen, about half open) */
+export const JAALI_OPEN = 0.5;
 /** `light`: the glazing a flat needs, as a share of its habitable floor area (UDCPR 1/10 as assumed; DCPR 2034
  *  Reg. 40(1)(a) 1/6), half of it opening. */
 export function planFloor(b: SiteReport['buildings'][number], ds: DesignSystem, light = 1 / 10): FloorPlan {
@@ -111,6 +114,7 @@ export function planFloor(b: SiteReport['buildings'][number], ds: DesignSystem, 
   const seen = new Set<string>();
   const key = (a: number, c: number, d: number, e: number) => { const p = [a, c, d, e].map((v) => Math.round(v * 10)); return p[0] < p[2] || (p[0] === p[2] && p[1] < p[3]) ? p.join() : [p[2], p[3], p[0], p[1]].join(); };
   const wall = (x0: number, z0: number, x1: number, z1: number) => { const k = key(x0, z0, x1, z1); if (!seen.has(k)) { seen.add(k); walls.push([x0, z0, x1, z1]); } };
+  const cl = climateOf(ds), screened = (t: Tag) => (t === 'V1' ? cl.jaali !== 'none' : t === 'W2' && cl.jaali === 'windows');
   const comp = compositionOf(ds), lines = comp.rhythm === 'free' ? [] : facadeBays(b.quads, comp.bay);
 
   // the entrance on the corridor, a gap in its wall
@@ -195,7 +199,7 @@ export function planFloor(b: SiteReport['buildings'][number], ds: DesignSystem, 
       const bayPer: { tag: Tag; t: number }[][] = outs.map(() => []);
       let bk = 0, toShaft = 0;
       for (const tag of list) if (!place(tag) && tag === 'V1') toShaft++;
-      const hab = u.carpet * HABITABLE, glassOf = (t: Tag) => { const z = sizeOf(t, ds); return z.w * z.h; };
+      const hab = u.carpet * HABITABLE, glassOf = (t: Tag) => { const z = sizeOf(t, ds); return z.w * z.h * (screened(t) ? JAALI_OPEN : 1); };
       let have = bayPer.reduce((s, l) => s + l.reduce((q, o) => q + glassOf(o.tag), 0), 0);
       if (u.t === 3) { for (let ei = 0; ei < outs.length; ei++) while (fit(ei, ds.windows.W1.w)) { bk = ei; place('W1'); } }
       else for (let guard = 0; have < hab * light - 1e-6 && guard < 12; guard++) {
@@ -208,7 +212,7 @@ export function planFloor(b: SiteReport['buildings'][number], ds: DesignSystem, 
         for (const { tag, t } of bayPer[ei]) {
           const s = sizeOf(tag, ds);
           openings.push({ tag, unit: ui, x: e.x0 + e.ux * t, z: e.z0 + e.uz * t, nx: e.nx, nz: e.nz, ux: e.ux, uz: e.uz, w: s.w, h: s.h, sill: s.sill, outside: true });
-          glazed += s.w * s.h; open += s.w * s.h * openable(s.kind);
+          const jf = screened(tag) ? JAALI_OPEN : 1; glazed += s.w * s.h * jf; open += s.w * s.h * openable(s.kind) * jf;
         }
       });
       entrance(edges, ui, u);
@@ -225,7 +229,7 @@ export function planFloor(b: SiteReport['buildings'][number], ds: DesignSystem, 
     }
     // short of the glazing the rules ask (a share of the habitable rooms' floor): more windows where the walls
     // have room, the bigger first, as an architect would size them up
-    const hab = u.carpet * HABITABLE, glass = (t: Tag) => { const z = sizeOf(t, ds); return z.w * z.h; };
+    const hab = u.carpet * HABITABLE, glass = (t: Tag) => { const z = sizeOf(t, ds); return z.w * z.h * (screened(t) ? JAALI_OPEN : 1); };
     let have = per.reduce((s, l) => s + l.reduce((q, t) => q + glass(t), 0), 0);
     if (u.t !== 3) for (let guard = 0; have < hab * light - 1e-6 && guard < 12; guard++) {
       let added = false;
@@ -244,7 +248,7 @@ export function planFloor(b: SiteReport['buildings'][number], ds: DesignSystem, 
       for (const tag of tags) {
         const s = sizeOf(tag, ds), m = at + s.w / 2;
         openings.push({ tag, unit: ui, x: e.x0 + e.ux * m, z: e.z0 + e.uz * m, nx: e.nx, nz: e.nz, ux: e.ux, uz: e.uz, w: s.w, h: s.h, sill: s.sill, outside: true });
-        glazed += s.w * s.h; open += s.w * s.h * openable(s.kind);
+        const jf = screened(tag) ? JAALI_OPEN : 1; glazed += s.w * s.h * jf; open += s.w * s.h * openable(s.kind) * jf;
         at += s.w + gap;
       }
     });

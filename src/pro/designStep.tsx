@@ -4,12 +4,12 @@
 // (./design.ts), not of a building: the Scheme step decides what gets built with it.
 // Pro's UI is black and white; the material swatches and the facade preview are the one place colour shows, because
 // there the colour is the data.
-import type { JSX } from 'preact';
+import type { ComponentChildren, JSX } from 'preact';
 import { useEffect, useId, useState } from 'preact/hooks';
 import './designStep.css';
 import {
-  climateOf, clone, compositionOf, finishOf, finishRate, FINISHED, FLOOR_ROOMS, languageOf, paletteOf, presetOf, PRESETS, ROOF_KINDS, setFinish, SKIN_PATTERNS, SPEC, STYLE_IDS, ZONED_FROM,
-  type BalconyKind, type Climate, type Composition, type Corner, type Crown, type DesignSystem, type DoorType, type Entrance, type FinishSlot, type Language, type Rhythm, type Tone, type WindowType,
+  climateOf, clone, compositionOf, landscapeOf, lightingOf, signageOf, finishOf, finishRate, FINISHED, FLOOR_ROOMS, languageOf, paletteOf, presetOf, PRESETS, ROOF_KINDS, setFinish, SKIN_PATTERNS, SPEC, STYLE_IDS, ZONED_FROM,
+  type BalconyKind, type Climate, type Landscape, type Lighting, type Signage, type Composition, type Corner, type Crown, type DesignSystem, type DoorType, type Entrance, type FinishSlot, type Language, type Rhythm, type Tone, type WindowType,
 } from './design';
 import type { RoofKind, SkinPattern } from './form/types';
 import { byCategory, materialOf, SLOT_CATEGORIES, type Material } from './materials';
@@ -17,6 +17,8 @@ import * as library from './designLibrary';
 import type { SavedDesign } from './designLibrary';
 import type { StepProps } from './steps';
 import { PALETTE_SLOTS, PALETTE_TOLERANCE, sharesOf, type PaletteSlot } from './palette';
+import { lockedBy, precinctOf, PRECINCTS, type LockGroup } from './heritage';
+import { review } from './review';
 import { Btn, Color, Icon, Note, nf, Num, Row, Section, Seg, Select, Slider, Toggle } from './ui';
 
 // ---------------------------------------------------------------- colour helpers (for drawing materials only)
@@ -312,6 +314,7 @@ function CompositionSection({ ds, setDs }: { ds: DesignSystem; setDs: (fn: (d: D
   const m = (v: number) => `${nf(v, 2)} m`;
   return (
     <Section title="Composition" sub={`A base, a middle and a top (from ${ZONED_FROM} storeys up), the windows set out on bays.`}>
+      <Locked ds={ds} g="composition">
       <Row>
         <Num label="Base floors" value={c.base.floors} step={1} min={0} max={4} set={(v) => setC((x) => { x.base.floors = Math.round(v); })} />
         <Num label="Top floors" value={c.top.floors} step={1} min={0} max={4} set={(v) => setC((x) => { x.top.floors = Math.round(v); })} />
@@ -328,6 +331,92 @@ function CompositionSection({ ds, setDs }: { ds: DesignSystem; setDs: (fn: (d: D
       <Seg<Corner> label="Corners" value={c.corner} set={(v) => setC((x) => { x.corner = v; })} options={[{ value: 'plain', label: 'Plain' }, { value: 'solid', label: 'Solid', title: 'No windows in the end bays' }, { value: 'glazed', label: 'Glazed', title: 'Glass round the corner (on bays)' }, { value: 'accent', label: 'Accent', title: 'A pier in the accent' }]} />
       <Seg<Entrance> label="Entrance" value={c.entrance} set={(v) => setC((x) => { x.entrance = v; })} options={[{ value: 'none', label: 'Plain' }, { value: 'canopy', label: 'Canopy' }, { value: 'portal', label: 'Portal' }]} />
       {(c.corner === 'glazed' || c.corner === 'solid') && c.rhythm === 'free' && <Note>Solid and glazed corners keep the end bays clear, so they need the windows on bays.</Note>}
+      </Locked>
+    </Section>
+  );
+}
+
+// ---------------------------------------------------------------- locks, heritage, street, landscape, review
+/** A part of the design system a heritage precinct controls: greyed out and said so. */
+function Locked({ ds, g, children }: { ds: DesignSystem; g: LockGroup; children: ComponentChildren }) {
+  const p = lockedBy(ds, g);
+  return (
+    <fieldset class="dss-lock" disabled={!!p}>
+      {p && <p class="dss-locked"><Icon n="lock" size={12} />Set by the {p.name.toLowerCase()}</p>}
+      {children}
+    </fieldset>
+  );
+}
+
+/** A heritage precinct's controls: pick one and the tokens it fixes are set and locked. */
+function HeritageSection({ ds, setDs }: { ds: DesignSystem; setDs: (fn: (d: DesignSystem) => void) => void }) {
+  const pr = precinctOf(ds.precinct);
+  return (
+    <Section title="Heritage controls" fold open={!!pr} aside={pr ? <span class="sec-meta">{pr.name}</span> : undefined}>
+      <Select<string> label="Precinct" value={ds.precinct ?? ''} onChange={(v) => setDs((d) => { if (!v) { delete d.precinct; return; } const x = precinctOf(v)!; x.apply(d); d.precinct = v; })}
+        options={[{ value: '', label: 'None' }, ...PRECINCTS.map((x) => ({ value: x.id, label: `${x.name} · ${x.where}` }))]} />
+      {pr ? <Note>{pr.blurb} Locked: {pr.locks.join(', ')}. The precinct’s rules are in the review.</Note>
+        : <Note>For a site in a heritage precinct: its controls set and lock the parts of the design system they cover, as frame control does in Chandigarh.</Note>}
+    </Section>
+  );
+}
+
+const KELVINS = [2700, 3000, 4000, 5000];
+/** The street: the building's sign and its facade lighting. */
+function StreetSection({ ds, setDs }: { ds: DesignSystem; setDs: (fn: (d: DesignSystem) => void) => void }) {
+  const sg = signageOf(ds), li = lightingOf(ds);
+  const setS = (fn: (x: Signage) => void) => setDs((d) => { const x = { ...signageOf(d) }; fn(x); d.signage = x; });
+  const setL = (fn: (x: Lighting) => void) => setDs((d) => { const x = { ...lightingOf(d) }; fn(x); d.lighting = x; });
+  return (
+    <Section title="Signs and lighting" fold open={false} sub="Move the sun past sunset to see the lights on.">
+      <Locked ds={ds} g="signage">
+        <Seg<Signage['kind']> label="Sign" value={sg.kind} set={(v) => setS((x) => { x.kind = v; })} options={[{ value: 'none', label: 'None' }, { value: 'letters', label: 'Letters' }, { value: 'panel', label: 'Panel' }, { value: 'blade', label: 'Blade' }]} />
+        {sg.kind !== 'none' && <Slider label="Letter height" value={sg.h} min={0.3} max={1.5} step={0.05} fmt={(v) => `${nf(v, 2)} m`} set={(v) => setS((x) => { x.h = v; })} />}
+        <Slider label="Signs at most" value={sg.cap} min={0.05} max={0.3} step={0.01} fmt={(v) => `${Math.round(v * 100)}% of the front`} set={(v) => setS((x) => { x.cap = v; })} />
+      </Locked>
+      <Locked ds={ds} g="lighting">
+        <Seg<Lighting['facade']> label="Facade lighting" value={li.facade} set={(v) => setL((x) => { x.facade = v; })} options={[{ value: 'none', label: 'None' }, { value: 'wash', label: 'Wash' }, { value: 'grazing', label: 'Grazing' }, { value: 'lines', label: 'Lines' }]} />
+        <Seg<string> label="Colour" value={String(li.kelvin)} set={(v) => setL((x) => { x.kelvin = Number(v); })} options={KELVINS.map((k) => ({ value: String(k), label: `${k} K` }))} />
+        <Toggle label="Dark sky: shielded, nothing aimed up" value={li.shielded} set={(v) => setL((x) => { x.shielded = v; })} />
+      </Locked>
+    </Section>
+  );
+}
+
+/** The planting round the buildings. */
+function LandscapeSection({ ds, setDs }: { ds: DesignSystem; setDs: (fn: (d: DesignSystem) => void) => void }) {
+  const l = landscapeOf(ds);
+  const setX = (fn: (x: Landscape) => void) => setDs((d) => { const x = { ...landscapeOf(d) }; fn(x); d.landscape = x; });
+  return (
+    <Section title="Landscape" fold open={false}>
+      <Seg<Landscape['trees']> label="Trees" value={l.trees} set={(v) => setX((x) => { x.trees = v; })} options={[{ value: 'few', label: 'The garden’s', title: 'Only what the garden has' }, { value: 'avenue', label: 'Avenue', title: 'A row along the road' }, { value: 'dense', label: 'Every edge', title: 'Rows along every edge of the plot' }]} />
+      <Row>
+        <Toggle label="Hedge on the boundary" value={l.hedge} set={(v) => setX((x) => { x.hedge = v; })} />
+        <Toggle label="Balcony planters" value={l.planters} set={(v) => setX((x) => { x.planters = v; })} />
+      </Row>
+    </Section>
+  );
+}
+
+/** The design review: the design system checked against the scheme, line by line. */
+function ReviewSection({ e }: { e: StepProps['e'] }) {
+  const rv = review(e);
+  const groups = [...new Set(rv.lines.map((l) => l.group))];
+  return (
+    <Section title="Review" fold open={false} aside={<span class="sec-meta">{rv.pass} of {rv.total} pass</span>} sub="The design checked against the scheme as built: rules of thumb from design codes, for discussion.">
+      {groups.map((g) => (
+        <div class="dsr-g">
+          <small>{g}</small>
+          <ul>
+            {rv.lines.filter((l) => l.group === g).map((l) => (
+              <li class={l.ok ? '' : 'no'}>
+                <Icon n={l.ok ? 'check' : 'x'} size={13} stroke={2.5} />
+                <span><b>{l.label}</b><em>{l.ok ? 'Pass' : 'Fails'} · {l.detail}</em></span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
     </Section>
   );
 }
@@ -339,9 +428,11 @@ function ClimateSection({ ds, setDs }: { ds: DesignSystem; setDs: (fn: (d: Desig
   const setC = (fn: (c: Climate) => void) => setDs((d) => { const x: Climate = { ...climateOf(d) }; fn(x); d.climate = x; });
   return (
     <Section title="Climate" sub="Sunshades and screens, as Indian buildings have long been shaded.">
+      <Locked ds={ds} g="climate">
       <Slider label="Chhajja over the windows" value={c.chhajja} min={0} max={1.5} step={0.05} fmt={(v) => (v > 0.04 ? `${nf(v, 2)} m` : 'None')} set={(v) => setC((x) => { x.chhajja = v; })} />
       {c.chhajja > 0.04 && <Toggle label="Deeper to the south and west" value={c.orient} set={(v) => setC((x) => { x.orient = v; })} hint="Full depth facing south, a little more facing west, about a third facing north." />}
       <Seg<Climate['jaali']> label="Jaali" value={c.jaali} set={(v) => setC((x) => { x.jaali = v; })} options={[{ value: 'none', label: 'None' }, { value: 'vents', label: 'Ventilators' }, { value: 'windows', label: 'Small windows too' }]} />
+      </Locked>
     </Section>
   );
 }
@@ -426,7 +517,12 @@ function StartFrom({ p, up, toast }: Pick<StepProps, 'p' | 'up' | 'toast'>) {
   const preset = presetOf(custom?.id ?? p.style);
   const ds = custom ?? presetOf(p.style);
 
-  const preset_ = (x: DesignSystem) => ({ key: x.id, d: x, on: !custom && p.style === x.id, pick: () => up({ style: x.id, custom: null }) });
+  const keep = precinctOf(custom?.precinct);
+  const preset_ = (x: DesignSystem) => ({ key: x.id, d: x, on: !custom && p.style === x.id, pick: () => {
+    // (a heritage precinct stays: its controls are laid on the new start)
+    if (!keep) { up({ style: x.id, custom: null }); return; }
+    const d = clone(x); keep.apply(d); d.precinct = keep.id; up({ style: x.id, custom: d });
+  } });
   const cards: { key: string; d: DesignSystem; on: boolean; mine?: boolean; pick: () => void }[] = [
     ...PRESETS.filter((x) => !STYLE_IDS.includes(x.id)).map(preset_),
     ...PRESETS.filter((x) => STYLE_IDS.includes(x.id)).map(preset_),
@@ -509,7 +605,12 @@ export function DesignSystemStep({ p, e, up, toast }: StepProps) {
         <figcaption>{ds.name}{ds.blurb && !p.custom ? <span> · {ds.blurb}</span> : null}</figcaption>
       </figure>
 
+      <HeritageSection ds={ds} setDs={setDs} />
+
+      <ReviewSection e={e} />
+
       <Section title="Facade">
+        <Locked ds={ds} g="materials">
         <div class="dss-mats">
           {row('wall', 'Walls', f.wall, 'wall', 'wall')}
           {row('accent', 'Accents (bands, fins)', f.accent, 'accent', 'accent')}
@@ -519,7 +620,10 @@ export function DesignSystemStep({ p, e, up, toast }: StepProps) {
           <Toggle label="Floor bands" value={ds.facade.bands} set={(v) => setDs((d) => { d.facade.bands = v; })} />
           <Toggle label="Fins" value={ds.facade.fins} set={(v) => setDs((d) => { d.facade.fins = v; })} />
         </Row>
+        </Locked>
+        <Locked ds={ds} g="windows">
         <Num label="Floor to floor" value={ds.floorH} step={0.05} min={2.8} max={4.5} unit="m" set={(v) => setDs((d) => { d.floorH = v; })} />
+        </Locked>
       </Section>
 
       <CompositionSection ds={ds} setDs={setDs} />
@@ -537,6 +641,7 @@ export function DesignSystemStep({ p, e, up, toast }: StepProps) {
           <div class="dss-mats">{row('railing', 'Railing', f.railing, 'railing', 'railing')}</div>
         </>}
         <Row><Color label="Glass" value={ds.glazing.glass} set={(c) => setDs((d) => { d.glazing.glass = c; })} /><Color label="Frames" value={ds.glazing.frame} set={(c) => setDs((d) => { d.glazing.frame = c; })} /></Row>
+        <Locked ds={ds} g="windows">
         <div class="tscroll">
           <table class="cat">
             <caption class="dss-cap">The catalog every opening comes from: change a size and every one follows.</caption>
@@ -547,7 +652,12 @@ export function DesignSystemStep({ p, e, up, toast }: StepProps) {
             </tbody>
           </table>
         </div>
+        </Locked>
       </Section>
+
+      <StreetSection ds={ds} setDs={setDs} />
+
+      <LandscapeSection ds={ds} setDs={setDs} />
 
       <Section title="Flooring" fold open={false}>
         <div class="dss-mats">{FLOOR_ROOMS.map((r) => row(`floor-${r.key}`, r.label, f.flooring[r.key], 'floor', r.key))}</div>

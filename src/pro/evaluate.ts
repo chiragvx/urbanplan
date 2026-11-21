@@ -67,7 +67,7 @@ export function evaluate(p: ProProject): Evaluated {
   const planAll = (x: typeof d) => x.buildings.map((b, i) => planFloor(b, dsOfBuilding(p, i, ds, b.b.id), r.code === 'udcpr' ? 1 / 10 : 1 / 6));
   // (the facade measured from the model: its tones priced by their measured areas, not the rule of thumb)
   const measure = (x: typeof d, pl: FloorPlan[]) => {
-    const T = facadeTakeoff(x, pl, (i) => dsOfBuilding(p, i, ds, x.buildings[i].b.id), r.rules.floorH);
+    const T = facadeTakeoff(x, pl, (i) => dsOfBuilding(p, i, ds, x.buildings[i].b.id), r.rules.floorH, p.north ?? 0);
     const q: FinishQty = T.total > 0 && x.bua > 0 ? { wall: T.area.wall / x.bua, accent: T.area.accent / x.bua, base: T.area.base / x.bua } : {};
     return { T, q, rate: specRateNet(ds) + finishRate(ds, q) };
   };

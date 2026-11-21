@@ -100,7 +100,55 @@ export interface DesignSystem {
   climate?: Climate;
   /** the preset a style was built on (./design.ts `derive`) */
   basedOn?: string;
+  /** how the buildings are lit at night, signed and planted round (unset: read through lightingOf, signageOf,
+   *  landscapeOf) */
+  lighting?: Lighting; signage?: Signage; landscape?: Landscape;
+  /** a heritage precinct whose controls it follows (./heritage.ts): those tokens are set by it and locked */
+  precinct?: string;
 }
+
+/** Facade lighting, as design guidelines write it: what's lit, how warm, and whether it's kept off the sky. */
+export interface Lighting {
+  /** wash: the base lit from the ground; grazing: the piers and corners lit up their height; lines: LED lines on the
+   *  string courses and the cornice; none */
+  facade: 'none' | 'wash' | 'grazing' | 'lines';
+  /** colour temperature (K): guidelines ask 3000 or warmer near homes */
+  kelvin: number;
+  /** dark sky: fittings shielded, nothing aimed above the horizontal */
+  shielded: boolean;
+}
+/** The building's name and any signs: what kind, how big its letters, and the most of the front face they may take. */
+export interface Signage {
+  kind: 'none' | 'letters' | 'panel' | 'blade';
+  /** letter or panel height (m) */
+  h: number;
+  /** the most of the front face signs may cover (Amaravati's draft caps it at 20 %) */
+  cap: number;
+}
+/** The planting round the buildings. */
+export interface Landscape {
+  /** few: what the garden has; avenue: a row along the road; dense: rows along every edge */
+  trees: 'few' | 'avenue' | 'dense';
+  /** a hedge along the boundary (not across the road side) */
+  hedge: boolean;
+  /** planters on the balconies */
+  planters: boolean;
+}
+const LIGHTINGS: Record<string, Lighting> = {
+  glass: { facade: 'lines', kelvin: 4000, shielded: true }, signature: { facade: 'grazing', kelvin: 2700, shielded: true },
+  value: { facade: 'none', kelvin: 3000, shielded: true }, fluid: { facade: 'grazing', kelvin: 3000, shielded: true },
+  sculpted: { facade: 'lines', kelvin: 3000, shielded: true },
+};
+const SIGNAGES: Record<string, Signage> = { value: { kind: 'panel', h: 0.9, cap: 0.2 }, glass: { kind: 'letters', h: 0.9, cap: 0.2 } };
+const LANDSCAPES: Record<string, Landscape> = {
+  value: { trees: 'few', hedge: false, planters: false }, signature: { trees: 'dense', hedge: true, planters: true },
+  earth: { trees: 'dense', hedge: true, planters: true },
+};
+export const lightingOf = (d: DesignSystem): Lighting => d.lighting ?? LIGHTINGS[d.id] ?? { facade: 'wash', kelvin: 3000, shielded: true };
+export const signageOf = (d: DesignSystem): Signage => d.signage ?? SIGNAGES[d.id] ?? { kind: 'letters', h: 0.6, cap: 0.2 };
+export const landscapeOf = (d: DesignSystem): Landscape => d.landscape ?? LANDSCAPES[d.id] ?? { trees: 'avenue', hedge: true, planters: false };
+/** a lamp's colour at a colour temperature (K), roughly */
+export const kelvinColour = (k: number) => (k <= 2700 ? '#ffb46b' : k <= 3000 ? '#ffc58f' : k <= 3500 ? '#ffd6aa' : k <= 4000 ? '#ffe4c8' : '#fff4ea');
 
 /** Climate elements, the shading and screening Indian buildings have always carried. */
 export interface Climate {
@@ -118,6 +166,12 @@ const CLIMATES: Record<string, Climate> = {
 const NO_CLIMATE: Climate = { chhajja: 0, orient: false, jaali: 'none' };
 /** A design system's climate elements: its own, else its preset's. */
 export const climateOf = (d: DesignSystem): Climate => d.climate ?? CLIMATES[d.id] ?? NO_CLIMATE;
+/** A face's bearing (degrees clockwise from north) from its outward normal in the plan, where −z is north before
+ *  the plot is turned by `north` (degrees, as the project's p.north). */
+export function bearingOf(nx: number, nz: number, north = 0): number {
+  const n = (north * Math.PI) / 180;
+  return (Math.atan2(nx * Math.cos(n) + nz * Math.sin(n), nx * Math.sin(n) - nz * Math.cos(n)) * 180) / Math.PI;
+}
 /** How deep a chhajja is on a face whose outward normal points `bearing` degrees clockwise from north: the full depth
  *  to the south, a little more to the west (the hot afternoon), about a third to the north. */
 export function chhajjaOn(c: Climate, bearing: number): number {
@@ -428,7 +482,7 @@ type Over = { [K in keyof DesignSystem]?: NonNullable<DesignSystem[K]> extends o
  *  `over` changed, and the facade colours following the materials named in `over.finish`. */
 export function derive(parentId: string, over: Over & { id: string; name: string; blurb: string }): DesignSystem {
   const p = PRESETS.find((x) => x.id === parentId)!;
-  const full: DesignSystem = { ...clone(p), composition: compositionOf(p), palette: paletteOf(p), climate: climateOf(p), finish: finishOf(p), origin: undefined };
+  const full: DesignSystem = { ...clone(p), composition: compositionOf(p), palette: paletteOf(p), climate: climateOf(p), lighting: lightingOf(p), signage: signageOf(p), landscape: landscapeOf(p), finish: finishOf(p), origin: undefined };
   const d = merge(full, { ...over, basedOn: parentId });
   const f = d.finish!;
   for (const s of ['wall', 'accent', 'base'] as const) if ((over.finish as Partial<Finish> | undefined)?.[s]) setFinish(d, s, f[s]);
@@ -447,6 +501,7 @@ PRESETS.push(
     composition: CO([1, 'base'], [1, 'accent', 'cornice'], 3.0, 'even', true, 0.1, 'accent', 'portal'),
     palette: PT(0.62, 0.18, 0.06, 0.14),
     climate: { chhajja: 0.6, orient: false, jaali: 'none' },
+    lighting: { facade: 'lines', kelvin: 2700, shielded: true }, signage: { kind: 'letters', h: 0.6, cap: 0.1 },
   }),
   derive('earth', {
     id: 'indo-saracenic', name: 'Indo-Saracenic', blurb: 'Sandstone over a basalt base, jaali screens and deep chhajjas, a pavilion crown: Bombay’s 19th-century civic look.',
@@ -455,6 +510,7 @@ PRESETS.push(
     composition: CO([2, 'base'], [1, 'accent', 'pergola'], 3.6, 'paired', true, 0.3, 'accent', 'portal'),
     palette: PT(0.52, 0.18, 0.15, 0.15),
     climate: { chhajja: 0.75, orient: false, jaali: 'windows' },
+    lighting: { facade: 'wash', kelvin: 2700, shielded: true }, landscape: { trees: 'dense', hedge: true, planters: false },
   }),
   derive('earth', {
     id: 'chandigarh', name: 'Chandigarh Modern', blurb: 'Brick infill in a concrete frame, deep brise-soleil turned to the sun, pilotis: Chandigarh’s modernism.',
@@ -475,6 +531,7 @@ PRESETS.push(
     composition: CO([1, 'base'], [1, 'wall', 'pergola'], 3.6, 'paired', false, 0.2, 'solid', 'canopy'),
     palette: PT(0.66, 0.1, 0.06, 0.18),
     climate: { chhajja: 0.6, orient: true, jaali: 'none' },
+    landscape: { trees: 'dense', hedge: true, planters: true },
   }),
   derive('earth', {
     id: 'brick-vernacular', name: 'Brick Vernacular', blurb: 'Exposed brick, jaali walls for light and air, deep sunshades, clay tiles: after Laurie Baker.',
@@ -483,6 +540,7 @@ PRESETS.push(
     composition: CO([0, 'base'], [0, 'wall', 'parapet'], 3.0, 'free', false, 0.1, 'plain', 'canopy'),
     palette: PT(0.72, 0.08, 0.05, 0.15),
     climate: { chhajja: 0.75, orient: true, jaali: 'windows' },
+    landscape: { trees: 'dense', hedge: false, planters: true }, lighting: { facade: 'none', kelvin: 2700, shielded: true },
   }),
   derive('contemporary', {
     id: 'tropical', name: 'Tropical Modern', blurb: 'White walls and teak, wide balconies under deep overhangs, a pergola roof: after Geoffrey Bawa.',
@@ -493,5 +551,6 @@ PRESETS.push(
     composition: CO([1, 'base'], [1, 'accent', 'pergola'], 3.6, 'even', false, 0, 'plain', 'canopy'),
     palette: PT(0.56, 0.16, 0.05, 0.23),
     climate: { chhajja: 1.0, orient: true, jaali: 'none' },
+    landscape: { trees: 'dense', hedge: true, planters: true }, lighting: { facade: 'grazing', kelvin: 2700, shielded: true },
   }),
 );

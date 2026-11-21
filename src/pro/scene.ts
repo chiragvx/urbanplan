@@ -11,12 +11,13 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { PlotReport } from '../doc/plot';
 import { UNIT_COLOR, type SiteReport } from '../doc/site';
-import { chhajjaOn, climateOf, compositionOf, finishOf, languageOf, zonesOf, ZONED_FROM, type DesignSystem, type Tone } from './design';
+import { bearingOf, chhajjaOn, climateOf, kelvinColour, landscapeOf, lightingOf, signageOf, compositionOf, finishOf, languageOf, zonesOf, ZONED_FROM, type DesignSystem, type Tone } from './design';
 import { materialOf } from './materials';
 import { DEFAULT_SITE } from '../doc/site';
 import { frameOf, layForm, type Form, type FormLayout } from './form';
 import { buildForm, disposeBuilt, layoutHash, type Built, type Look } from './form/mesh';
 import { facadeBays, type FloorPlan, type Opening } from './openings';
+import { plantingOf } from './landscape';
 
 import { SHOP_W, type Shops } from './mixed';
 import { roadFrame } from '../doc/site';
@@ -338,6 +339,22 @@ export class ProView {
     this.sun.position.set(cx + (x / L) * 300, (up / L) * 300, cz + (z / L) * 300);
     this.sun.target.position.set(cx, 0, cz);
     this.sun.intensity = y <= 0 ? 0.15 : 2.6 * Math.min(1, y / L * 2.2);
+    // (after sunset the lights come on)
+    this.night = dir ? Math.max(0, Math.min(1, (0.06 - y) / 0.16)) : 0;
+    this.applyNight();
+    this.frame();
+  }
+  /** how dark it is (0 day … 1 night): the lights and the windows glow by it */
+  night = 0;
+  private lamps: THREE.MeshStandardMaterial[] = []; private glows: THREE.MeshBasicMaterial[] = []; private panes: THREE.MeshStandardMaterial[] = [];
+  private lampMat(m: THREE.MeshStandardMaterial) { this.lamps.push(m); m.emissiveIntensity = 2.6 * this.night; return m; }
+  private glowMat(m: THREE.MeshBasicMaterial) { this.glows.push(m); m.opacity = 0.32 * this.night; m.visible = this.night > 0.02; return m; }
+  private paneMat(m: THREE.MeshStandardMaterial) { this.panes.push(m); m.emissiveIntensity = 0.38 * this.night; return m; }
+  private applyNight() {
+    const n = this.night;
+    for (const m of this.lamps) m.emissiveIntensity = 2.6 * n;
+    for (const m of this.glows) { m.opacity = 0.32 * n; m.visible = n > 0.02; }
+    for (const m of this.panes) m.emissiveIntensity = 0.38 * n;
     this.frame();
   }
   /** a darker sky for the dark theme */
@@ -385,19 +402,24 @@ export class ProView {
     // (the formed buildings are kept aside, so clearing doesn't throw away the ones that haven't changed)
     for (const e of this.formed.values()) this.root.remove(e.built.group);
     this.clear();
+    this.lamps = []; this.glows = []; this.panes = [];
     const seen = new Set<string>(), forms: Record<string, FormLayout> = {};
     const { r, d, plans, ds } = v;
     // (a face's bearing, degrees clockwise from north, from its outward normal: plan −z is north, turned by v.north)
-    const nr = ((v.north ?? 0) * Math.PI) / 180, bearingOf = (nx: number, nz: number) => (Math.atan2(nx * Math.cos(nr) + nz * Math.sin(nr), nx * Math.sin(nr) - nz * Math.cos(nr)) * 180) / Math.PI;
+    const bearing = (nx: number, nz: number) => bearingOf(nx, nz, v.north ?? 0);
     const fh = r.rules.floorH, mat = (color: string, o: Partial<THREE.MeshStandardMaterialParameters> = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.85, ...o });
     const mats = (ds: DesignSystem) => ({
       wall: mat(ds.facade.wall), accent: mat(ds.facade.accent, { roughness: 0.6 }), base: mat(ds.facade.base),
-      frame: mat(ds.glazing.frame, { roughness: 0.45, metalness: 0.3 }), glass: mat(ds.glazing.glass, { roughness: 0.08, metalness: 0.55, envMapIntensity: 1 }),
+      frame: mat(ds.glazing.frame, { roughness: 0.45, metalness: 0.3 }), glass: this.paneMat(mat(ds.glazing.glass, { roughness: 0.08, metalness: 0.55, envMapIntensity: 1, emissive: '#ffcf8a', emissiveIntensity: 0 })),
       rail: ds.balcony.railing === 'glass' ? mat('#cfe3ee', { transparent: true, opacity: 0.38, roughness: 0.05 }) : ds.balcony.railing === 'ms' ? mat('#2b2b2e', { roughness: 0.5, metalness: 0.5 }) : mat(ds.facade.wall),
       slab: mat('#d8d4cc'), road: mat('#5b5e66', { roughness: 0.95 }), dp: mat('#e5484d', { transparent: true, opacity: 0.28 }), paving: mat('#d3cfc5'),
       shop: mat('#efe2c8', { emissive: '#ffd9a0', emissiveIntensity: 0.25 }), sign: mat('#1d1f24', { roughness: 0.4 }),
       core: mat('#a7a39b'), door: mat('#8a5a3b', { roughness: 0.6 }), partition: mat('#f5f3ef'),
       jaali: mat(ds.facade.accent, { alphaMap: jaaliTexture(), alphaTest: 0.5, side: THREE.DoubleSide }),
+      // (the lights: fittings that glow after sunset, and the wash they throw on the wall; see setSun)
+      lamp: this.lampMat(mat('#3a3a3c', { emissive: kelvinColour(lightingOf(ds).kelvin), emissiveIntensity: 0 })),
+      glow: this.glowMat(new THREE.MeshBasicMaterial({ color: kelvinColour(lightingOf(ds).kelvin), transparent: true, opacity: 0, depthWrite: false })),
+      green: mat('#56744a', { roughness: 0.95, flatShading: true }),
     });
     let M = mats(ds);
     const site = M;
@@ -439,17 +461,23 @@ export class ProView {
       else flatMP(sh, 0.08, tone);
       if (f.kind !== 'nobuild') flatMP(keptOf(f), 0.075, mat('#e5484d', { transparent: true, opacity: 0.1 }));
     }
+    // the design system's planting: an avenue or rows of trees, a hedge along the boundary
+    const plant = plantingOf(r, landscapeOf(ds), d.buildings.flatMap((b) => b.quads));
+    for (const [x, z] of plant.trees) treeAt(x, z, 2.4);
+    const hedge = new Boxes();
+    for (const [x0, z0, x1, z1] of plant.hedges) { const L = Math.hypot(x1 - x0, z1 - z0); if (L > 0.5) hedge.add((x0 + x1) / 2, 0.6, (z0 + z1) / 2, (x1 - x0) / L, (z1 - z0) / L, L, 1.2, 0.8); }
+    add(hedge.mesh(mat('#5a7a48', { roughness: 0.95, flatShading: true }), true));
     add(trunks.mesh(mat('#6b5440'), true, trunkGeo)); add(crowns.mesh(mat('#5f7f4c', { roughness: 0.9, flatShading: true }), true, crownGeo));
 
-    let bands = new Boxes(), fins = new Boxes(), frames = new Boxes(), panes = new Boxes(), slabs = new Boxes(), rails = new Boxes(), cols = new Boxes(), parts = new Boxes(), doors = new Boxes(), parapets = new Boxes(), signs = new Boxes(), jaalis = new Boxes();
+    let bands = new Boxes(), fins = new Boxes(), frames = new Boxes(), panes = new Boxes(), slabs = new Boxes(), rails = new Boxes(), cols = new Boxes(), parts = new Boxes(), doors = new Boxes(), parapets = new Boxes(), signs = new Boxes(), jaalis = new Boxes(), lamps = new Boxes(), glows = new Boxes(), greens = new Boxes();
     const flush = () => {
-      for (const [B, m, cast] of [[bands, M.accent, true], [fins, M.accent, true], [frames, M.frame, true], [panes, M.glass, false], [slabs, M.slab, true], [rails, M.rail, false], [cols, M.base, true], [parts, M.partition, true], [doors, M.door, true], [parapets, M.wall, true], [signs, M.sign, true], [jaalis, M.jaali, false]] as [Boxes, THREE.Material, boolean][]) {
+      for (const [B, m, cast] of [[bands, M.accent, true], [fins, M.accent, true], [frames, M.frame, true], [panes, M.glass, false], [slabs, M.slab, true], [rails, M.rail, false], [cols, M.base, true], [parts, M.partition, true], [doors, M.door, true], [parapets, M.wall, true], [signs, M.sign, true], [jaalis, M.jaali, false], [lamps, M.lamp, false], [glows, M.glow, false], [greens, M.green, true]] as [Boxes, THREE.Material, boolean][]) {
         const im = B.mesh(m, cast);
         if (!im) continue;
         add(im);
         if (B === frames || B === panes || B === doors) this.pickables.push(im);
       }
-      bands = new Boxes(); fins = new Boxes(); frames = new Boxes(); panes = new Boxes(); slabs = new Boxes(); rails = new Boxes(); cols = new Boxes(); parts = new Boxes(); doors = new Boxes(); parapets = new Boxes(); signs = new Boxes(); jaalis = new Boxes();
+      bands = new Boxes(); fins = new Boxes(); frames = new Boxes(); panes = new Boxes(); slabs = new Boxes(); rails = new Boxes(); cols = new Boxes(); parts = new Boxes(); doors = new Boxes(); parapets = new Boxes(); signs = new Boxes(); jaalis = new Boxes(); lamps = new Boxes(); glows = new Boxes(); greens = new Boxes();
     };
     const under = d.under, y0 = under * fh;
     // shops at the front: the road-facing edges of each strip, and which flats are shops on the floors above
@@ -503,6 +531,11 @@ export class ProView {
           roof: materialOf(finishOf(bds).roof).colour, base: bds.facade.base, core: '#a7a39b',
           skin: { ...lang.skin, ...(form?.skin ?? {}) }, roofKind: form?.roof ?? { kind: lang.roof, pitch: 20, overhang: 0.6, dir: 0, parapet: 1 }, round: lang.round,
         };
+        // (the composition's zones and the climate's chhajja, on a formed building too)
+        const fc = compositionOf(bds), fz = zonesOf(fc, FL.floors.length);
+        if (fz.base || fz.top) look.zones = { base: fz.base, top: fz.top, baseColour: bds.facade[fc.base.tone], topColour: bds.facade[fc.top.tone] };
+        const fcl = climateOf(bds);
+        if (fcl.chhajja > 0.05) look.chhajja = fcl.chhajja;
         const key = JSON.stringify([look, v.xray, form?.shell ?? null, fr.u]);
         const old = this.formed.get(b.b.id);
         const hash = old && old.L === FL ? old.hash : layoutHash(FL);
@@ -555,7 +588,11 @@ export class ProView {
       }
       const corners = comp.corner === 'glazed' && comp.rhythm !== 'free' ? faces.filter((f) => f.n >= 3) : [];
       // the entrance: on the face that looks most at the road, in line with the core, a canopy or a portal
-      const front = comp.entrance === 'none' ? undefined : faces.filter((f) => f.L >= 7).sort((a, c) => (c.nx * -F.vx + c.nz * -F.vz) - (a.nx * -F.vx + a.nz * -F.vz))[0];
+      const facing = faces.filter((f) => f.L >= 7).sort((a, c) => (c.nx * -F.vx + c.nz * -F.vz) - (a.nx * -F.vx + a.nz * -F.vz))[0];
+      const front = comp.entrance === 'none' ? undefined : facing;
+      // where the building's name goes: over the entrance (the canopy's edge, the portal's lintel), else on the wall
+      let signAt: { x: number; z: number; y: number; out: number } | null = null;
+      if (facing) { const [sx, sz] = along(facing, facing.L / 2, 0); signAt = { x: sx, z: sz, y: 3.2, out: 0.08 }; }
       if (front) {
         const core = b.cores[0], [kx, kz] = core ? [core.filter((_, i) => i % 2 === 0).reduce((a, c) => a + c, 0) / (core.length / 2), core.filter((_, i) => i % 2 === 1).reduce((a, c) => a + c, 0) / (core.length / 2)] : along(front, front.L / 2, 0);
         const s = Math.max(3.2, Math.min(front.L - 3.2, (kx - front.ax) * front.ux + (kz - front.az) * front.uz));
@@ -565,6 +602,7 @@ export class ProView {
         const dh = Math.min(2.7, he - 0.3), [gx, gz] = at(0.08);
         frames.add(gx, dh / 2 + 0.05, gz, front.ux, front.uz, 3.4, dh + 0.1, 0.12);
         panes.add(gx + front.nx * 0.05, dh / 2 + 0.05, gz + front.nz * 0.05, front.ux, front.uz, 3.2, dh - 0.06, 0.04);
+        signAt = { x, z, y: he + 0.12, out: 2.95 };
         if (comp.entrance === 'canopy') { const [cx2, cz2] = at(1.5); slabs.add(cx2, he, cz2, front.ux, front.uz, 5.4, 0.22, 3.0); }
         else {
           // a portal: a frame in the accent standing out from the face, as tall as the base
@@ -572,6 +610,41 @@ export class ProView {
           for (const sgn of [-1, 1]) { const [px, pz] = at(dep - 0.3, sgn * 2.9); fins.add(px, hp / 2, pz, front.ux, front.uz, 0.6, hp, 0.6); }
           const [lx, lz] = at(dep / 2);
           fins.add(lx, hp - 0.3, lz, front.ux, front.uz, 6.4, 0.6, dep);
+          signAt = { x, z, y: hp, out: dep + 0.02 };
+        }
+      }
+      // the sign: letters or a panel over the entrance, or a blade standing off the front's end; lit after dark
+      const sg = signageOf(ds_);
+      if (facing && signAt && sg.kind !== 'none') {
+        const sw = Math.min(facing.L * 0.6, sg.h * 8), cx = signAt.x + facing.nx * signAt.out, cz = signAt.z + facing.nz * signAt.out;
+        if (sg.kind === 'letters') {
+          for (let k = 0; k < 7; k++) signs.add(cx + facing.ux * (k - 3) * sw / 7, signAt.y + sg.h / 2, cz + facing.uz * (k - 3) * sw / 7, facing.ux, facing.uz, sw / 7 * 0.72, sg.h, 0.08);
+          lamps.add(cx + facing.nx * 0.05, signAt.y + 0.02, cz + facing.nz * 0.05, facing.ux, facing.uz, sw, 0.04, 0.04);
+        } else if (sg.kind === 'panel') {
+          signs.add(cx, signAt.y + sg.h / 2, cz, facing.ux, facing.uz, sw, sg.h, 0.1);
+          lamps.add(cx + facing.nx * 0.06, signAt.y + sg.h / 2, cz + facing.nz * 0.06, facing.ux, facing.uz, sw - 0.2, sg.h - 0.2, 0.02);
+        } else {
+          const [bx, bz] = along(facing, facing.L - 1.2, 0.45);
+          signs.add(bx, 3.0 + sg.h * 2, bz, facing.nx, facing.nz, 0.9, sg.h * 4, 0.12);
+          lamps.add(bx, 3.0 + sg.h * 2, bz, facing.nx, facing.nz, 0.7, sg.h * 4 - 0.2, 0.14);
+        }
+      }
+      // the facade lighting: a wash on the base from the ground, grazing light up the piers and corners, or lines
+      const li = lightingOf(ds_);
+      if (top > y0) for (const f of faces) {
+        if (li.facade === 'wash') {
+          const yw = Math.min(top, Math.max(yBase, y0 + fh * 1.5));
+          const [x, z] = along(f, f.L / 2, 0.35); lamps.add(x, 0.12, z, f.ux, f.uz, f.L - 0.6, 0.12, 0.2);
+          const [gx2, gz2] = along(f, f.L / 2, 0.03); glows.add(gx2, yw / 2, gz2, f.ux, f.uz, f.L, yw, 0.02);
+        } else if (li.facade === 'grazing') {
+          const lines = comp.piers && comp.rhythm !== 'free' ? Array.from({ length: f.n + 1 }, (_, k) => k * f.bw) : [0.4, f.L - 0.4];
+          for (const t of lines) {
+            const [x, z] = along(f, t, 0.3); lamps.add(x, y0 + 0.1, z, f.ux, f.uz, 0.3, 0.12, 0.3);
+            const [gx2, gz2] = along(f, t, 0.03); glows.add(gx2, (y0 + top) / 2, gz2, f.ux, f.uz, 0.9, top - y0, 0.02);
+          }
+        } else if (li.facade === 'lines') {
+          const ys = [...(Z.base ? [yBase + 0.25] : []), ...(Z.top ? [yTop + 0.16] : []), top + 1.02, ...(ds_.facade.bands && !Z.base && !Z.top ? Array.from({ length: all }, (_, k) => y0 + k * fh + 0.12) : [])];
+          for (const yl of ys) { const [x, z] = along(f, f.L / 2, 0.16); lamps.add(x, yl, z, f.ux, f.uz, f.L, 0.05, 0.05); }
         }
       }
       for (const c of b.cores) mesh(prism(c, 0, (v.xray === null ? y0 + all * fh + 2.4 : top + fh)), M.core);
@@ -617,7 +690,7 @@ export class ProView {
           // the face's sun asks; a jaali in front of the ventilators (and the smaller windows)
           const shaded = o.tag === 'SD' && (ds_.balcony.kind === 'cantilever' || ds_.balcony.kind === 'recessed');
           if (cl.chhajja > 0.05 && !shaded) {
-            const dep = chhajjaOn(cl, bearingOf(o.nx, o.nz)), y = cy + o.h / 2 + (rv > 0.01 ? 0.24 : 0.12);
+            const dep = chhajjaOn(cl, bearing(o.nx, o.nz)), y = cy + o.h / 2 + (rv > 0.01 ? 0.24 : 0.12);
             parapets.add(o.x + o.nx * dep / 2, y, o.z + o.nz * dep / 2, o.ux, o.uz, o.w + 0.6, 0.1, dep);
           }
           if (o.tag === 'V1' ? cl.jaali !== 'none' : o.tag === 'W2' && cl.jaali === 'windows') jaalis.add(o.x + o.nx * 0.2, cy, o.z + o.nz * 0.2, o.ux, o.uz, o.w + 0.2, o.h + 0.2, 0.05);
@@ -625,6 +698,7 @@ export class ProView {
             const fx = o.x + o.ux * sgn * (o.w / 2 + 0.25), fz = o.z + o.uz * sgn * (o.w / 2 + 0.25);
             fins.add(fx + o.nx * 0.3, fy + fh / 2, fz + o.nz * 0.3, o.nx, o.nz, 0.6, fh, 0.12);
           }
+          if (o.tag === 'SD' && ds_.balcony.kind === 'cantilever' && landscapeOf(ds).planters) greens.add(o.x + o.nx * (ds_.balcony.depth - 0.3), fy + 0.35, o.z + o.nz * (ds_.balcony.depth - 0.3), o.ux, o.uz, Math.min(1.6, o.w), 0.5, 0.35);
           if (o.tag === 'SD' && ds_.balcony.kind !== 'none') {
             const dep = ds_.balcony.kind === 'french' ? 0.3 : ds_.balcony.depth, w = o.w + 0.9;
             const out = ds_.balcony.kind === 'recessed' ? 0.12 : dep;
