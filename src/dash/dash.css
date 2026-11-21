@@ -16,8 +16,11 @@ body { overflow: auto; }
 kbd { font: 500 10.5px/1 var(--up-font-mono); padding: 3px 5px; border-radius: 5px; border: 1px solid var(--up-line-strong); background: var(--up-surface); color: var(--up-muted); white-space: nowrap; }
 .d-side nav { display: grid; gap: 2px; margin-top: 6px; }
 .d-side nav a, .d-link { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px; border-radius: 9px; color: var(--up-ink-2); text-decoration: none; font-size: 13.5px; font-weight: 500; border: 0; background: none; font-family: inherit; cursor: pointer; width: 100%; text-align: left; }
-.d-side nav a:hover, .d-link:hover { background: var(--up-surface-2); color: var(--up-ink); }
-.d-side nav a.on { background: var(--up-surface-2); color: var(--up-ink); font-weight: 600; box-shadow: inset 2px 0 0 var(--up-ink); }
+.d-link:hover { background: var(--up-surface-2); color: var(--up-ink); }
+/* the sidebar's pages: the theme's navigation (tokens.css) */
+.d-side nav a { color: var(--up-nav-idle); transition: color .15s, background-color .15s, box-shadow .15s; }
+.d-side nav a:hover { color: var(--up-ink); background: var(--up-nav-hover); }
+.d-side nav a.on { color: var(--up-ink); background: var(--up-nav-on); box-shadow: var(--up-nav-on-ring); }
 .d-side nav small { margin-left: auto; font: 500 11px var(--up-font-mono); color: var(--up-muted); }
 .d-side-foot { margin-top: auto; display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--up-line); }
 .d-link { color: var(--up-muted); font-size: 13px; }
@@ -93,8 +96,9 @@ p { margin: 0; }
 .d-proj, .d-set { display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 28px; align-items: start; }
 .d-filters { display: grid; gap: 2px; position: sticky; top: 16px; }
 .d-filters > button, .d-filters > a, .d-folder > button { display: flex; align-items: center; gap: 9px; height: 34px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: var(--up-ink-2); font: inherit; font-size: 13px; font-weight: 500; text-decoration: none; cursor: pointer; text-align: left; width: 100%; min-width: 0; }
-.d-filters > button:hover, .d-filters > a:hover, .d-folder > button:hover { background: var(--up-surface-2); }
-.d-filters .on { background: var(--up-surface-2); color: var(--up-ink); font-weight: 600; }
+.d-filters > button, .d-filters > a, .d-folder > button { color: var(--up-nav-idle); transition: color .15s, background-color .15s, box-shadow .15s; }
+.d-filters > button:hover, .d-filters > a:hover, .d-folder > button:hover { color: var(--up-ink); background: var(--up-nav-hover); }
+.d-filters .on { color: var(--up-ink); background: var(--up-nav-on); box-shadow: var(--up-nav-on-ring); }
 .d-filters small { margin-left: auto; font: 500 11px var(--up-font-mono); color: var(--up-muted); }
 .d-filters-h { display: flex; align-items: center; justify-content: space-between; margin: 14px 0 2px; padding: 0 4px 0 10px; font-size: 11.5px; font-weight: 600; color: var(--up-muted); text-transform: uppercase; letter-spacing: .06em; }
 .d-icon-btn { display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: none; color: var(--up-muted); cursor: pointer; }

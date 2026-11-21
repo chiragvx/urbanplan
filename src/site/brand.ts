@@ -14,3 +14,5 @@ export const SITE_URL_FALLBACK = 'https://urbanplan-seven.vercel.app';
 /** The browser bar and home-screen colour (the dark of the logo). */
 export const THEME_COLOR = '#0c0c0d';
 export const TAGLINE = 'From a plot to a project';
+/** Where the contact page sends people (an email address). Empty: the page says it's on its way. */
+export const CONTACT_EMAIL = '';

@@ -4,9 +4,10 @@
 // Black and white; the animated dither only in the brand (the mark, the closing band). Sections ease in as they
 // scroll into view (not when motion is reduced, and never hidden without JavaScript).
 import { useEffect, useState } from 'preact/hooks';
-import { DASH, href, Icon, Page, PRO } from './ui';
+import { DASH, href, Icon, Page, PRO, StartLink } from './ui';
 import { authReady, session } from '../auth/auth';
 import { Dither } from '../theme/Dither';
+import { FormMorph } from './FormMorph';
 
 const img = (name: string) => href(`site/${name}`);
 const DP = href('pune/dp-report/');
@@ -19,16 +20,6 @@ const STEPS = [
   { key: 'money', label: 'Money', title: 'Is it worth it', body: 'Price, cost and the land deal. Profit, IRR and the cash, month by month.' },
   { key: 'approval', label: 'Approval', title: 'Ready for the authority', body: 'The scrutiny, NOCs, fees and documents. Drawings, IFC and a PreDCR DXF.' },
   { key: 'explore', label: 'Explore', title: 'Every option', body: 'Many schemes at once, a written brief, plots screened side by side.' },
-];
-
-/** What Pro can build: each a template placed on a plot, as Pro draws it (public/site/form-*.webp). */
-const FORMS: { key: string; title: string; body: string }[] = [
-  { key: 'twins', title: 'Sculpted twins', body: 'Two towers that turn as they rise, fins all round.' },
-  { key: 'library', title: 'A public library', body: 'Three floors under one free-curved roof.' },
-  { key: 'taper', title: 'A tapered tower', body: 'Each floor a little smaller, terraces at every edge.' },
-  { key: 'courtyard', title: 'Homes round a court', body: 'A block of flats open to a garden in the middle.' },
-  { key: 'wave', title: 'A wave block', body: 'Shops below, homes above, a facade that flows.' },
-  { key: 'sky', title: 'A sky garden tower', body: 'Gardens carved into the tower, floors stepping in.' },
 ];
 
 const FEATURES: { icon: keyof typeof Icon; title: string; body: string }[] = [
@@ -94,11 +85,11 @@ export function Landing() {
     <Page current="landing">
       <section class="hero">
         <div class="wrap">
-          <a class="pill" href={PRO}><i />UrbanPlan Pro · Beta · Pune and Mumbai</a>
+          <a class="pill" href="#pro"><i />UrbanPlan Pro · Beta · Pune and Mumbai</a>
           <h1>From a plot to a project.</h1>
           <p class="lede">What a plot can hold under the rules, what it’s worth, and what the authority will ask for. Worked out in your browser, as you change it.</p>
           <div class="cta-row">
-            <a class="btn btn-primary btn-lg" href={PRO}>Start a project <Icon.arrow /></a>
+            <StartLink class="btn btn-primary btn-lg">Start a project <Icon.arrow /></StartLink>
             <a class="btn btn-lg" href={REPORT} target="_blank" rel="noopener">See a sample report</a>
           </div>
           <a class="frame hero-shot" href={PRO} aria-label="Open UrbanPlan Pro">
@@ -113,14 +104,7 @@ export function Landing() {
             <h2>Any building, any shape.</h2>
             <p>Pick a template or draw your own. The floors, cores, flats and the rules follow it, from a tower to a public toilet.</p>
           </div>
-          <ul class="forms reveal">
-            {FORMS.map((f) => (
-              <li key={f.key}>
-                <a href={PRO} class="form-shot"><img width={1100} height={680} src={img(`form-${f.key}.webp`)} alt={`${f.title}, drawn in UrbanPlan Pro: ${f.body}`} loading="lazy" /></a>
-                <b>{f.title}</b><span>{f.body}</span>
-              </li>
-            ))}
-          </ul>
+          <FormMorph />
         </div>
       </section>
 
@@ -166,7 +150,7 @@ export function Landing() {
           <h2>Start with your plot.</h2>
           <p>Free in beta. Nothing to install.</p>
           <div class="cta-row">
-            <a class="btn btn-primary btn-lg" href={PRO}>Start a project <Icon.arrow /></a>
+            <StartLink class="btn btn-primary btn-lg">Start a project <Icon.arrow /></StartLink>
             {authReady && (signedIn ? <a class="btn btn-lg" href={DASH}>Your dashboard</a> : <a class="btn btn-lg" href={href('signup/')}>Create an account</a>)}
           </div>
         </div>

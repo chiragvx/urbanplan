@@ -13,6 +13,8 @@ import type { CityMapData } from './maps/types';
 import { DP_FAQ, DATA_FIELDS } from './CityMap';
 import { DP_FAQ_MR } from './CityMapMr';
 import { fsiFaq, fsiMapDesc } from './FsiPages';
+import { TEMPLATES } from './templates/data';
+import { RULE_BOOKS } from './coverage';
 import { AREAS, SUMMARY, DPR_FAQ, DPR_PATH, areaPath, areaMap, areaCard, clsLower, type DprArea } from './dpreport/data';
 
 export { SITE_NAME };
@@ -119,7 +121,7 @@ const STATIC: Route[] = [
         org(url), app(url),
       ],
     },
-    images: ['site/pro-hero.webp', 'site/pro-scheme.webp', 'site/form-twins.webp', 'site/form-library.webp', 'site/form-taper.webp', 'site/pro-design.webp', 'site/pro-money.webp', 'site/pro-approval.webp', 'site/report-cover.webp'],
+    images: ['site/pro-hero.webp', 'site/pro-scheme.webp', 'site/pro-design.webp', 'site/pro-money.webp', 'site/pro-approval.webp', 'site/report-cover.webp'],
   },
   {
     // (the city editor: kept off the website and out of search for now; nothing links here)
@@ -393,8 +395,44 @@ function dpReportRoutes(): Route[] {
   return [hub, report, ...AREAS.map(page)];
 }
 
+// ---------- the platform: templates, rule books, the sample report, about, contact ----------
+
+const PLATFORM_UPDATED = '2026-11-21';
+/** A description cut to what search results show, at a word. */
+const clip = (s: string, n = 155) => (s.length <= n ? s : `${s.slice(0, n - 1).replace(/\s+\S*$/, '')}…`);
+
+function platformRoutes(): Route[] {
+  const page = (path: string, priority: number, title: string, description: string, trail: [string, string][], ld: Ld = () => []): Route => ({
+    path, priority, updated: PLATFORM_UPDATED,
+    head: { title, description: clip(description), image: IMG.studio, imageAlt: ALT.studio, ld: (url) => [...ld(url), crumbs(url, [['Home', ''], ...trail])] },
+  });
+  return [
+    page('templates/', 0.8, 'Building templates: towers, homes, public buildings',
+      `${TEMPLATES.length} building forms to start from in ${SITE_NAME} Pro: towers, courts, slabs, a library, sculpted towers. Each fitted to your plot and checked against the rules.`,
+      [['Templates', 'templates/']]),
+    ...TEMPLATES.map((t) => page(`templates/${t.id}/`, 0.6, `${t.name}: a building template`, `${t.blurb} ${t.body}`,
+      [['Templates', 'templates/'], [t.name, `templates/${t.id}/`]])),
+    page('coverage/', 0.7, 'Coverage: the building rules Pro checks',
+      `${SITE_NAME} Pro works to a rule book, not a city: UDCPR 2020 and DCPR 2034 today, fire per NBC 2016, more to come. What it checks, clause by clause.`,
+      [['Coverage', 'coverage/']]),
+    ...RULE_BOOKS.map((r) => page(`coverage/${r.slug}/`, 0.6, `${r.name}: what ${SITE_NAME} Pro checks`, r.intro,
+      [['Coverage', 'coverage/'], [r.name, `coverage/${r.slug}/`]])),
+    {
+      ...page('sample-report/', 0.6, 'Sample report: a scheme, its numbers and its rules',
+        'The report Pro makes from a scheme: the buildings in 3D, plans to scale, revenue, cost and IRR, and every rule with its clause. Open a sample.',
+        [['Sample report', 'sample-report/']]),
+      images: ['site/report-cover.webp', 'site/report-plans.webp', 'site/report-money.webp', 'site/report.webp'],
+    },
+    page('about/', 0.4, `About ${SITE_NAME}`,
+      `${SITE_NAME} works out what a plot can become: what the rules allow, what it’s worth and what the authority will ask for. Why we build it, and how.`,
+      [['About', 'about/']], (url) => [org(url)]),
+    page('contact/', 0.3, 'Contact', `Questions, a rule book you’d like covered, a bug, or a team that wants to try ${SITE_NAME} Pro.`, [['Contact', 'contact/']]),
+  ];
+}
+
 export const ROUTES: Route[] = [
   ...STATIC,
+  ...platformRoutes(),
   ...GUIDES.map(guideRoute),
   ...(['pune', 'mumbai'] as City[]).map(cityRoute),
   ...mapRoutes(),

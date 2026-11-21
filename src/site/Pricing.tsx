@@ -1,10 +1,10 @@
 // Pricing: free during the beta; Pro and Firm are announced, not sold yet (no prices until they ship).
-import { href, Icon, Page, PRO } from './ui';
+import { href, Icon, Page, StartLink } from './ui';
 import { SITE_NAME } from './brand';
 
 const PLANS = [
   {
-    name: 'Beta', price: '₹0', per: 'while in beta', cta: 'Start a project', to: PRO, feature: true,
+    name: 'Beta', price: '₹0', per: 'while in beta', cta: 'Start a project', to: '', feature: true,
     items: ['Pro: plot to scheme in 3D, any building shape', 'UDCPR and DCPR 2034, checked live', 'Money: cost, profit, IRR, cash flow', 'Drawings, report, IFC and PreDCR DXF', 'Projects saved to your account, shared with your team'],
   },
   {
@@ -40,7 +40,7 @@ export function Pricing() {
                 <h2>{p.name}</h2>
                 <div class="price">{p.price}<small>{p.per}</small></div>
                 <ul>{p.items.map((i) => <li key={i}><Icon.check />{i}</li>)}</ul>
-                <a class="btn btn-ink btn-block" href={p.to}>{p.cta}</a>
+                {p.to ? <a class="btn btn-ink btn-block" href={p.to}>{p.cta}</a> : <StartLink class="btn btn-ink btn-block">{p.cta}</StartLink>}
               </article>
             ))}
           </div>

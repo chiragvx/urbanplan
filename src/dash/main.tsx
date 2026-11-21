@@ -272,7 +272,7 @@ function LocalCard({ data }: { data: Data }) {
   // (the browser's project is usually also the cloud one it last saved to: say so rather than show it twice)
   if (l.cloudId && data.rows?.some((r) => r.id === l.cloudId)) return null;
   return (
-    <a class="d-card" href={D.proUrl()}>
+    <a class="d-card" href={D.proUrl('?local')}>
       <Thumb s={s} />
       <div class="d-card-b"><b>{l.p.name}</b><small><I n="monitor" size={13} />In this browser · {s.city}</small><Facts s={s} /></div>
     </a>

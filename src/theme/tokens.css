@@ -2,7 +2,10 @@
  * set in src/style.css under its own names).
  *
  * Black and white. Paper and ink, greys between, hairline borders. No accent colour: selection and failures invert
- * (paper on ink), and every state also carries an icon or a word, so nothing depends on colour. The old role names
+ * (paper on ink), and every state also carries an icon or a word, so nothing depends on colour. Navigation is the
+ * exception to inverting: the page, step or item you're on is a raised chip (--up-nav-on: a lighter fill, a hairline
+ * ring, a faint shadow; never an accent bar, never bolder type), and the rest are muted (--up-nav-idle) until hovered
+ * (--up-nav-hover). Sidebars, rails, menus and lists of places to go all use it. The old role names
  * (--up-blue, --up-orange, --up-ok…) stay so existing styles keep working; they all read as ink now. Animated dither
  * (ditherEngine.ts) is the one texture, kept for the brand mark and for things loading or being worked out.
  * Two colours stay, for data only, borrowed from the Development Plan sheets: red for a DP road line ("planned") and
@@ -38,6 +41,11 @@
   --up-warn: var(--up-ink-2);
   --up-danger: var(--up-ink);
   --up-focus: 0 0 0 2px var(--up-paper), 0 0 0 4px var(--up-ink);
+  /* navigation: where you are is a raised chip; the rest muted until hovered (see the note at the top) */
+  --up-nav-idle: var(--up-muted);
+  --up-nav-hover: color-mix(in srgb, var(--up-surface-2) 55%, transparent);
+  --up-nav-on: var(--up-surface-2);
+  --up-nav-on-ring: inset 0 0 0 1px var(--up-line-strong), 0 1px 2px rgba(12, 12, 13, 0.06);
 
   /* type */
   --up-font-display: "Geist", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -98,6 +106,7 @@
   --up-warn: var(--up-ink-2);
   --up-danger: var(--up-ink);
   --up-focus: 0 0 0 2px var(--up-paper), 0 0 0 4px var(--up-ink);
+  --up-nav-on-ring: inset 0 0 0 1px var(--up-line-strong), 0 1px 2px rgba(0, 0, 0, 0.25);
   --up-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
   --up-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.06);
   color-scheme: dark;

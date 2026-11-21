@@ -36,7 +36,8 @@ import { ApproveStep, ExploreStep, MoneyStep, PdfButton, STEPS, type Step, type 
 import { SchemeStep, SiteStep2 } from './sitePanels';
 import { DesignSystemStep } from './designStep';
 import { groundAt } from './terrain';
-import { CanvasEdit, SELECT, type Picked as EditPicked, type Tool } from './edit';
+import { CanvasEdit, own, placeTemplate, SELECT, type Picked as EditPicked, type Tool } from './edit';
+import { pole } from './form/curve';
 import { Btn, cr, Dialog, Icon, Menu, nf, Num, pct, Range, Seg, Select, sqft, TooltipLayer } from './ui';
 
 const KEY = 'urbanplan:pro:project', REF = 'urbanplan:pro:cloud', SEEN = 'urbanplan:pro:seen';
@@ -95,7 +96,7 @@ function App() {
     if (!m) return;
     decodeShare(m[1]).then((x) => { setP(x); setReadOnly(true); setDialog(null); }, () => toast('That share link is damaged.'));
   }, []);
-  const keepCopy = () => { store.set(KEY, p); setReadOnly(false); history.replaceState(null, '', location.pathname); toast('This scheme is now your own copy.'); };
+  const keepCopy = () => { store.set(KEY, p); setReadOnly(false); history.replaceState(null, '', '?local'); toast('This scheme is now your own copy.'); };
 
   // ---------- everything worked out from it ----------
   const e = useMemo(() => evaluate(p), [JSON.stringify(p)]);
@@ -132,6 +133,14 @@ function App() {
     // (a city page's link names its city: Pune's rules, or Mumbai suburbs')
     const asked = new URLSearchParams(location.search).get('city');
     if (asked === 'pune') city = 'pune'; else if (asked === 'mumbai') city = 'mumbai-suburbs';
+    // (a template from the website: on the sample plot, in the middle of what may be built, ready to shape)
+    if (start.startsWith('template:')) {
+      const n: ProProject = { ...DEFAULT_PROJECT, city }, e0 = evaluate(n), [x, z] = pole([e0.r.footprint]);
+      const bs = placeTemplate(start.slice(9), [x, z], e0);
+      fresh(bs.length ? { ...n, scheme: { ...own(n, e0), buildings: bs } } : n);
+      go('build');
+      return;
+    }
     fresh({ ...DEFAULT_PROJECT, city });
     if (start === 'blank') setDialog('welcome');
     if (start === 'survey' || start === 'import') { try { sessionStorage.setItem('urbanplan:pro:way', start); } catch { /* */ } go('site'); }
@@ -143,7 +152,7 @@ function App() {
   }, [user?.id]);
   const viewer = ref?.role === 'viewer';
   const roRef = useRef(false); roRef.current = readOnly || viewer;
-  const fresh = (n: ProProject = { ...DEFAULT_PROJECT }) => { replace(n); setRef(null); lastSaved.current = ''; setDialog(null); history.replaceState(null, '', location.pathname); };
+  const fresh = (n: ProProject = { ...DEFAULT_PROJECT }) => { replace(n); setRef(null); lastSaved.current = ''; setDialog(null); history.replaceState(null, '', '?local'); };
   useEffect(() => {
     if (!user || readOnly || viewer) { setCloud({ s: 'local' }); return; }
     const text = toText(p);

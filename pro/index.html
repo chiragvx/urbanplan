@@ -10,6 +10,14 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@500;600&display=swap" rel="stylesheet" />
     <script>
+      // Pro opens from the dashboard: a bare /pro/ goes there first, before anything loads. A project to open
+      // (?p=, ?new=, ?local, a share link's #s=) comes straight in, and so does a reload of Pro itself.
+      try {
+        const nav = performance.getEntriesByType('navigation')[0];
+        if (!location.search && !location.hash && !(nav && nav.type === 'reload')) location.replace(new URL('../dashboard/', location.href).href);
+      } catch (e) { /* stay in Pro */ }
+    </script>
+    <script>
       // theme before first paint: the same setting as the site and the editor
       try {
         const s = JSON.parse(localStorage.getItem('pune-remix:settings') || '{}');
