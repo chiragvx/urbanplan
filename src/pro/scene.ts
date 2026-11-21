@@ -12,13 +12,16 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { Pipeline } from './render/pipeline';
 import { SkyLight, sunColour } from './render/sky';
 import { fitShadow } from './render/shadows';
-import { albedo, Materials } from './render/pbr';
-import { detailOf } from './render/textures';
+import { albedo, BEVEL, CHAMFER_BOX, Materials } from './render/pbr';
+import { detailOf, loadScans } from './render/textures';
 import { FrameWatch, guessTier, saveTier, savedTier, SPEC, type Tier } from './render/quality';
 import { cutFace, flat, GeoBuf, prism, type Hole } from './render/geo';
+import { buildingOutline, crossings, endExt } from './render/outline';
+import { inside as inMP, union as unionMP, fromFlat as mpOf, offset as offsetMP } from '../doc/ground';
 import { GLASS, litShare, withRooms } from './render/glass';
 import { carMeshes, gridIn, markings, peopleMeshes, treeMeshes, type Tree } from './render/entourage';
 import { pathSky, pixelsToPng } from './render/still';
+import { neighbourMesh, neighbours } from './render/context';
 import { PerfOverlay, type BenchResult } from './render/perf';
 import type { Material as LibMaterial } from './materials';
 import type { PlotReport } from '../doc/plot';
@@ -48,6 +51,8 @@ export interface ViewData {
   rooms?: RoomsLike[][]; roomColor?: Record<string, string>;
   /** obstructions and no-build zones, the plot's levels, where north is, the building picked */
   features?: SiteFeature[]; levels?: Levels; north?: number; sel?: string | null;
+  /** where the plot is ([lat, lon] of its middle) and its authority: the neighbours drawn round it (./render/context.ts) */
+  at?: [number, number] | null; city?: string;
   /** the formed buildings' layouts by building id (Evaluated.forms); unset, worked out here from each one's form */
   forms?: Record<string, FormLayout>;
 }
@@ -79,6 +84,41 @@ function jaaliTexture(): THREE.Texture | null {
   jaaliTex = new THREE.CanvasTexture(c);
   jaaliTex.wrapS = jaaliTex.wrapT = THREE.RepeatWrapping; jaaliTex.repeat.set(4, 4);
   return jaaliTex;
+}
+
+/** an instanced mesh as one plain geometry: each instance placed, its colour (and the geometry's own) baked into vertex
+ *  colours: for the path tracer, which reads plain meshes */
+function bakeInstances(im: THREE.InstancedMesh): THREE.BufferGeometry | null {
+  const base = (im.geometry.index ? im.geometry.toNonIndexed() : im.geometry.clone());
+  for (const k of Object.keys(base.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'color') base.deleteAttribute(k);
+  if (!base.attributes.normal) base.computeVertexNormals();
+  const n = base.attributes.position.count, own = base.attributes.color as THREE.BufferAttribute | undefined;
+  const out: THREE.BufferGeometry[] = [], m = new THREE.Matrix4(), c = new THREE.Color();
+  im.updateMatrixWorld();
+  for (let i = 0; i < im.count; i++) {
+    const g = base.clone();
+    im.getMatrixAt(i, m); g.applyMatrix4(m.premultiply(im.matrixWorld));
+    if (im.instanceColor) im.getColorAt(i, c); else c.setRGB(1, 1, 1);
+    const col = new Float32Array(n * 3);
+    for (let v = 0; v < n; v++) { col[v * 3] = c.r * (own ? own.getX(v) : 1); col[v * 3 + 1] = c.g * (own ? own.getY(v) : 1); col[v * 3 + 2] = c.b * (own ? own.getZ(v) : 1); }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    out.push(g);
+  }
+  base.dispose();
+  const merged = out.length ? mergeGeometries(out) : null;
+  out.forEach((g) => g.dispose());
+  return merged;
+}
+/** a baked geometry split by colour, one plain geometry per colour (the path tracer ignores vertex colours) */
+function splitByColour(g: THREE.BufferGeometry): { colour: THREE.Color; geo: THREE.BufferGeometry }[] {
+  const P = g.attributes.position as THREE.BufferAttribute, N = g.attributes.normal as THREE.BufferAttribute, C = g.attributes.color as THREE.BufferAttribute;
+  const groups = new Map<string, { colour: THREE.Color; p: number[]; n: number[] }>();
+  for (let t = 0; t < P.count; t += 3) {
+    const col = new THREE.Color(C.getX(t), C.getY(t), C.getZ(t)), k = col.getHexString();
+    let gr = groups.get(k); if (!gr) { gr = { colour: col, p: [], n: [] }; groups.set(k, gr); }
+    for (let v = t; v < t + 3; v++) { gr.p.push(P.getX(v), P.getY(v), P.getZ(v)); gr.n.push(N.getX(v), N.getY(v), N.getZ(v)); }
+  }
+  return [...groups.values()].map((gr) => { const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(gr.p, 3)); geo.setAttribute('normal', new THREE.Float32BufferAttribute(gr.n, 3)); return { colour: gr.colour, geo }; });
 }
 
 class Boxes {
@@ -154,6 +194,9 @@ export class ProView {
   private slabLod: { centre: THREE.Vector3; radius: number; detail: THREE.Object3D[] }[] = [];
   private sunDir = new THREE.Vector3(-0.45, 0.75, -0.35).normalize();
   private shadowBox = new THREE.Box3();
+  /** the neighbouring buildings (kept across rebuilds; made again when the plot moves) */
+  private ctx = new THREE.Group();
+  private ctxKey = '';
 
   constructor(public canvas: HTMLCanvasElement) {
     // (the canvas keeps MSAA for the draft tier and the wireframe; the pipeline does its own anti-aliasing)
@@ -172,6 +215,7 @@ export class ProView {
     this.skyL = new SkyLight(this.renderer);
     this.scene.add(this.skyL.sky);
     this.lib.tex = SPEC[this.tier].tex;
+    BEVEL.value = this.tier === 'high' ? 0.025 : 0;
     // (the formed buildings' walls, metal and glass from the same library as the straight ones)
     setMaterialResolver((kind, colour, id) => kind === 'solid' ? this.lib.surface(id, colour) : kind === 'glass' ? this.glassOf(colour) : kind === 'spandrel' ? this.lib.glass(colour, { roughness: 0.18, color: albedo(colour).multiplyScalar(0.55) }) : kind === 'metal' ? this.lib.surface(undefined, colour, { roughness: 0.4, metalness: 0.75 }) : null);
     this.sun.position.set(-120, 180, -90);
@@ -180,7 +224,7 @@ export class ProView {
     this.sun.shadow.radius = 2.5;
     this.sun.shadow.bias = -0.0001;
     this.sun.shadow.normalBias = 0.04;
-    this.scene.add(this.sun, this.sun.target, this.root);
+    this.scene.add(this.sun, this.sun.target, this.root, this.ctx);
     // (the ground: a disc fading into the fog, a fine earthy grain in metres)
     const gg = new THREE.CircleGeometry(900, 72), gp = gg.attributes.position as THREE.BufferAttribute, guv = new Float32Array(gp.count * 2);
     for (let i = 0; i < gp.count; i++) { guv[i * 2] = gp.getX(i); guv[i * 2 + 1] = -gp.getY(i); }
@@ -202,6 +246,8 @@ export class ProView {
     if (typeof location !== 'undefined' && /[?&]perf\b/.test(location.search) && canvas.parentElement) this.perf = new PerfOverlay(canvas.parentElement);
     this.resize();
     this.setSun(null);
+    // (the scanned textures, when the texture tool has fetched them: the materials made again with them)
+    void loadScans(import.meta.env.BASE_URL, this.renderer).then((ok) => { if (ok && this.lib.tex) { this.lib.reset(); for (const e of this.formed.values()) disposeBuilt(e.built); this.formed.clear(); if (this.last) this.set(this.last); } });
   }
 
   /** the quality tier: textures, shadows, the pipeline (kept in this browser) */
@@ -211,6 +257,7 @@ export class ProView {
     this.renderer.setPixelRatio(Math.min(SPEC[t].dpr, window.devicePixelRatio || 1));
     this.pipe.setTier(t);
     this.lib.tex = SPEC[t].tex; this.lib.reset();
+    BEVEL.value = t === 'high' ? 0.025 : 0;
     GLASS.uInterior.value = SPEC[t].interiors ? 1 : 0;
     // (the materials and the formed buildings made again at the new detail)
     for (const e of this.formed.values()) disposeBuilt(e.built);
@@ -378,6 +425,7 @@ export class ProView {
     this.root.visible = !w; this.ground.visible = !w; this.wire.group.visible = w;
     // (after dark the Preetham sky gives way to a night blue: below the horizon it turns brown)
     this.skyL.sky.visible = !w && this.night < 0.6;
+    this.ctx.visible = !w;
     this.scene.background = w ? this.paper : this.night < 0.6 ? null : this.nightSky;
     this.scene.fog = w ? null : this.fog;
     this.scene.environment = w ? null : this.skyL.env;
@@ -488,6 +536,18 @@ export class ProView {
         if (mm && (mm as THREE.MeshPhysicalMaterial).isMeshPhysicalMaterial && mm.userData.rooms) { const g = mm as THREE.MeshPhysicalMaterial; swapped.push([g, g.transmission]); g.transmission = 0.85; g.thickness = 0.006; }
         if (mm && (mm as THREE.MeshBasicMaterial).isMeshBasicMaterial && x.visible && x !== this.ground) { hidden.push(x); x.visible = false; }
       });
+      // (instanced parts with their own colours, the trees, cars and people, baked into plain meshes the tracer reads)
+      const baked: THREE.Mesh[] = [];
+      this.root.traverse((x) => {
+        const im = x as THREE.InstancedMesh;
+        if (!im.isInstancedMesh || !im.visible || !(im.instanceColor || (im.material as THREE.MeshStandardMaterial).vertexColors)) return;
+        const g = bakeInstances(im);
+        if (!g) return;
+        const src = im.material as THREE.MeshStandardMaterial;
+        for (const part of splitByColour(g)) baked.push(new THREE.Mesh(part.geo, new THREE.MeshStandardMaterial({ color: part.colour.multiply(src.color ?? new THREE.Color(1, 1, 1)), roughness: src.roughness ?? 0.8, metalness: src.metalness ?? 0 })));
+        g.dispose(); hidden.push(im); im.visible = false;
+      });
+      for (const m of baked) this.scene.add(m);
       const size = this.renderer.getSize(new THREE.Vector2()), ratio = this.renderer.getPixelRatio();
       this.renderer.setPixelRatio(1); this.renderer.setSize(o.width, o.height, false);
       const pt = new WebGLPathTracer(this.renderer);
@@ -509,6 +569,7 @@ export class ProView {
         pt.dispose();
         for (const [g, t] of swapped) g.transmission = t;
         for (const x of hidden) x.visible = true;
+        for (const m of baked) { this.scene.remove(m); m.geometry.dispose(); (m.material as THREE.Material).dispose(); }
         this.scene.environment = envKeep; this.scene.background = bgKeep; this.scene.fog = fogKeep; this.skyL.sky.visible = this.night < 0.6; sky.dispose();
         this.renderer.setPixelRatio(ratio); this.renderer.setSize(size.x, size.y, false);
         this.raf = 0; this.resize();
@@ -539,7 +600,7 @@ export class ProView {
   }
 
   clear() {
-    this.root.traverse((o) => { const m = o as THREE.Mesh; if (m.geometry && m.geometry !== box && m.geometry !== crownGeo && m.geometry !== trunkGeo) m.geometry.dispose(); });
+    this.root.traverse((o) => { const m = o as THREE.Mesh; if (m.geometry && m.geometry !== box && m.geometry !== CHAMFER_BOX && m.geometry !== crownGeo && m.geometry !== trunkGeo) m.geometry.dispose(); });
     this.root.clear();
     this.pickables = [];
   }
@@ -647,7 +708,9 @@ export class ProView {
       const detail: THREE.Object3D[] = [];
       for (const [B, m, cast] of [[bands, M.accent, true], [fins, M.accent, true], [frames, M.frame, true], [panes, M.glass, false], [slabs, M.slab, true], [rails, M.rail, false], [cols, M.base, true], [parts, M.partition, true], [doors, M.door, true], [parapets, M.wall, true], [signs, M.sign, true], [jaalis, M.jaali, false], [lamps, M.lamp, false], [glows, M.glow, false], [greens, M.green, true], [sills, M.sill, true], [posts, M.post, false], [solids, M.wall, true]] as [Boxes, THREE.Material, boolean][]) {
         // (each pane a room of its own: a seed per instance for the lit rooms and the interiors)
-        const im = B === panes ? B.mesh(m, cast, box.clone()) : B.mesh(m, cast);
+        // (the members in the facade's materials take the chamfered box on the high tier: ./render/pbr.ts)
+        const chamfer = BEVEL.value > 0 && (B === bands || B === fins || B === parapets || B === sills || B === slabs || B === cols || B === solids);
+        const im = B === panes ? B.mesh(m, cast, box.clone()) : B.mesh(m, cast, chamfer ? CHAMFER_BOX : box);
         if (!im) continue;
         if (B === panes) { const n = im.count, a = new Float32Array(n); for (let i = 0; i < n; i++) { const h = Math.sin((i + 1) * 12.9898 + this.slabLod.length * 78.233) * 43758.5453; a[i] = h - Math.floor(h); } im.geometry.setAttribute('aLit', new THREE.InstancedBufferAttribute(a, 1)); }
         add(im);
@@ -694,11 +757,14 @@ export class ProView {
         panes.add(cx + e.nx * 0.04, yb + 0.05 + gh / 2, cz + e.nz * 0.04, e.ux, e.uz, w - 0.42, gh - 0.04, 0.04);
         if (sign) signs.add(cx + e.nx * 0.12, yb + h - 0.45, cz + e.nz * 0.12, e.ux, e.uz, w - 0.5, 0.6, 0.12);
       }
-      for (let k = 0; k <= n; k++) { const t = -e.L / 2 + w * k; cols.add(e.x + e.ux * t + e.nx * 0.1, yb + h / 2, e.z + e.uz * t + e.nz * 0.1, e.ux, e.uz, 0.3, h, 0.3); }
+      for (let k = 0; k <= n; k++) { const t = -e.L / 2 + Math.max(0.15, Math.min(e.L - 0.15, w * k)); cols.add(e.x + e.ux * t - e.nx * 0.05, yb + h / 2, e.z + e.uz * t - e.nz * 0.05, e.ux, e.uz, 0.3, h, 0.3); }
     };
-    if (v.shops && under) for (const st of v.shops.strips) {
-      mesh(prism(st.ring, 0, y0 - 0.02), M.shop);
-      for (const e of shopFronts(st.ring)) {
+    // (each building's shop strips merged, so the faces between strips aren't glazed inside the building)
+    const shopRings = new Map<number, number[][]>();
+    if (v.shops) for (const st of v.shops.strips) { const m2 = unionMP(...[...(shopRings.has(st.b) ? [] : []), ...v.shops.strips.filter((x) => x.b === st.b).map((x) => mpOf(x.ring))]); shopRings.set(st.b, m2.map((p) => p[0].flatMap((q) => [q[0], q[1]]))); }
+    if (v.shops && under) for (const st of v.shops.strips) mesh(prism(st.ring, 0, y0 - 0.02), M.shop);
+    if (v.shops && under) for (const ring of [...shopRings.values()].flat()) {
+      for (const e of shopFronts(ring)) {
         glazeRun(e, 0, y0, true);
         // a canopy over the shopfronts facing the road
         if (e.nx * -F.vx + e.nz * -F.vz > 0.5) slabs.add(e.x + e.nx * 0.9, y0 - 0.1, e.z + e.nz * 0.9, e.ux, e.uz, e.L, 0.14, 1.8);
@@ -778,7 +844,8 @@ export class ProView {
     for (const im of treeMeshes(trees, this.tier !== 'draft', this.lib.other('plants', () => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 })))) add(im);
     // road markings: dashes down the middle, edge lines on the public roads
     for (const ln of [...d.ground.drive.map((pts) => ({ pts, w: d.ground.driveW, edges: false })), ...d.ground.roads.map((x) => ({ pts: x.pts, w: x.w, edges: false }))]) marks.push(ln);
-    const mk = markings(marks);
+    // (internal markings only where there is road: a road a building has grown over is cut back, and so are its lines)
+    const mk = markings(marks, (x, z) => !inMP(d.ground.map.road, x, z) ? v.roads.some((rd) => { const [x0, z0, x1, z1] = rd.pts, L = Math.hypot(x1 - x0, z1 - z0) || 1; return Math.abs(((x - x0) * (z1 - z0) - (z - z0) * (x1 - x0)) / L) < rd.today / 2; }) : true);
     if (mk) { const mm = mesh(mk, mat('#f1efe8', { roughness: 0.7, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), false); mm.renderOrder = 1; }
     flush();
     const entrances: [number, number, number, number][] = [];
@@ -826,11 +893,13 @@ export class ProView {
       const yBase = Math.min(top, y0 + Z.base * fh), yTop = Math.max(yBase, Math.min(top, y0 + (all - Z.top) * fh));
       const faces = facadeBays(b.quads, comp.bay).filter((f) => !f.inner);
       // stilt / podium: columns round the edge, the cores carried down
+      const OL = buildingOutline(b.quads);
+      // (the stilt's columns: round the outline, inside it, turned with each face; one at each corner)
+      if (under) for (const e of OL.edges) {
+        const n = Math.max(1, Math.round(e.L / 6));
+        for (let k = 0; k < n; k++) { const t = 0.25 + ((e.L - 0.5) * k) / n; cols.add(e.ax + e.ux * t - e.nx * 0.25, y0 / 2, e.az + e.uz * t - e.nz * 0.25, e.ux, e.uz, 0.5, y0, 0.5); }
+      }
       for (const q of b.quads) {
-        if (under) for (let i = 0; i < q.length; i += 2) {
-          const j = (i + 2) % q.length, L = Math.hypot(q[j] - q[i], q[j + 1] - q[i + 1]), n = Math.max(1, Math.round(L / 6));
-          for (let k = 0; k < n; k++) cols.add(q[i] + ((q[j] - q[i]) * k) / n, y0 / 2, q[i + 1] + ((q[j + 1] - q[i + 1]) * k) / n, 1, 0, 0.5, y0, 0.5);
-        }
         if (v.xray !== null) {
           if (yBase > y0) mesh(prism(q, y0, yBase), toneM(comp.base.tone));
           if (yTop > yBase) mesh(prism(q, yBase, yTop), M.wall);
@@ -843,7 +912,7 @@ export class ProView {
       // (how far the glass sits back in the wall: by the wall's material)
       const wallCat = materialOf(finishOf(ds_).wall).category;
       const recess = wallCat === 'brick' || wallCat === 'stone' ? 0.12 : wallCat === 'cladding' ? 0.05 : wallCat === 'glass' ? 0.0 : 0.1;
-      const facesAll = facadeBays(b.quads, comp.bay).filter((f) => !f.inner);
+      const facesAll = faces;
       if (v.xray === null && top > y0) {
         const zb = { base: new GeoBuf(), mid: new GeoBuf(), top: new GeoBuf() };
         for (const f of facesAll) {
@@ -852,7 +921,7 @@ export class ProView {
           for (let k = 0; k < all; k++) {
             const fy = y0 + k * fh, shopHere = !!v.shops && k < v.shops.upperOf[bi], gone = shopHere ? v.shops!.removed.get(bi) : undefined;
             const holes: Hole[] = on.filter((x) => !gone?.has(x.o.unit)).map(({ o, s: sAt }) => ({ s0: sAt - o.w / 2, s1: sAt + o.w / 2, y0: fy + o.sill, y1: Math.min(fy + fh - 0.05, fy + o.sill + o.h) }));
-            if (corner && !shopHere && k >= Z.base) for (const sAt of [f.bw / 2, f.L - f.bw / 2]) holes.push({ s0: sAt - (f.bw - 0.2) / 2, s1: sAt + (f.bw - 0.2) / 2, y0: fy + 0.15, y1: fy + fh - 0.3 });
+            if (corner && !shopHere && k >= Z.base) for (const sAt of [...(f.startConvex ? [f.bw / 2] : []), ...(f.endConvex ? [f.L - f.bw / 2] : [])]) holes.push({ s0: sAt - (f.bw - 0.2) / 2, s1: sAt + (f.bw - 0.2) / 2, y0: fy + 0.15, y1: fy + fh - 0.3 });
             cutFace(k < Z.base ? zb.base : k >= all - Z.top ? zb.top : zb.mid, f, fy, fy + fh, holes, recess);
           }
         }
@@ -864,8 +933,9 @@ export class ProView {
       // a string course over the base and under the top
       for (const f of faces) {
         const [mx, mz] = along(f, f.L / 2, 0);
-        if (Z.base && yBase < top) bands.add(mx, yBase, mz, f.ux, f.uz, f.L + 0.4, 0.45, 0.4);
-        if (Z.top && yTop < top) bands.add(mx, yTop, mz, f.ux, f.uz, f.L + 0.3, 0.3, 0.3);
+        void mx; void mz;
+        if (Z.base && yBase < top) { const [e0, e1] = endExt(f, 0.2), [x, z] = along(f, (f.L + e1 - e0) / 2, 0); bands.add(x, yBase, z, f.ux, f.uz, f.L + e0 + e1, 0.45, 0.4); }
+        if (Z.top && yTop < top) { const [e0, e1] = endExt(f, 0.15), [x, z] = along(f, (f.L + e1 - e0) / 2, 0); bands.add(x, yTop, z, f.ux, f.uz, f.L + e0 + e1, 0.3, 0.3); }
       }
       // the bay lines as piers through the middle (not through a window that spans two bays)
       if (comp.piers && comp.rhythm !== 'free' && yTop > yBase) for (const f of faces) for (let k = 1; k < f.n; k++) {
@@ -877,6 +947,7 @@ export class ProView {
       }
       // the corners: a pier in the accent, or glass wrapping round (the end bays are kept free of windows for it)
       if (comp.corner === 'accent' && top > y0) for (const f of faces) {
+        if (!f.endConvex) continue;
         const [x, z] = along(f, f.L, 0);
         fins.add(x - f.ux * 0.3 - f.nx * 0.3, (y0 + top) / 2, z - f.uz * 0.3 - f.nz * 0.3, f.ux, f.uz, 0.7, top - y0, 0.7);
       }
@@ -898,7 +969,9 @@ export class ProView {
         frames.add(gx, dh / 2 + 0.05, gz, front.ux, front.uz, 3.4, dh + 0.1, 0.12);
         panes.add(gx + front.nx * 0.05, dh / 2 + 0.05, gz + front.nz * 0.05, front.ux, front.uz, 3.2, dh - 0.06, 0.04);
         signAt = { x, z, y: he + 0.12, out: 2.95 };
-        if (comp.entrance === 'canopy') { const [cx2, cz2] = at(1.5); slabs.add(cx2, he, cz2, front.ux, front.uz, 5.4, 0.22, 3.0); }
+        // (a portal or canopy that would stand on a road becomes a flush canopy)
+        const onRoad = (o2: number) => { const [qx, qz] = at(o2); return inMP(d.ground.map.road, qx, qz) || inMP(d.ground.map.fire, qx, qz); };
+        if (comp.entrance === 'canopy' || onRoad(2.6)) { const dep2 = onRoad(2.6) ? 1.2 : 3.0, [cx2, cz2] = at(dep2 / 2); slabs.add(cx2, he, cz2, front.ux, front.uz, 5.4, 0.22, dep2); if (dep2 < 3) signAt = { x, z, y: he + 0.12, out: dep2 - 0.05 }; }
         else {
           // a portal: a frame in the accent standing out from the face, as tall as the base
           const hp = Math.max(he + 0.6, Math.min(7.5, y0 + Z.base * fh)), dep = 2.4;
@@ -942,21 +1015,21 @@ export class ProView {
           for (const yl of ys) { const [x, z] = along(f, f.L / 2, 0.16); lamps.add(x, yl, z, f.ux, f.uz, f.L, 0.05, 0.05); }
         }
       }
-      for (const c of b.cores) mesh(prism(c, 0, (v.xray === null ? y0 + all * fh + 2.4 : top + fh)), M.core);
+      // (the cores: inside the walls they'd only fight the facade for depth, so drawn where they show: down the stilt and up
+      // past the roof as the lift room; X-ray shows them whole)
+      for (const c of b.cores) { if (v.xray !== null) mesh(prism(c, 0, top + fh), M.core); else { if (y0 > 0.05) mesh(prism(c, 0, y0, false), M.core); mesh(prism(c, y0 + all * fh - 0.05, y0 + all * fh + 2.4), M.core); } }
       // floors: bands on the slab edges, the openings
       const floorsShown = v.xray === null ? all : show;
       for (let f = 0; f < floorsShown; f++) {
         const fy = y0 + f * fh;
-        if (ds_.facade.bands) for (const q of b.quads) for (let i = 0; i < q.length; i += 2) {
-          const j = (i + 2) % q.length, L = Math.hypot(q[j] - q[i], q[j + 1] - q[i + 1]);
-          if (L < 0.5) continue;
-          const ux = (q[j] - q[i]) / L, uz = (q[j + 1] - q[i + 1]) / L;
-          bands.add((q[i] + q[j]) / 2, fy, (q[i + 1] + q[j + 1]) / 2, ux, uz, L + 0.24, 0.22, 0.24);
+        if (ds_.facade.bands) for (const e of OL.edges) {
+          const [e0, e1] = endExt(e, 0.12), t = (e.L + e1 - e0) / 2;
+          bands.add(e.ax + e.ux * t, fy, e.az + e.uz * t, e.ux, e.uz, e.L + e0 + e1, 0.22, 0.24);
         }
         const cut = v.xray !== null && f === show - 1;
         const shopHere = !!v.shops && f < v.shops.upperOf[bi], gone = shopHere ? v.shops!.removed.get(bi) : undefined;
-        if (shopHere && !cut) for (const st of v.shops!.strips) if (st.b === bi) for (const e of shopFronts(st.ring)) glazeRun(e, fy, fh, false);
-        if (!cut && !shopHere && f >= Z.base) for (const c of corners) for (const s of [c.bw / 2, c.L - c.bw / 2]) {
+        if (shopHere && !cut) for (const ring of shopRings.get(bi) ?? []) for (const e of shopFronts(ring)) glazeRun(e, fy, fh, false);
+        if (!cut && !shopHere && f >= Z.base) for (const c of corners) for (const s of [...(c.startConvex ? [c.bw / 2] : []), ...(c.endConvex ? [c.L - c.bw / 2] : [])]) {
           const gw = c.bw - 0.2, gh = fh - 0.45, [x, z] = along(c, s, -Math.max(0, recess - 0.04));
           for (const sg2 of [-1, 1]) frames.add(x + c.ux * sg2 * (gw / 2 - 0.03), fy + 0.15 + gh / 2, z + c.uz * sg2 * (gw / 2 - 0.03), c.ux, c.uz, 0.06, gh, 0.07);
           frames.add(x, fy + 0.15 + gh - 0.03, z, c.ux, c.uz, gw, 0.06, 0.07); frames.add(x, fy + 0.18, z, c.ux, c.uz, gw, 0.06, 0.07);
@@ -967,6 +1040,11 @@ export class ProView {
           if (!o.outside && !cut) continue;
           const s = o.tag === 'SD' || o.tag === 'D1' ? ds_.doors[o.tag] : ds_.windows[o.tag];
           const cy = fy + o.sill + o.h / 2;
+          // (the face it's on, and how much of a span centred on it fits within the face: fins, reveals, chhajjas and
+          // balconies stop at the face's ends instead of passing a corner)
+          const fo = o.outside ? faces.find((ff) => Math.abs((o.x - ff.ax) * ff.nx + (o.z - ff.az) * ff.nz) < 0.15 && (o.x - ff.ax) * ff.ux + (o.z - ff.az) * ff.uz > -0.1 && (o.x - ff.ax) * ff.ux + (o.z - ff.az) * ff.uz < ff.L + 0.1) : undefined;
+          const so = fo ? (o.x - fo.ax) * fo.ux + (o.z - fo.az) * fo.uz : 0, sgnU = fo ? Math.sign(o.ux * fo.ux + o.uz * fo.uz) || 1 : 1;
+          const fit = (w: number): [number, number] => { if (!fo) return [0, w]; const a = Math.max(0.05, so - w / 2), c = Math.min(fo.L - 0.05, so + w / 2); return [((a + c) / 2 - so) * sgnU, Math.max(0, c - a)]; };
           const meta = { o, floor: f + 1, label: `${o.tag} · ${s.label}` };
           // (the cut floor is drawn as a plan: walls to 1.5 m, the glass only below that)
           if (cut && o.outside) { const t = Math.min(CUT, o.sill + o.h); if (t > o.sill + 0.05) panes.add(o.x, fy + (o.sill + t) / 2, o.z, o.ux, o.uz, o.w, t - o.sill, 0.04, meta); continue; }
@@ -989,7 +1067,7 @@ export class ProView {
           // a deep reveal: the surround stands out from the wall (not round a balcony's door, which has the balcony)
           const rv = comp.reveal;
           if (rv > 0.01 && !(o.tag === 'SD' && ds_.balcony.kind !== 'none' && ds_.balcony.kind !== 'french')) {
-            const hx = o.x + o.nx * rv / 2, hz = o.z + o.nz * rv / 2, sw = o.w + 0.36;
+            const [dsh, sw] = fit(o.w + 0.36), hx = o.x + o.nx * rv / 2 + o.ux * dsh, hz = o.z + o.nz * rv / 2 + o.uz * dsh;
             parapets.add(hx, cy + o.h / 2 + 0.08, hz, o.ux, o.uz, sw, 0.16, rv);
             parapets.add(hx, cy - o.h / 2 - 0.08, hz, o.ux, o.uz, sw, 0.16, rv);
             for (const sgn of [-1, 1]) parapets.add(hx + o.ux * sgn * (o.w / 2 + 0.09), cy, hz + o.uz * sgn * (o.w / 2 + 0.09), o.ux, o.uz, 0.18, o.h, rv);
@@ -998,54 +1076,73 @@ export class ProView {
           // the face's sun asks; a jaali in front of the ventilators (and the smaller windows)
           const shaded = o.tag === 'SD' && (ds_.balcony.kind === 'cantilever' || ds_.balcony.kind === 'recessed');
           if (cl.chhajja > 0.05 && !shaded) {
-            const dep = chhajjaOn(cl, bearing(o.nx, o.nz)), y = cy + o.h / 2 + (rv > 0.01 ? 0.24 : 0.12);
-            parapets.add(o.x + o.nx * dep / 2, y, o.z + o.nz * dep / 2, o.ux, o.uz, o.w + 0.6, 0.1, dep);
-            parapets.add(o.x + o.nx * (dep - 0.03), y - 0.07, o.z + o.nz * (dep - 0.03), o.ux, o.uz, o.w + 0.6, 0.04, 0.03);
+            const dep = chhajjaOn(cl, bearing(o.nx, o.nz)), y = cy + o.h / 2 + (rv > 0.01 ? 0.24 : 0.12), [csh, cw] = fit(o.w + 0.6);
+            if (cw > 0.1) {
+              parapets.add(o.x + o.nx * dep / 2 + o.ux * csh, y, o.z + o.nz * dep / 2 + o.uz * csh, o.ux, o.uz, cw, 0.1, dep);
+              parapets.add(o.x + o.nx * (dep - 0.03) + o.ux * csh, y - 0.07, o.z + o.nz * (dep - 0.03) + o.uz * csh, o.ux, o.uz, cw, 0.04, 0.03);
+            }
           }
           if (o.tag === 'V1' ? cl.jaali !== 'none' : o.tag === 'W2' && cl.jaali === 'windows') jaalis.add(o.x + o.nx * 0.2, cy, o.z + o.nz * 0.2, o.ux, o.uz, o.w + 0.2, o.h + 0.2, 0.05);
           if (ds_.facade.fins && (o.tag === 'W1' || o.tag === 'SD')) for (const sgn of [-1, 1]) {
+            if (fo) { const sf = so + sgn * sgnU * (o.w / 2 + 0.25); if (sf < 0.1 || sf > fo.L - 0.1) continue; }
             const fx = o.x + o.ux * sgn * (o.w / 2 + 0.25), fz = o.z + o.uz * sgn * (o.w / 2 + 0.25);
             fins.add(fx + o.nx * 0.3, fy + fh / 2, fz + o.nz * 0.3, o.nx, o.nz, 0.6, fh, 0.12);
           }
-          if (o.tag === 'SD' && ds_.balcony.kind === 'cantilever' && landscapeOf(ds).planters) greens.add(o.x + o.nx * (ds_.balcony.depth - 0.3), fy + 0.35, o.z + o.nz * (ds_.balcony.depth - 0.3), o.ux, o.uz, Math.min(1.6, o.w), 0.5, 0.35);
+          if (o.tag === 'SD' && ds_.balcony.kind === 'cantilever' && landscapeOf(ds).planters && !(fo && (so < 0.9 || so > fo.L - 0.9))) greens.add(o.x + o.nx * (ds_.balcony.depth - 0.3), fy + 0.35, o.z + o.nz * (ds_.balcony.depth - 0.3), o.ux, o.uz, Math.min(1.6, o.w), 0.5, 0.35);
           if (o.tag === 'SD' && ds_.balcony.kind !== 'none') {
-            const dep = ds_.balcony.kind === 'french' ? 0.3 : ds_.balcony.depth, w = o.w + 0.9;
+            const dep = ds_.balcony.kind === 'french' ? 0.3 : ds_.balcony.depth, [bsh, w] = fit(o.w + 0.9);
+            // (a balcony that would run into another wing of the building at an inside corner is left off)
+            const bcx = o.x + o.ux * bsh, bcz = o.z + o.uz * bsh;
+            if (w < 0.6 || [-0.5, 0.5].some((k) => inMP(OL.shape, bcx + o.ux * k * w + o.nx * (dep - 0.05), bcz + o.uz * k * w + o.nz * (dep - 0.05)))) continue;
             const out = ds_.balcony.kind === 'recessed' ? 0.12 : dep;
-            if (ds_.balcony.kind === 'cantilever') slabs.add(o.x + o.nx * dep / 2, fy - 0.08, o.z + o.nz * dep / 2, o.ux, o.uz, w, 0.16, dep);
-            if (ds_.balcony.kind === 'recessed') slabs.add(o.x + o.nx * 0.06, fy + fh - 0.25, o.z + o.nz * 0.06, o.ux, o.uz, w, 0.5, 0.12);
-            const rk = ds_.balcony.railing, fx0 = o.x + o.nx * out - o.ux * w / 2, fz0 = o.z + o.nz * out - o.uz * w / 2, fx1 = o.x + o.nx * out + o.ux * w / 2, fz1 = o.z + o.nz * out + o.uz * w / 2;
+            if (ds_.balcony.kind === 'cantilever') slabs.add(bcx + o.nx * dep / 2, fy - 0.08, bcz + o.nz * dep / 2, o.ux, o.uz, w, 0.16, dep);
+            if (ds_.balcony.kind === 'recessed') slabs.add(bcx + o.nx * 0.06, fy + fh - 0.25, bcz + o.nz * 0.06, o.ux, o.uz, w, 0.5, 0.12);
+            const rk = ds_.balcony.railing, fx0 = bcx + o.nx * out - o.ux * w / 2, fz0 = bcz + o.nz * out - o.uz * w / 2, fx1 = bcx + o.nx * out + o.ux * w / 2, fz1 = bcz + o.nz * out + o.uz * w / 2;
             railRun(fx0, fz0, fx1, fz1, fy, rk);
-            if (ds_.balcony.kind === 'cantilever') for (const sgn of [-1, 1]) railRun(o.x + o.ux * sgn * w / 2, o.z + o.uz * sgn * w / 2, o.x + o.ux * sgn * w / 2 + o.nx * dep, o.z + o.uz * sgn * w / 2 + o.nz * dep, fy, rk);
-            if (ds_.balcony.kind === 'cantilever') slabs.add(o.x + o.nx * (dep - 0.02), fy - 0.19, o.z + o.nz * (dep - 0.02), o.ux, o.uz, w, 0.03, 0.04);
+            if (ds_.balcony.kind === 'cantilever') for (const sgn of [-1, 1]) railRun(bcx + o.ux * sgn * w / 2, bcz + o.uz * sgn * w / 2, bcx + o.ux * sgn * w / 2 + o.nx * dep, bcz + o.uz * sgn * w / 2 + o.nz * dep, fy, rk);
+            if (ds_.balcony.kind === 'cantilever') slabs.add(bcx + o.nx * (dep - 0.02), fy - 0.19, bcz + o.nz * (dep - 0.02), o.ux, o.uz, w, 0.03, 0.04);
           }
         }
       }
       if (v.xray === null) {
         // parapet round the roof, and a lift room and tank over each core
         const ry = y0 + all * fh;
-        for (const q of b.quads) for (let i = 0; i < q.length; i += 2) {
-          const j = (i + 2) % q.length, L = Math.hypot(q[j] - q[i], q[j + 1] - q[i + 1]);
-          if (L < 0.5) continue;
-          parapets.add((q[i] + q[j]) / 2, ry + 0.5, (q[i + 1] + q[j + 1]) / 2, (q[j] - q[i]) / L, (q[j + 1] - q[i + 1]) / L, L + 0.1, 1.0, 0.2);
-          sills.add((q[i] + q[j]) / 2, ry + 1.03, (q[i + 1] + q[j + 1]) / 2, (q[j] - q[i]) / L, (q[j + 1] - q[i + 1]) / L, L + 0.16, 0.06, 0.3);
+        for (const e of OL.edges) {
+          if (e.L < 0.3) continue;
+          // (the parapet just inside the face; the coping over it, 5 cm proud, wrapping outside corners)
+          const tp = e.L / 2, [c0, c1] = endExt(e, 0.05), tc = (e.L + c1 - c0) / 2;
+          parapets.add(e.ax + e.ux * tp - e.nx * 0.1, ry + 0.5, e.az + e.uz * tp - e.nz * 0.1, e.ux, e.uz, e.L, 1.0, 0.2);
+          sills.add(e.ax + e.ux * tc - e.nx * 0.1, ry + 1.03, e.az + e.uz * tc - e.nz * 0.1, e.ux, e.uz, e.L + c0 + c1, 0.06, 0.3);
         }
         // the crown: a deep cornice, or a pergola's frame over the terrace
         const crown = all >= ZONED_FROM ? comp.top.crown : 'parapet';
-        if (crown === 'cornice') for (const f of faces) { const [x, z] = along(f, f.L / 2, 0.1); bands.add(x, ry + 0.75, z, f.ux, f.uz, f.L + 1.0, 0.5, 1.0); }
-        if (crown === 'pergola') for (const q of b.quads) {
-          if (q.length !== 8) continue;
-          const [cx, cz] = [(q[0] + q[2] + q[4] + q[6]) / 4, (q[1] + q[3] + q[5] + q[7]) / 4];
-          const P = [0, 1, 2, 3].map((k) => { const x = q[2 * k], z = q[2 * k + 1], d = Math.hypot(cx - x, cz - z) || 1; return [x + (cx - x) * 0.6 / d, z + (cz - z) * 0.6 / d]; });
-          const ph = 3.0, yb = ry + ph;
-          for (const [x, z] of P) fins.add(x, ry + ph / 2, z, 1, 0, 0.3, ph, 0.3);
-          const beam = (a: number[], c: number[], y: number, t: number) => { const L = Math.hypot(c[0] - a[0], c[1] - a[1]); if (L > 0.1) fins.add((a[0] + c[0]) / 2, y, (a[1] + c[1]) / 2, (c[0] - a[0]) / L, (c[1] - a[1]) / L, L, t, t); };
-          for (let k = 0; k < 4; k++) beam(P[k], P[(k + 1) % 4], yb, 0.3);
-          // slats across the longer way, a metre apart
-          const long = Math.hypot(P[1][0] - P[0][0], P[1][1] - P[0][1]) >= Math.hypot(P[3][0] - P[0][0], P[3][1] - P[0][1]);
-          const [A, B, C, D] = long ? [P[0], P[1], P[2], P[3]] : [P[1], P[2], P[3], P[0]];
-          const n = Math.max(2, Math.round(Math.hypot(B[0] - A[0], B[1] - A[1]) / 1.0));
-          const lerp = (p: number[], r: number[], t: number) => [p[0] + (r[0] - p[0]) * t, p[1] + (r[1] - p[1]) * t];
-          for (let k = 1; k < n; k++) beam(lerp(A, B, k / n), lerp(D, C, k / n), yb + 0.2, 0.12);
+        if (crown === 'cornice') for (const f of faces) { const [e0, e1] = endExt(f, 0.6), [x, z] = along(f, (f.L + e1 - e0) / 2, 0.1); bands.add(x, ry + 0.75, z, f.ux, f.uz, f.L + e0 + e1, 0.5, 1.0); }
+        if (crown === 'pergola') {
+          // (on the outline 0.8 m in from the faces: posts at its corners and every 3 m along it, beams round it, slats
+          // across the longer way a metre apart, each cut to the shape)
+          const ph = 3.0, yb = ry + ph, inset = offsetMP(OL.shape, -0.8);
+          const beam = (ax: number, az: number, cx: number, cz: number, y: number, t: number) => { const L = Math.hypot(cx - ax, cz - az); if (L > 0.1) fins.add((ax + cx) / 2, y, (az + cz) / 2, (cx - ax) / L, (cz - az) / L, L, t, t); };
+          for (const poly of inset) {
+            const ring = poly[0]?.flatMap((p) => [p[0], p[1]]) ?? [];
+            if (ring.length < 6) continue;
+            let A = 0; for (let i = 0; i < ring.length; i += 2) { const j = (i + 2) % ring.length; A += ring[i] * ring[j + 1] - ring[j] * ring[i + 1]; }
+            if (Math.abs(A) / 2 < 9) continue;
+            let lx = 1, lz = 0, best = 0;
+            for (let i = 0; i < ring.length; i += 2) {
+              const j = (i + 2) % ring.length, L = Math.hypot(ring[j] - ring[i], ring[j + 1] - ring[i + 1]);
+              beam(ring[i], ring[i + 1], ring[j], ring[j + 1], yb, 0.3);
+              const n = Math.max(1, Math.round(L / 3));
+              for (let k = 0; k < n; k++) fins.add(ring[i] + (ring[j] - ring[i]) * k / n, ry + ph / 2, ring[i + 1] + (ring[j + 1] - ring[i + 1]) * k / n, 1, 0, 0.3, ph, 0.3);
+              if (L > best) { best = L; lx = (ring[j] - ring[i]) / L; lz = (ring[j + 1] - ring[i + 1]) / L; }
+            }
+            // slats: lines across (along the longest edge's normal), each cut to the ring
+            let v0 = Infinity, v1 = -Infinity;
+            for (let i = 0; i < ring.length; i += 2) { const v = ring[i] * lx + ring[i + 1] * lz; v0 = Math.min(v0, v); v1 = Math.max(v1, v); }
+            for (let v = v0 + 1; v < v1; v += 1) {
+              const px = lx * v, pz = lz * v, ts = crossings(ring, px, pz, -lz, lx);
+              for (let k = 0; k + 1 < ts.length; k += 2) beam(px - lz * ts[k], pz + lx * ts[k], px - lz * ts[k + 1], pz + lx * ts[k + 1], yb + 0.2, 0.12);
+            }
+          }
         }
       } else {
         // the cut floor: its slab, the flats tinted by type, the walls (dolls'-house height), the entrance doors
@@ -1110,6 +1207,20 @@ export class ProView {
       for (const im of peopleMeshes(people.filter(([x, z]) => r.net.length < 6 || pointIn(r.net, x, z, 2) || true).slice(0, 200), this.lib.other('people', () => new THREE.MeshStandardMaterial({ roughness: 0.85 })), mat('#a77b5a'))) add(im);
     }
 
+    // the neighbours, when the plot is on the map (loaded once per place)
+    const ck = v.at && v.city ? `${v.city}|${v.at[0].toFixed(6)}|${v.at[1].toFixed(6)}|${v.north ?? 0}` : '';
+    if (ck !== this.ctxKey) {
+      this.ctxKey = ck;
+      this.ctx.traverse((o) => (o as THREE.Mesh).geometry?.dispose()); this.ctx.clear();
+      if (ck && v.at && v.city) {
+        const fp = r.footprint.length >= 6 ? r.footprint : r.net;
+        void neighbours(import.meta.env.BASE_URL, v.city, v.at, v.north ?? 0, (x, z) => fp.length >= 6 && pointIn(fp, x, z, 2)).then((list) => {
+          if (this.ctxKey !== ck) return;
+          const m = neighbourMesh(list, this.lib.plain('#d6d3cc', { roughness: 0.95 }));
+          if (m) { this.ctx.add(m); this.renderer.shadowMap.needsUpdate = true; this.frame(); }
+        }).catch(() => { /* no region data here: no neighbours */ });
+      }
+    }
     // the sun's shadow fitted to what's drawn
     this.shadowBox.set(new THREE.Vector3(minX - 30, -1, minZ - 30), new THREE.Vector3(maxX + 30, (d.height || 30) + 10, maxZ + 30));
     this.fitSun();

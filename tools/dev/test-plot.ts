@@ -169,9 +169,21 @@ const capped = opt([-50, 7, 50, 7, 50, 97, -50, 97], 'udcpr', { type: 'slab', ma
 check(capped.D.buildings.every((b) => b.floors <= 8) && legal(capped.D), `8 floors at most: ${capped.st.buildings.length} slabs, ${(capped.D.bua / capped.R.bua * 100).toFixed(0)} % built`);
 const both = optSchemes(pune.R, { type: 'auto', maxFloors: 0, maxBuildings: 0 }, 'residential');
 check(both.length === 2 && both[0].type !== both[1].type, `both kinds offered: ${both.map((s) => `${s.type} ${s.bua.toFixed(0)} m²`).join(', ')}`);
-// the ground: a wall with gates, the drive round the tall buildings, the open space
+// the ground: a wall with gates, the fire tender's way derived round the tall buildings (every run reaching a gate or
+// closing on itself, none of it under a building), the open space
 const G = pune.D.ground;
-check(G.gates.length === 2 && G.drive.length === 1 && G.wall.length >= 4 && !!G.rg && area(G.rg) >= 900 - 1, `the ground: ${G.wall.length} runs of wall, ${G.gates.length} gates, a ${G.driveW} m drive, ${area(G.rg ?? []).toFixed(0)} m² of open space`);
+const runEnds = G.drive.flatMap((d) => (d[0] === d[d.length - 2] && d[1] === d[d.length - 1]) ? [] : [[d[0], d[1]], [d[d.length - 2], d[d.length - 1]]]);
+const atGate = (x: number, z: number) => G.gates.some((g) => Math.hypot((g[0] + g[2]) / 2 - x, (g[1] + g[3]) / 2 - z) < 8);
+const underB = G.drive.some((d) => { for (let i = 0; i < d.length; i += 2) if (pune.D.buildings.some((b) => b.quads.some((q) => pointIn(q, d[i], d[i + 1], 0)))) return true; return false; });
+check(G.gates.length >= 1 && G.drive.length >= 1 && runEnds.every(([x, z]) => atGate(x, z) || !pune.D.buildings.length) && !underB && G.wall.length >= 4 && !!G.rg && area(G.rg) >= 900 - 1, `the ground: ${G.wall.length} runs of wall, ${G.gates.length} gates, ${G.drive.length} run(s) of a ${G.driveW} m fire way round the buildings, every end at a gate, ${area(G.rg ?? []).toFixed(0)} m² of open space`);
+{
+  // the fire way is derived from the buildings, never stored: move them 3 m and it moves with them
+  const shifted = { ...pune.st, buildings: pune.st.buildings.map((b) => ({ ...b, spine: b.spine.map((v, i) => (i % 2 === 0 ? v + 3 : v)) })) };
+  const D2 = solveSite(pune.R, shifted, 'residential');
+  const mid = (D: typeof pune.D) => { let s = 0, n = 0; for (const d of D.ground.drive) for (let i = 0; i < d.length; i += 2) { s += d[i]; n++; } return n ? s / n : NaN; };
+  const dx = mid(D2) - mid(pune.D);
+  check(D2.ground.drive.length >= 1 && dx > 1 && dx < 5, `the fire way follows its buildings: moved 3 m, it moved ${dx.toFixed(1)} m`);
+}
 const lowG = opt([-10, 7, 10, 7, 10, 37, -10, 37]).D.ground;
 check(lowG.drive.length === 0 && lowG.gates.length === 1, 'a low building: one gate, no drive');
 

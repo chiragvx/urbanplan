@@ -76,10 +76,10 @@ export function gridIn(poly: number[], ux: number, uz: number, du: number, dv: n
 }
 
 /** road markings along centre lines (x0,z0,x1,z1 per stretch, width): dashes 3 m on 4.5 off down the middle, edge lines */
-export function markings(lines: { pts: number[]; w: number; edges: boolean }[]): THREE.BufferGeometry | null {
+export function markings(lines: { pts: number[]; w: number; edges: boolean }[], keep: (x: number, z: number) => boolean = () => true): THREE.BufferGeometry | null {
   const pos: number[] = [];
   const strip = (ax: number, az: number, bx: number, bz: number, w: number, y: number) => {
-    const L = Math.hypot(bx - ax, bz - az); if (L < 0.05) return;
+    const L = Math.hypot(bx - ax, bz - az); if (L < 0.05 || !keep((ax + bx) / 2, (az + bz) / 2)) return;
     const nx = -(bz - az) / L * w / 2, nz = (bx - ax) / L * w / 2;
     pos.push(ax + nx, y, az + nz, bx + nx, y, bz + nz, bx - nx, y, bz - nz, ax + nx, y, az + nz, bx - nx, y, bz - nz, ax - nx, y, az - nz);
   };

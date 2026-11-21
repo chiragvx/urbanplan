@@ -344,17 +344,35 @@ Budget: no more than 150 KB gz added to the first load.
 
 ## Status (2026-11-21): built
 
-| Phase | Done | Different from the plan |
-|---|---|---|
-| 1 Light and lens | `src/pro/render/pipeline.ts`, `sky.ts`, `shadows.ts`, `perf.ts`: GTAO, SMAA, night bloom, Neutral by day and AgX at night, fitted texel-snapped shadows re-rendered only on change, dielectric glass, merged ground, a "Render image" still, a `?perf` overlay, `proView.bench()` | three's own passes (GTAOPass, SMAAPass, UnrealBloomPass, OutputPass, SSAARenderPass), with no pmndrs or n8ao dependency. The Preetham sky is only the backdrop: its radiance is too strong and blue to light with, so the environment map comes from a measured gradient dome with a sun disc (`sky.ts`). |
-| 2 Real materials | `pbr.ts` (cached library: no more material leak), `textures.ts` (procedural maps at real module sizes: brick 230×75, tile, ashlar, plank, grooves, grain), world-projected UVs for instanced boxes, metre UVs on prisms, flats and formed buildings, `quality.ts` (tiers, GPU guess, step-down, Quality picker), road markings | Every texture is procedural. No ambientCG/KTX2 scans yet: no asset pipeline or downloads were needed. |
-| 3 Architectural geometry | `geo.ts` `cutFace`: openings cut into the faces with reveals by wall material; frames by kind (sliding, casement, fixed, louvre, transoms); sills; railings by kind (glass with posts, MS balusters, solid with coping); copings; chhajja drips; curtain-wall spandrels and transoms; level of detail for straight buildings' detail | No chamfered instance boxes. |
-| 4 Night, interiors, entourage | `glass.ts`: interior mapping behind every pane, lit rooms by hash and darkness with their own warmth, Fresnel; `entourage.ts`: the five species from `src/build/plants.ts`, cars in lots and on the street, people at entrances; additive wash glows | Cars and people are made in code, not CC0 models. Neighbouring buildings wait on the plot being placed on the map (no georeference yet), as the plan said. |
-| 5 Stills | `renderStill`: raster (32 samples a pixel offscreen, about 0.5 s at 1200×800) and path-traced (`three-gpu-pathtracer`, lazy, about 3.5 s for 24 samples at 480×320 on Intel UHD 630) with a progress bar and cancel | In the path tracer the instanced trees and cars are missing (not handled by its scene generator), and the sky is a procedural equirect. |
-| Verification | `tools/render/shots.mjs` (`npm run render:shots`): 9 reference stills (fit, street and top × day, low sun and night) and a benchmark through `?shots=<tier>`; pixelmatch against `tools/render/ref/<tier>/` | References are from the in-app browser (Intel UHD 630). Accept a fresh set on the machine that compares. |
+| Phase | Done |
+|---|---|
+| 1 Light and lens | <ul><li>, , , : GTAO, SMAA, night bloom, Neutral by day and AgX at night</li><li>Fitted, texel-snapped shadows re-rendered only on change</li><li>Dielectric glass, merged ground, a "Render image" still, a  overlay and </li><li>three's own passes: no pmndrs or n8ao dependency</li><li>The Preetham sky is the backdrop only; the environment map comes from a measured gradient dome with a sun disc</li></ul> |
+| 2 Real materials | <ul><li>: a cached library, so materials no longer leak</li><li>: procedural maps at real module sizes</li><li>Scanned CC0 sets:  downloads them from ambientCG, converts normal and roughness maps to KTX2 when  is installed, and writes a manifest and .  uses them as detail maps, so token colours hold, and falls back to the procedural maps.</li><li>World-projected UVs for instanced boxes; metre UVs everywhere else</li><li>: tiers, a GPU guess, automatic step-down, and a Quality picker</li><li>Road markings, clipped to the road surface</li></ul> |
+| 3 Architectural geometry | <ul><li> : openings cut with reveals</li><li>Frames by window type; sills; railings by type; copings; drips; curtain-wall spandrels and transoms</li><li>Level of detail for straight buildings</li><li>Scale-aware chamfered members on the High tier:  and , 25 mm at any size</li><li>Everything round a building's edge is placed from its real outline (: blocks unioned, courtyards kept, collinear runs merged, convex and reflex corners)</li><li>Corner members trim or extend at corners ()</li><li>Attachments are clipped to their face; balconies that would hit another wing are dropped</li><li>One pergola per building</li></ul> |
+| 4 Night, interiors, entourage, context | <ul><li>: interior mapping, lit rooms, Fresnel</li><li>: five tree species, cars, people</li><li>: the neighbouring buildings within 250 m from the city's baked OSM region, drawn whenever the plot is on the map (, set by import or survey lookup)</li></ul> |
+| 5 Stills | <ul><li> raster: about 0.5 s at 1200×800</li><li> path-traced: lazily loaded , with instanced trees, cars and people baked into a plain mesh per colour so they appear</li><li>Progress and cancel</li></ul> |
+| Verification | <ul><li>: reference stills and the benchmark, compared with pixelmatch against </li><li>Competitor protocol and kit in </li></ul> |
 
-**Measured on the sample, standard tier, Intel UHD 630:**
-- Frames: p50 1.6–2.4 ms, p95 3.4–9 ms.
-- Load: 86–121 draw calls, 133–193k triangles.
-- Rebuild (`set()`): 8 ms.
-- No growth in geometries, textures or materials over 20 rebuilds.
+**Not done here:**
+- The comparison against Forma, the APS viewer and Revit needs Autodesk access. The protocol, cameras, scoring and our captured side are ready.
+- The scanned textures aren't downloaded yet:  does it when run.
+- Cars and people are made in code rather than CC0 models.
+
+**Measured on the sample, Intel UHD 630:**
+
+| Tier | p50 | p95 | Draw calls | Triangles |
+|---|---|---|---|---|
+| Standard | 1.3 ms | 14.2 ms | 90 | 192k |
+| High | 1.5 ms | 19.6 ms | 90 | 465k |
+
+A rebuild takes about 8 ms, with no growth in geometries, textures or materials over 20 rebuilds.
+
+**Alignment and access** ():
+- Problem 1 is built as above.
+- Problem 2, part built:
+  - The fire tender's lane is derived from the buildings on every change, at  1.5 m (as assumed) from the faces. It ends at gates or gets a spur to a road side, and the fire check tests the same lane. A test checks the lane follows the buildings when they move.
+  - The optimiser leaves room for that gap.
+  - Roads are cut back from buildings by 1.2 m.
+  - The optimiser's roads stay marked as derived.
+  - The old plot-edge drive is the 'plot-edge' access option.
+  - Still to do: entrance spurs to every building, and spine and grid roads laid in the gaps between buildings.

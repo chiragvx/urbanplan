@@ -5,6 +5,7 @@
 // least 1/10 of the floor area for light, half that opening for air, as UDCPR's habitable-room rule asks; checked
 // by flat until rooms are modelled).
 import { pointIn, type SiteReport, type Unit } from '../doc/site';
+import { buildingOutline } from './render/outline';
 import { climateOf, compositionOf, openable, type Composition, type DesignSystem } from './design';
 
 export type Tag = 'W1' | 'W2' | 'V1' | 'SD' | 'D1';
@@ -33,26 +34,19 @@ interface Edge { x0: number; z0: number; ux: number; uz: number; nx: number; nz:
 /** A face of a building divided into bays: from ax,az along u for L, in n bays of bw. */
 export interface BayLine {
   ax: number; az: number; ux: number; uz: number; L: number; n: number; bw: number;
-  /** the face's outward normal; `inner` when it's against another block of the building (no facade there) */
+  /** the face's outward normal; `inner` is always false now (kept for callers): faces are the outline's */
   nx: number; nz: number; inner: boolean;
+  /** whether each end is an outside corner (a corner pier, corner glass and kept-clear end bays go only there), and how
+   *  far the outline turns there */
+  startConvex: boolean; endConvex: boolean; startTurn: number; endTurn: number;
 }
-/** Every face of a building's blocks divided into equal bays, as near `bay` wide as fit, so each face starts and ends
- *  on a bay line (the corners). */
+/** Every face of a building's outline (its blocks unioned, straight runs merged: ./render/outline.ts) divided into
+ *  equal bays, as near `bay` wide as fit, so each face starts and ends on a bay line (its corners). */
 export function facadeBays(quads: number[][], bay: number): BayLine[] {
-  const out: BayLine[] = [];
-  for (const q of quads) {
-    let sa = 0;
-    for (let i = 0; i < q.length; i += 2) { const j = (i + 2) % q.length; sa += q[i] * q[j + 1] - q[j] * q[i + 1]; }
-    const sg = sa > 0 ? 1 : -1;
-    for (let i = 0; i < q.length; i += 2) {
-      const j = (i + 2) % q.length, L = Math.hypot(q[j] - q[i], q[j + 1] - q[i + 1]);
-      if (L < 0.5) continue;
-      const n = Math.max(1, Math.round(L / Math.max(1, bay))), ux = (q[j] - q[i]) / L, uz = (q[j + 1] - q[i + 1]) / L;
-      const nx = uz * sg, nz = -ux * sg, mx = (q[i] + q[j]) / 2 + nx * 0.4, mz = (q[i + 1] + q[j + 1]) / 2 + nz * 0.4;
-      out.push({ ax: q[i], az: q[i + 1], ux, uz, L, n, bw: L / n, nx, nz, inner: quads.some((o) => o !== q && pointIn(o, mx, mz, 0.01)) });
-    }
-  }
-  return out;
+  return buildingOutline(quads).edges.filter((e) => e.L >= 0.5).map((e) => {
+    const n = Math.max(1, Math.round(e.L / Math.max(1, bay)));
+    return { ax: e.ax, az: e.az, ux: e.ux, uz: e.uz, L: e.L, n, bw: e.L / n, nx: e.nx, nz: e.nz, inner: false, startConvex: e.startConvex, endConvex: e.endConvex, startTurn: e.startTurn, endTurn: e.endTurn };
+  });
 }
 
 /** a bay a flat's wall can use: its index on the face, its centre along the wall, its width, and which way the face
@@ -70,9 +64,10 @@ function slotsOn(e: Edge, lines: BayLine[], comp: Composition): Slot[] | null {
     const lo = Math.min(s0, s1), hi = Math.max(s0, s1);
     if (hi < 0.05 || lo > f.L - 0.05) continue;
     const ends = (comp.corner === 'solid' || comp.corner === 'glazed') && f.n >= 3;
+    const endAt = (k: number) => ends && ((k === 0 && f.startConvex) || (k === f.n - 1 && f.endConvex));
     const out: Slot[] = [];
     for (let k = 0; k < f.n; k++) {
-      if (ends && (k === 0 || k === f.n - 1)) continue;
+      if (endAt(k)) continue;
       if (k * f.bw < lo - 0.05 || (k + 1) * f.bw > hi + 0.05) continue;
       out.push({ k, t: ((k + 0.5) * f.bw - s0) * dot, bw: f.bw, dir: dot });
     }

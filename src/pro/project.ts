@@ -290,6 +290,8 @@ function shaped(r: PlotReport, site: PlotSite, f: Fill): PlotSite {
 export function ownScheme(d: SiteReport, styles?: Record<number, string>): NonNullable<ProProject['scheme']> {
   return {
     buildings: d.buildings.map((b, i) => ({ ...b.b, laid: undefined, floors: b.floors, auto: undefined, name: `Building ${String.fromCharCode(65 + i)}`, ...(styles?.[i] ? { style: styles[i] } : {}) })),
-    elements: (d.site.elements ?? []).map((e) => ({ ...e, auto: undefined })),
+    // (roads the optimiser laid stay marked as its own: they're cleared from buildings as they change, and a hand-drawn
+    // road is never mistaken for one)
+    elements: (d.site.elements ?? []).map((e) => ({ ...e, auto: e.kind === 'road' || e.kind === 'roundabout' ? e.auto : undefined })),
   };
 }

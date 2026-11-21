@@ -12,7 +12,7 @@
 //
 // Pure: a plot report and the site's settings in, a site out.
 import { clipHalf, inset, polyArea, sideMargin, type PlotReport, type PlotUse } from './plot';
-import { basementsToFit, buildingQuads, DEFAULT_SITE, elementRings, FIRE_H, FIRE_W, GATES_FROM, RG_FROM, RG_SHARE, roadFrame, spanU, type PlotSite, type SiteBuilding, type SiteElement } from './site';
+import { basementsToFit, buildingQuads, DEFAULT_SITE, elementRings, FIRE_GAP, FIRE_H, FIRE_W, GATES_FROM, RG_FROM, RG_SHARE, roadFrame, spanU, type PlotSite, type SiteBuilding, type SiteElement } from './site';
 
 export type Typology = 'auto' | 'slab' | 'tower';
 export const TYPOLOGIES: { value: Typology; label: string; title: string }[] = [
@@ -39,9 +39,10 @@ export interface Design {
   gateW?: number; roadW?: number;
 }
 export const DEFAULT_DESIGN: Design = { type: 'auto', maxFloors: 0, maxBuildings: 0 };
-export type Access = 'perimeter' | 'spine' | 'grid' | 'none';
+export type Access = 'perimeter' | 'plot-edge' | 'spine' | 'grid' | 'none';
 export const ACCESS: { value: Access; label: string; title: string }[] = [
-  { value: 'perimeter', label: 'Perimeter', title: 'A drive round the back of the plot (the fire tender’s way)' },
+  { value: 'perimeter', label: 'Round the buildings', title: 'The fire tender’s way round each tall building, following it as it changes' },
+  { value: 'plot-edge', label: 'Plot edge', title: 'A drive round the plot’s edge, by the compound wall' },
   { value: 'spine', label: 'Spine', title: 'An internal road up the middle from the entrance, buildings either side' },
   { value: 'grid', label: 'Grid', title: 'Internal roads up and across the plot, in blocks' },
   { value: 'none', label: 'None', title: 'No internal roads: the buildings are reached from the road' },
@@ -67,7 +68,7 @@ const SHAPES: Record<'residential' | 'commercial' | 'industrial', { depths: numb
 const SHALLOW_H = 15, SLENDER = 6;
 
 /** The gap between two buildings on the plot: the taller one's side margin, and room for the fire tender's way. */
-export const buildingGap = (r: PlotReport, h: number) => Math.max(sideMargin(r.rules, h), h > FIRE_H ? FIRE_W : 3);
+export const buildingGap = (r: PlotReport, h: number) => Math.max(sideMargin(r.rules, h), h > FIRE_H ? FIRE_GAP + FIRE_W : 3);
 
 export interface Scheme {
   type: 'slab' | 'tower';
@@ -116,7 +117,7 @@ function schemesOf(r0: PlotReport, design: Design, use: PlotUse, under: number, 
     ...(site?.elements ?? []).filter((e) => !e.auto && (e.kind === 'parking' || e.kind === 'road' || e.kind === 'roundabout' || e.kind === 'tank'))
       .flatMap(elementRings).map((q) => box(F.toL(q), ROAD_SET)),
     // (the buildings placed by hand, with a fire tender's way round them)
-    ...hand.flatMap(buildingQuads).map((q) => box(F.toL(q), FIRE_W)),
+    ...hand.flatMap(buildingQuads).map((q) => box(F.toL(q), FIRE_GAP + FIRE_W)),
     // (no-build zones and obstructions' clearances)
     ...(site?.keepOut ?? []).filter((k) => k.length >= 6).map((k) => box(F.toL(k), 0)),
   ];
@@ -125,7 +126,7 @@ function schemesOf(r0: PlotReport, design: Design, use: PlotUse, under: number, 
 
   for (let n = 1; n <= maxN; n++) {
     const h = (n + under) * fh;
-    const side = Math.max(sideMargin(R, h), h > FIRE_H ? FIRE_W : 0);
+    const side = Math.max(sideMargin(R, h), h > FIRE_H ? FIRE_GAP + FIRE_W : 0);
     const zoneW = inset(r.net, r.edges, R.front, side);
     if (zoneW.length < 6 || polyArea(zoneW) < 50) break;
     let Z = F.toL(zoneW);

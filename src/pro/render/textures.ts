@@ -4,6 +4,7 @@
 // (the geometry's UVs are metres), so a brick is 230 × 75 mm whatever the wall. Drawn once per pattern and size.
 import * as THREE from 'three';
 import type { Material } from '../materials';
+import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 
 export interface Detail { map: THREE.Texture; normal: THREE.Texture; repeat: [number, number] }
 const cache = new Map<string, Detail>();
@@ -73,9 +74,54 @@ function heights(pattern: string, n: number, m: Material, R: () => number): Floa
   return h;
 }
 
-/** the detail for a material at a resolution (px), or null when there's no texture tier */
+// ---------------------------------------------------------------- scanned sets (tools/render/textures.mjs)
+interface ScanEntry { size: [number, number]; color: string; normal?: string; rough?: string }
+const scans = new Map<string, Detail>();
+/** Load the scanned sets the texture tool put in public/assets/render/tex (none there: false, and the procedural
+ *  ones stay). Colour maps become detail maps (their luminance divided by its mean, so the token colour holds). */
+export async function loadScans(base: string, renderer?: THREE.WebGLRenderer): Promise<boolean> {
+  if (typeof document === 'undefined') return false;
+  let man: Record<string, ScanEntry>;
+  const at = (f: string) => `${base}assets/render/tex/${f}`;
+  try { const r = await fetch(at('manifest.json')); if (!r.ok || !(r.headers.get('content-type') ?? '').includes('json')) return false; man = await r.json(); } catch { return false; }
+  const ktx = renderer ? new KTX2Loader().setTranscoderPath(`${base}basis/`).detectSupport(renderer) : null;
+  const img = (u: string) => new Promise<HTMLImageElement>((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = u; });
+  const tex = async (u: string): Promise<THREE.Texture> => (u.endsWith('.ktx2') && ktx ? ktx.loadAsync(u) : new THREE.TextureLoader().loadAsync(u));
+  for (const [key, e] of Object.entries(man)) {
+    try {
+      const im = await img(at(e.color));
+      const cv = document.createElement('canvas'); cv.width = im.width; cv.height = im.height;
+      const g = cv.getContext('2d')!; g.drawImage(im, 0, 0);
+      const d = g.getImageData(0, 0, cv.width, cv.height), p = d.data;
+      let sum = 0; for (let i = 0; i < p.length; i += 4) sum += 0.2126 * p[i] + 0.7152 * p[i + 1] + 0.0722 * p[i + 2];
+      const mean = sum / (p.length / 4) || 1;
+      for (let i = 0; i < p.length; i += 4) { const l = Math.min(255, ((0.2126 * p[i] + 0.7152 * p[i + 1] + 0.0722 * p[i + 2]) / mean) * 235); p[i] = p[i + 1] = p[i + 2] = l; }
+      g.putImageData(d, 0, 0);
+      const map = new THREE.CanvasTexture(cv); map.colorSpace = THREE.SRGBColorSpace;
+      const normal = e.normal ? await tex(at(e.normal)) : null;
+      for (const t2 of [map, normal]) if (t2) { t2.wrapS = t2.wrapT = THREE.RepeatWrapping; t2.anisotropy = 8; t2.repeat.set(1 / e.size[0], 1 / e.size[1]); }
+      if (normal) normal.colorSpace = THREE.NoColorSpace;
+      scans.set(key, { map, normal: normal ?? map, repeat: e.size });
+    } catch { /* that set skipped */ }
+  }
+  return scans.size > 0;
+}
+/** which scanned set a material takes, if one is loaded */
+function scanFor(m: Material): Detail | null {
+  if (!scans.size) return null;
+  const k = m.id === 'concrete-fair' || m.id.includes('concrete') ? 'concrete' : m.pattern === 'brick' ? 'brick' : m.pattern === 'stone' ? 'stone'
+    : m.category === 'wood' || m.pattern === 'plank' ? 'wood' : m.pattern === 'tile' && m.category !== 'cladding' && m.category !== 'glass' ? 'tile'
+    : m.id.startsWith('ground') ? 'ground' : m.id.includes('asphalt') ? 'asphalt' : m.id.includes('paver') ? 'pavers' : m.id.includes('grass') ? 'grass'
+    : (m.category === 'paint' || m.finish === 'textured') && m.pattern !== 'stripe' ? 'plaster' : null;
+  return k ? scans.get(k) ?? null : null;
+}
+
+/** the detail for a material at a resolution (px), or null when there's no texture tier: a scanned set when one is
+ *  loaded for it (loadScans), else drawn here */
 export function detailOf(m: Material, size: number): Detail | null {
   if (!size || typeof document === 'undefined') return null;
+  const scanned = scanFor(m);
+  if (scanned) return scanned;
   const pattern = m.pattern ?? 'plain', key = `${m.id}|${size}`;
   const hit = cache.get(key);
   if (hit) return hit;

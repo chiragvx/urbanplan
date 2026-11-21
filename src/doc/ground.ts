@@ -393,7 +393,8 @@ export function layGround(I: GroundIn): GroundOut {
   const plants: Plant[] = [];
   // roads: the lines and the roundabouts as one surface; the islands planted
   const islands = union(...I.circles.filter((c) => c[2] > 8).map(([x, z, r]) => disc(x, z, r - 6.5, 28)));
-  const road = diff(inter(union(...I.lines.map((l) => stroke(l.pts, l.w, l.closed)), ...I.circles.map(([x, z, r]) => disc(x, z, r, 32))), net), islands);
+  // (never under a building: a road a building has grown over is cut back, clear of its faces)
+  const road = diff(inter(union(...I.lines.map((l) => stroke(l.pts, l.w, l.closed)), ...I.circles.map(([x, z, r]) => disc(x, z, r, 32))), net), islands, offset(fromFlats(I.build), 1.2));
   const island = inter(islands, net);
   const build = inter(fromFlats([...I.build, ...I.structures]), net);
   let taken = union(road, island, build);

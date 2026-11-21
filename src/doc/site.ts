@@ -7,7 +7,7 @@
 //
 // Pure: a site and a plot report in, numbers and rings (tile metres x,z) out.
 import { clipHalf, inset, polyArea, sideMargin, useInfo, type PlotCode, type PlotReport, type PlotUse } from './plot';
-import { anglesFor, area as mpArea, diff, fromFlat, fromFlats, inter, layBays, layGround, NO_GROUND, offset, outlines, shrink, triangles, union, type GroundMap } from './ground';
+import { anglesFor, area as mpArea, diff, fromFlat, fromFlats, inside as mpInside, inter, layBays, layGround, NO_GROUND, offset, outlines, shrink, triangles, union, type GroundMap } from './ground';
 
 /** flat types: 1, 2 and 3 BHK; commercial floors are one office per stretch of corridor */
 export type UnitType = 0 | 1 | 2 | 3;
@@ -272,6 +272,9 @@ const coreLength = (height: number) => (height > 15 ? 8 : 6);
 /** plots this big get a gate on every road along them */
 export const GATES_FROM = 10000;
 export const FIRE_H = 15, FIRE_W = 6;
+/** the fire tender's way keeps this clear of a building's face (m, its near edge; as assumed: confirm against the
+ *  authority's fire regulations), and ordinary internal roads keep ROAD_CLEAR from any building */
+export const FIRE_GAP = 1.5, ROAD_CLEAR = 1.2;
 /** recreational open space: a share of the plot, on plots this big and more (UDCPR 3.5.1) */
 export const RG_FROM = 4000, RG_SHARE = 0.1;
 
@@ -427,8 +430,8 @@ export function presetBuildings(r: PlotReport, shape: Preset, depth?: number, le
     if (!s) return [];
     const L = Math.min(len, s[1] - s[0]), um = (s[0] + s[1]) / 2;
     // two towers want room for both and a fire tender's way between them
-    if (shape === 'twin' && s[1] - s[0] >= 2 * Math.min(len, 16) + 2 * FIRE_W) {
-      const l2 = Math.min(len, (s[1] - s[0] - 2 * FIRE_W) / 2);
+    if (shape === 'twin' && s[1] - s[0] >= 2 * Math.min(len, 16) + 2 * (FIRE_GAP + FIRE_W)) {
+      const l2 = Math.min(len, (s[1] - s[0] - 2 * (FIRE_GAP + FIRE_W)) / 2);
       return [...make([[s[0], vm], [s[0] + l2, vm]]), ...make([[s[1] - l2, vm], [s[1], vm]])];
     }
     return make([[um - L / 2, vm], [um + L / 2, vm]]);
@@ -599,7 +602,7 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
   cars = Math.ceil(cars * 1.05); scooters = Math.ceil(scooters * 1.05);
   trucks = Math.ceil(trucks);
   const need = cars + Math.ceil(scooters / 4) + trucks * 3;
-  const ground = groundOf(r, site, height > FIRE_H);
+  const ground = groundOf(r, site, height > FIRE_H, buildings.map((b) => ({ quads: b.quads, tall: b.height > FIRE_H })));
   const playOrTrees = els.filter((e) => e.kind === 'play' || e.kind === 'trees').map(ringOf);
   // the ground laid out: what's left of each lot and garden, bays packed into the lots (and, asked for, the open
   // ground), the rest paved and planted
@@ -962,7 +965,7 @@ function layLaid(L: Laid, use: PlotUse) {
 /** The fire tender's way round a formed building: its outline grown by the way's width, less the outline, in pieces. */
 function fireBandOf(outline: number[]): number[][] {
   const P = fromFlat(outline);
-  return triangles(diff(offset(P, FIRE_W), P)).filter((q) => polyArea(q) > 1e-3);
+  return triangles(diff(offset(P, FIRE_GAP + FIRE_W), offset(P, FIRE_GAP))).filter((q) => polyArea(q) > 1e-3);
 }
 
 /** Bays on the stilt under a formed building: across its lowest floor, clear of the cores. */
@@ -989,7 +992,11 @@ function hull(r: number[]): number[] {
 /** The compound wall along the plot (behind the DP road line), gates onto the roads, and, once a building tops
  *  15 m, a drive the fire tender's width along every side that isn't a road, 3 m in from the wall: it leaves by a
  *  gate at each end (a road side). A lower building gets a single gate off the entry road. */
-function groundOf(r: PlotReport, site: PlotSite, tall: boolean): Ground {
+/** The compound wall along the plot, gates onto the roads, and the fire tender's way: derived afresh from the buildings
+ *  as they stand every time (never stored), a lane round each building over 15 m at FIRE_GAP from its faces, kept on
+ *  the plot and clear of the other buildings, with a spur out to a road side where it doesn't reach one; its ends are
+ *  gates. (The old drive round the plot's edge is what the 'perimeter' access used to mean.) */
+function groundOf(r: PlotReport, site: PlotSite, tall: boolean, built: { quads: number[][]; tall: boolean }[] = []): Ground {
   const N = r.net, n = N.length / 2;
   const els = site.elements ?? [];
   const roads = els.filter((e) => e.kind === 'road' && e.spine.length >= 4).map((e) => ({ pts: e.spine, w: e.depth }));
@@ -1010,8 +1017,61 @@ function groundOf(r: PlotReport, site: PlotSite, tall: boolean): Ground {
   const gate = (k: number, s: number, w: number) => { const L = len(k), s0 = Math.max(0, Math.min(L - w, s - w / 2)); if (L >= w) gates.push({ k, s0, s1: s0 + w }); };
   const drive: number[][] = [];
   const front = r.edges, any = front.some(Boolean);
-  if (tall && access === 'perimeter' && front.some((f) => !f)) {
-    const C = offsetSpine(N, true, (sgn * driveW) / 2);
+  void sgn;
+  const tallB = built.filter((b) => b.tall && b.quads.length);
+  if (tall && access === 'perimeter' && tallB.length) {
+    // the lane's centre line: the tall buildings' outlines grown by the gap and half the lane; where it leaves the plot
+    // (less half the lane) or runs over another building, it stops
+    const reach = FIRE_GAP + driveW / 2;
+    const loops = offset(union(...tallB.flatMap((b) => b.quads.map(fromFlat))), reach);
+    const okArea = offset(fromFlat(N), -driveW / 2), blocked = offset(union(...built.flatMap((b) => b.quads.map(fromFlat))), driveW / 2 + 0.6);
+    const ok = (x: number, z: number) => mpInside(okArea, x, z) && !mpInside(blocked, x, z);
+    const runs: number[][] = [];
+    for (const poly of loops) {
+      const ring = poly[0];
+      if (!ring || ring.length < 3) continue;
+      // (the ring sampled every 2 m, so a stretch that leaves the plot is cut where it leaves)
+      const P: [number, number][] = [];
+      for (let i = 0; i < ring.length; i++) {
+        const a = ring[i], b = ring[(i + 1) % ring.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]), m = Math.max(1, Math.ceil(L / 2));
+        for (let k = 0; k < m; k++) P.push([a[0] + ((b[0] - a[0]) * k) / m, a[1] + ((b[1] - a[1]) * k) / m]);
+      }
+      const good = P.map(([x, z]) => ok(x, z));
+      if (good.every(Boolean)) { runs.push([...P.flat(), P[0][0], P[0][1]]); continue; }
+      // (runs of good points, starting after a bad one so a run doesn't wrap)
+      const s0 = good.indexOf(false);
+      let cur: number[] = [];
+      for (let k = 1; k <= P.length; k++) {
+        const i = (s0 + k) % P.length;
+        if (good[i]) cur.push(P[i][0], P[i][1]);
+        else { if (cur.length >= 6) runs.push(cur); cur = []; }
+      }
+      if (cur.length >= 6) runs.push(cur);
+    }
+    // each run's ends: a gate where one comes near a road side; a run (or loop) that reaches none gets a spur out to the
+    // nearest road side, if the way there is clear
+    const roadEdge = (x: number, z: number) => { let best: { k: number; s: number; d: number } | null = null; for (let k = 0; k < n; k++) { if (!front[k]) continue; const s = along(k, x, z), [px, pz] = at(k, s), d = Math.hypot(px - x, pz - z); if (!best || d < best.d) best = { k, s, d }; } return best; };
+    for (const run of runs) {
+      let reached = false;
+      const closed = run.length >= 4 && run[0] === run[run.length - 2] && run[1] === run[run.length - 1];
+      if (!closed) for (const e of [0, run.length - 2]) {
+        const g = roadEdge(run[e], run[e + 1]);
+        if (g && g.d < driveW + 1) { const [px, pz] = at(g.k, g.s); if (e === 0) run.unshift(px, pz); else run.push(px, pz); gate(g.k, g.s, fireGate); reached = true; }
+      }
+      if (!reached) {
+        let best: { i: number; g: { k: number; s: number; d: number } } | null = null;
+        for (let i = 0; i < run.length; i += 2) { const g = roadEdge(run[i], run[i + 1]); if (g && (!best || g.d < best.g.d)) best = { i, g }; }
+        if (best) {
+          const [px, pz] = at(best.g.k, best.g.s), x0 = run[best.i], z0 = run[best.i + 1];
+          let clear = true;
+          for (let t = 0.15; t < 0.95; t += 0.1) if (mpInside(blocked, x0 + (px - x0) * t, z0 + (pz - z0) * t)) clear = false;
+          if (clear) { drive.push([x0, z0, px, pz]); gate(best.g.k, best.g.s, fireGate); }
+        }
+      }
+      drive.push(run);
+    }
+  } else if (tall && access === 'plot-edge' && front.some((f) => !f)) {
+    const C = offsetSpine(N, true, (signedArea(N) > 0 ? 1 : -1) * driveW / 2);
     if (!any) drive.push([...C, C[0], C[1]]);
     else {
       // runs of edges that aren't road sides, each from the road side before it to the one after
@@ -1093,6 +1153,9 @@ export function driveQuads(G: Ground): number[][] {
 
 /** The fire tender's way round a building: its plate grown by the way's width (outward only, for a courtyard block). */
 function fireBand(b: SiteBuilding): number[][] {
+  // (the lane as the scheme draws it: from FIRE_GAP to FIRE_GAP + FIRE_W out from the building's faces)
+  const own = union(...buildingQuads(b).map(fromFlat));
+  if (own.length) return triangles(diff(offset(own, FIRE_GAP + FIRE_W), offset(own, FIRE_GAP))).filter((q) => polyArea(q) > 1e-3);
   if (b.closed) {
     // the outer face is the side whose offset loop is bigger
     const out = polyArea(offsetSpine(b.spine, true, 1)) > polyArea(offsetSpine(b.spine, true, -1)) ? 1 : -1;

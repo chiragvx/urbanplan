@@ -32,9 +32,9 @@ export class Pipeline {
     this.gtao = new GTAOPass(scene, camera, Math.max(1, w), Math.max(1, h));
     this.gtao.output = GTAOPass.OUTPUT.Default;
     // (metres: a radius that reaches into window reveals and under chhajjas, not across a street)
-    this.gtao.updateGtaoMaterial({ radius: 1.2, distanceExponent: 1.4, thickness: 1.2, scale: 1, samples: 12, distanceFallOff: 0.5, screenSpaceRadius: false });
+    this.gtao.updateGtaoMaterial({ radius: 0.7, distanceExponent: 2, thickness: 0.5, scale: 1, samples: 12, distanceFallOff: 1.0, screenSpaceRadius: false });
     this.gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
-    this.gtao.blendIntensity = 1;
+    this.gtao.blendIntensity = 0.85;
     this.bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.3, 0.18, 1.6);
     this.bloom.enabled = false;
     for (const p of [this.scenePass, this.ssaa, this.gtao, this.bloom, this.output, this.smaa]) this.composer.addPass(p);

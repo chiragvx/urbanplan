@@ -220,7 +220,7 @@ function App() {
       r: e.r, d: e.d, plans: e.plans, ds: e.ds, xray: xr, shops: e.shops,
       roads: roadLines(o.ring, o.roads).map((l) => ({ pts: l.pts, today: l.road.today })),
       dsOf: (i) => dsOfBuilding(p, i, e.ds, e.d.buildings[i]?.b.id), rooms, roomColor: ROOM_COLOR,
-      features: p.features, levels: p.levels, north: p.north, sel: picked?.k === 'building' ? picked.id : null, forms: e.forms,
+      features: p.features, levels: p.levels, north: p.north, sel: picked?.k === 'building' ? picked.id : null, forms: e.forms, at: p.at ?? null, city: p.city,
     });
     edit.current?.draw();
     applySun();

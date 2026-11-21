@@ -6,6 +6,13 @@
 import * as THREE from 'three';
 import { materialOf } from '../materials';
 import { detailOf } from './textures';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+
+/** the chamfer on instanced members' edges (m; 0 off: the high tier and stills turn it on), and the unit box it bends:
+ *  the shader keeps it this many metres whatever a member's size, so a long band and a short pier bevel alike */
+export const BEVEL = { value: 0 };
+const R0 = 0.1;
+export const CHAMFER_BOX = new RoundedBoxGeometry(1, 1, 1, 1, R0);
 
 /** a colour clamped to what a real surface reflects (3 … 85 %), so white walls don't burn out in the sun */
 export function albedo(hex: string): THREE.Color {
@@ -18,7 +25,17 @@ export function albedo(hex: string): THREE.Color {
 /** world-projected UVs for instanced boxes: vertical faces along their run and up, flat ones in plan (metres) */
 function boxUV(m: THREE.Material) {
   m.onBeforeCompile = (s) => {
-    s.vertexShader = s.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
+    s.uniforms.uBevel = BEVEL;
+    s.vertexShader = 'uniform float uBevel;\n' + s.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+#ifdef USE_INSTANCING
+  if ( uBevel > 0.0 ) {
+    vec3 sc = vec3( length( instanceMatrix[0].xyz ), length( instanceMatrix[1].xyz ), length( instanceMatrix[2].xyz ) );
+    vec3 sg = sign( transformed );
+    vec3 dir = ( transformed - sg * ( 0.5 - ${R0.toFixed(3)} ) ) / ${R0.toFixed(3)};
+    vec3 bv = min( vec3( uBevel ), sc * 0.3 );
+    transformed = sg * 0.5 + ( dir - sg ) * bv / sc;
+  }
+#endif`).replace('#include <project_vertex>', `#include <project_vertex>
 #ifdef USE_INSTANCING
   {
     vec4 bw = modelMatrix * instanceMatrix * vec4( position, 1.0 );
