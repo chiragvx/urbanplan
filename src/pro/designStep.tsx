@@ -1,3 +1,6 @@
+// The design system builder, and Pro's simple Design step. The full builder lives in the dashboard (Design systems):
+// every section below, on a saved design system, checked on the sample scheme. Pro's step keeps the start, the preview,
+// the facade's materials and the balconies, and the review, and opens the builder for the rest.
 // Step 2, the design system: the builder's look, set once and kept. Start from a preset or one of your own, see it
 // on a facade, then pick the materials of each surface (walls, accents, the base, floors room by room, the roof, the
 // railings), the windows and balconies, and the specification. Everything here is a property of the design system
@@ -8,8 +11,8 @@ import type { ComponentChildren, JSX } from 'preact';
 import { useEffect, useId, useState } from 'preact/hooks';
 import './designStep.css';
 import {
-  climateOf, clone, compositionOf, landscapeOf, lightingOf, signageOf, finishOf, finishRate, FINISHED, FLOOR_ROOMS, languageOf, paletteOf, presetOf, PRESETS, ROOF_KINDS, setFinish, SKIN_PATTERNS, SPEC, STYLE_IDS, ZONED_FROM,
-  type BalconyKind, type Climate, type Landscape, type Lighting, type Signage, type Composition, type Corner, type Crown, type DesignSystem, type DoorType, type Entrance, type FinishSlot, type Language, type Rhythm, type Tone, type WindowType,
+  climateOf, clone, compositionOf, landscapeOf, lightingOf, signageOf, siteKitOf, finishOf, finishRate, FINISHED, FLOOR_ROOMS, languageOf, paletteOf, presetOf, PRESETS, ROOF_KINDS, setFinish, SKIN_PATTERNS, SPEC, STYLE_IDS, ZONED_FROM,
+  type BalconyKind, type Climate, type Landscape, type Lighting, type Signage, type SiteKit, type Composition, type Corner, type Crown, type DesignSystem, type DoorType, type Entrance, type FinishSlot, type Language, type Rhythm, type Tone, type WindowType,
 } from './design';
 import type { RoofKind, SkinPattern } from './form/types';
 import { byCategory, materialOf, SLOT_CATEGORIES, type Material } from './materials';
@@ -19,6 +22,7 @@ import type { StepProps } from './steps';
 import { PALETTE_SLOTS, PALETTE_TOLERANCE, sharesOf, type PaletteSlot } from './palette';
 import { lockedBy, precinctOf, PRECINCTS, type LockGroup } from './heritage';
 import { review } from './review';
+import type { Evaluated } from './evaluate';
 import { Btn, Color, Icon, Note, nf, Num, Row, Section, Seg, Select, Slider, Toggle } from './ui';
 
 // ---------------------------------------------------------------- colour helpers (for drawing materials only)
@@ -137,7 +141,7 @@ function MaterialRow({ label, value, slot, open, toggle, set }: { label: string;
 /** A few floors of a generic facade, drawn in metres: three bays (the main window, the balcony, the smaller window
  *  with the ventilator) over the stilt, with the parapet and the roof's edge. Colours from the design system's facade
  *  (what the 3D shows), surfaces from its materials. */
-function Elevation({ ds }: { ds: DesignSystem }) {
+export function Elevation({ ds }: { ds: DesignSystem }) {
   const uid = safeId(useId());
   const f = finishOf(ds);
   const mWall = materialOf(f.wall), mAcc = materialOf(f.accent), mBase = materialOf(f.base), mRoof = materialOf(f.roof), mRail = materialOf(f.railing);
@@ -421,6 +425,49 @@ function ReviewSection({ e }: { e: StepProps['e'] }) {
   );
 }
 
+// ---------------------------------------------------------------- site kit
+/** The site kit: the compound wall, the gates (the rules for getting in and out) and the internal roads. */
+function SiteKitSection({ ds, setDs }: { ds: DesignSystem; setDs: (fn: (d: DesignSystem) => void) => void }) {
+  const k = siteKitOf(ds);
+  const setK = (fn: (x: SiteKit) => void) => setDs((d) => { const x: SiteKit = JSON.parse(JSON.stringify(siteKitOf(d))); fn(x); d.site = x; });
+  const m = (v: number) => `${nf(v, 2)} m`, opt = (v: number) => (v > 0.04 ? m(v) : 'None');
+  const [openM, setOpenM] = useState(false);
+  return (
+    <Section title="Walls, gates and roads" fold open={false} sub="The plot’s edge, the ways in and out, and the internal roads: the site engine lays them out at these sizes.">
+      <small class="dsk-h">Compound wall</small>
+      <Seg<SiteKit['wall']['kind']> label="Wall" value={k.wall.kind} set={(v) => setK((x) => { x.wall.kind = v; })} options={[{ value: 'solid', label: 'Solid' }, { value: 'railing', label: 'Railing' }, { value: 'hedge', label: 'Hedge' }, { value: 'none', label: 'None' }]} />
+      {k.wall.kind !== 'none' && <Slider label="Height" value={k.wall.h} min={0.9} max={3} step={0.05} fmt={m} set={(v) => setK((x) => { x.wall.h = v; x.wall.plinth = Math.min(x.wall.plinth, v); })} />}
+      {k.wall.kind === 'railing' && <Slider label="Solid plinth" value={k.wall.plinth} min={0.2} max={k.wall.h} step={0.05} fmt={m} set={(v) => setK((x) => { x.wall.plinth = v; })} />}
+      {(k.wall.kind === 'solid' || k.wall.kind === 'railing') && <>
+        <div class="dss-mats"><MaterialRow label="Faced with" value={k.wall.material} slot="wall" open={openM} toggle={() => setOpenM(!openM)} set={(id) => setK((x) => { x.wall.material = id; })} /></div>
+        <Row>
+          <Toggle label="Coping" value={k.wall.coping} set={(v) => setK((x) => { x.wall.coping = v; })} />
+          <Slider label="Piers every" value={k.wall.piers} min={0} max={6} step={0.5} fmt={opt} set={(v) => setK((x) => { x.wall.piers = v; })} />
+        </Row>
+      </>}
+      <small class="dsk-h">Gates: in and out</small>
+      <Slider label="Vehicle gate, clear" value={k.gate.vehicle} min={3} max={12} step={0.25} fmt={m} set={(v) => setK((x) => { x.gate.vehicle = v; })} />
+      <Slider label="Pedestrian gate" value={k.gate.pedestrian} min={0} max={2.4} step={0.1} fmt={opt} set={(v) => setK((x) => { x.gate.pedestrian = v; })} />
+      <Slider label="Set back from the boundary" value={k.gate.setback} min={0} max={12} step={0.5} fmt={opt} set={(v) => setK((x) => { x.gate.setback = v; })} />
+      <Seg<SiteKit['gate']['style']> label="Gate" value={k.gate.style} set={(v) => setK((x) => { x.gate.style = v; })} options={[{ value: 'sliding', label: 'Sliding' }, { value: 'swing', label: 'Swing' }, { value: 'boom', label: 'Boom barrier' }]} />
+      <Row>
+        <Toggle label="Separate in and out" value={k.gate.separate} set={(v) => setK((x) => { x.gate.separate = v; })} />
+        <Toggle label="Security cabin" value={k.gate.cabin} set={(v) => setK((x) => { x.gate.cabin = v; })} />
+      </Row>
+      <small class="dsk-h">Internal roads</small>
+      <Slider label="Road width" value={k.road.w} min={3.5} max={12} step={0.25} fmt={m} set={(v) => setK((x) => { x.road.w = v; })} />
+      <Seg<SiteKit['road']['surface']> label="Surface" value={k.road.surface} set={(v) => setK((x) => { x.road.surface = v; })} options={[{ value: 'asphalt', label: 'Asphalt' }, { value: 'pavers', label: 'Pavers' }, { value: 'concrete', label: 'Concrete' }, { value: 'grass-pavers', label: 'Grass pavers' }]} />
+      <Slider label="Footpath each side" value={k.road.footpath} min={0} max={3} step={0.25} fmt={opt} set={(v) => setK((x) => { x.road.footpath = v; })} />
+      <Slider label="Light pole every" value={k.road.poles} min={0} max={50} step={1} fmt={(v) => (v > 1 ? `${v} m` : 'None')} set={(v) => setK((x) => { x.road.poles = v; })} />
+      <Row>
+        <Toggle label="Kerbs" value={k.road.kerb} set={(v) => setK((x) => { x.road.kerb = v; })} />
+        <Toggle label="Trees along" value={k.road.trees} set={(v) => setK((x) => { x.road.trees = v; })} />
+      </Row>
+      <Note>The review checks the ways in and out: a gate wide enough for the fire tender, separate in and out from 100 bays, a 1.2 m pedestrian gate, room to wait off the road, gates clear of junctions, a road-side wall no higher than 1.5 m solid.</Note>
+    </Section>
+  );
+}
+
 // ---------------------------------------------------------------- climate
 /** The climate's elements: a chhajja over each window, turned to the sun or not, and jaali screens. */
 function ClimateSection({ ds, setDs }: { ds: DesignSystem; setDs: (fn: (d: DesignSystem) => void) => void }) {
@@ -585,10 +632,10 @@ function StartFrom({ p, up, toast }: Pick<StepProps, 'p' | 'up' | 'toast'>) {
 }
 
 // ---------------------------------------------------------------- the step
-export function DesignSystemStep({ p, e, up, toast }: StepProps) {
+/** The full design system builder: every section, on `e.ds`, checked against `e`'s scheme. */
+export function DesignSystemBuilder({ e, setDs }: { e: Evaluated; setDs: (fn: (d: DesignSystem) => void) => void }) {
   const ds = e.ds;
   const f = finishOf(ds);
-  const setDs = (fn: (d: DesignSystem) => void) => { const d = clone(ds); fn(d); up({ custom: d }); };
   const pick = (slot: FinishSlot) => (id: string) => setDs((d) => setFinish(d, slot, id));
   // one surface's swatches open at a time
   const [open, setOpen] = useState<string | null>(null);
@@ -598,13 +645,6 @@ export function DesignSystemStep({ p, e, up, toast }: StepProps) {
   const fr = finishRate(ds, e.finishQty);
   return (
     <>
-      <StartFrom p={p} up={up} toast={toast} />
-
-      <figure class="dss-prev">
-        <Elevation ds={ds} />
-        <figcaption>{ds.name}{ds.blurb && !p.custom ? <span> · {ds.blurb}</span> : null}</figcaption>
-      </figure>
-
       <HeritageSection ds={ds} setDs={setDs} />
 
       <ReviewSection e={e} />
@@ -659,6 +699,8 @@ export function DesignSystemStep({ p, e, up, toast }: StepProps) {
 
       <LandscapeSection ds={ds} setDs={setDs} />
 
+      <SiteKitSection ds={ds} setDs={setDs} />
+
       <Section title="Flooring" fold open={false}>
         <div class="dss-mats">{FLOOR_ROOMS.map((r) => row(`floor-${r.key}`, r.label, f.flooring[r.key], 'floor', r.key))}</div>
       </Section>
@@ -673,6 +715,51 @@ export function DesignSystemStep({ p, e, up, toast }: StepProps) {
         ))}
         <Note>The materials chosen above come to about {fr >= 0 ? '+' : '−'}₹{nf(Math.abs(fr))} per sq ft of built-up over plain ones (paint, 600 mm vitrified tiles, MS railings).</Note>
       </Section>
+    </>
+  );
+}
+
+/** Pro's Design step: the start, the preview, the facade's materials and the balconies, the review; the rest in the
+ *  builder (the dashboard's Design systems), which opens on this design system (saved under yours first). */
+export function DesignSystemStep({ p, e, up, toast }: StepProps) {
+  const ds = e.ds, f = finishOf(ds);
+  const setDs = (fn: (d: DesignSystem) => void) => { const d = clone(ds); fn(d); up({ custom: d }); };
+  const [open, setOpen] = useState<string | null>(null);
+  const row = (key: string, label: string, value: string, slot: keyof typeof SLOT_CATEGORIES, fs: FinishSlot) => (
+    <MaterialRow label={label} value={value} slot={slot} open={open === key} toggle={() => setOpen(open === key ? null : key)} set={(id) => setDs((d) => setFinish(d, fs, id))} />
+  );
+  const builder = async () => {
+    let id = p.custom?.origin;
+    if (!id) { const s = await library.save(`My ${ds.name}`, ds); up({ custom: clone(s.ds) }); id = s.id; toast(`Saved as “${s.name}” under your design systems.`); }
+    window.open(`${import.meta.env.BASE_URL}dashboard/#designs/${encodeURIComponent(id)}`, '_blank', 'noopener');
+  };
+  return (
+    <>
+      <StartFrom p={p} up={up} toast={toast} />
+
+      <figure class="dss-prev">
+        <Elevation ds={ds} />
+        <figcaption>{ds.name}{ds.blurb && !p.custom ? <span> · {ds.blurb}</span> : null}</figcaption>
+      </figure>
+
+      <div class="dss-builder">
+        <p>Composition, palette, climate, heritage, signs and lighting, landscape, and the site’s walls, gates and roads are set in the design system builder.</p>
+        <Btn onClick={() => void builder()}><Icon n="palette" size={15} />Open in the builder</Btn>
+        {!p.custom?.origin && <small>It’s saved under your design systems first.</small>}
+      </div>
+
+      <Section title="Facade">
+        <Locked ds={ds} g="materials">
+          <div class="dss-mats">
+            {row('wall', 'Walls', f.wall, 'wall', 'wall')}
+            {row('accent', 'Accents (bands, fins)', f.accent, 'accent', 'accent')}
+            {row('base', 'Base (the stilt)', f.base, 'base', 'base')}
+          </div>
+        </Locked>
+        <Seg<BalconyKind> label="Balconies" value={ds.balcony.kind} set={(v) => setDs((d) => { d.balcony.kind = v; })} options={[{ value: 'cantilever', label: 'Cantilever' }, { value: 'recessed', label: 'Recessed' }, { value: 'french', label: 'French' }, { value: 'none', label: 'None' }]} />
+      </Section>
+
+      <ReviewSection e={e} />
     </>
   );
 }

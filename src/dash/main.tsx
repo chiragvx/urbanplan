@@ -15,6 +15,8 @@ import { Btn, Dialog, download, Menu, nf, Seg, Select, Toggle, TooltipLayer } fr
 import { Dither } from '../theme/Dither';
 import { PRESETS } from '../pro/design';
 import * as Lib from '../pro/designLibrary';
+import { clone } from '../pro/design';
+import { Builder } from './builder';
 import { CITIES } from '../pro/project';
 import { I } from './icons';
 import * as D from './data';
@@ -125,7 +127,7 @@ function App() {
         {s === undefined ? <p class="d-loading"><Dither class="dz" cell={2} />Loading…</p>
           : r.view === 'home' ? <Home data={data} name={name} signedIn={!!user} />
           : r.view === 'projects' ? <Projects data={data} signedIn={!!user} />
-          : r.view === 'designs' ? <Designs />
+          : r.view === 'designs' ? <Designs sub={location.hash.replace(/^#\/?/, '').split('/')[1] ?? ''} />
           : r.view === 'team' ? <Team data={data} signedIn={!!user} />
           : r.view === 'activity' ? <Activity data={data} signedIn={!!user} />
           : <Settings tab={r.tab} data={data} signedIn={!!user} />}
@@ -423,22 +425,27 @@ const RenameDialog = ({ r, done, close }: { r: D.Row; done: (v: string) => void;
 
 // ---------------- design systems ----------------
 
-function Designs() {
+/** The design systems: yours (each opens in the builder) and the presets to start one from. The builder is where a
+ *  design system is made; Pro's Design step uses them and opens the builder for the detail. */
+function Designs({ sub }: { sub: string }) {
   const [mine, setMine] = useState<Lib.SavedDesign[] | null>(null);
   const [ren, setRen] = useState<Lib.SavedDesign | null>(null);
-  useEffect(() => { void Lib.list().then(setMine); }, []);
+  useEffect(() => { if (!sub) void Lib.list().then(setMine); }, [sub]);
+  if (sub) return <Builder id={decodeURIComponent(sub)} back={() => go('designs')} />;
+  const start = (from: (typeof PRESETS)[number], name = `My ${from.name}`) => void Lib.save(name, clone(from)).then((s) => go(`designs/${s.id}`));
   const reload = () => void Lib.list().then(setMine);
   const sw = (c: string[]) => <span class="d-sw">{c.map((x) => <i style={`background:${x}`} />)}</span>;
   const libAny = Lib as unknown as { rename?: (id: string, name: string) => Promise<unknown>; remove?: (id: string) => Promise<unknown> };
   return (
     <div class="d-page">
-      <header class="d-head"><h1>Design systems</h1></header>
+      <header class="d-head"><h1>Design systems</h1><button type="button" class="btn primary" onClick={() => start(PRESETS[0], 'New design system')}>New design system</button></header>
       <section class="d-sec">
-        <div class="d-sec-h"><h2>Yours</h2><small class="muted">Saved from the Design step</small></div>
-        {mine === null ? null : !mine.length ? <Empty icon="palette" title="None saved yet"><p>Open a project, change its design system, and choose “Save as mine”.</p></Empty> : (
+        <div class="d-sec-h"><h2>Yours</h2><small class="muted">Open one to build it: facade, composition, palette, climate, signs, landscape, walls, gates and roads</small></div>
+        {mine === null ? null : !mine.length ? <Empty icon="palette" title="None yet"><p>Start one from a preset below, or save one from a project’s Design step.</p></Empty> : (
           <div class="d-ds">{mine.map((m) => (
-            <div class="d-ds-c">{sw([m.ds.facade.wall, m.ds.facade.accent, m.ds.glazing.glass, m.ds.facade.base])}<b>{m.name}</b><small>Saved {ago(new Date(m.savedAt).toISOString())}</small>
+            <div class="d-ds-c">{sw([m.ds.facade.wall, m.ds.facade.accent, m.ds.glazing.glass, m.ds.facade.base])}<a class="d-ds-open" href={`#designs/${encodeURIComponent(m.id)}`}><b>{m.name}</b></a><small>Saved {ago(new Date(m.savedAt).toISOString())}</small>
               <span class="d-card-m"><Menu label={`${m.name}: more`} items={[
+                { label: 'Open in the builder', icon: 'edit', onSelect: () => go(`designs/${m.id}`) },
                 ...(libAny.rename ? [{ label: 'Rename', icon: 'edit', onSelect: () => setRen(m) }] : []),
                 { label: 'Download', icon: 'down', onSelect: () => download(`${m.name}.design.json`, JSON.stringify(m, null, 1), 'application/json') },
                 ...(libAny.remove ? [{ label: 'Delete', icon: 'trash', onSelect: () => void act(async () => { await libAny.remove!(m.id); reload(); }, 'Deleted.') }] : []),
@@ -448,7 +455,7 @@ function Designs() {
       </section>
       <section class="d-sec">
         <div class="d-sec-h"><h2>Presets</h2></div>
-        <div class="d-ds">{PRESETS.map((d) => <div class="d-ds-c">{sw([d.facade.wall, d.facade.accent, d.glazing.glass, d.facade.base])}<b>{d.name}</b><small>{d.blurb}</small></div>)}</div>
+        <div class="d-ds">{PRESETS.map((d) => <div class="d-ds-c">{sw([d.facade.wall, d.facade.accent, d.glazing.glass, d.facade.base])}<b>{d.name}</b><small>{d.blurb}</small><button type="button" class="linkbtn d-ds-start" onClick={() => start(d)}>Start from this</button></div>)}</div>
       </section>
       {ren && <NameDialog title="Rename" label="Name" value={ren.name} close={() => setRen(null)} done={(n) => { setRen(null); void act(async () => { await libAny.rename!(ren.id, n); reload(); }, 'Renamed.'); }} />}
     </div>

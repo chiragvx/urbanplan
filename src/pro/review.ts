@@ -3,8 +3,8 @@
 // Groups: composition, palette, climate and light, the street (entrance, signs, lighting), landscape, and the heritage
 // precinct's own rules when there is one. Thresholds are rules of thumb from design codes and guidelines (cited
 // inline), for discussion, not a statutory check.
-import { roadFrame } from '../doc/site';
-import { bearingOf, chhajjaOn, climateOf, compositionOf, landscapeOf, lightingOf, paletteOf, signageOf, zonesOf, ZONED_FROM } from './design';
+import { FIRE_H, FIRE_W, roadFrame } from '../doc/site';
+import { bearingOf, chhajjaOn, climateOf, compositionOf, landscapeOf, lightingOf, paletteOf, signageOf, siteKitOf, zonesOf, ZONED_FROM } from './design';
 import type { Evaluated } from './evaluate';
 import { dsOfBuilding } from './evaluate';
 import { precinctOf } from './heritage';
@@ -79,6 +79,30 @@ export function review(e: Evaluated): Review {
   const garden = d.ground.map.plants.filter((t) => t.kind <= 1).length, extra = plantingOf(r, land, d.buildings.flatMap((b) => b.quads)).trees.length;
   const need = Math.ceil(area / PLOT_PER_TREE);
   add('Landscape', `A tree for every ${PLOT_PER_TREE} m² of plot`, garden + extra >= need, `${garden + extra} planted, ${need} asked (one per ${PLOT_PER_TREE} m², as assumed)`);
+
+  // entry and exit, the wall and the internal roads (rules of thumb as assumed: NBC 2016 Part 4's fire tender access,
+  // the accessibility guidelines' 1.2 m clear path, a DCR's 1.5 m solid wall on a road side and gates kept off junctions)
+  const K = siteKitOf(ds), G = d.ground, tallB = d.buildings.some((b) => b.height > FIRE_H);
+  const widths = G.gates.map((g) => Math.hypot(g[2] - g[0], g[3] - g[1])), gmin = widths.length ? Math.min(...widths) : 0;
+  const needW = tallB ? FIRE_W : 4.5;
+  add('Entry and exit', `A vehicle gate at least ${needW} m clear`, widths.length > 0 && gmin >= needW - 0.01, widths.length ? `${widths.length} gate(s), the narrowest ${gmin.toFixed(1)} m${tallB ? ' (the fire tender drives in: over 15 m)' : ''}` : 'No gate laid out');
+  const bays = d.parking.have, twoWays = widths.length >= 2 || (K.gate.separate && gmin >= 7);
+  add('Entry and exit', 'Separate ways in and out from 100 car bays', bays < 100 || twoWays, `${bays} bays; ${widths.length >= 2 ? `${widths.length} gates` : K.gate.separate ? (gmin >= 7 ? 'one gate split in and out' : 'split asked, but the gate is under 7 m') : 'one way in and out'}`);
+  add('Entry and exit', 'A pedestrian gate 1.2 m clear', K.gate.pedestrian >= 1.2 - 1e-6, K.gate.pedestrian > 0 ? `${K.gate.pedestrian.toFixed(1)} m` : 'None: people share the vehicle gate');
+  add('Entry and exit', 'Room for a car to wait off the road', bays < 50 || K.gate.setback >= 5.5, bays < 50 ? `${bays} bays: not needed` : `Gate set back ${K.gate.setback.toFixed(1)} m (5.5 m asked from 50 bays)`);
+  const N = r.net, n = N.length / 2;
+  let nearJ = 0;
+  for (let k = 0; k < n; k++) {
+    if (!r.edges[k] || !r.edges[(k - 1 + n) % n]) continue; // a corner where two road sides meet
+    const cx = N[k * 2], cz = N[k * 2 + 1];
+    for (const g of G.gates) if (Math.min(Math.hypot(g[0] - cx, g[1] - cz), Math.hypot(g[2] - cx, g[3] - cz)) < 15) nearJ++;
+  }
+  add('Entry and exit', 'Gates 15 m or more from a road junction', !nearJ, nearJ ? `${nearJ} gate(s) nearer a corner where two roads meet` : 'Clear of the corners');
+  const solid = K.wall.kind === 'solid' ? K.wall.h : K.wall.kind === 'railing' ? K.wall.plinth : 0;
+  add('Entry and exit', 'Solid wall no higher than 1.5 m on a road side', solid <= 1.5 + 1e-6, K.wall.kind === 'none' ? 'No wall' : K.wall.kind === 'hedge' ? 'A hedge' : `${solid.toFixed(2)} m solid${K.wall.kind === 'railing' ? `, railing to ${K.wall.h.toFixed(2)} m` : ''}`);
+  const roadMin = Math.min(G.driveW || 99, ...G.roads.map((x) => x.w));
+  if (G.drive.length || G.roads.length) add('Entry and exit', `Internal roads at least ${tallB ? FIRE_W : 4.5} m`, roadMin >= (tallB ? FIRE_W : 4.5) - 0.01, `The narrowest ${roadMin.toFixed(1)} m`);
+  if (G.drive.length || G.roads.length) add('Entry and exit', 'A footpath along the roads', K.road.footpath >= 1.5 - 1e-6, K.road.footpath > 0 ? `${K.road.footpath.toFixed(1)} m each side` : 'None');
 
   // the precinct
   const pr = precinctOf(ds.precinct);

@@ -995,9 +995,11 @@ function groundOf(r: PlotReport, site: PlotSite, tall: boolean): Ground {
   const roads = els.filter((e) => e.kind === 'road' && e.spine.length >= 4).map((e) => ({ pts: e.spine, w: e.depth }));
   const circles = els.filter((e) => e.kind === 'roundabout' && e.spine.length >= 4).map((e) => [...spineCentreOf(e.spine), e.depth / 2]);
   const gardens: number[][] = [];
-  const empty: Ground = { map: NO_GROUND, wall: [], gates: [], drive: [], driveW: FIRE_W, rg: site.rg ?? null, roads, circles, gardens };
+  const empty: Ground = { map: NO_GROUND, wall: [], gates: [], drive: [], driveW: Math.max(FIRE_W, site.design?.roadW ?? FIRE_W), rg: site.rg ?? null, roads, circles, gardens };
   if (n < 3 || (!site.buildings.length && !els.length)) return empty;
   const access = site.design?.access ?? 'perimeter';
+  // (the design system's gate and road widths; never under what the fire tender needs where it has to come in)
+  const gw = site.design?.gateW, driveW = Math.max(FIRE_W, site.design?.roadW ?? FIRE_W), fireGate = Math.max(FIRE_W, gw ?? FIRE_W);
   const sgn = signedArea(N) > 0 ? 1 : -1;
   const E = (k: number) => { const i = ((k % n) + n) % n, j = (i + 1) % n; return [N[i * 2], N[i * 2 + 1], N[j * 2], N[j * 2 + 1]]; };
   const len = (k: number) => { const [ax, az, bx, bz] = E(k); return Math.hypot(bx - ax, bz - az); };
@@ -1009,7 +1011,7 @@ function groundOf(r: PlotReport, site: PlotSite, tall: boolean): Ground {
   const drive: number[][] = [];
   const front = r.edges, any = front.some(Boolean);
   if (tall && access === 'perimeter' && front.some((f) => !f)) {
-    const C = offsetSpine(N, true, (sgn * FIRE_W) / 2);
+    const C = offsetSpine(N, true, (sgn * driveW) / 2);
     if (!any) drive.push([...C, C[0], C[1]]);
     else {
       // runs of edges that aren't road sides, each from the road side before it to the one after
@@ -1020,11 +1022,11 @@ function groundOf(r: PlotReport, site: PlotSite, tall: boolean): Ground {
         const pts: number[] = [];
         const s0 = along(k - 1, C[k * 2], C[k * 2 + 1]);
         pts.push(...at(k - 1, s0));
-        gate(k - 1, s0, FIRE_W);
+        gate(k - 1, s0, fireGate);
         for (let i = k; ; i = (i + 1) % n) { pts.push(C[i * 2], C[i * 2 + 1]); if (i === (m + 1) % n) break; }
         const e = (m + 1) % n, s1 = along(e, C[e * 2], C[e * 2 + 1]);
         pts.push(...at(e, s1));
-        gate(e, s1, FIRE_W);
+        gate(e, s1, fireGate);
         drive.push(pts);
       }
     }
@@ -1052,14 +1054,14 @@ function groundOf(r: PlotReport, site: PlotSite, tall: boolean): Ground {
     let k = -1;
     for (let i = 0; i < n; i++) if (front[i] && r.edgeRoad[i] === id && (k < 0 || len(i) > len(k))) k = i;
     if (k < 0 || gates.some((g) => r.edgeRoad[g.k] === id)) continue;
-    gate(k, len(k) / 2, 6);
+    gate(k, len(k) / 2, gw ?? 6);
   }
   if (!gates.length && any) {
     // one gate off the entry road (its longest side), near the end
     let k = -1;
     for (let i = 0; i < n; i++) if (front[i] && (r.edgeRoad[i] === r.road?.id || !r.road) && (k < 0 || len(i) > len(k))) k = i;
     if (k < 0) k = front.findIndex(Boolean);
-    gate(k, len(k) - 4, 4.5);
+    gate(k, len(k) - Math.max(4, (gw ?? 4.5) - 0.5), gw ?? 4.5);
   }
   // the wall: every edge, less its gates; and the walls drawn by hand, a run per stretch
   const wall: number[][] = [];
@@ -1070,7 +1072,7 @@ function groundOf(r: PlotReport, site: PlotSite, tall: boolean): Ground {
     for (const x of g) { if (x.s0 - s > 0.2) wall.push([...at(k, s), ...at(k, x.s0)]); s = x.s1; }
     if (len(k) - s > 0.2) wall.push([...at(k, s), ...at(k, len(k))]);
   }
-  return { map: NO_GROUND, wall, gates: gates.map((x) => [...at(x.k, x.s0), ...at(x.k, x.s1)]), drive, driveW: FIRE_W, rg: site.rg ?? null, roads, circles, gardens };
+  return { map: NO_GROUND, wall, gates: gates.map((x) => [...at(x.k, x.s0), ...at(x.k, x.s1)]), drive, driveW, rg: site.rg ?? null, roads, circles, gardens };
 }
 
 /** The drive and the internal roads as a quad per stretch (their width either side of the centre line), and the

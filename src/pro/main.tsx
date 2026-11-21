@@ -14,6 +14,8 @@ import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import '../theme/tokens.css';
 import './pro.css';
+import * as designLibrary from './designLibrary';
+import { presetOf } from './design';
 import { DEFAULT_PROJECT, outline, roadLines, type ProProject } from './project';
 import { deletePro, listPro, listSharedPro, openPro, savePro, toText, type CloudRef } from './cloud';
 import { addComment, addMember, comments as listComments, deleteComment, EMAIL, joinProject, members as listMembers, NotSetUp, projectLink, removeMember, resolveComment, sendInvite, type Comment, type Member } from './team';
@@ -139,6 +141,12 @@ function App() {
       const bs = placeTemplate(start.slice(9), [x, z], e0);
       fresh(bs.length ? { ...n, scheme: { ...own(n, e0), buildings: bs } } : n);
       go('build');
+      return;
+    }
+    // (a design system from the builder: the sample in it, on its Design step)
+    const dsId = new URLSearchParams(location.search).get('ds');
+    if (dsId) {
+      void designLibrary.get(dsId).then((s) => { fresh({ ...DEFAULT_PROJECT, city, ...(s ? { custom: s.ds, style: presetOf(s.ds.id).id } : {}) }); go('design'); });
       return;
     }
     fresh({ ...DEFAULT_PROJECT, city });

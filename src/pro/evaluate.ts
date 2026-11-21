@@ -3,7 +3,7 @@
 // options explorer, the screening table, the brief runner and the API all go through this, so they can't disagree.
 import type { PlotReport } from '../doc/plot';
 import type { SiteReport } from '../doc/site';
-import { finishRate, languageOf, presetOf, specRateNet, type DesignSystem, type FinishQty } from './design';
+import { finishRate, languageOf, presetOf, siteKitOf, specRateNet, type DesignSystem, type FinishQty } from './design';
 import { facadeTakeoff, type Takeoff } from './palette';
 import type { Shops } from './mixed';
 import { planFloor, schedule, type FloorPlan, type ScheduleRow, type UnitCheck } from './openings';
@@ -60,7 +60,9 @@ export function evaluate(p: ProProject): Evaluated {
     const L = layForm(b, { floorH: ds.floorH, mix: b.mix ?? p.mix, sizes: DEFAULT_SITE.sizes, round: languageOf(dsOfBuilding(p, 0, ds, b.id)).round });
     if (L && L.floors.length) forms[b.id] = L;
   }
-  let { d, shops } = generate(p, r, rate, ds.premium, forms);
+  // (the design system's gates and internal roads go to the site engine: their widths)
+  const sk = siteKitOf(ds), kit = { gateW: sk.gate.vehicle, roadW: sk.road.w };
+  let { d, shops } = generate(p, r, rate, ds.premium, forms, kit);
   const sysOf = (x: typeof d) => siteSystems(x.buildings.map((b) => ({ b, settings: p.systems?.byBuilding?.[b.b.id] })), { under: x.under, floorH: ds.floorH, code: r.code, basements: x.site.basements, bays: x.parking.have, site: p.systems?.site });
   let sys = sysOf(d);
   // (a building with a style of its own takes that one's windows and doors)
@@ -77,7 +79,7 @@ export function evaluate(p: ProProject): Evaluated {
   let used = rate;
   if (sysRate || M.rate !== rate) {
     used = M.rate;
-    ({ d, shops } = generate(p, r, used + sysRate, ds.premium, forms)); sys = sysOf(d);
+    ({ d, shops } = generate(p, r, used + sysRate, ds.premium, forms, kit)); sys = sysOf(d);
     plans = planAll(d); M = measure(d, plans);
   }
   const rows = schedule(d, plans, ds, (bi, ui) => (shops?.removed.get(bi)?.has(ui) ? shops.upperOf[bi] : 0));

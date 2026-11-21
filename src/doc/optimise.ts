@@ -34,6 +34,9 @@ export interface Design {
   roundabouts?: boolean;
   /** % of the plot kept green (at least; the open space the rules ask is kept anyway) */
   green?: number;
+  /** the design system's site kit: a vehicle gate's clear width and an internal road's width (m; unset: 4.5 to 6 m
+   *  gates as the case asks, 7 m roads) */
+  gateW?: number; roadW?: number;
 }
 export const DEFAULT_DESIGN: Design = { type: 'auto', maxFloors: 0, maxBuildings: 0 };
 export type Access = 'perimeter' | 'spine' | 'grid' | 'none';
@@ -406,7 +409,7 @@ function accessRoads(r: PlotReport, Z: number[], NL: number[], design: Design, u
   const ns = mode === 'grid' ? Math.max(1, Math.round((U1 - U0) / (block * 1.2))) : 1;
   const segs: [number[], number[]][] = [];
   const W = (u: number, v: number) => F.toW(u, v).map((x) => Math.round(x * 100) / 100);
-  const add = (pts: number[][], w = ROAD_W) => {
+  const add = (pts: number[][], w = design.roadW ?? ROAD_W) => {
     roads.push({ id: `r${roads.length}`, kind: 'road', spine: pts.flatMap(([u, v]) => W(u, v)), depth: w, floors: 0, auto: true });
     for (let i = 0; i + 1 < pts.length; i++) { segs.push([pts[i], pts[i + 1]]); keep.push(stripL(pts[i], pts[i + 1], w + 2 * ROAD_SET)); }
   };

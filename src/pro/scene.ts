@@ -11,13 +11,14 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { PlotReport } from '../doc/plot';
 import { UNIT_COLOR, type SiteReport } from '../doc/site';
-import { bearingOf, chhajjaOn, climateOf, kelvinColour, landscapeOf, lightingOf, signageOf, compositionOf, finishOf, languageOf, zonesOf, ZONED_FROM, type DesignSystem, type Tone } from './design';
+import { bearingOf, chhajjaOn, climateOf, kelvinColour, siteKitOf, SURFACE_COLOUR, landscapeOf, lightingOf, signageOf, compositionOf, finishOf, languageOf, zonesOf, ZONED_FROM, type DesignSystem, type Tone } from './design';
 import { materialOf } from './materials';
 import { DEFAULT_SITE } from '../doc/site';
 import { frameOf, layForm, type Form, type FormLayout } from './form';
 import { buildForm, disposeBuilt, layoutHash, type Built, type Look } from './form/mesh';
 import { facadeBays, type FloorPlan, type Opening } from './openings';
 import { plantingOf } from './landscape';
+import { pointIn } from '../doc/site';
 
 import { SHOP_W, type Shops } from './mixed';
 import { roadFrame } from '../doc/site';
@@ -446,7 +447,9 @@ export class ProView {
 
     // the site's own ground: internal roads, lots, paths, lawns and beds, as the ground map lays them; the trees
     const G = d.ground.map, flatMP = (m: MP, y: number, mt: THREE.Material) => { for (const t of triangles(m)) if (t.length >= 6) mesh(flat(t, y), mt, false); };
-    flatMP(G.road, 0.05, M.road); flatMP(G.lot, 0.05, mat('#8b8e95', { roughness: 0.95 })); flatMP(G.path, 0.06, M.paving);
+    // (the internal roads in the site kit's surface)
+    const KIT = siteKitOf(ds);
+    flatMP(G.road, 0.05, mat(SURFACE_COLOUR[KIT.road.surface], { roughness: KIT.road.surface === 'asphalt' ? 0.95 : 0.85 })); flatMP(G.lot, 0.05, mat('#8b8e95', { roughness: 0.95 })); flatMP(G.path, 0.06, M.paving);
     flatMP(G.lawn, 0.06, mat('#9fb889')); flatMP(G.bed, 0.07, mat('#6f8f5a'));
     const trunks = new Boxes(), crowns = new Boxes();
     const treeAt = (x: number, z: number, cr: number) => { const h = Math.max(3, cr * 1.6); trunks.add(x, h * 0.25, z, 1, 0, 0.3, h * 0.5, 0.3); crowns.add(x, h * 0.7, z, 1, 0, cr * 1.6, h * 0.6, cr * 1.6); };
@@ -467,7 +470,6 @@ export class ProView {
     const hedge = new Boxes();
     for (const [x0, z0, x1, z1] of plant.hedges) { const L = Math.hypot(x1 - x0, z1 - z0); if (L > 0.5) hedge.add((x0 + x1) / 2, 0.6, (z0 + z1) / 2, (x1 - x0) / L, (z1 - z0) / L, L, 1.2, 0.8); }
     add(hedge.mesh(mat('#5a7a48', { roughness: 0.95, flatShading: true }), true));
-    add(trunks.mesh(mat('#6b5440'), true, trunkGeo)); add(crowns.mesh(mat('#5f7f4c', { roughness: 0.9, flatShading: true }), true, crownGeo));
 
     let bands = new Boxes(), fins = new Boxes(), frames = new Boxes(), panes = new Boxes(), slabs = new Boxes(), rails = new Boxes(), cols = new Boxes(), parts = new Boxes(), doors = new Boxes(), parapets = new Boxes(), signs = new Boxes(), jaalis = new Boxes(), lamps = new Boxes(), glows = new Boxes(), greens = new Boxes();
     const flush = () => {
@@ -514,6 +516,78 @@ export class ProView {
         if (e.nx * -F.vx + e.nz * -F.vz > 0.5) slabs.add(e.x + e.nx * 0.9, y0 - 0.1, e.z + e.nz * 0.9, e.ux, e.uz, e.L, 0.14, 1.8);
       }
     }
+    // ---- the site kit: the compound wall, its gates, the internal roads' kerbs, footpaths, poles and trees
+    {
+      const wm = mat(materialOf(KIT.wall.material).colour, { roughness: 0.85 }), walls = new Boxes(), metal = new Boxes(), cabin = new Boxes();
+      const N = r.net; let ncx = 0, ncz = 0;
+      for (let i = 0; i < N.length; i += 2) { ncx += N[i]; ncz += N[i + 1]; }
+      ncx /= Math.max(1, N.length / 2); ncz /= Math.max(1, N.length / 2);
+      const W = KIT.wall, built = d.buildings.flatMap((b) => b.quads), free = (x: number, z: number) => N.length >= 6 && pointIn(N, x, z, 0) && !built.some((q) => pointIn(q, x, z, 0.5));
+      // (a run's inward normal: toward the plot's middle)
+      const frame = (s: number[]) => { const L = Math.hypot(s[2] - s[0], s[3] - s[1]) || 1, ux = (s[2] - s[0]) / L, uz = (s[3] - s[1]) / L; let nx = -uz, nz = ux; if ((ncx - s[0]) * nx + (ncz - s[1]) * nz < 0) { nx = -nx; nz = -nz; } return { L, ux, uz, nx, nz }; };
+      const solidRun = (x0: number, z0: number, x1: number, z1: number, h: number) => { const L = Math.hypot(x1 - x0, z1 - z0); if (L > 0.05) walls.add((x0 + x1) / 2, h / 2, (z0 + z1) / 2, (x1 - x0) / L, (z1 - z0) / L, L, h, 0.23); };
+      if (W.kind !== 'none') for (const s of d.ground.wall) {
+        const { L, ux, uz } = frame(s), mx = (s[0] + s[2]) / 2, mz = (s[1] + s[3]) / 2;
+        if (L < 0.2) continue;
+        if (W.kind === 'hedge') { greens.add(mx, W.h / 2, mz, ux, uz, L, W.h, 0.8); continue; }
+        const solid = W.kind === 'solid' ? W.h : W.plinth;
+        walls.add(mx, solid / 2, mz, ux, uz, L, solid, 0.23);
+        if (W.coping) walls.add(mx, solid + 0.04, mz, ux, uz, L + 0.05, 0.08, 0.33);
+        if (W.kind === 'railing' && W.h > solid + 0.1) {
+          const rh = W.h - solid, n = Math.max(1, Math.floor(L / 0.18));
+          metal.add(mx, W.h - 0.03, mz, ux, uz, L, 0.05, 0.05);
+          for (let k = 0; k <= n; k++) { const t = -L / 2 + (L * k) / n; metal.add(mx + ux * t, solid + rh / 2, mz + uz * t, ux, uz, 0.025, rh, 0.025); }
+        }
+        if (W.piers > 0.5) { const n = Math.max(1, Math.round(L / W.piers)); for (let k = 0; k <= n; k++) { const t = -L / 2 + (L * k) / n; walls.add(mx + ux * t, (W.h + 0.15) / 2, mz + uz * t, ux, uz, 0.45, W.h + 0.15, 0.45); } }
+      }
+      // the gates: piers either side, set back (with the wall turned in to meet them) if asked, the leaves as styled,
+      // an island between the way in and out, a pedestrian gate beside, the cabin
+      const G0 = KIT.gate, gh = Math.max(1.8, W.kind === 'none' ? 1.8 : W.h), sb = Math.max(0, G0.setback);
+      for (const s of d.ground.gates) {
+        const { L, ux, uz, nx, nz } = frame(s), at = (t: number, inn: number) => [s[0] + ux * t + nx * inn, s[1] + uz * t + nz * inn] as const;
+        if (sb > 0.2 && W.kind !== 'none' && W.kind !== 'hedge') for (const t of [0, L]) { const [ax, az] = at(t, 0), [bx, bz] = at(t, sb); solidRun(ax, az, bx, bz, Math.min(W.h, 1.5)); }
+        for (const t of [0, L]) { const [px, pz] = at(t, sb); walls.add(px, (gh + 0.4) / 2, pz, ux, uz, 0.6, gh + 0.4, 0.6); }
+        const split = G0.separate && L >= 7;
+        if (split) { const [ix, iz] = at(L / 2, sb + 1.5); greens.add(ix, 0.3, iz, nx, nz, 4, 0.6, 1.2); walls.add(...((([x, z]) => [x, (gh + 0.4) / 2, z] as const)(at(L / 2, sb))), ux, uz, 0.5, gh + 0.4, 0.5); }
+        const leaves = split ? [[0, L / 2], [L / 2, L]] : [[0, L]];
+        for (const [a, c] of leaves) {
+          const w = c - a;
+          if (G0.style === 'sliding') { const [lx, lz] = at(c + w / 2, sb + 0.35); metal.add(lx, 0.15 + (gh - 0.2) / 2, lz, ux, uz, w, gh - 0.2, 0.06); }
+          else if (G0.style === 'swing') for (const [t, side] of [[a, 1], [c, -1]] as const) { const [lx, lz] = at(t + side * 0.3, sb + w / 4); metal.add(lx, 0.15 + (gh - 0.2) / 2, lz, nx, nz, w / 2, gh - 0.2, 0.06); }
+          else { const [bx, bz] = at(a + 0.4, sb); metal.add(bx, 0.6, bz, ux, uz, 0.25, 1.2, 0.25); const [rx, rz] = at((a + c) / 2, sb); metal.add(rx, 1.05, rz, ux, uz, w - 0.6, 0.08, 0.08); }
+        }
+        if (G0.pedestrian > 0.4) { const [qx, qz] = at(L + 0.6 + G0.pedestrian / 2, -0.02); metal.add(qx, 1.0, qz, ux, uz, G0.pedestrian, 1.9, 0.07); walls.add(...((([x, z]) => [x, (gh + 0.4) / 2, z] as const)(at(L + 0.6 + G0.pedestrian + 0.25, 0))), ux, uz, 0.5, gh + 0.4, 0.5); }
+        if (G0.cabin) { const [cx, cz] = at(-2.2, sb + 2.0); if (free(cx, cz)) { cabin.add(cx, 1.35, cz, ux, uz, 2.4, 2.7, 2.4); panes.add(cx + nx * 1.22, 1.6, cz + nz * 1.22, ux, uz, 1.8, 0.9, 0.04); slabs.add(cx, 2.78, cz, ux, uz, 3.0, 0.16, 3.0); } }
+      }
+      add(walls.mesh(wm, true)); add(metal.mesh(mat('#2b2b2e', { roughness: 0.5, metalness: 0.5 }), true)); add(cabin.mesh(mat('#e9e6df'), true));
+      // the internal roads: kerbs and footpaths along both sides, poles on one side, trees on the other
+      const R = KIT.road, kerbs = new Boxes(), paths = new Boxes(), poles = new Boxes();
+      const lines = [...d.ground.drive.map((pts) => ({ pts, w: d.ground.driveW })), ...d.ground.roads];
+      for (const ln of lines) {
+        let run = 0, nextPole = R.poles * 0.5, nextTree = 4;
+        for (let i = 0; i + 3 < ln.pts.length; i += 2) {
+          const x0 = ln.pts[i], z0 = ln.pts[i + 1], x1 = ln.pts[i + 2], z1 = ln.pts[i + 3], L = Math.hypot(x1 - x0, z1 - z0);
+          if (L < 0.5) continue;
+          const ux = (x1 - x0) / L, uz = (z1 - z0) / L, nx = -uz, nz = ux, hw = ln.w / 2;
+          for (let t = 0; t < L; t += 2) {
+            const piece = Math.min(2, L - t), cx = x0 + ux * (t + piece / 2), cz = z0 + uz * (t + piece / 2);
+            for (const sgn of [-1, 1]) {
+              const kx = cx + nx * sgn * (hw + 0.075), kz = cz + nz * sgn * (hw + 0.075);
+              if (R.kerb && free(kx, kz)) kerbs.add(kx, 0.1, kz, ux, uz, piece, 0.15, 0.15);
+              const fx = cx + nx * sgn * (hw + 0.15 + R.footpath / 2), fz = cz + nz * sgn * (hw + 0.15 + R.footpath / 2);
+              if (R.footpath > 0.2 && free(fx, fz)) paths.add(fx, 0.08, fz, ux, uz, piece, 0.06, R.footpath);
+            }
+          }
+          const side = hw + 0.4 + (R.footpath > 0.2 ? R.footpath : 0);
+          while (R.poles > 1 && nextPole <= run + L) { const t = nextPole - run, px = x0 + ux * t + nx * side, pz = z0 + uz * t + nz * side; if (free(px, pz)) { poles.add(px, 3.75, pz, ux, uz, 0.14, 7.5, 0.14); poles.add(px - nx * 0.5, 7.5, pz - nz * 0.5, nx, nz, 1.0, 0.08, 0.08); lamps.add(px - nx * 0.9, 7.42, pz - nz * 0.9, ux, uz, 0.25, 0.06, 0.4); } nextPole += R.poles; }
+          while (R.trees && nextTree <= run + L) { const t = nextTree - run, px = x0 + ux * t - nx * (side + 0.6), pz = z0 + uz * t - nz * (side + 0.6); if (free(px, pz)) treeAt(px, pz, 2.0); nextTree += 9; }
+          run += L;
+        }
+      }
+      add(kerbs.mesh(mat('#c9c6bf'), true)); add(paths.mesh(mat('#cfc9bd', { roughness: 0.9 }), false)); add(poles.mesh(mat('#3b3d42', { roughness: 0.5, metalness: 0.4 }), true));
+    }
+    add(trunks.mesh(mat('#6b5440'), true, trunkGeo)); add(crowns.mesh(mat('#5f7f4c', { roughness: 0.9, flatShading: true }), true, crownGeo));
+    flush();
     d.buildings.forEach((b, bi) => {
       const plan = plans[bi];
       // (each building in its own design system: its materials, then its instanced meshes flushed at the end)

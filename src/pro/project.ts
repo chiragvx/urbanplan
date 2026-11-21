@@ -220,13 +220,13 @@ export function laidOf(L: FormLayout, roof?: Form['roof']): Laid {
 /** The generated scheme on it, with shops along the front if asked for (./mixed.ts). `forms`: the user's formed
  *  buildings laid out (by id, see ./evaluate.ts), each counted floor by floor; a building whose form lays out to
  *  nothing stays the plain building of its spine. */
-export function generate(p: ProProject, r: PlotReport, specRate = 0, premium = 0, forms: Record<string, FormLayout> = {}): { d: SiteReport; shops: Shops | null } {
+export function generate(p: ProProject, r: PlotReport, specRate = 0, premium = 0, forms: Record<string, FormLayout> = {}, kit: { gateW?: number; roadW?: number } = {}): { d: SiteReport; shops: Shops | null } {
   const c = defaultCosts(r.code, 'residential');
   const cost = { ...(p.costs ?? {}), ...(p.rents ?? {}), build: c.build + specRate, ...(p.land ? { land: p.land } : {}), sale: p.sale > 0 ? p.sale : Math.round((c.sale * (1 + premium)) / 50) * 50, ...(p.shops && p.shops.sale > 0 ? { retail: p.shops.sale } : {}) };
   const f = fillOf(p);
   const base: PlotSite = {
     ...siteDefaults('residential'), ...parkingOf(f), mix: p.mix, cost, keepOut: keepOutOf(p.features),
-    design: { ...DEFAULT_DESIGN, type: p.typology, maxFloors: p.maxFloors, maxBuildings: f.buildings, spacing: f.spacing, access: f.access, green: f.green },
+    design: { ...DEFAULT_DESIGN, type: p.typology, maxFloors: p.maxFloors, maxBuildings: f.buildings, spacing: f.spacing, access: f.access, green: f.green, ...kit },
   };
   // the user's own buildings: as they stand, checked
   if (p.scheme) {

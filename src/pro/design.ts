@@ -103,6 +103,8 @@ export interface DesignSystem {
   /** how the buildings are lit at night, signed and planted round (unset: read through lightingOf, signageOf,
    *  landscapeOf) */
   lighting?: Lighting; signage?: Signage; landscape?: Landscape;
+  /** the site's own kit: the compound wall, the gates and the internal roads (unset: read through siteKitOf) */
+  site?: SiteKit;
   /** a heritage precinct whose controls it follows (./heritage.ts): those tokens are set by it and locked */
   precinct?: string;
 }
@@ -147,6 +149,64 @@ const LANDSCAPES: Record<string, Landscape> = {
 export const lightingOf = (d: DesignSystem): Lighting => d.lighting ?? LIGHTINGS[d.id] ?? { facade: 'wash', kelvin: 3000, shielded: true };
 export const signageOf = (d: DesignSystem): Signage => d.signage ?? SIGNAGES[d.id] ?? { kind: 'letters', h: 0.6, cap: 0.2 };
 export const landscapeOf = (d: DesignSystem): Landscape => d.landscape ?? LANDSCAPES[d.id] ?? { trees: 'avenue', hedge: true, planters: false };
+/** The site kit: what the plot's edge, its ways in and out, and its internal roads are built as. The site engine lays
+ *  the wall's runs, the gates and the roads out (src/doc/site.ts); these say how wide and of what, and the review
+ *  checks them against the rules for access. */
+export interface SiteKit {
+  wall: {
+    /** solid: masonry to its height; railing: a solid plinth with MS railing over; hedge: planted; none */
+    kind: 'solid' | 'railing' | 'hedge' | 'none';
+    /** its height (m), and a railing's solid plinth (m) */
+    h: number; plinth: number;
+    /** what it's faced with (./materials.ts id), and a coping along its top */
+    material: string; coping: boolean;
+    /** a pier every so many metres (0 none) */
+    piers: number;
+  };
+  gate: {
+    /** a vehicle gate's clear width (m): the fire tender needs 4.5 m and more as assumed (6 m where it drives in) */
+    vehicle: number;
+    /** a pedestrian gate beside it (m clear; 0 none): 1.2 m lets a wheelchair through */
+    pedestrian: number;
+    /** a separate way in and out */
+    separate: boolean;
+    /** how far the gate is set back from the boundary, so a car waits off the road (m) */
+    setback: number;
+    /** a security cabin by the gate */
+    cabin: boolean;
+    style: 'sliding' | 'swing' | 'boom';
+  };
+  road: {
+    /** an internal road's width (m), at least the fire tender's 6 m where it drives round */
+    w: number;
+    surface: 'asphalt' | 'pavers' | 'concrete' | 'grass-pavers';
+    /** kerbs along its edges; a footpath each side (m; 0 none) */
+    kerb: boolean; footpath: number;
+    /** a light pole every so many metres (0 none) */
+    poles: number;
+    /** trees along it */
+    trees: boolean;
+  };
+}
+const KIT = (wall: Partial<SiteKit['wall']>, gate: Partial<SiteKit['gate']>, road: Partial<SiteKit['road']>): SiteKit => ({
+  wall: { kind: 'solid', h: 1.5, plinth: 0.6, material: 'paint-offwhite', coping: true, piers: 3, ...wall },
+  gate: { vehicle: 6, pedestrian: 1.2, separate: false, setback: 0, cabin: true, style: 'sliding', ...gate },
+  road: { w: 7, surface: 'asphalt', kerb: true, footpath: 1.5, poles: 25, trees: true, ...road },
+});
+const KITS: Record<string, SiteKit> = {
+  contemporary: KIT({ kind: 'railing', h: 1.8, plinth: 0.9, material: 'paint-grey' }, {}, {}),
+  glass: KIT({ kind: 'railing', h: 2.1, plinth: 0.6, material: 'granite-grey-clad', piers: 4.5 }, { separate: true, setback: 6, style: 'boom' }, { w: 7.5, surface: 'pavers', footpath: 2 }),
+  earth: KIT({ kind: 'solid', h: 1.5, material: 'brick-red' }, { style: 'swing' }, { surface: 'pavers' }),
+  value: KIT({ kind: 'solid', h: 1.5, material: 'paint-cream', coping: false, piers: 0 }, { vehicle: 4.5, pedestrian: 1.0, cabin: false }, { w: 6, surface: 'concrete', kerb: false, footpath: 0, poles: 30, trees: false }),
+  signature: KIT({ kind: 'railing', h: 2.1, plinth: 0.9, material: 'granite-flamed', piers: 4 }, { vehicle: 7.5, pedestrian: 1.5, separate: true, setback: 9, style: 'swing' }, { w: 7.5, surface: 'pavers', footpath: 2 }),
+  fluid: KIT({ kind: 'hedge', h: 1.5 }, { separate: true, setback: 6, style: 'boom' }, { surface: 'pavers', footpath: 2 }),
+  monolith: KIT({ kind: 'solid', h: 2.1, material: 'acp-white', piers: 0 }, { setback: 6 }, { surface: 'concrete' }),
+  sculpted: KIT({ kind: 'hedge', h: 1.5 }, { vehicle: 7.5, separate: true, setback: 9, style: 'swing' }, { w: 7.5, surface: 'pavers', footpath: 2 }),
+};
+export const siteKitOf = (d: DesignSystem): SiteKit => d.site ?? KITS[d.id] ?? KIT({}, {}, {});
+/** an internal road surface's colour */
+export const SURFACE_COLOUR: Record<SiteKit['road']['surface'], string> = { asphalt: '#5b5e66', pavers: '#9a8f82', concrete: '#b5b2aa', 'grass-pavers': '#7f9a6c' };
+
 /** a lamp's colour at a colour temperature (K), roughly */
 export const kelvinColour = (k: number) => (k <= 2700 ? '#ffb46b' : k <= 3000 ? '#ffc58f' : k <= 3500 ? '#ffd6aa' : k <= 4000 ? '#ffe4c8' : '#fff4ea');
 
@@ -482,7 +542,7 @@ type Over = { [K in keyof DesignSystem]?: NonNullable<DesignSystem[K]> extends o
  *  `over` changed, and the facade colours following the materials named in `over.finish`. */
 export function derive(parentId: string, over: Over & { id: string; name: string; blurb: string }): DesignSystem {
   const p = PRESETS.find((x) => x.id === parentId)!;
-  const full: DesignSystem = { ...clone(p), composition: compositionOf(p), palette: paletteOf(p), climate: climateOf(p), lighting: lightingOf(p), signage: signageOf(p), landscape: landscapeOf(p), finish: finishOf(p), origin: undefined };
+  const full: DesignSystem = { ...clone(p), composition: compositionOf(p), palette: paletteOf(p), climate: climateOf(p), lighting: lightingOf(p), signage: signageOf(p), landscape: landscapeOf(p), site: siteKitOf(p), finish: finishOf(p), origin: undefined };
   const d = merge(full, { ...over, basedOn: parentId });
   const f = d.finish!;
   for (const s of ['wall', 'accent', 'base'] as const) if ((over.finish as Partial<Finish> | undefined)?.[s]) setFinish(d, s, f[s]);

@@ -231,3 +231,25 @@ p { margin: 0; }
   .d-feed time { grid-column: 2; padding-top: 0; }
 }
 @media (prefers-reduced-motion: reduce) { .d-side { transition: none; } }
+
+/* design systems: a card's name opens the builder (the whole card is the target) */
+.d-ds-open { color: inherit; text-decoration: none; }
+.d-ds-open::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
+.d-ds-c:has(.d-ds-open):hover { border-color: var(--up-line-strong); }
+.d-ds-c .d-card-m { z-index: 1; }
+.d-ds-start { justify-self: start; margin-top: 4px; font-size: 12.5px; }
+.d-head .btn.primary { margin-left: auto; }
+
+/* the builder: the preview and the score beside, every section in a column */
+.dsb { max-width: 1180px; }
+.dsb-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.dsb-name { flex: 1 1 220px; min-width: 0; font: 600 22px/1.2 var(--up-font-display); letter-spacing: -0.02em; border: 1px solid transparent; border-radius: 8px; padding: 4px 8px; background: none; color: var(--up-ink); }
+.dsb-name:hover { border-color: var(--up-line); }
+.dsb-name:focus { outline: none; border-color: var(--up-line-strong); box-shadow: var(--up-focus); }
+.dsb-state { font-size: 12px; color: var(--up-muted); }
+.dsb-grid { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 32px; align-items: start; margin-top: 16px; }
+.dsb-side { position: sticky; top: 16px; display: grid; gap: 12px; }
+.dsb-score { margin: 0; font-size: 13px; }
+.dsb-note { margin: 0; font-size: 12px; }
+.dsb-main { max-width: 560px; min-width: 0; }
+@media (max-width: 860px) { .dsb-grid { grid-template-columns: 1fr; } .dsb-side { position: static; } }
