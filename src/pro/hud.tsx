@@ -16,6 +16,7 @@ import { duplicated, formRing, moved, own, removed, spineLength, stretched, turn
 import { buildingQuads } from '../doc/site';
 import { shapeIt, withFloors } from './shapePanel';
 import { Icon } from './ui';
+import { BarExtras } from './formHud';
 
 type Pt = [number, number];
 export interface Tx {
@@ -55,6 +56,9 @@ export function usePins(view: ProView | null) {
   const root = useRef<HTMLDivElement>(null), bar = useRef<HTMLDivElement>(null);
   const els = useRef(new Map<string, HTMLElement>()), at = useRef(new Map<string, [number, number, number]>());
   const box = useRef<[number, number, number][]>([]);
+  /** elements standing beside the box (side 1: right of it, -1: left), as tall as the segment a–b on screen */
+  const spans = useRef(new Map<string, { a: [number, number, number]; b: [number, number, number]; side: 1 | -1 }>());
+  const spanEls = useRef(new Map<string, HTMLElement>());
   // ---------- pinning to the world ----------
   const place = () => {
     const v = view, R = root.current; if (!v || !R) return;
@@ -65,26 +69,41 @@ export function usePins(view: ProView | null) {
       if (!s || s[0] < -40 || s[1] < -40 || s[0] > W + 40 || s[1] > H + 40) { el.style.visibility = 'hidden'; continue; }
       el.style.visibility = ''; el.style.transform = `translate(${Math.round(s[0])}px,${Math.round(s[1])}px) translate(-50%,-50%)`;
     }
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const w of box.current) { const s = toS(w); if (!s) continue; x0 = Math.min(x0, s[0]); x1 = Math.max(x1, s[0]); y0 = Math.min(y0, s[1]); y1 = Math.max(y1, s[1]); }
+    // (the room between the result bar and the view's toolbar, right of the tool shelf)
+    const res = R.parentElement?.querySelector<HTMLElement>('.results'), top = res ? res.offsetTop + res.offsetHeight + 10 : 12;
+    const tools = R.parentElement?.querySelector<HTMLElement>('.tools'), floor = tools ? tools.offsetTop - 8 : H - 60;
+    const shelf = R.parentElement?.querySelector<HTMLElement>('.shelf'), left = shelf ? shelf.offsetLeft + shelf.offsetWidth + 8 : 8;
+    for (const [k, el] of spanEls.current) {
+      const sp = spans.current.get(k), a = sp && toS(sp.a), b = sp && toS(sp.b);
+      if (!sp || !a || !b || !Number.isFinite(x0)) { el.style.visibility = 'hidden'; continue; }
+      let t = Math.min(a[1], b[1]), bt = Math.max(a[1], b[1]);
+      if (bt - t < 90) { t -= (90 - (bt - t)) / 2; bt = t + 90; }
+      // (kept on screen: a tall building's strip is squeezed into the room there is)
+      t = Math.max(top + 76, t); bt = Math.min(floor, bt); if (bt - t < 90) t = Math.max(top + 76, bt - 90);
+      const hgt = Math.max(60, bt - t);
+      const w = el.offsetWidth, x = sp.side > 0 ? Math.min(W - w - 6, x1 + 16) : Math.max(left, x0 - 16 - w);
+      el.style.visibility = 'visible'; el.style.height = `${Math.round(hgt)}px`; el.style.transform = `translate(${Math.round(x)}px,${Math.round(t)}px)`;
+    }
     const B = bar.current;
     if (B) {
-      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
-      for (const w of box.current) { const s = toS(w); if (!s) continue; x0 = Math.min(x0, s[0]); x1 = Math.max(x1, s[0]); y0 = Math.min(y0, s[1]); y1 = Math.max(y1, s[1]); }
       if (!Number.isFinite(x0)) { B.style.visibility = 'hidden'; return; }
-      const res = R.parentElement?.querySelector<HTMLElement>('.results'), top = res ? res.offsetTop + res.offsetHeight + 10 : 12;
       const bw = B.offsetWidth, bh = B.offsetHeight;
       // (between the result bar and the view's toolbar: above the building, else below it, else at the top)
-      const tools = R.parentElement?.querySelector<HTMLElement>('.tools'), bottom = (tools ? tools.offsetTop : H - 60) - bh - 8;
+      const bottom = floor - bh;
       let y = y0 - bh - 26;
       if (y < top) y = y1 + 40 <= bottom ? y1 + 40 : top;
       y = Math.max(top, Math.min(bottom, y));
-      const x = Math.max(8, Math.min(W - bw - 8, (x0 + x1) / 2 - bw / 2));
+      const x = Math.max(Math.min(left, W - bw - 8), Math.min(W - bw - 8, (x0 + x1) / 2 - bw / 2));
       B.style.visibility = 'visible'; B.style.transform = `translate(${Math.round(x)}px,${Math.round(y)}px)`;
     }
   };
-  useEffect(() => { if (!view) return; view.onFrame = place; return () => { if (view.onFrame === place) view.onFrame = undefined; }; });
+  useEffect(() => { if (!view) return; view.frameHooks.add(place); return () => { view.frameHooks.delete(place); }; });
   useLayoutEffect(place);
   const ref = (k: string) => (el: HTMLElement | null) => { if (el) els.current.set(k, el); else els.current.delete(k); };
-  return { root, bar, at, box, ref };
+  const span = (k: string) => (el: HTMLElement | null) => { if (el) spanEls.current.set(k, el); else spanEls.current.delete(k); };
+  return { root, bar, at, box, ref, spans, span };
 }
 
 export function Hud({ view, p, e, picked, pick, up, tx, snap, live, readOnly, inspect, toast }: Props) {
@@ -280,7 +299,9 @@ export function Hud({ view, p, e, picked, pick, up, tx, snap, live, readOnly, in
         <button type="button" aria-label="Duplicate" data-tip="Duplicate (Ctrl+D)" onClick={() => { const s = own(p, e), src = s.buildings.find((b) => b.id === br.b.id); if (!src) return; const c = duplicated(src); once({ scheme: { ...s, buildings: [...s.buildings, c] } }); pick({ k: 'building', id: c.id }); toast(`Duplicated ${name}.`); }}><Icon n="copy" size={15} /></button>
         <button type="button" aria-label="Remove" data-tip="Remove (Delete)" onClick={() => { once(removed(p, e, { k: 'building', id: br.b.id })); pick(null); toast(`Removed ${name} · Ctrl+Z to undo`); }}><Icon n="trash" size={15} /></button>
         <span class="hsep" />
-        <button type="button" class="hinspect" data-tip="Its mix, design system, systems and flat plans" onClick={inspect}><Icon n="panel" size={15} />Inspect</button>
+        <BarExtras p={p} b={ownB} residential={!ownB.form || ownB.form.uses.some((u) => u.use === 'residential')} setB={setB} once={once} />
+        <span class="hsep" />
+        <button type="button" class="hinspect" data-tip="Its systems, flat plans, and shaping by hand" onClick={inspect}><Icon n="panel" size={15} />Inspect</button>
         <button type="button" aria-label="Deselect" data-tip="Deselect (Esc)" onClick={() => pick(null)}><Icon n="x" size={14} /></button>
       </div>
     </div>

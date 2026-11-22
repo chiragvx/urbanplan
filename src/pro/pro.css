@@ -716,3 +716,48 @@ li[aria-current="true"] > .bitem, li[aria-current="true"] > .fitem { border-colo
 .hpop.up { top: auto; bottom: calc(100% + 6px); }
 .hud > .hbar { z-index: 4; }
 .hud > .hroad:has(.hpop) { z-index: 5; }
+
+/* ---------- a formed building on the view: key-floor rings, the uses strip, slot handles, the X-ray scrubber ---------- */
+.hh-key { width: 16px; height: 16px; cursor: ew-resize; background: var(--up-paper); color: var(--up-ink); border: 2px solid var(--up-ink); }
+.hh-lean { width: 15px; height: 15px; border-radius: 3px; transform-origin: center; cursor: move; }
+.hh-lean svg { transform: rotate(0deg); }
+.hh-twist { width: 22px; height: 22px; background: #2f6fed; cursor: grab; }
+.hh-cut { width: 18px; height: 18px; border-radius: 5px; background: #0f8a6a; cursor: ns-resize; }
+.hud.dragging .hstrip, .hud.dragging .hscrub { opacity: .75; }
+.hstrip { display: flex; flex-direction: column; width: 34px; gap: 0; border-radius: 8px; box-shadow: 0 4px 14px -6px rgba(0, 0, 0, .45), 0 0 0 1px rgba(0, 0, 0, .12); background: var(--up-surface); visibility: hidden; }
+.hstrip > .hadd { position: absolute; left: 50%; top: -28px; transform: translateX(-50%); }
+.hstrip > .hadd > button { width: 24px; height: 24px; min-width: 0; padding: 0; border-radius: 50%; background: var(--up-surface); box-shadow: 0 0 0 1px var(--up-line-strong); justify-content: center; }
+.hband { position: relative; display: flex; min-height: 18px; }
+.hband:first-of-type, .hstrip > .hadd + .hband { border-radius: 8px 8px 0 0; }
+.hband:last-child { border-radius: 0 0 8px 8px; }
+.hband > button { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; padding: 0; border: 0; background: none; color: #1d1d1f; cursor: pointer; overflow: hidden; }
+.hband > button small { font: 600 10px var(--up-font-mono); }
+.hband > button:hover, .hband > button[aria-expanded="true"] { outline: 2px solid var(--up-ink); outline-offset: -2px; border-radius: inherit; }
+.hdiv { position: relative; height: 0; z-index: 2; }
+.hdiv::before { content: ''; position: absolute; left: -4px; right: -4px; top: -4px; height: 8px; cursor: ns-resize; touch-action: none; }
+.hdiv::after { content: ''; position: absolute; left: -3px; right: -3px; top: -1.5px; height: 3px; border-radius: 2px; background: var(--up-ink); }
+.hdiv:hover::after, .hdiv.on::after, .hdiv:focus-visible::after { background: #2f6fed; height: 4px; }
+.hdiv:focus-visible { outline: none; }
+.hpop.side { top: 0; left: calc(100% + 10px); }
+.hstrip:has(.hpop) { z-index: 5; }
+.huses { display: flex; flex-wrap: wrap; gap: 4px; }
+.huses button { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; border: 1px solid var(--up-line); border-radius: 13px; background: var(--up-surface); font-size: 12px; color: var(--up-ink-2); }
+.huses button i { width: 9px; height: 9px; border-radius: 50%; }
+.huses button[aria-checked="true"] { background: var(--up-ink); color: var(--up-paper); border-color: var(--up-ink); }
+.hrow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.hlink { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px; border: 0; border-radius: 7px; background: var(--up-surface-2); font-size: 12px; color: var(--up-ink); }
+.hlink:hover { outline: 1px solid var(--up-line-strong); }
+.hlink.bad { color: #b42318; }
+.hpop .hstep { display: inline-flex; align-items: center; gap: 2px; }
+.hscrub { width: 30px; visibility: hidden; cursor: ns-resize; touch-action: none; }
+.hscrub .track { position: absolute; left: 12px; top: 0; bottom: 0; width: 6px; border-radius: 3px; background: color-mix(in srgb, var(--up-ink) 70%, transparent); box-shadow: 0 0 0 1.5px var(--up-paper); }
+.hscrub .thumb { position: absolute; left: 0; transform: translateY(50%); width: 30px; height: 20px; display: grid; place-items: center; border-radius: 10px; background: var(--up-ink); color: var(--up-paper); font: 600 11px var(--up-font-mono); }
+.hscrub:focus-visible .thumb { outline: 2px solid #2f6fed; outline-offset: 2px; }
+.hmix { position: relative; display: flex; height: 28px; border-radius: 8px; overflow: visible; gap: 0; }
+.hmix i { display: grid; place-items: center; font: 600 11px var(--up-font-mono); font-style: normal; }
+.hmix .m0 { background: var(--up-ink); color: var(--up-paper); border-radius: 8px 0 0 8px; } .hmix .m1 { background: var(--up-muted); color: var(--up-paper); } .hmix .m2 { background: var(--up-surface-2); color: var(--up-ink); box-shadow: inset 0 0 0 1px var(--up-line-strong); border-radius: 0 8px 8px 0; }
+.hmixd { position: absolute; top: -4px; bottom: -4px; width: 10px; margin-left: -5px; border-radius: 4px; background: var(--up-paper); box-shadow: 0 0 0 1.5px var(--up-ink); cursor: ew-resize; touch-action: none; }
+.hmixd:focus-visible { outline: 2px solid #2f6fed; }
+.hrange { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; font-size: 12px; }
+.hextras { display: contents; }
+.hpop.end { left: auto; right: 0; }

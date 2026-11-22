@@ -126,11 +126,8 @@ export function SchemeStep({ p, e, up, rooms, toast, picked, pick }: StepProps) 
         {br && ownB && (
       <Picked title={<>{nameOf(bi)}<small> · {br.floors} floors · {nf(br.plate)} m² plate</small></>}>
         {deps.map((x) => <Note tone="bad">{x.text}</Note>)}
-        <Note>Its name, floors, length, depth and turn are set on the view: drag the handles on it, or click a measurement to type one. R turns it, + and − change its floors, Ctrl+D duplicates it, Delete removes it.</Note>
+        <Note>It's edited on the view: drag the handles on it, click a measurement to type one, and use its bar for its shape, roof, skin, flat mix and design system. A formed building's rings shape it and the strip beside it sets what its floors are for. R turns it, + and − change its floors, Ctrl+D duplicates it, Delete removes it.</Note>
         {ownB.form && <ShapePanel b={ownB} floors={br.floors} set={setB} />}
-        {(!ownB.form || ownB.form.uses.some((u) => u.use === 'residential')) && <Toggle label="Its own flat mix" value={!!ownB.mix} set={(v) => setB((b) => ({ ...b, mix: v ? [...p.mix] as [number, number, number] : undefined }))} />}
-        {ownB.mix && <Row n={3}>{[0, 1, 2].map((t) => <Num label={UNIT_LABEL[t]} value={Math.round(ownB.mix![t] * 100)} set={(v) => setB((b) => { const m = [...(b.mix ?? p.mix)] as [number, number, number]; m[t] = v / 100; const s = m[0] + m[1] + m[2] || 1; return { ...b, mix: m.map((x) => x / s) as [number, number, number] }; })} max={100} step={5} unit="%" />)}</Row>}
-        <Select<string> label="Design system" value={ownB.style ?? ''} onChange={(v) => setB((b) => ({ ...b, style: v || undefined }))} options={[{ value: '', label: `Project default (${presetOf(p.style).name})` }, ...PRESETS.map((x) => ({ value: x.id, label: x.name }))]} />
         <Section title="Systems" fold open={false} sub="Stairs, lifts, ducts, plumbing, power and fire: sized for it, each one yours to set."><SystemsPanel b={br} settings={mergeSettings(p.systems?.byBuilding?.[br.b.id], p.systems?.site)} under={d.under} floorH={r.rules.floorH} code={r.code} name={nameOf(bi)} basements={d.site.basements} bays={d.parking.have}
           set={(x) => { const { building, plant } = splitSettings(x); up({ systems: { site: plant, byBuilding: { ...(p.systems?.byBuilding ?? {}), [br.b.id]: building } } }); }} /></Section>
         <Section title="Flat plans" fold open={false} sub="Rooms fitted into each flat of a typical floor, checked against the minimum room sizes.">

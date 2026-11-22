@@ -661,6 +661,26 @@ The core loop of placing and shaping buildings stops needing the panel.
 - Own mix (sitePanels.tsx:248-249), design system (250).
 - What the inspector sheet keeps for a building: "By hand" (SilhouetteEditor and PlanEditor, as the precise and accessible fallback), Systems, Flat plans.
 
+**Status (2026-11-22): built, in src/pro/formHud.tsx.**
+- Done:
+  - key-floor rings drawn at their heights, each with a width dot (Shift: across only; double-click or Delete removes an inner key) and a lean diamond, and a twist handle at the top; every handle also takes the arrow keys;
+  - the uses strip beside the building: boundaries to drag, a band's popover to change its use, step its floors, remove it or see it in X-ray, and + for a band on top;
+  - the slot's start and end as handles up the face;
+  - the X-ray scrubber beside the picked building (drag or arrow keys); clicking a band moves X-ray to its first floor;
+  - the bar's popovers: Shape (presets, rounding, smooth or straight between keys, a key floor, a slot, fins), Roof, Skin, Mix (its own or the project's, with dividers to drag) and Style (the design system);
+  - the panel's floors, presets, sliders, uses, roof, skin, own mix and design system removed: the building card keeps "By hand" (the elevation and plan editors), Systems and Flat plans.
+- Done differently:
+  - a key floor is added from the Shape popover (in the widest gap), not by Alt-click on the side;
+  - an inner key's height is set in "By hand", not by dragging its ring up or down;
+  - the rings and their handles step aside in X-ray;
+  - the strip is squeezed to fit the view when the building is taller than it;
+  - the form maths is shared by importing silhouette.tsx's `keysOf`, `keyAt`, `keyed` and `yOfT` (one source), not by moving them into form/keys.ts;
+  - in shaded or X-ray view a ring drag moves dashed rings and the form is laid out on release; wireframe is live.
+- Not done yet:
+  - the twist drawn as an arc;
+  - fading handles hidden behind the building;
+  - the slot's width and path as handles (only its start and end).
+
 ### Phase 5: The panel becomes a sheet over the view
 
 **Deliverables:**

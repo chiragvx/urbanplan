@@ -58,12 +58,12 @@ export function previewFloors(f: Form): PreviewFloor[] {
   return out;
 }
 /** the height at a share of the way up (the middle of the floor there) */
-function yOfT(fl: PreviewFloor[], t: number): number {
+export function yOfT(fl: PreviewFloor[], t: number): number {
   if (!fl.length) return 0;
   const x = t * (fl.length - 1), i = Math.min(fl.length - 1, Math.floor(x)), j = Math.min(fl.length - 1, i + 1), s = x - i;
   return lerp(fl[i].y + fl[i].h / 2, fl[j].y + fl[j].h / 2, s);
 }
-function tOfY(fl: PreviewFloor[], y: number): number {
+export function tOfY(fl: PreviewFloor[], y: number): number {
   if (fl.length < 2) return 0;
   const lo = fl[0].y + fl[0].h / 2, top = fl[fl.length - 1], hi = top.y + top.h / 2;
   return Math.min(1, Math.max(0, (y - lo) / (hi - lo || 1)));
