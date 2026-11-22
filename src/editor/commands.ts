@@ -1,4 +1,5 @@
 // Every action in one registry: menus, the command palette (Ctrl+K) and keyboard shortcuts all use it.
+import { isPhone } from '../device';
 import type { Editor } from './editor';
 import { isTyping } from './editor';
 import * as ops from '../doc/ops';
@@ -182,7 +183,7 @@ export const COMMANDS: Command[] = [
   { id: 'file.versions', label: 'Versions (saved in your account)…', group: 'File', run: () => { dialog.value = 'versions'; } },
   { id: 'file.export', label: 'Export (GeoJSON, network)…', group: 'File', run: () => { dialog.value = 'export'; } },
   { id: 'file.publish', label: 'Publish…', group: 'File', run: () => { dialog.value = 'publish'; } },
-  { id: 'file.fork', label: 'Edit a copy of this map', group: 'File', enabled: () => readOnly.value, run: (E) => E.app.fork() },
+  { id: 'file.fork', label: 'Edit a copy of this map', group: 'File', enabled: () => readOnly.value && !isPhone(), run: (E) => E.app.fork() },
   { id: 'file.settings', label: 'Settings…', group: 'File', run: () => { dialog.value = 'settings'; } },
 
   // ---- Edit ----

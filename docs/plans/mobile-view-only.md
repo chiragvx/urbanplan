@@ -144,12 +144,42 @@ One Share sheet, used by Pro and the dashboard:
    - The building info card on a tap.
    - The trimmed top bar and menus.
    - The step bodies dynamically imported, so a phone never loads them.
+   - **Status (2026-11-22): built, in src/pro/viewer.tsx and main.tsx.**
+     - A phone's steps bar is Overview, Money, Rules and Share.
+     - Overview: the plot, what's built, the flat-mix bar and the design system's swatches.
+     - Money: result, by use, in and out, the landowner.
+     - Rules: the scrutiny with Issues/Everything and Show.
+     - A tapped building's card in the sheet: floors, built-up, homes by type, floors by use (each opens X-ray there), its flagged rules, and X-ray it.
+     - The result bar's figures land on the matching sheet.
+     - The Render menu and snapping are hidden; the image is in Share.
+     - Not done: the step bodies aren't dynamically imported yet (a phone still downloads them, it just never shows them).
 3. **Share.** The shared Share sheet with `navigator.share`, link choice, the image file and the PDF, used from Pro first.
+   - **Status: built, in src/pro/shareSheet.tsx.**
+     - It replaces the old Share dialog on a computer too.
+     - The device's share sheet where there is one, else Copy link and WhatsApp.
+     - People on the project (the ?p= link, for an owner or editor) or anyone with the link (#s=).
+     - "Share an image of the view": a 1600 px render, shared as a file where the device can, else saved.
+     - The PDF on a phone is the drawing set's download, not a shared file.
 4. **The dashboard on a phone.** Cards with Open and Share only, the hidden actions, the Designs tab, the explaining line.
+   - **Status: built, in src/dash/main.tsx.**
+     - Home, Projects, Activity and Settings only. #/designs and #/team land on Home.
+     - No New project, start tiles, Import, the N key, the palette's New, folder create/delete or the Archive filter.
+     - Each card's menu has Open and Share; this browser's project has them too.
+     - Card Share is also added on a computer.
+     - A cloud card's anyone-link loads the project first. That isn't tested here (no accounts on localhost).
 5. **/app/ and the website.** /app/'s phone screen and view mode; the site's CTAs.
+   - **Status: built.**
+     - /app/ on a phone without ?map shows "The map editor works on a computer" with links to the dashboard and home.
+     - With ?map it opens view-only, even a map that's the person's own.
+     - New map and Edit a copy are refused; the map's Copy link uses the device's share sheet.
+     - On the website, a phone tapping a link that starts a project goes to the dashboard.
+     - Done differently: the CTAs' wording is unchanged.
 6. **Clean-up and a real phone.**
    - Remove phone-only editing code that no longer runs: drawing tools lowering the sheet, coarse-pointer handle sizes in the HUDs, `.hstrip` touch tweaks.
    - Test on a real Android phone and an iPhone: share sheet, pinch, rotation, the PDF on a big scheme, safe areas.
+   - **Status: nothing removed.**
+     - The narrow-screen editing code (drawing tools lowering the sheet, coarse-pointer handle sizes) still runs on tablets in portrait, which edit.
+     - Not done: the real-phone pass. Everything was checked at 375 px in a desktop browser emulating a phone, where `navigator.share` isn't offered.
 
 ## Files
 

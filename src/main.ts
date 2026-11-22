@@ -14,6 +14,7 @@ import { Home, cities, cityOf } from './ui/Home';
 import { parse } from './doc/format';
 import { Tour, firstTime } from './ui/tour';
 import { LiveLongSection } from './ui/LongSection';
+import { isPhone } from './device';
 
 // Vercel Web Analytics (page views; a no-op off Vercel)
 inject();
@@ -70,6 +71,20 @@ async function boot() {
 
 // film mode (dev only): renders a "What If" episode on the film set, no UI (src/film, tools/film/README.md)
 if (import.meta.env.DEV && Q.has('film')) void import('./film/boot').then((m) => m.bootFilm(Q));
+// a phone views a published map (?map=…) and nothing else: the editor itself is for a computer
+// (docs/plans/mobile-view-only.md)
+else if (isPhone() && !Q.has('map')) {
+  $('loading').hidden = true;
+  $('shell').hidden = true;
+  const base = import.meta.env.BASE_URL;
+  render(h('div', { style: 'min-height:100dvh;display:grid;place-items:center;padding:24px;font:15px/1.5 system-ui,sans-serif;text-align:center' },
+    h('div', { style: 'max-width:340px' },
+      h('h1', { style: 'font-size:22px;margin:0 0 8px' }, 'The map editor works on a computer'),
+      h('p', { style: 'margin:0 0 20px;opacity:.75' }, 'On a phone you can open and share your projects, and look round maps people have shared with you.'),
+      h('p', { style: 'display:grid;gap:10px;margin:0' },
+        h('a', { href: `${base}dashboard/`, style: 'padding:12px;border-radius:10px;background:#16161a;color:#fafafa;font-weight:600;text-decoration:none;box-shadow:0 0 0 1px rgba(255,255,255,.25)' }, 'Your projects'),
+        h('a', { href: base, style: 'padding:12px' }, 'UrbanPlan home')))), $('home'));
+}
 else if (Q.has('region') || Q.has('tile') || Q.has('map')) boot();
 else {
   $('loading').hidden = true;

@@ -1,4 +1,5 @@
 // App shell: boot, files (open / save / autosave / publish / fork), review queue, exports, frame loop.
+import { isPhone } from '../device';
 import * as THREE from 'three/webgpu';
 import { Engine, PERF_URL, type Graphics } from '../render/engine';
 import { releaseUploaded } from '../render/release';
@@ -390,7 +391,7 @@ export class App implements AppApi {
     if (this.region && f.meta.base === this.region.fingerprint) {
       this.doc.load(new Map(Object.entries(f.objects)), { ...f.meta });
       this.issues.orphans = [];
-      readOnly.value = viewOnly;
+      readOnly.value = viewOnly || isPhone();
       select([]);
       if (source) status.value = `Opened ${source}`;
       docVersion.value++;
@@ -400,7 +401,7 @@ export class App implements AppApi {
     const r = openMap(this.doc, f);
     if (this.region) this.doc.meta.base = this.region.fingerprint;
     this.issues.orphans = r.unresolved.map((u) => ({ id: u.id, title: u.entry.loc?.name ?? u.id }));
-    readOnly.value = viewOnly;
+    readOnly.value = viewOnly || isPhone();
     select([]);
     if (r.remapped.length) toast(`${r.remapped.length} edit(s) re-attached to roads that changed in the base map`, 'info');
     if (r.unresolved.length) toast(`${r.unresolved.length} edit(s) no longer match the base map — see Issues`, 'warn');
@@ -515,6 +516,7 @@ export class App implements AppApi {
   }
 
   newMap(ask = true) {
+    if (isPhone()) return; // (a phone views maps, it doesn't make them)
     if (ask && this.doc.editCount && !confirm('Start a new map? Your current map stays saved in this browser.')) return;
     void this.persist();
     this.doc.load(new Map(), newMeta(this.tile.id, this.doc.meta.base ?? '', settings.value.author));
@@ -525,6 +527,7 @@ export class App implements AppApi {
   }
 
   fork() {
+    if (isPhone()) return;
     const m = this.doc.meta;
     const fresh = newMeta(this.tile.id, m.base ?? '', settings.value.author);
     this.doc.meta = { ...fresh, cloud: null, name: `${m.name} (my copy)`, description: m.description, forkedFrom: { name: m.name, author: m.author, id: m.id, url: new URLSearchParams(location.search).get('map') ?? undefined } };
@@ -658,6 +661,8 @@ export class App implements AppApi {
   }
 
   copyLink() {
+    // (a published map open on a phone: the device's own share sheet, with this address)
+    if (isPhone() && new URLSearchParams(location.search).has('map') && typeof navigator.share === 'function') { void navigator.share({ title: this.doc.meta.name, url: location.href }).catch(() => {}); return; }
     const at = prompt('Where is the map file hosted? (a URL to the .urbanplan.json, e.g. a GitHub raw link or gist)');
     if (!at) return;
     const link = `${location.origin}${location.pathname}?map=${encodeURIComponent(at.trim())}`;

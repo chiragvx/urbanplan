@@ -3,6 +3,9 @@
 // account: profile, sign-in and security, preferences, notifications, plan and usage, their data. Signed out, it shows
 // the project in this browser and what an account adds.
 //
+// On a phone it only opens and shares (docs/plans/mobile-view-only.md): each project's Open and Share, nothing that makes,
+// renames, moves or deletes; no design systems or team.
+//
 // One page, routed by the hash (#/projects, #/settings/profile …) so it needs no server routes. Built from Pro's own
 // controls (src/pro/ui.tsx) and tokens, so it reads as the same product.
 import { render, type ComponentChildren } from 'preact';
@@ -22,6 +25,13 @@ import { CITIES } from '../pro/project';
 import { I } from './icons';
 import * as D from './data';
 import { summaryOf, type Summary } from './summary';
+import { isPhone } from '../device';
+import { ShareBody } from '../pro/shareSheet';
+import { openPro } from '../pro/cloud';
+import type { ProProject } from '../pro/project';
+
+/** a phone: open and share only (it doesn't turn into one while the page is open) */
+const PHONE = isPhone();
 
 void startAuth();
 D.applyTheme(D.prefs.value.theme);
@@ -32,7 +42,7 @@ type View = 'home' | 'projects' | 'designs' | 'team' | 'activity' | 'settings';
 type Tab = 'profile' | 'account' | 'preferences' | 'notifications' | 'plan' | 'data';
 const route = () => {
   const [v, t] = location.hash.replace(/^#\/?/, '').split('/');
-  const view = (['home', 'projects', 'designs', 'team', 'activity', 'settings'].includes(v) ? v : 'home') as View;
+  const view = ((PHONE ? ['home', 'projects', 'activity', 'settings'] : ['home', 'projects', 'designs', 'team', 'activity', 'settings']).includes(v) ? v : 'home') as View;
   return { view, tab: (t || 'profile') as Tab };
 };
 const go = (h: string) => { location.hash = h; };
@@ -44,7 +54,9 @@ const NAV: { v: View; label: string; icon: string }[] = [
   { v: 'team', label: 'Team', icon: 'team' },
   { v: 'activity', label: 'Activity', icon: 'clock' },
   { v: 'settings', label: 'Settings', icon: 'gear' },
-];
+].filter((n) => !PHONE || (n.v !== 'designs' && n.v !== 'team')) as { v: View; label: string; icon: string }[];
+/** the line a phone shows at the top of its projects */
+const PhoneNote = () => (PHONE ? <p class="d-phone"><I n="monitor" size={15} />On a phone you can open and share your projects. Create and edit them on a computer.</p> : null);
 
 // ---------------- formatting ----------------
 
@@ -77,13 +89,15 @@ function App() {
   const [palette, setPalette] = useState(false);
   const [help, setHelp] = useState(false);
   const data = useData(user?.id ?? null);
+  const [sharing, setSharing] = useState<Sharing | null>(null);
+  share_ = setSharing;
   useEffect(() => { setNav(false); }, [r.view, r.tab]);
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       const typing = (e.target as HTMLElement)?.closest?.('input, textarea, select');
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((x) => !x); }
       else if (!typing && e.key === '?') setHelp(true);
-      else if (!typing && e.key.toLowerCase() === 'n' && !e.ctrlKey && !e.metaKey) location.assign(D.newUrl());
+      else if (!typing && !PHONE && e.key.toLowerCase() === 'n' && !e.ctrlKey && !e.metaKey) location.assign(D.newUrl());
     };
     addEventListener('keydown', k); return () => removeEventListener('keydown', k);
   }, []);
@@ -93,7 +107,7 @@ function App() {
     <div class={`dash${nav ? ' nav-open' : ''}`}>
       <aside class="d-side" aria-label="Dashboard">
         <div class="d-brand"><a class="logo" href={BASE} aria-label="UrbanPlan home"><Dither field="mark" cell={2} class="mark" />UrbanPlan</a><b class="chip">Pro</b></div>
-        <a class="btn primary d-new" href={D.newUrl()}><I n="plus" size={16} />New project</a>
+        {!PHONE && <a class="btn primary d-new" href={D.newUrl()}><I n="plus" size={16} />New project</a>}
         <button type="button" class="d-search" onClick={() => setPalette(true)}><I n="search" size={15} /><span>Search</span><kbd>Ctrl K</kbd></button>
         <nav>
           {NAV.map((n) => (
@@ -137,6 +151,7 @@ function App() {
       {help && <Help close={() => setHelp(false)} />}
       <TooltipLayer />
       <Toasts />
+      {sharing && <ShareDlg r={sharing} close={() => setSharing(null)} />}
     </div>
   );
 }
@@ -241,9 +256,9 @@ function Home({ data, name, signedIn }: { data: Data; name: string; signedIn: bo
   return (
     <div class="d-page">
       <header class="d-head"><h1>{signedIn && first ? `${hi}, ${first}` : hi}</h1></header>
-      <section class="d-starts" aria-label="Start a project">
+      {PHONE ? <PhoneNote /> : <section class="d-starts" aria-label="Start a project">
         {STARTS.map((s) => <a class="d-start" href={D.newUrl(s.k)}><span class="d-start-i"><I n={s.icon} size={20} /></span><b>{s.label}</b><small>{s.sub}</small></a>)}
-      </section>
+      </section>}
       {signedIn && totals.n > 0 && (
         <section class="d-kpis" aria-label="Across your projects">
           <div><small>Projects</small><b>{nf(totals.n)}</b></div>
@@ -260,7 +275,7 @@ function Home({ data, name, signedIn }: { data: Data; name: string; signedIn: bo
           {signedIn && data.rows === null && !data.err && [0, 1, 2].map(() => <div class="d-card skel" />)}
         </div>
         {!signedIn && <NeedsAccount what="projects saved to your account" />}
-        {signedIn && data.rows?.length === 0 && !data.local && <Empty icon="folder" title="No projects yet"><a class="btn primary" href={D.newUrl()}>New project</a></Empty>}
+        {signedIn && data.rows?.length === 0 && !data.local && <Empty icon="folder" title="No projects yet">{PHONE ? <p>Start one on a computer: it shows here to open and share.</p> : <a class="btn primary" href={D.newUrl()}>New project</a>}</Empty>}
       </section>
       {signedIn && <section class="d-sec"><div class="d-sec-h"><h2>Activity</h2><a class="linkbtn" href="#/activity">All activity</a></div><Feed data={data} limit={6} /></section>}
     </div>
@@ -274,6 +289,14 @@ function LocalCard({ data }: { data: Data }) {
   const s = useMemo(() => summaryOf(l.p), [l]);
   // (the browser's project is usually also the cloud one it last saved to: say so rather than show it twice)
   if (l.cloudId && data.rows?.some((r) => r.id === l.cloudId)) return null;
+  if (PHONE) return (
+    <div class="d-card">
+      <a href={D.proUrl('?local')} class="d-card-link" aria-label={`Open ${l.p.name}`} />
+      <Thumb s={s} />
+      <div class="d-card-b"><b>{l.p.name}</b><small><I n="monitor" size={13} />In this browser · {s.city}</small><Facts s={s} /></div>
+      <span class="d-card-m"><Menu label={`${l.p.name}: more`} items={[{ label: 'Open', icon: 'open', href: D.proUrl('?local') }, { label: 'Share', icon: 'share', onSelect: () => share_({ name: l.p.name, load: () => Promise.resolve(l.p) }) }]} /></span>
+    </div>
+  );
   return (
     <a class="d-card" href={D.proUrl('?local')}>
       <Thumb s={s} />
@@ -289,10 +312,13 @@ function Facts({ s }: { s: Summary | null | undefined }) {
 
 function actions(r: D.Row, data: Data, ask: (k: 'rename' | 'delete' | 'move', r: D.Row) => void): { label: string; icon: string; onSelect?: () => void; href?: string }[] {
   const own = !r.role;
+  const shareIt = { label: 'Share', icon: 'share', onSelect: () => share_({ name: r.name, id: r.id, team: !r.role || r.role === 'editor', load: () => openPro(r.id).then((o) => o.p) }) };
+  if (PHONE) return [{ label: 'Open', icon: 'open', href: D.openUrl(r.id) }, shareIt];
   const list: { label: string; icon: string; onSelect?: () => void; href?: string }[] = [
     { label: 'Open', icon: 'open', href: D.openUrl(r.id) },
     { label: 'Make a copy', icon: 'copy', onSelect: () => void act(async () => { await D.duplicate(r.id); data.reload(); }, 'Copied into your projects.') },
     { label: 'Download', icon: 'down', onSelect: () => void act(async () => download(`${r.name}.urbanplan-pro.json`, await D.fileText(r.id), 'application/json')) },
+    shareIt,
   ];
   if (own) list.splice(1, 0,
     { label: r.starred ? 'Unstar' : 'Star', icon: 'star', onSelect: () => { data.patch(r.id, { starred: !r.starred }); void act(() => D.star(r.id, !r.starred)).then((ok) => !ok && data.patch(r.id, { starred: r.starred })); } },
@@ -307,6 +333,12 @@ function actions(r: D.Row, data: Data, ask: (k: 'rename' | 'delete' | 'move', r:
 }
 
 let ask_: (k: 'rename' | 'delete' | 'move', r: D.Row) => void = () => {};
+/** what's being shared from a card (set by the app) */
+type Sharing = { name: string; load: () => Promise<ProProject>; id?: string; team?: boolean };
+let share_: (x: Sharing) => void = () => {};
+function ShareDlg({ r, close }: { r: Sharing; close: () => void }) {
+  return <Dialog title={`Share ${r.name}`} close={close}><ShareBody name={r.name} load={r.load} id={r.id} team={r.team} phone={PHONE} toast={toast} done={close} /></Dialog>;
+}
 function Card({ r, data }: { r: D.Row; data: Data }) {
   return (
     <div class="d-card">
@@ -352,20 +384,21 @@ function Projects({ data, signedIn }: { data: Data; signedIn: boolean }) {
         <h1>Projects</h1>
         <div class="d-head-a">
           <input ref={fileIn} type="file" accept=".json,application/json" hidden onChange={(e) => void onFile((e.target as HTMLInputElement).files?.[0])} />
-          <Btn icon="upload" onClick={() => fileIn.current?.click()}>Import</Btn>
-          <a class="btn primary" href={D.newUrl()}><I n="plus" size={16} />New project</a>
+          {!PHONE && <Btn icon="upload" onClick={() => fileIn.current?.click()}>Import</Btn>}
+          {!PHONE && <a class="btn primary" href={D.newUrl()}><I n="plus" size={16} />New project</a>}
         </div>
       </header>
+      <PhoneNote />
       <div class="d-proj">
         <nav class="d-filters" aria-label="Show">
-          {([['all', 'All projects', 'folder'], ['starred', 'Starred', 'star'], ['shared', 'Shared with me', 'team'], ['archived', 'Archive', 'archive']] as [Filter, string, string][]).map(([f, l, i]) => (
+          {([['all', 'All projects', 'folder'], ['starred', 'Starred', 'star'], ['shared', 'Shared with me', 'team'], ['archived', 'Archive', 'archive']] as [Filter, string, string][]).filter(([f]) => !PHONE || f !== 'archived').map(([f, l, i]) => (
             <button type="button" class={filter === f ? 'on' : ''} onClick={() => setFilter(f)}><I n={i} size={16} />{l}<small>{count(f) || ''}</small></button>
           ))}
           {!data.foldersOff && <>
-            <div class="d-filters-h"><span>Folders</span><button type="button" class="d-icon-btn" aria-label="New folder" onClick={() => setNewFolder(true)}><I n="plus" size={14} /></button></div>
+            <div class="d-filters-h"><span>Folders</span>{!PHONE && <button type="button" class="d-icon-btn" aria-label="New folder" onClick={() => setNewFolder(true)}><I n="plus" size={14} /></button>}</div>
             {(data.folders ?? []).map((f) => (
               <span class="d-folder"><button type="button" class={filter === `folder:${f.id}` ? 'on' : ''} onClick={() => setFilter(`folder:${f.id}`)}><I n="folder" size={16} />{f.name}<small>{count(`folder:${f.id}`) || ''}</small></button>
-                <Menu label={`${f.name}: more`} items={[{ label: 'Delete folder', icon: 'trash', onSelect: () => void act(async () => { await D.removeFolder(f.id); if (filter === `folder:${f.id}`) setFilter('all'); data.reload(); }, 'Folder deleted. Its projects are still in All projects.') }]} />
+                {!PHONE && <Menu label={`${f.name}: more`} items={[{ label: 'Delete folder', icon: 'trash', onSelect: () => void act(async () => { await D.removeFolder(f.id); if (filter === `folder:${f.id}`) setFilter('all'); data.reload(); }, 'Folder deleted. Its projects are still in All projects.') }]} />}
               </span>
             ))}
           </>}
@@ -379,7 +412,7 @@ function Projects({ data, signedIn }: { data: Data; signedIn: boolean }) {
           {data.err && <p class="note bad">{data.err}</p>}
           {data.rows === null && !data.err ? <div class="d-cards">{[0, 1, 2, 3].map(() => <div class="d-card skel" />)}</div>
             : !list.length ? <Empty icon={filter === 'archived' ? 'archive' : filter === 'starred' ? 'star' : 'folder'} title={q ? 'Nothing matches' : filter === 'archived' ? 'Nothing archived' : filter === 'starred' ? 'No starred projects' : filter === 'shared' ? 'Nothing shared with you yet' : 'No projects here'}>
-                {filter === 'all' && !q && <a class="btn primary" href={D.newUrl()}>New project</a>}</Empty>
+                {filter === 'all' && !q && !PHONE && <a class="btn primary" href={D.newUrl()}>New project</a>}</Empty>
             : view === 'grid' ? <div class="d-cards">{filter === 'all' && !q && data.local && <LocalCard data={data} />}{list.map((r) => <Card r={r} data={data} />)}</div>
             : <table class="d-table">
                 <thead><tr><th>Name</th><th class="hide-s">Place</th><th class="num hide-s">Plot</th><th class="num hide-s">Homes</th><th class="num">Changed</th><th /></tr></thead>
@@ -740,7 +773,7 @@ function Palette({ data, close }: { data: Data; close: () => void }) {
   const [i, setI] = useState(0);
   const items = useMemo(() => {
     const acts: { label: string; icon: string; sub?: string; run: () => void }[] = [
-      { label: 'New project', icon: 'plus', run: () => location.assign(D.newUrl()) },
+      ...(PHONE ? [] : [{ label: 'New project', icon: 'plus', run: () => location.assign(D.newUrl()) }]),
       { label: 'Start from a survey number', icon: 'pin', run: () => location.assign(D.newUrl('survey')) },
       { label: 'Open the sample', icon: 'tower', run: () => location.assign(D.newUrl('sample')) },
       ...NAV.map((n) => ({ label: `Go to ${n.label}`, icon: n.icon, run: () => go(`#/${n.v}`) })),

@@ -22,6 +22,7 @@ import { parseScreen, screen, screenCsv, type ScreenResult } from './screen';
 import { parseBrief, runBrief, type BriefResult } from './brief';
 import { layoutDefaults, plotLayout, type LayoutOpts } from './layout';
 import { Btn, cr, download, Icon, Lines, Note, nf, Num, pct, Row, Section, Seg, Select, sqft, Stat, Toggle } from './ui';
+import { checkBuilding } from './viewer';
 
 export type Step = 'site' | 'build' | 'design' | 'money' | 'approve' | 'explore';
 export const STEPS: { key: Step; label: string; icon: string; title: string; sub: string }[] = [
@@ -264,8 +265,6 @@ export function PdfButton({ p, e, checks, rooms, toast, big }: { p: ProProject; 
   );
 }
 
-/** the building a check is about, from its key (height:2, margins:0 …), or null for the whole scheme's */
-const checkBuilding = (key: string): number | null => { const m = /^(height|margins|transfers|cantilever|mixed|fire-access):(\d+)$/.exec(key); return m ? +m[2] : null; };
 
 export function ApproveStep({ p, e, up, checks, rooms, openDrawings, toast, show }: StepProps) {
   const sum = scrutinySummary(checks);

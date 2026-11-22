@@ -51,6 +51,8 @@ import { PlotHud } from './plotHud';
 import { FormHud } from './formHud';
 import { Sheet, useNarrow, type Detent } from './sheet';
 import { isPhone, usePhone } from '../device';
+import { BuildingInfo, buildingName, MoneyView, Overview, RulesView, VIEW_OF, VIEW_STEPS, type ViewStep } from './viewer';
+import { ShareBody } from './shareSheet';
 import { withFloors } from './shapePanel';
 import { pole } from './form/curve';
 import { Btn, cr, Dialog, Icon, Menu, nf, Num, pct, Range, Seg, Select, sqft, TooltipLayer } from './ui';
@@ -112,7 +114,11 @@ function App() {
   const [cov, setCov] = useState<[number, number]>([0, 0]);
   const cover = (x: number, y: number) => { setCov((c) => (c[0] === x && c[1] === y ? c : [x, y])); view.current?.setCover(x, y); };
   const openSheet = () => { setPanel(true); if (narrow && detent === 'peek') setDetent('half'); };
-  const go = (s: Step) => { setStep(s); openSheet(); store.set('urbanplan:pro:step', s); setToolS(SELECT); edit.current?.setTool(SELECT); setPicked(null); };
+  // (a phone has its own four sheets: an editing step's link lands on the one that shows it)
+  const [vstep, setVstepS] = useState<ViewStep>(() => store.get<ViewStep>('urbanplan:pro:vstep', 'overview'));
+  const setVstep = (v: ViewStep) => { setVstepS(v); store.set('urbanplan:pro:vstep', v); };
+  const goView = (v: ViewStep) => { setVstep(v); setPicked(null); openSheet(); };
+  const go = (s: Step) => { if (isPhone()) { goView(VIEW_OF[s] ?? 'overview'); return; } setStep(s); openSheet(); store.set('urbanplan:pro:step', s); setToolS(SELECT); edit.current?.setTool(SELECT); setPicked(null); };
   // ---------- the map's tool and what's picked on it ----------
   const [tool, setToolS] = useState<Tool>(SELECT), [picked, setPicked] = useState<EditPicked>(null), [hint, setHint] = useState<string | null>(null);
   const edit = useRef<CanvasEdit | null>(null);
@@ -309,6 +315,8 @@ function App() {
     }, 3000);
     return () => clearTimeout(t);
   }, []);
+  /** an image of the view at about 1600 px across, to share */
+  const shareImage = () => { const v = view.current, c = canvas.current; if (!v || !c) return Promise.reject(new Error('the view isn’t ready')); return v.renderStill({ width: 1600, height: Math.round(1600 / Math.max(0.5, (c.clientWidth || 16) / (c.clientHeight || 9))), quality: 'raster' }); };
   const [still, setStill] = useState<{ kind: 'raster' | 'path'; f: number; stop: AbortController } | null>(null);
   const renderImage = async (kind: 'raster' | 'path') => {
     const v = view.current; if (!v || still) return;
@@ -397,6 +405,7 @@ function App() {
     if (narrow) setDetent('peek');
     if (Number.isFinite(x0)) view.current?.focus((x0 + x1) / 2, (z0 + z1) / 2, Math.max(x1 - x0, z1 - z0), br.height);
   };
+  useEffect(() => { if (phone && picked?.k === 'building') { setPanel(true); setDetent('peek'); } }, [phone, picked?.k === 'building' ? picked.id : null]);
   /** the plot's editor is on: picked, or on the Site step with nothing else picked */
   const plotOn = picked?.k === 'plot' || (step === 'site' && !picked);
   const cur = STEPS.find((s) => s.key === step)!;
@@ -417,7 +426,7 @@ function App() {
         </span>}
         {readOnly && !phone
           ? <Btn kind="primary" icon="check" onClick={keepCopy}>Make it my copy</Btn>
-          : <Btn icon="share" onClick={() => setDialog('share')}>Share</Btn>}
+          : <Btn icon="share" onClick={() => (phone ? goView('share') : setDialog('share'))}>Share</Btn>}
         {authReady && user && ref && !readOnly && !phone && <Btn icon="team" title="People on this project, and comments" onClick={() => setDialog(dialog === 'team' ? null : 'team')}>Team</Btn>}
         {authReady && user && <Btn icon="folder" onClick={() => setDialog(dialog === 'projects' ? null : 'projects')}>Projects</Btn>}
         {authReady && session.value === null && <Btn icon="user" href={`${BASE}login/?next=${encodeURIComponent(location.pathname + location.search)}`} title="Keep your projects in your account">Sign in</Btn>}
@@ -425,7 +434,14 @@ function App() {
       </header>
 
       <nav class="rail" aria-label="Steps">
-        {STEPS.map((s, i) => (
+        {phone && VIEW_STEPS.map((s) => (
+          <button type="button" class="step" aria-current={vstep === s.key && !(picked?.k === 'building') ? 'step' : undefined} aria-expanded={vstep === s.key ? panel : undefined} onClick={() => { if (vstep !== s.key || picked) goView(s.key); else if (panel) setPanel(false); else openSheet(); }}>
+            <Icon n={s.icon} size={20} />
+            <span>{s.label}</span>
+            {s.key === 'rules' && sum.fail + sum.warn > 0 && <i class={`dot ${sum.fail ? 'bad' : 'warn'}`} />}
+          </button>
+        ))}
+        {!phone && STEPS.map((s, i) => (
           <button type="button" class="step" aria-current={step === s.key ? 'step' : undefined} aria-expanded={step === s.key ? panel : undefined} onClick={() => { if (step !== s.key) go(s.key); else if (panel) setPanel(false); else openSheet(); }} data-tip={`${s.title} (${i + 1})`} data-tip-side="right">
             <Icon n={s.icon} size={20} />
             <span>{s.label}</span>
@@ -436,7 +452,19 @@ function App() {
         <button type="button" class="step small" onClick={() => setPanel(!panel)} aria-label="Show or hide the sheet" aria-expanded={panel} data-tip="Show or hide the sheet (\) · pin it beside the view (/)" data-tip-side="right"><Icon n="panel" size={18} /></button>
       </nav>
 
-      <Sheet title={cur.title} open={panel} pinned={pinned} setPinned={setPinned} close={() => setPanel(false)} phone={narrow} detent={detent} setDetent={setDetent} cover={cover}
+      {phone && <Sheet title={picked?.k === 'building' ? buildingName(p, e, e.d.buildings.findIndex((b) => b.b.id === picked.id)) : VIEW_STEPS.find((v) => v.key === vstep)!.title} open={panel} pinned={false} setPinned={() => {}} close={() => { setPanel(false); setPicked(null); }} phone={narrow} detent={detent} setDetent={setDetent} cover={cover}>
+        <div class="panel-b" key={picked?.k === 'building' ? picked.id : vstep}>
+          {picked?.k === 'building'
+            ? <BuildingInfo p={p} e={e} id={picked.id} checks={checks} xray={(f) => { setXray(f); setDetent('peek'); }} />
+            : vstep === 'overview' ? <><p class="note">On a phone you can look round your projects and share them. Change them on a computer.</p><Overview p={p} e={e} /></>
+            : vstep === 'money' ? <MoneyView e={e} deal={deal} />
+            : vstep === 'rules' ? <RulesView e={e} checks={checks} show={showBuilding} />
+            : <ShareBody name={p.name} load={() => Promise.resolve(p)} id={readOnly ? null : ref?.id} team={!!ref && ref.role !== 'viewer'} image={shareImage} phone toast={toast}>
+                <PdfButton p={p} e={e} checks={checks} rooms={rooms} toast={toast} big />
+              </ShareBody>}
+        </div>
+      </Sheet>}
+      {!phone && <Sheet title={cur.title} open={panel} pinned={pinned} setPinned={setPinned} close={() => setPanel(false)} phone={narrow} detent={detent} setDetent={setDetent} cover={cover}
         footer={!(step === 'build' && picked?.k === 'building') && <footer class="panel-f">
           {STEPS.findIndex((s) => s.key === step) > 0 && <Btn kind="quiet" onClick={() => go(STEPS[STEPS.findIndex((s) => s.key === step) - 1].key)}>Back</Btn>}
           <span class="gap" />
@@ -446,10 +474,9 @@ function App() {
           {authReady && session.value === null && new URLSearchParams(location.search).has('p') && <p class="note">A project shared with you. <a href={`${BASE}login/?next=${encodeURIComponent(location.pathname + location.search)}`}>Sign in</a> with the email it was shared to and it opens here.</p>}
           {viewer && !readOnly && <p class="note">Shared with you to view and comment. <button type="button" class="linkbtn" onClick={() => setDialog('team')}>Comments</button></p>}
           {readOnly && !phone && <p class="note">A shared scheme, view only. <button type="button" class="linkbtn" onClick={keepCopy}>Make it your own copy</button> to change it.</p>}
-          {phone && <p class="note">On a phone you can look round your projects and share them. Change them on a computer.</p>}
           <fieldset disabled={locked}><Body {...props} /></fieldset>
         </div>
-      </Sheet>
+      </Sheet>}
 
       <main class="stage">
         <canvas ref={canvas} onPointerMove={(ev) => setHover(view.current?.pick(ev.clientX, ev.clientY) ?? null)} onPointerLeave={() => setHover(null)} />
@@ -498,7 +525,7 @@ function App() {
             <button type="button" aria-label="From the street" aria-keyshortcuts="S" data-tip="From the street (S)" onClick={() => cam('street')}><Icon n="street" size={16} /></button>
             <button type="button" aria-label="From above" aria-keyshortcuts="T" data-tip="From above (T)" onClick={() => cam('top')}><Icon n="top" size={16} /></button>
             <button type="button" aria-label="X-ray, a floor at a time" data-tip="X-ray: a floor at a time" aria-pressed={xr !== null} onClick={() => setXray(xr === null ? Math.max(1, Math.round(maxFloor / 2)) : null)}><Icon n="layers" size={16} /></button>
-            <button type="button" aria-label="Snapping" data-tip={snap ? 'Snapping on (hold Alt to move freely)' : 'Snapping off'} aria-pressed={snap} onClick={() => setSnap(!snap)}><Icon n="magnet" size={16} /></button>
+            {!locked && <button type="button" aria-label="Snapping" data-tip={snap ? 'Snapping on (hold Alt to move freely)' : 'Snapping off'} aria-pressed={snap} onClick={() => setSnap(!snap)}><Icon n="magnet" size={16} /></button>}
           </div>
           <div class={`tgroup sun${sun.on ? ' on' : ''}`}>
             <button type="button" aria-label="Sun" data-tip="Sun and shadows on a date and time" aria-pressed={sun.on} onClick={() => { if (!sun.on && mode === 'wire') setMode('shaded'); setSun({ ...sun, on: !sun.on }); }}><Icon n="sun" size={16} />{sun.on ? '' : 'Sun'}</button>
@@ -510,10 +537,10 @@ function App() {
           </div>
           <div class="tgroup">
             {(mode === 'shaded' || xr !== null) && <Select<Exclude<Tier, 'still'>> size="sm" quiet aria-label="Quality" value={tier} onChange={(t) => { setTierS(t); view.current?.setTier(t); }} options={TIERS} />}
-            <Menu label="Render an image" icon="camera" items={[
+            {!phone && <Menu label="Render an image" icon="camera" items={[
               { label: 'Image (a few seconds)', icon: 'down', onSelect: () => void renderImage('raster') },
               { label: 'Path-traced image (about a minute)', icon: 'spark', onSelect: () => void renderImage('path') },
-            ]} />
+            ]} />}
           </div>
         </div>
         {xr !== null && <div class="legend floating">{[0, 1, 2].map((t) => <span><i style={`background:${UNIT_COLOR[t]}`} />{UNIT_LABEL[t]}</span>)}{(['living', 'bed', 'kitchen', 'toilet'] as const).map((k) => <span><i style={`background:${ROOM_COLOR[k]}`} />{k === 'bed' ? 'bedroom' : k}</span>)}</div>}
@@ -525,7 +552,7 @@ function App() {
       <TooltipLayer />
       {dialog === 'projects' && user && <Projects current={ref?.id ?? null} open={(id) => void openId(id)} fresh={phone ? undefined : () => fresh()} close={() => setDialog(null)} />}
       {dialog === 'team' && user && ref && <Team pid={ref.id} role={ref.role ?? 'owner'} step={step} go={(s) => { go(s); }} close={() => setDialog(null)} />}
-      {dialog === 'share' && <ShareDialog p={p} close={() => setDialog(null)} toast={toast} />}
+      {dialog === 'share' && <Dialog title="Share this scheme" close={() => setDialog(null)}><ShareBody name={p.name} load={() => Promise.resolve(p)} id={readOnly ? null : ref?.id} team={!!ref && ref.role !== 'viewer'} image={shareImage} toast={toast} done={() => setDialog(null)} /></Dialog>}
       {dialog === 'keys' && <Keys close={() => setDialog(null)} />}
       {dialog === 'welcome' && <Welcome close={(n) => { store.set(SEEN, true); setDialog(null); if (n) { fresh(n); go('site'); } }} />}
       {dialog === 'drawings' && (
@@ -708,19 +735,6 @@ function Team({ pid, role, step, go, close }: { pid: string; role: 'owner' | 'ed
       <ul class="cmts">{[...open].reverse().map((c) => <Item c={c} />)}</ul>
       {done.length > 0 && <button type="button" class="linkbtn" onClick={() => setShowDone(!showDone)}>{showDone ? 'Hide' : 'Show'} {done.length} resolved</button>}
       {showDone && <ul class="cmts">{[...done].reverse().map((c) => <Item c={c} />)}</ul>}
-    </Dialog>
-  );
-}
-
-function ShareDialog({ p, close, toast }: { p: ProProject; close: () => void; toast: (s: string) => void }) {
-  const [url, setUrl] = useState('');
-  useEffect(() => { encodeShare(p).then((s) => setUrl(`${location.origin}${location.pathname}#s=${s}`)); }, []);
-  const copy = async () => { try { await navigator.clipboard.writeText(url); toast('Link copied.'); close(); } catch { toast('Select the link and copy it.'); } };
-  return (
-    <Dialog title="Share this scheme" close={close}>
-      <p class="note">Anyone with the link sees the scheme, its 3D and its figures, read-only. They can make their own copy. The whole project is in the link: nothing is uploaded.</p>
-      <input class="share-url" readOnly value={url} onFocus={(ev) => (ev.target as HTMLInputElement).select()} />
-      <div class="row r2"><Btn kind="primary" icon="link" onClick={copy} disabled={!url}>Copy link</Btn><Btn href={`https://wa.me/?text=${encodeURIComponent(`${p.name} on UrbanPlan: ${url}`)}`} icon="share">WhatsApp</Btn></div>
     </Dialog>
   );
 }

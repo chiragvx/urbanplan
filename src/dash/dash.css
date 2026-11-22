@@ -283,3 +283,7 @@ p { margin: 0; }
 .dsv-detail p { margin: 0; font-size: 12px; }
 
 @media (max-width: 860px) { .dsb-grid { grid-template-columns: 1fr; } .dsb-side { position: static; } }
+
+/* a phone: open and share only (docs/plans/mobile-view-only.md) */
+.d-phone { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 16px; padding: 10px 12px; border-radius: 10px; background: var(--up-surface-2); color: var(--up-ink-2); font-size: 13px; line-height: 1.45; }
+.d-phone .ico { flex: none; margin-top: 2px; }
