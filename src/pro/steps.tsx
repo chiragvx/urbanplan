@@ -36,7 +36,9 @@ export const STEPS: { key: Step; label: string; icon: string; title: string; sub
 export interface StepProps {
   p: ProProject; e: Evaluated; up: (o: Partial<ProProject>) => void;
   rooms: FlatRooms[][]; checks: Check[]; deal: DealResult;
-  go: (s: Step) => void; openDrawings: () => void; toast: (s: string) => void;
+  go: (s: Step) => void; openDrawings: () => void; toast: (s: string, o?: { undo?: boolean }) => void;
+  /** pick a building and bring it into the middle of the view (by its id) */
+  show: (id: string) => void;
   /** the tool on the map, and what's picked on it (./edit.ts) */
   tool: import('./edit').Tool; setTool: (t: import('./edit').Tool) => void;
   picked: import('./edit').Picked; pick: (x: import('./edit').Picked) => void;
@@ -262,7 +264,10 @@ export function PdfButton({ p, e, checks, rooms, toast, big }: { p: ProProject; 
   );
 }
 
-export function ApproveStep({ p, e, up, checks, rooms, openDrawings, toast }: StepProps) {
+/** the building a check is about, from its key (height:2, margins:0 …), or null for the whole scheme's */
+const checkBuilding = (key: string): number | null => { const m = /^(height|margins|transfers|cantilever|mixed|fire-access):(\d+)$/.exec(key); return m ? +m[2] : null; };
+
+export function ApproveStep({ p, e, up, checks, rooms, openDrawings, toast, show }: StepProps) {
   const sum = scrutinySummary(checks);
   const [only, setOnly] = useState<'all' | 'issues'>('issues');
   const ex = p.approval ?? {};
@@ -288,6 +293,7 @@ export function ApproveStep({ p, e, up, checks, rooms, openDrawings, toast }: St
               <summary><Icon n={STATUS_ICON[c.status]} size={15} /><span>{c.rule}</span><em>{c.proposed}</em></summary>
               <Lines rows={[['Required', c.required], ['Proposed', c.proposed], ['Clause', c.clause]]} />
               {c.note && <Note>{c.note}</Note>}
+              {(() => { const b = e.d.buildings[checkBuilding(c.key) ?? -1]; return b && <button type="button" class="linkbtn show" onClick={() => show(b.b.id)}><Icon n="fit" size={14} />Show {e.d.buildings.length > 1 ? `building ${String.fromCharCode(65 + e.d.buildings.indexOf(b))}` : 'the building'}</button>; })()}
             </details>
           ))}</div>;
         })}
@@ -348,11 +354,11 @@ function BriefBox({ p, up, toast }: { p: ProProject; up: StepProps['up']; toast:
   return (
     <Section title="Brief">
       <textarea class="brief" rows={3} value={text} onInput={(ev) => setText((ev.target as HTMLTextAreaElement).value)} onKeyDown={(ev) => { if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) run(); }} />
-      <Row><Btn kind="primary" icon="play" onClick={run}>Plan it</Btn>{res?.best && <Btn icon="check" onClick={() => { up({ ...res.patch, scheme: undefined }); toast(`Applied: ${res.best!.label}`); }}>Use the best</Btn>}</Row>
+      <Row><Btn kind="primary" icon="play" onClick={run}>Plan it</Btn>{res?.best && <Btn icon="check" onClick={() => { up({ ...res.patch, scheme: undefined }); toast(`Applied: ${res.best!.label}`, { undo: true }); }}>Use the best</Btn>}</Row>
       {res && <>
         {res.understood.length > 0 && <div class="chips">{res.understood.map((u) => <span class="chip">{u}</span>)}{res.ignored.map((u) => <span class="chip off" title="Not understood">{u}</span>)}</div>}
         <ol class="trace">{res.steps.map((s) => <li class={s.kind}>{s.text}</li>)}</ol>
-        {[res.best, ...res.alternatives].filter(Boolean).map((o, i) => <OptionCard o={o!} best={i === 0} apply={() => { up({ ...o!.patch, scheme: undefined }); toast(`Applied: ${o!.label}`); }} />)}
+        {[res.best, ...res.alternatives].filter(Boolean).map((o, i) => <OptionCard o={o!} best={i === 0} apply={() => { up({ ...o!.patch, scheme: undefined }); toast(`Applied: ${o!.label}`, { undo: true }); }} />)}
         {!res.met && <Note tone="warn">Nothing met the whole brief: the closest is shown.</Note>}
       </>}
     </Section>
@@ -376,7 +382,7 @@ function OptionsBox({ p, up, toast }: { p: ProProject; up: StepProps['up']; toas
     <Section title="Options">
       <Row><Btn icon={busy ? undefined : 'layers'} onClick={run} disabled={busy}>{busy ? <><Dither class="dz" cell={2} />Working…</> : rows ? 'Run again' : 'Find options'}</Btn></Row>
       {busy && <div class="working" role="status"><Dither class="working-art" cell={3} /><span>Working out every option…</span></div>}
-      {rows && <div class="opts">{rows.map((o, i) => <OptionCard o={o} best={i === 0} apply={() => { up({ ...o.patch, scheme: undefined }); toast(`Applied: ${o.label}`); }} />)}</div>}
+      {rows && <div class="opts">{rows.map((o, i) => <OptionCard o={o} best={i === 0} apply={() => { up({ ...o.patch, scheme: undefined }); toast(`Applied: ${o.label}`, { undo: true }); }} />)}</div>}
     </Section>
   );
 }

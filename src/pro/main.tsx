@@ -1,13 +1,15 @@
 // UrbanPlan Pro (/pro/): the full planning workspace, beside the simple editor (/app/).
 //
 // The layout follows how a developer works a plot, and keeps the answer in view the whole time:
-// - a rail of six steps on the left (site, design system, scheme, money, approval, explore), each with its own panel;
+// - a rail of six steps on the left (site, design system, scheme, money, approval, explore), each with its own sheet
+//   over the view (./sheet.tsx): a drawer on a wide screen (pinned, it docks beside the view), a sheet up from the
+//   bottom on a phone;
 // - the map (3D or the plan from above, a compass always in its corner) is where the plot, what's on it and the
 //   buildings are drawn, picked and moved (./edit.ts); the panel holds the numbers;
 // - the 3D in the middle, with the result bar over it (built-up, homes, profit, IRR, the rules), which flashes what
 //   each change did to it, so cause and effect are never a scroll away;
 // - view tools along the bottom of the 3D (exterior or an X-ray floor, the camera, the sun);
-// - on a phone the steps move to a bar along the bottom and the panel sits under the 3D.
+// - on a phone the steps move to a bar along the bottom, and the 3D fills the rest.
 // Every change can be undone (Ctrl+Z). The project is kept in this browser and, signed in, in the account a few
 // seconds behind (./cloud.ts); a share link carries the whole project in the URL and opens read-only.
 import { render } from 'preact';
@@ -46,6 +48,7 @@ import { ObjectHud } from './objHud';
 import { Shelf } from './shelf';
 import { PlotHud } from './plotHud';
 import { FormHud } from './formHud';
+import { Sheet, usePhone, type Detent } from './sheet';
 import { withFloors } from './shapePanel';
 import { pole } from './form/curve';
 import { Btn, cr, Dialog, Icon, Menu, nf, Num, pct, Range, Seg, Select, sqft, TooltipLayer } from './ui';
@@ -96,12 +99,22 @@ function App() {
   const redo = () => { const x = future.current.pop(); if (!x) return; past.current.push(p); store.set(KEY, x); setP(x); };
 
   const [step, setStep] = useState<Step>(() => store.get<Step>('urbanplan:pro:step', 'site'));
+  // the step's sheet: open or not, pinned beside the view (a wide screen), its height (a phone)
   const [panel, setPanel] = useState(true);
-  const go = (s: Step) => { setStep(s); setPanel(true); store.set('urbanplan:pro:step', s); setToolS(SELECT); edit.current?.setTool(SELECT); setPicked(null); };
+  const phone = usePhone();
+  const [pinned, setPinnedS] = useState<boolean>(() => store.get<boolean>('urbanplan:pro:pin', false));
+  const setPinned = (on: boolean) => { setPinnedS(on); store.set('urbanplan:pro:pin', on); };
+  const [detent, setDetent] = useState<Detent>('half');
+  /** what the sheet covers of the view (px from the left, from the bottom): the 3D and its tools keep clear of it */
+  const [cov, setCov] = useState<[number, number]>([0, 0]);
+  const cover = (x: number, y: number) => { setCov((c) => (c[0] === x && c[1] === y ? c : [x, y])); view.current?.setCover(x, y); };
+  const openSheet = () => { setPanel(true); if (phone && detent === 'peek') setDetent('half'); };
+  const go = (s: Step) => { setStep(s); openSheet(); store.set('urbanplan:pro:step', s); setToolS(SELECT); edit.current?.setTool(SELECT); setPicked(null); };
   // ---------- the map's tool and what's picked on it ----------
   const [tool, setToolS] = useState<Tool>(SELECT), [picked, setPicked] = useState<EditPicked>(null), [hint, setHint] = useState<string | null>(null);
   const edit = useRef<CanvasEdit | null>(null);
-  const setTool = (t: Tool) => { setToolS(t); edit.current?.setTool(t); };
+  // (on a phone a drawing tool lowers the sheet to a peek, so the map is there to draw on)
+  const setTool = (t: Tool) => { setToolS(t); edit.current?.setTool(t); if (t.k !== 'select' && matchMedia('(max-width: 900px)').matches) setDetent('peek'); };
   // snapping on by default (Alt held suspends it), remembered in this browser
   const [snap, setSnapS] = useState<boolean>(() => store.get<boolean>('urbanplan:pro:snap', true));
   const setSnap = (on: boolean) => { setSnapS(on); store.set('urbanplan:pro:snap', on); if (edit.current) edit.current.snapOn = on; };
@@ -114,9 +127,10 @@ function App() {
   const dial = useRef<{ a0: number; n0: number; moved: boolean; x: number; y: number } | null>(null);
   // (the readout by the pointer while drawing: written straight to the DOM, as it changes with every move)
   const readout = useRef<HTMLDivElement>(null);
-  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [toastMsg, setToastMsg] = useState<{ s: string; undo?: boolean } | null>(null);
   const toastT = useRef<number>();
-  const toast = (s: string) => { setToastMsg(s); clearTimeout(toastT.current); toastT.current = window.setTimeout(() => setToastMsg(null), 4200); };
+  /** a line at the bottom for a few seconds; with `undo`, an Undo on it (for a change made away from the view) */
+  const toast = (s: string, o?: { undo?: boolean }) => { setToastMsg({ s, undo: o?.undo }); clearTimeout(toastT.current); toastT.current = window.setTimeout(() => setToastMsg(null), o?.undo ? 7000 : 4200); };
   const [dialog, setDialog] = useState<null | 'projects' | 'share' | 'drawings' | 'keys' | 'welcome' | 'team'>(() => (store.get(SEEN, false) || location.hash.startsWith('#s=') || new URLSearchParams(location.search).has('p') ? null : 'welcome'));
 
   // ---------- a shared link: /pro/#s=<the project> opens read-only ----------
@@ -307,11 +321,19 @@ function App() {
   // ---------- keys ----------
   useEffect(() => {
     const on = (ev: KeyboardEvent) => {
+      // F6 (Shift+F6 back): the top bar, the steps, the sheet, the view
+      if (ev.key === 'F6') {
+        ev.preventDefault();
+        const rs = ['.top', '.rail', '.sheet', '.stage .results'].map((q) => document.querySelector<HTMLElement>(q)).filter((x): x is HTMLElement => !!x);
+        const i = rs.findIndex((r) => r.contains(document.activeElement)), n = rs[((i < 0 ? (ev.shiftKey ? 0 : -1) : i) + (ev.shiftKey ? -1 : 1) + rs.length) % rs.length];
+        (n.querySelector<HTMLElement>('h2[tabindex], button:not([disabled]), input, [tabindex="0"]') ?? n).focus();
+        return;
+      }
       if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') { if (typing(ev.target)) return; ev.preventDefault(); if (ev.shiftKey) redo(); else undo(); return; }
       if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'd' && picked?.k === 'building' && !readOnly && !typing(ev.target)) { ev.preventDefault(); const s = own(p, e), src = s.buildings.find((b) => b.id === picked.id); if (!src) return; const c = duplicated(src); tx.once({ scheme: { ...s, buildings: [...s.buildings, c] } }); setPicked({ k: 'building', id: c.id }); return; }
       if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'y') { if (typing(ev.target)) return; ev.preventDefault(); redo(); return; }
       if (ev.ctrlKey || ev.metaKey || ev.altKey || typing(ev.target)) return;
-      if (ev.key === 'Escape') { if (dialog) setDialog(null); else if (picked && tool.k === 'select') setPicked(null); return; }
+      if (ev.key === 'Escape') { if (dialog) setDialog(null); else if (picked && tool.k === 'select') setPicked(null); else if (panel && !pinned) setPanel(false); return; }
       // (the picked building: R turns it, + and − its floors, Ctrl+D below)
       const pb = picked?.k === 'building' && !readOnly ? picked : null;
       if (pb && (ev.key === 'r' || ev.key === 'R')) { const s = own(p, e); tx.once({ scheme: { ...s, buildings: s.buildings.map((b) => (b.id === pb.id ? turned(b, ev.shiftKey ? -15 : 15) : b)) } }); return; }
@@ -328,6 +350,7 @@ function App() {
       if (ev.key === 'm' && !readOnly) setTool(tool.k === 'measure' ? SELECT : { k: 'measure' });
       if (ev.key === 's') cam('street');
       if (ev.key === '\\') setPanel((v) => !v);
+      if (ev.key === '/') { ev.preventDefault(); setPinned(!pinned); setPanel(true); }
       if (ev.key === '?') setDialog('keys');
     };
     addEventListener('keydown', on);
@@ -358,14 +381,24 @@ function App() {
     };
   }, []);
 
+  /** pick a building and bring it into the middle of the view (a check's Show); on a phone the sheet lowers to a peek */
+  const showBuilding = (id: string) => {
+    const br = e.d.buildings.find((b) => b.b.id === id); if (!br) return;
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const q of br.quads) for (let i = 0; i + 1 < q.length; i += 2) { x0 = Math.min(x0, q[i]); x1 = Math.max(x1, q[i]); z0 = Math.min(z0, q[i + 1]); z1 = Math.max(z1, q[i + 1]); }
+    setToolS(SELECT); edit.current?.setTool(SELECT);
+    setPicked({ k: 'building', id });
+    if (phone) setDetent('peek');
+    if (Number.isFinite(x0)) view.current?.focus((x0 + x1) / 2, (z0 + z1) / 2, Math.max(x1 - x0, z1 - z0), br.height);
+  };
   /** the plot's editor is on: picked, or on the Site step with nothing else picked */
   const plotOn = picked?.k === 'plot' || (step === 'site' && !picked);
   const cur = STEPS.find((s) => s.key === step)!;
-  const props: StepProps = { p, e, up, rooms, checks, deal, go, openDrawings: () => setDialog('drawings'), toast, tool, setTool, picked, pick: setPicked };
+  const props: StepProps = { p, e, up, rooms, checks, deal, go, openDrawings: () => setDialog('drawings'), toast, tool, setTool, picked, pick: setPicked, show: showBuilding };
   const Body = { site: SiteStep2, build: SchemeStep, design: DesignSystemStep, money: MoneyStep, approve: ApproveStep, explore: ExploreStep }[step];
 
   return (
-    <div class={`pro${panel ? '' : ' no-panel'}${readOnly ? ' ro' : ''}`}>
+    <div class={`pro${panel && pinned && !phone ? ' docked' : ''}${readOnly ? ' ro' : ''}`} style={`--cover:${cov[0]}px;--cover-b:${cov[1]}px`}>
       <header class="top">
         <a class="logo" href={`${BASE}dashboard/`} aria-label="Your dashboard"><Dither field="mark" cell={2} class="mark" />UrbanPlan</a>
         <b class="chip">Pro</b>
@@ -387,35 +420,29 @@ function App() {
 
       <nav class="rail" aria-label="Steps">
         {STEPS.map((s, i) => (
-          <button type="button" class="step" aria-current={step === s.key ? 'step' : undefined} onClick={() => { if (step !== s.key) go(s.key); else if (matchMedia('(max-width: 900px)').matches) { setPanel(true); document.querySelector('.panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); } else setPanel(!panel); }} data-tip={`${s.title} (${i + 1})`} data-tip-side="right">
+          <button type="button" class="step" aria-current={step === s.key ? 'step' : undefined} aria-expanded={step === s.key ? panel : undefined} onClick={() => { if (step !== s.key) go(s.key); else if (panel) setPanel(false); else openSheet(); }} data-tip={`${s.title} (${i + 1})`} data-tip-side="right">
             <Icon n={s.icon} size={20} />
             <span>{s.label}</span>
             {s.key === 'approve' && sum.fail + sum.warn > 0 && <i class={`dot ${sum.fail ? 'bad' : 'warn'}`} />}
           </button>
         ))}
         <span class="gap" />
-        <button type="button" class="step small" onClick={() => setPanel(!panel)} aria-label="Show or hide the panel" aria-expanded={panel} data-tip="Show or hide the panel (\)" data-tip-side="right"><Icon n="panel" size={18} /></button>
+        <button type="button" class="step small" onClick={() => setPanel(!panel)} aria-label="Show or hide the sheet" aria-expanded={panel} data-tip="Show or hide the sheet (\) · pin it beside the view (/)" data-tip-side="right"><Icon n="panel" size={18} /></button>
       </nav>
 
-      {panel && (
-        <aside class="panel" aria-label={cur.title}>
-          <header class="panel-h">
-            <div><h2>{cur.title}</h2></div>
-            <Btn kind="quiet" icon="x" title="Hide the panel" onClick={() => setPanel(false)} />
-          </header>
-          <div class="panel-b" key={step}>
-            {authReady && session.value === null && new URLSearchParams(location.search).has('p') && <p class="note">A project shared with you. <a href={`${BASE}login/?next=${encodeURIComponent(location.pathname + location.search)}`}>Sign in</a> with the email it was shared to and it opens here.</p>}
-            {viewer && !readOnly && <p class="note">Shared with you to view and comment. <button type="button" class="linkbtn" onClick={() => setDialog('team')}>Comments</button></p>}
-            {readOnly && <p class="note">A shared scheme, view only. <button type="button" class="linkbtn" onClick={keepCopy}>Make it your own copy</button> to change it.</p>}
-            <fieldset disabled={readOnly || viewer}><Body {...props} /></fieldset>
-          </div>
-          {!(step === 'build' && picked?.k === 'building') && <footer class="panel-f">
-            {STEPS.findIndex((s) => s.key === step) > 0 && <Btn kind="quiet" onClick={() => go(STEPS[STEPS.findIndex((s) => s.key === step) - 1].key)}>Back</Btn>}
-            <span class="gap" />
-            {STEPS.findIndex((s) => s.key === step) < STEPS.length - 1 && <Btn kind="primary" onClick={() => go(STEPS[STEPS.findIndex((s) => s.key === step) + 1].key)}>Next: {STEPS[STEPS.findIndex((s) => s.key === step) + 1].label}<Icon n="chevron" size={15} /></Btn>}
-          </footer>}
-        </aside>
-      )}
+      <Sheet title={cur.title} open={panel} pinned={pinned} setPinned={setPinned} close={() => setPanel(false)} phone={phone} detent={detent} setDetent={setDetent} cover={cover}
+        footer={!(step === 'build' && picked?.k === 'building') && <footer class="panel-f">
+          {STEPS.findIndex((s) => s.key === step) > 0 && <Btn kind="quiet" onClick={() => go(STEPS[STEPS.findIndex((s) => s.key === step) - 1].key)}>Back</Btn>}
+          <span class="gap" />
+          {STEPS.findIndex((s) => s.key === step) < STEPS.length - 1 && <Btn kind="primary" onClick={() => go(STEPS[STEPS.findIndex((s) => s.key === step) + 1].key)}>Next: {STEPS[STEPS.findIndex((s) => s.key === step) + 1].label}<Icon n="chevron" size={15} /></Btn>}
+        </footer>}>
+        <div class="panel-b" key={step}>
+          {authReady && session.value === null && new URLSearchParams(location.search).has('p') && <p class="note">A project shared with you. <a href={`${BASE}login/?next=${encodeURIComponent(location.pathname + location.search)}`}>Sign in</a> with the email it was shared to and it opens here.</p>}
+          {viewer && !readOnly && <p class="note">Shared with you to view and comment. <button type="button" class="linkbtn" onClick={() => setDialog('team')}>Comments</button></p>}
+          {readOnly && <p class="note">A shared scheme, view only. <button type="button" class="linkbtn" onClick={keepCopy}>Make it your own copy</button> to change it.</p>}
+          <fieldset disabled={readOnly || viewer}><Body {...props} /></fieldset>
+        </div>
+      </Sheet>
 
       <main class="stage">
         <canvas ref={canvas} onPointerMove={(ev) => setHover(view.current?.pick(ev.clientX, ev.clientY) ?? null)} onPointerLeave={() => setHover(null)} />
@@ -423,11 +450,11 @@ function App() {
         {!readOnly && !viewer && <Shelf tool={tool} setTool={setTool} />}
         <div class="readout" ref={readout} hidden aria-live="polite"><b /><span /></div>
         {tool.k === 'select' && plotOn && <PlotHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} pick={setPicked} tx={tx} snap={snap} live={mode === 'wire' && xr === null} readOnly={readOnly || viewer} toast={toast} setTool={setTool}
-          openWay={(w) => { try { sessionStorage.setItem('urbanplan:pro:way', w); } catch { /* */ } setStep('site'); store.set('urbanplan:pro:step', 'site'); setPanel(true); dispatchEvent(new CustomEvent('urbanplan:way', { detail: w })); }} northFree={northFree} setNorthFree={setNorthFree} />}
+          openWay={(w) => { try { sessionStorage.setItem('urbanplan:pro:way', w); } catch { /* */ } setStep('site'); store.set('urbanplan:pro:step', 'site'); openSheet(); dispatchEvent(new CustomEvent('urbanplan:way', { detail: w })); }} northFree={northFree} setNorthFree={setNorthFree} />}
         {tool.k === 'select' && (picked?.k === 'element' || picked?.k === 'feature') && <ObjectHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} pick={setPicked} tx={tx} snap={snap} readOnly={readOnly || viewer} toast={toast} />}
         {tool.k === 'select' && picked?.k === 'building' && <FormHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} tx={tx} live={mode === 'wire' && xr === null} readOnly={readOnly || viewer} xray={xr} setXray={setXray} toast={toast} />}
         {tool.k === 'select' && picked?.k === 'building' && <Hud view={view.current} p={p} e={e} picked={picked} pick={setPicked} up={up} tx={tx} snap={snap} live={mode === 'wire' && xr === null} readOnly={readOnly || viewer} toast={toast}
-          inspect={() => { setStep('build'); store.set('urbanplan:pro:step', 'build'); setPanel(true); }} />}
+          inspect={() => { setStep('build'); store.set('urbanplan:pro:step', 'build'); openSheet(); }} />}
         {hint && <div class="drawhint" role="status"><span>{hint}</span><button type="button" class="linkbtn" onClick={() => setTool(SELECT)}>Done</button></div>}
         {(() => {
           // the compass: a click shows the plan from above; with the plot picked it's a dial: drag it (or the arrow keys)
@@ -487,7 +514,7 @@ function App() {
         {hover && <div class="tip" style={`left:${hover.x + 14}px;top:${hover.y + 14}px`}><b>{hover.label}</b><span>{hover.size}</span><span>Floor {hover.floor}</span></div>}
       </main>
 
-      {toastMsg && <div class="toast" role="status">{toastMsg}</div>}
+      {toastMsg && <div class="toast" role="status">{toastMsg.s}{toastMsg.undo && <button type="button" class="linkbtn" onClick={() => { undo(); setToastMsg(null); }}>Undo</button>}</div>}
       <TooltipLayer />
       {dialog === 'projects' && user && <Projects current={ref?.id ?? null} open={(id) => void openId(id)} fresh={() => fresh()} close={() => setDialog(null)} />}
       {dialog === 'team' && user && ref && <Team pid={ref.id} role={ref.role ?? 'owner'} step={step} go={(s) => { go(s); }} close={() => setDialog(null)} />}
@@ -691,7 +718,7 @@ function ShareDialog({ p, close, toast }: { p: ProProject; close: () => void; to
 }
 
 function Keys({ close }: { close: () => void }) {
-  const rows: [string, string][] = [['1 – 6', 'Go to a step'], ['\\', 'Show or hide the panel'], ['X', 'X-ray floor on or off'], ['[  ]', 'Floor down / up'], ['F · S · T', 'Camera: whole site, street, from above'], ['P', 'The plan from above, or back to 3D'], ['V', 'Back to picking'], ['Enter · Esc · Backspace', 'Drawing: finish, cancel, take back a point'], ['Shift', 'Drawing: keep a line square to the road'], ['Alt', 'Hold while dragging: no snapping'], ['← → ↑ ↓', 'Nudge what’s picked a grid step (Shift: ×10)'], ['Delete', 'Remove what’s picked'], ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · redo'], ['↑ ↓ in a number', 'Step it (Shift: ×10)'], ['Esc', 'Close this']];
+  const rows: [string, string][] = [['1 – 6', 'Go to a step'], ['\\', 'Show or hide the sheet'], ['/', 'Pin the sheet beside the view, or float it'], ['F6 · Shift+F6', 'Move between the top bar, the steps, the sheet and the view'], ['R · Shift+R', 'Turn the picked building 15°'], ['+ −', 'A floor more or less on the picked building'], ['Ctrl+D', 'Duplicate the picked building'], ['M', 'Measure'], ['X', 'X-ray floor on or off'], ['[  ]', 'Floor down / up'], ['F · S · T', 'Camera: whole site, street, from above'], ['P', 'The plan from above, or back to 3D'], ['V', 'Back to picking'], ['Enter · Esc · Backspace', 'Drawing: finish, cancel, take back a point'], ['Shift', 'Drawing: keep a line square to the road'], ['Alt', 'Hold while dragging: no snapping'], ['← → ↑ ↓', 'Nudge what’s picked a grid step (Shift: ×10)'], ['Delete', 'Remove what’s picked'], ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · redo'], ['↑ ↓ in a number', 'Step it (Shift: ×10)'], ['Esc', 'Close this; let go of what’s picked; close the sheet']];
   return <Dialog title="Keyboard shortcuts" close={close}><dl class="lines keys">{rows.map(([a, b]) => <div><dt><kbd>{a}</kbd></dt><dd>{b}</dd></div>)}</dl></Dialog>;
 }
 

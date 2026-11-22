@@ -290,8 +290,37 @@ export class ProView {
     this.camera.aspect = r.width / Math.max(1, r.height);
     this.camera.updateProjectionMatrix();
     this.fitOrtho();
+    this.applyCover();
     this.pipe?.setSize(r.width, r.height);
     this.frame();
+  }
+  /** how much of the canvas a sheet covers (px: its left edge, its bottom), so the view's middle stays in what's seen */
+  private cover = { x: 0, y: 0 };
+  setCover(x: number, y: number) {
+    if (x === this.cover.x && y === this.cover.y) return;
+    this.cover = { x, y }; this.applyCover(); this.frame();
+  }
+  private applyCover() {
+    const r = this.canvas.parentElement!.getBoundingClientRect(), W = Math.max(1, r.width), H = Math.max(1, r.height), { x, y } = this.cover;
+    for (const c of [this.camera, this.ortho]) { if (x || y) c.setViewOffset(W, H, -x / 2, y / 2, W, H); else c.clearViewOffset(); }
+  }
+  /** bring a point into the middle of the view, near enough to see something this big round it (a building picked
+   *  from a check), keeping the way the camera looks; over a third of a second, or at once with reduced motion */
+  focus(cx: number, cz: number, size: number, h: number) {
+    const c = this.controls, t0 = c.target.clone(), t1 = new THREE.Vector3(cx, this.plan ? 0 : h * 0.4, cz);
+    const cam = this.plan ? this.ortho : this.camera, p0 = cam.position.clone();
+    const dir = p0.clone().sub(t0); const R = Math.max(size, h) * 1.7 + 12;
+    const p1 = this.plan ? new THREE.Vector3(cx, p0.y, cz) : t1.clone().addScaledVector(dir.normalize(), Math.min(R, p0.distanceTo(t0) * 1.4));
+    const z0 = this.ortho.zoom, z1 = this.plan ? Math.max(z0, Math.min(4, (this.orthoH * 1.2) / Math.max(10, size))) : z0;
+    const T = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 380, s0 = performance.now();
+    const step = () => {
+      const k = T ? Math.min(1, (performance.now() - s0) / T) : 1, e = 1 - (1 - k) ** 3;
+      c.target.lerpVectors(t0, t1, e); cam.position.lerpVectors(p0, p1, e);
+      if (this.plan) { this.ortho.zoom = z0 + (z1 - z0) * e; this.ortho.updateProjectionMatrix(); }
+      c.update(); this.frame();
+      if (k < 1) requestAnimationFrame(step);
+    };
+    step();
   }
   /** the plan's frustum for the canvas's shape (its zoom is the controls') */
   private orthoH = 60;
@@ -520,7 +549,7 @@ export class ProView {
    *  few seconds), or 'path', path-traced with real glass and bounced light (a minute or so, `samples` passes). */
   async renderStill(o: { width: number; height: number; quality: 'raster' | 'path'; samples?: number; onProgress?: (f: number) => void; signal?: AbortSignal }): Promise<Blob> {
     const m = this.mode; if (m !== 'shaded') { this.mode = 'shaded'; this.apply(); }
-    const cam = this.camera.clone(); cam.aspect = o.width / o.height; cam.updateProjectionMatrix();
+    const cam = this.camera.clone(); cam.clearViewOffset(); cam.aspect = o.width / o.height; cam.updateProjectionMatrix();
     try {
       if (o.quality === 'raster') {
         this.renderer.shadowMap.needsUpdate = true;

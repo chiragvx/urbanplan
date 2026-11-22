@@ -707,6 +707,22 @@ The core loop of placing and shaping buildings stops needing the panel.
 
 **Remove from the side panel:** the panel itself as a permanent column. Every remaining section lives in a sheet.
 
+**Status (2026-11-22): built, in src/pro/sheet.tsx, main.tsx, scene.ts (setCover, focus) and pro.css.**
+- Done:
+  - the fixed panel column gone: a step opens its sheet, a drawer over the view's left edge, or on a phone a sheet up from the steps bar at three heights (a peek, half, nearly all) dragged by its grip (a tap steps it up, a drag down past the peek closes it, the arrow keys on the grip);
+  - pinned (its button, or /) it docks beside the view as the panel did, remembered in this browser; \ still shows or hides it;
+  - the view keeps clear of it: the camera's middle shifts into what's seen (a view offset, so picking and the HUDs stay true), and the result bar, tool shelf, view tools, compass, hints and legend move over;
+  - on a phone a drawing tool lowers the sheet to a peek;
+  - Inspect, the result bar's figures and Survey no./Import open their sheets;
+  - "Show" on a check that's about one building (height, margins, transfers, cantilevers, mixed use, fire access) picks it and brings it into the middle of the view;
+  - an option or the brief's best applied from Explore toasts with Undo;
+  - a11y: focus to the sheet's title when it opens from a step or figure, back to the opener when it closes; Esc lets go of what's picked, then closes a floating sheet; F6 / Shift+F6 move between the top bar, the steps, the sheet and the view; the keyboard map updated.
+- Done differently: the sheets are still one per step (their bodies unchanged), not split into Fill settings, Objects and Export; the panel's Back/Next footer stays on a wide screen.
+- Not done yet:
+  - comment pins in the view (needs a column for the point on project_comments, a migration, and comments loaded outside the Team dialog);
+  - the applied option animating in the view (the result bar's figures flash what changed);
+  - a touch pass on a real phone (checked at 375 px in a desktop browser only).
+
 ---
 
 **Opinionated summary:**

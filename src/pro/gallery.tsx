@@ -24,8 +24,8 @@ function formsOf(t: FormTemplate) {
 }
 
 export function Gallery({ tool, setTool: set }: { tool: Tool; setTool: (t: Tool) => void }) {
-  // (on a phone the panel scrolls over the map: picking a tile brings the map back into view, to click on)
-  const setTool = (t: Tool) => { set(t); if (t.k !== 'select' && matchMedia('(max-width: 900px)').matches) scrollTo({ top: 0, behavior: 'smooth' }); };
+  // (on a phone, picking a tile lowers the sheet to a peek, so the map is there to click on: in main.tsx)
+  const setTool = set;
   const basicOn = tool.k === 'building';
   const [basic, setBasic] = useState(basicOn || !TEMPLATES.length);
   const on = (id: string) => tool.k === 'template' && tool.id === id;
