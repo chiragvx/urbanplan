@@ -546,6 +546,7 @@ Each phase ships on its own and leaves Pro working. The order puts the **IA's mi
   - objHud's popover fields become `inspector/object.tsx`.
 - The HUD's Inspect opens the inspector.
 - **Done when:** with a building picked, every one of its settings is in the inspector, and nothing project-wide is there.
+- **Status (2026-11-22): built, in one file.** The step's sheet stays on the left, and the inspector is a second panel on the view's right (src/pro/inspector.tsx). Building, plot and object sections are its three parts, not three files. See docs/plans/pro-global-ux-log.md.
 
 ### Phase 4: Brief, Design, Numbers, Approval
 

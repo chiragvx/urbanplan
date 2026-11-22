@@ -55,6 +55,7 @@ import { PlotHud } from './plotHud';
 import { FormHud } from './formHud';
 import { Sheet, useNarrow, type Detent } from './sheet';
 import { isPhone, usePhone } from '../device';
+import { Inspector } from './inspector';
 import { BuildingInfo, buildingName, MoneyView, Overview, RulesView, VIEW_OF, VIEW_STEPS, type ViewStep } from './viewer';
 import { ShareBody } from './shareSheet';
 import { withFloors } from './shapePanel';
@@ -479,12 +480,19 @@ function App() {
   useEffect(() => { if (phone && picked?.k === 'building') { setPanel(true); setDetent('peek'); } }, [phone, picked?.k === 'building' ? picked.id : null]);
   /** the plot's editor is on: picked, or on the Site step with nothing else picked */
   const plotOn = picked?.k === 'plot' || (step === 'site' && !picked);
+  // the inspector on the view's right: what's picked, on a wide screen; hidden by its ×, back with Inspect or a new pick
+  const [insp, setInsp] = useState(true);
+  const pickKey = picked ? `${picked.k}:${'id' in picked ? picked.id : ''}` : '';
+  useEffect(() => { if (pickKey) setInsp(true); }, [pickKey]);
+  const inspOn = !!picked && insp && !narrow && !phone && tool.k === 'select';
+  const covR = inspOn ? 344 : 0;
+  useEffect(() => { view.current?.setCover(cov[0], cov[1], covR); }, [covR]);
   const cur = STEPS.find((s) => s.key === step)!;
   const props: StepProps = { p, e, up, rooms, checks, deal, go, openDrawings: () => setDialog('drawings'), openStatement: () => setDialog('area'), toast, tool, setTool, picked, pick: setPicked, show: showBuilding };
   const Body = { site: SiteStep2, build: SchemeStep, design: DesignSystemStep, money: MoneyStep, approve: ApproveStep, explore: ExploreStep }[step];
 
   return (
-    <div class={`pro${panel && pinned && !narrow ? ' docked' : ''}${locked ? ' ro' : ''}`} style={`--cover:${cov[0]}px;--cover-b:${cov[1]}px`}>
+    <div class={`pro${panel && pinned && !narrow ? ' docked' : ''}${locked ? ' ro' : ''}`} style={`--cover:${cov[0]}px;--cover-b:${cov[1]}px;--cover-r:${covR}px`}>
       <header class="top">
         <a class="logo" href={`${BASE}dashboard/`} aria-label="Your dashboard"><Dither field="mark" cell={2} class="mark" />UrbanPlan</a>
         <b class="chip">Pro</b>
@@ -537,7 +545,7 @@ function App() {
         </div>
       </Sheet>}
       {!phone && <Sheet title={cur.title} open={panel} pinned={pinned} setPinned={setPinned} close={() => setPanel(false)} phone={narrow} detent={detent} setDetent={setDetent} cover={cover}
-        footer={!(step === 'build' && picked?.k === 'building') && <footer class="panel-f">
+        footer={<footer class="panel-f">
           {STEPS.findIndex((s) => s.key === step) > 0 && <Btn kind="quiet" onClick={() => go(STEPS[STEPS.findIndex((s) => s.key === step) - 1].key)}>Back</Btn>}
           <span class="gap" />
           {STEPS.findIndex((s) => s.key === step) < STEPS.length - 1 && <Btn kind="primary" onClick={() => go(STEPS[STEPS.findIndex((s) => s.key === step) + 1].key)}>Next: {STEPS[STEPS.findIndex((s) => s.key === step) + 1].label}<Icon n="chevron" size={15} /></Btn>}
@@ -560,7 +568,8 @@ function App() {
         {tool.k === 'select' && (picked?.k === 'element' || picked?.k === 'feature') && <ObjectHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} pick={setPicked} tx={tx} snap={snap} readOnly={locked} toast={toast} />}
         {tool.k === 'select' && picked?.k === 'building' && <FormHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} tx={tx} live={mode === 'wire' && xr === null} readOnly={locked} xray={xr} setXray={setXray} toast={toast} />}
         {tool.k === 'select' && picked?.k === 'building' && <Hud view={view.current} p={p} e={e} picked={picked} pick={setPicked} up={up} tx={tx} snap={snap} live={mode === 'wire' && xr === null} readOnly={locked} toast={toast}
-          inspect={() => { setStep('build'); store.set('urbanplan:pro:step', 'build'); openSheet(); }} />}
+          inspect={() => setInsp(true)} inspecting={inspOn} />}
+        {inspOn && picked && <Inspector p={p} e={e} up={up} rooms={rooms} checks={checks} picked={picked} pick={setPicked} toast={toast} xray={setXray} hide={() => setInsp(false)} readOnly={locked} />}
         {hint && <div class="drawhint" role="status"><span>{hint}</span><button type="button" class="linkbtn" onClick={() => setTool(SELECT)}>Done</button></div>}
         {(() => {
           // the compass: a click shows the plan from above; with the plot picked it's a dial: drag it (or the arrow keys)

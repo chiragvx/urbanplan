@@ -5,8 +5,8 @@ import { FINDABLE } from '../../src/pro/findable';
 
 const files = ['src/pro/sitePanels.tsx', 'src/pro/steps.tsx', 'src/pro/designStep.tsx', 'src/pro/numbersUi.tsx'];
 const src = files.map((f) => readFileSync(f, 'utf8')).join('\n');
-// (the picked building's own sections: reached by picking it, not by search, until the inspector)
-const NOT = new Set(['Systems', 'Flat plans']);
+// (none left out: a picked thing's own sections are in the inspector, reached by picking it)
+const NOT = new Set<string>([]);
 const titles = new Set([...src.matchAll(/<Section title="([^"]+)"/g)].map((m) => m[1]));
 let bad = 0;
 const fail = (s: string) => { bad++; console.log(`FAIL ${s}`); };

@@ -25,7 +25,7 @@ export const VIEW_STEPS: { key: ViewStep; label: string; icon: string; title: st
 /** where an editing step's link lands on a phone (a result bar figure, a check) */
 export const VIEW_OF: Record<string, ViewStep> = { site: 'overview', design: 'overview', build: 'overview', explore: 'overview', money: 'money', approve: 'rules' };
 
-const STATUS_ICON: Record<CheckStatus, string> = { pass: 'check', fail: 'x', warn: 'warn', info: 'info' };
+export const STATUS_ICON: Record<CheckStatus, string> = { pass: 'check', fail: 'x', warn: 'warn', info: 'info' };
 const m = (v: number) => `${nf(v, v < 10 ? 1 : 0)} m`;
 const letter = (i: number) => String.fromCharCode(65 + i);
 

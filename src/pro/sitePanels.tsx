@@ -5,30 +5,19 @@
 // edge, its levels and north on the map (./plotHud.tsx); here its survey number or an import, and what's on the site (obstructions and no-build zones).
 // Scheme: "Fill the plot" (how much, what, the green, the play area, the roads, the parking), then the buildings
 // and the site's things, each the user's to place, shape and set: floors, mix, design system, its systems.
-import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import { UNIT_LABEL } from '../doc/site';
 import { ACCESS, TYPOLOGIES, type Typology } from '../doc/optimise';
-import { CITIES, fillOf, type Fill, type ProBuilding } from './project';
+import { CITIES, fillOf, type Fill } from './project';
 import { longestEdge } from './importPlot';
 import { readGround } from './plotOps';
-import { presetOf, PRESETS } from './design';
 import { shopFloorsAllowed } from './mixed';
-import { buildModel, ifcLite, modelJson } from './model';
-import { own } from './edit';
-import { ShapePanel } from './shapePanel';
 import { featureOf } from './siteObjects';
-import { FindPlot, FlatPlan, ImportBox, slug, type StepProps } from './steps';
-import { Btn, download, Icon, Lines, Note, nf, Num, Row, Section, Seg, Select, Slider, sqft, Stat, Toggle } from './ui';
-import { SystemsPanel } from './systemsPanel';
+import { FindPlot, ImportBox, type StepProps } from './steps';
+import { Btn, Icon, Lines, Note, nf, Num, Row, Section, Seg, Select, Slider, sqft, Toggle } from './ui';
 import { LadderBox } from './numbersUi';
-import { mergeSettings, splitSettings } from './systems';
 
 type PlotWay = 'view' | 'survey' | 'import';
-
-function Picked({ title, children, remove, copy }: { title: ComponentChildren; children?: ComponentChildren; remove?: () => void; copy?: () => void }) {
-  return <div class="picked"><header><b>{title}</b><span>{copy && <Btn kind="quiet" icon="plus" title="Duplicate" onClick={copy} />}{remove && <Btn kind="quiet" icon="trash" title="Remove (Delete)" onClick={remove} />}</span></header>{children}</div>;
-}
 
 // ================================================================ site
 export function SiteStep2({ p, e, up, toast, tool, picked, pick, openStatement }: StepProps) {
@@ -99,30 +88,8 @@ export function SchemeStep({ p, e, up, rooms, toast, picked, pick }: StepProps) 
   const sh = p.shops ?? { floors: 0, depth: 9, sale: 0 };
   const setShops = (x: Partial<typeof sh>) => up({ shops: { ...sh, ...x } });
   const allowed = shopFloorsAllowed(r.roadW);
-  // the picked building: its report, and the user's own copy (taken over on the first change)
   const bi = picked?.k === 'building' ? d.buildings.findIndex((b) => b.b.id === picked.id) : -1;
-  const br = bi >= 0 ? d.buildings[bi] : null;
-  const setB = (fn: (b: ProBuilding) => ProBuilding) => { if (!br) return; const s = own(p, e); up({ scheme: { ...s, buildings: s.buildings.map((b) => (b.id === br.b.id ? fn(b) : b)) } }); };
-  const ownB = br ? (p.scheme?.buildings.find((b) => b.id === br.b.id) ?? { ...br.b, floors: br.floors }) as ProBuilding : null;
   const nameOf = (i: number) => (p.scheme?.buildings.find((b) => b.id === d.buildings[i].b.id)?.name) ?? `Building ${String.fromCharCode(65 + i)}`;
-  const deps = br ? d.departures.filter((x) => x.ids.includes(br.b.id)) : [];
-  if (br && ownB) return (
-    <>
-      <button type="button" class="backlink" onClick={() => pick(null)}><Icon n="chevron" size={14} /> All buildings</button>
-        {br && ownB && (
-      <Picked title={<>{nameOf(bi)}<small> · {br.floors} floors · {nf(br.plate)} m² plate</small></>}>
-        {deps.map((x) => <Note tone="bad">{x.text}</Note>)}
-        <Note>It's edited on the view: drag the handles on it, click a measurement to type one, and use its bar for its shape, roof, skin, flat mix and design system. A formed building's rings shape it and the strip beside it sets what its floors are for. R turns it, + and − change its floors, Ctrl+D duplicates it, Delete removes it.</Note>
-        {ownB.form && <ShapePanel b={ownB} floors={br.floors} set={setB} />}
-        <Section title="Systems" fold open={false} sub="Stairs, lifts, ducts, plumbing, power and fire: sized for it, each one yours to set."><SystemsPanel b={br} settings={mergeSettings(p.systems?.byBuilding?.[br.b.id], p.systems?.site)} under={d.under} floorH={r.rules.floorH} code={r.code} name={nameOf(bi)} basements={d.site.basements} bays={d.parking.have}
-          set={(x) => { const { building, plant } = splitSettings(x); up({ systems: { site: plant, byBuilding: { ...(p.systems?.byBuilding ?? {}), [br.b.id]: building } } }); }} /></Section>
-        <Section title="Flat plans" fold open={false} sub="Rooms fitted into each flat of a typical floor, checked against the minimum room sizes.">
-          <div class="flats">{(rooms[bi] ?? []).filter((fr, k, a) => fr.t < 3 && fr.rooms.length && a.findIndex((y) => y.t === fr.t) === k).map((fr) => <FlatPlan t={fr.t} fr={fr} />)}</div>
-        </Section>
-      </Picked>
-    )}
-    </>
-  );
   return (
     <>
       <Section title="Fill the plot" aside={owned ? <span class="sec-meta">shaped by hand</span> : undefined}>

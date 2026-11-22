@@ -4,6 +4,49 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-22 · Phase 3: the inspector
+
+**What changed:**
+- **The inspector** (src/pro/inspector.tsx) is a panel on the view's right that follows what's picked. It shows on wide screens only; a phone keeps its read-only building card.
+  - **A building:**
+    - its name, which can be typed over;
+    - duplicate and remove;
+    - the departures it needs, built-up area and homes;
+    - Size: floors, and length and depth for a straight building, plus turn buttons;
+    - Shape, By hand (silhouette and plan), Roof and Skin for a formed building, or Shape it for a straight one;
+    - Flat mix and Design system;
+    - Floors by use, which X-rays a floor;
+    - its checks;
+    - Systems and Flat plans.
+  - **The plot:**
+    - the planning authority;
+    - frontage and depth, while it's a rectangle;
+    - a table of its edges, each with its length, the road today and the road's width in the development plan;
+    - levels: over the road, the slope, and which way it falls;
+    - north.
+  - **A thing on the site:** its width, levels, or how far across, by kind. A tree, well or no-build zone gets its radius, how much is kept clear, and a note. Each can be removed.
+- **Hiding it:** its × hides the panel and keeps the pick. The building bar's Inspect, or a new pick, brings it back.
+- **The view keeps clear of it.** `ProView.setCover(x, y, r)` takes a right edge. The view's middle, the tools and the compass shift left by the panel's width, and the floating bars stay left of it.
+- **The building's floating bar is slimmer** while the inspector is open: Shape, Roof, Skin, Mix, Style and Inspect are in the panel. Their popover bodies are now shared components in formHud.tsx: `ShapeBody`, `RoofBody`, `SkinBody`, `MixBody`, `StyleBody`.
+- **The Scheme step is project-wide only.** The picked-building card, with its back link, is gone. Its Systems and Flat plans live in the inspector, and the Next and Back footer always shows.
+
+**How it was checked:**
+- Browser at 1280×800:
+  - picking Building A from the list opened the inspector with every section. The bar slimmed, and the floating bar stayed clear of the panel;
+  - × hid the panel, and the bar's Inspect came back;
+  - Esc deselected;
+  - clicking the plot opened the plot inspector with the edges table.
+- No new console errors. The ones there were from hot reloads mid-edit.
+- `npm test` ALL OK. The search test now covers 43 sections, with nothing left out. `npm run build` OK.
+
+**Left or known:**
+- Not checked in the browser: editing values in the inspector, and the inspector for roads, parking, gates and features.
+- At 1280 px the building's floating bar can touch the tool shelf, because the room between the shelf and the inspector is narrow.
+- The plot is in the inspector only when it is picked on the view. On the Site step with nothing picked, the plot's bar shows and the inspector doesn't.
+- The step sheet still floats or pins on the left; phase 4 reworks the rail and steps.
+
+---
+
 ## 2026-11-22 · Phase 2: find anything, one Share
 
 **What changed:**

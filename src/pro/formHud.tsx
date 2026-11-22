@@ -342,59 +342,85 @@ function MixBar({ mix, set }: { mix: [number, number, number]; set: (m: [number,
   );
 }
 
+type BodyProps = Omit<ExtrasProps, 'residential'>;
+const setFormOf = (setB: BodyProps['setB']) => (fn: (f: Form) => Form) => setB((x) => (x.form ? withForm(x, fn(x.form)) : x));
+
+/** A formed building's shape: presets, rounding, the ease between key floors, key floors, a slot, fins. */
+export function ShapeBody({ b, setB }: BodyProps) {
+  const f = b.form; if (!f) return null;
+  const setF = setFormOf(setB);
+  const active = SHAPES.find((s) => same(s.make(f), { keys: f.keys, ease: f.ease }))?.id ?? null;
+  /** a key floor halfway up the widest gap between keys */
+  const addKey = () => setF((x) => { const g = withKeys(x), ks = g.keys; let at = 0.5, gap = 0; for (let i = 0; i + 1 < ks.length; i++) if (ks[i + 1].t - ks[i].t > gap) { gap = ks[i + 1].t - ks[i].t; at = r2((ks[i].t + ks[i + 1].t) / 2); } return { ...g, keys: sortedKeys({ ...g, keys: [...ks, keyAt(g, at)] }) }; });
+  return <>
+    <IconPick<Preset> label="Shape" cls="shp-presets" value={active} set={(id) => setF((x) => ({ ...x, ...SHAPES.find((s) => s.id === id)!.make(x) }))} options={SHAPES.map((s) => ({ value: s.id, icon: s.id, label: s.label }))} />
+    <small>Or drag the rings on it: the dots for width, the diamonds to lean it, the round handle at the top to twist it.</small>
+    <label class="hrange"><span>Round the plan</span><Range min={0} max={100} step={5} value={Math.round(roundness(f) * 100)} label="Round the plan" valueText={`${Math.round(roundness(f) * 100)}%`} onInput={(v) => setF((x) => rounded(x, v / 100))} /><b>{Math.round(roundness(f) * 100)}%</b></label>
+    <Seg<Form['ease']> label="Between key floors" value={f.ease} set={(v) => setF((x) => ({ ...x, ease: v }))} options={[{ value: 'smooth', label: 'Smooth' }, { value: 'linear', label: 'Straight' }]} />
+    <div class="hrow">
+      <button type="button" class="hlink" onClick={addKey}><Icon n="plus" size={14} />A key floor</button>
+      <button type="button" class="hlink" onClick={() => setF((x) => ({ ...x, carves: [...x.carves, slotCarve(x)] }))}><Icon n="slot" size={14} />A slot</button>
+      {f.carves.length > 0 && <button type="button" class="hlink bad" onClick={() => setF((x) => ({ ...x, carves: [] }))}><Icon n="trash" size={14} />The cuts</button>}
+    </div>
+    <Toggle label="Fins round it" value={!!f.shell} set={(on) => setF((x) => ({ ...x, shell: on ? { offset: 1.2, over: 4, under: 0 } : undefined }))} />
+  </>;
+}
+
+/** A formed building's roof. */
+export function RoofBody({ b, setB }: BodyProps) {
+  const f = b.form; if (!f) return null;
+  return <IconPick<RoofKind> label="Roof" value={f.roof.kind} set={(k) => setFormOf(setB)((x) => ({ ...x, roof: { ...ROOFS.find((r) => r.value === k)!.roof } }))} options={ROOFS.map((r) => ({ value: r.value, icon: `roof-${r.value}`, label: r.label }))} />;
+}
+
+/** A formed building's facade pattern: the design system's, or its own. */
+export function SkinBody({ b, setB }: BodyProps) {
+  const f = b.form; if (!f) return null;
+  const setF = setFormOf(setB);
+  return <>
+    <Seg<'ds' | 'own'> ariaLabel="Skin" value={f.skin?.pattern ? 'own' : 'ds'} set={(v) => setF((x) => ({ ...x, skin: v === 'ds' ? undefined : { ...(x.skin ?? {}), pattern: x.skin?.pattern ?? 'fins' } }))} options={[{ value: 'ds', label: 'Design system' }, { value: 'own', label: 'Its own' }]} />
+    {f.skin?.pattern && <IconPick<SkinPattern> label="Skin pattern" value={f.skin.pattern} set={(pt) => setF((x) => ({ ...x, skin: { ...(x.skin ?? {}), pattern: pt } }))} options={SKINS.map((s) => ({ value: s.value, icon: `pat-${s.value}`, label: s.label }))} />}
+  </>;
+}
+
+/** The flat mix: the building's own, or the project's. */
+export function MixBody({ p, b, setB, once }: BodyProps) {
+  const own = !!b.mix, mix = (b.mix ?? p.mix) as [number, number, number];
+  return <>
+    <Toggle label="Its own mix" value={own} set={(v) => setB((x) => ({ ...x, mix: v ? [...p.mix] as [number, number, number] : undefined }))} />
+    <MixBar mix={mix} set={(m) => (own ? setB((x) => ({ ...x, mix: m })) : once({ mix: m }))} />
+    <small>{own ? 'This building only.' : 'Every building without its own: the project’s mix.'} Drag the dividers; {UNIT_LABEL[0]}, {UNIT_LABEL[1]}, {UNIT_LABEL[2]}.</small>
+  </>;
+}
+
+/** The building's design system: the project's, or a preset of its own. */
+export function StyleBody({ p, b, setB }: BodyProps) {
+  return (
+    <div class="huses" role="radiogroup" aria-label="Design system">
+      <button type="button" role="radio" aria-checked={!b.style} onClick={() => setB((x) => ({ ...x, style: undefined }))}>Project default ({presetOf(p.style).name})</button>
+      {PRESETS.map((x) => <button type="button" role="radio" aria-checked={b.style === x.id} onClick={() => setB((y) => ({ ...y, style: x.id }))}>{x.name}</button>)}
+    </div>
+  );
+}
+
 export function BarExtras({ p, b, residential, setB, once }: ExtrasProps) {
   const root = useRef<HTMLSpanElement>(null);
   const { open, pop, toggle } = usePop(root);
-  const f = b.form;
-  const setF = (fn: (f: Form) => Form) => setB((x) => (x.form ? withForm(x, fn(x.form)) : x));
-  const active = f ? SHAPES.find((s) => same(s.make(f), { keys: f.keys, ease: f.ease }))?.id ?? null : null;
-  const own = !!b.mix, mix = (b.mix ?? p.mix) as [number, number, number];
+  const f = b.form, own = !!b.mix;
   const ds = b.style ? presetOf(b.style) : null;
+  const bp = { p, b, setB, once };
   const wrap = (id: string, label: ComponentChildren, tip: string, body: ComponentChildren) => (
     <div class="hpopwrap" data-pop={id}>
       <button type="button" aria-expanded={open === id} data-tip={tip} onClick={() => toggle(id)}>{label}</button>
       {pop(id, body)}
     </div>
   );
-  /** a key floor halfway up the widest gap between keys */
-  const addKey = () => setF((x) => { const g = withKeys(x), ks = g.keys; let at = 0.5, gap = 0; for (let i = 0; i + 1 < ks.length; i++) if (ks[i + 1].t - ks[i].t > gap) { gap = ks[i + 1].t - ks[i].t; at = r2((ks[i].t + ks[i + 1].t) / 2); } return { ...g, keys: sortedKeys({ ...g, keys: [...ks, keyAt(g, at)] }) }; });
   return (
     <span class="hextras" ref={root}>
-      {f && wrap('shape', <><Icon n="taper" size={15} />Shape</>, 'Its shape: presets, rounding, key floors, a slot', <>
-        <b>Shape</b>
-        <IconPick<Preset> label="Shape" cls="shp-presets" value={active} set={(id) => setF((x) => ({ ...x, ...SHAPES.find((s) => s.id === id)!.make(x) }))} options={SHAPES.map((s) => ({ value: s.id, icon: s.id, label: s.label }))} />
-        <small>Or drag the rings on it: the dots for width, the diamonds to lean it, the round handle at the top to twist it.</small>
-        <label class="hrange"><span>Round the plan</span><Range min={0} max={100} step={5} value={Math.round(roundness(f) * 100)} label="Round the plan" valueText={`${Math.round(roundness(f) * 100)}%`} onInput={(v) => setF((x) => rounded(x, v / 100))} /><b>{Math.round(roundness(f) * 100)}%</b></label>
-        <Seg<Form['ease']> label="Between key floors" value={f.ease} set={(v) => setF((x) => ({ ...x, ease: v }))} options={[{ value: 'smooth', label: 'Smooth' }, { value: 'linear', label: 'Straight' }]} />
-        <div class="hrow">
-          <button type="button" class="hlink" onClick={addKey}><Icon n="plus" size={14} />A key floor</button>
-          <button type="button" class="hlink" onClick={() => setF((x) => ({ ...x, carves: [...x.carves, slotCarve(x)] }))}><Icon n="slot" size={14} />A slot</button>
-          {f.carves.length > 0 && <button type="button" class="hlink bad" onClick={() => setF((x) => ({ ...x, carves: [] }))}><Icon n="trash" size={14} />The cuts</button>}
-        </div>
-        <Toggle label="Fins round it" value={!!f.shell} set={(on) => setF((x) => ({ ...x, shell: on ? { offset: 1.2, over: 4, under: 0 } : undefined }))} />
-      </>)}
-      {f && wrap('roof', <><Icon n={`roof-${f.roof.kind}`} size={15} />Roof</>, 'Its roof', <>
-        <b>Roof</b>
-        <IconPick<RoofKind> label="Roof" value={f.roof.kind} set={(k) => setF((x) => ({ ...x, roof: { ...ROOFS.find((r) => r.value === k)!.roof } }))} options={ROOFS.map((r) => ({ value: r.value, icon: `roof-${r.value}`, label: r.label }))} />
-      </>)}
-      {f && wrap('skin', <><Icon n={`pat-${f.skin?.pattern ?? 'grid'}`} size={15} />Skin</>, 'Its facade pattern', <>
-        <b>Skin</b>
-        <Seg<'ds' | 'own'> ariaLabel="Skin" value={f.skin?.pattern ? 'own' : 'ds'} set={(v) => setF((x) => ({ ...x, skin: v === 'ds' ? undefined : { ...(x.skin ?? {}), pattern: x.skin?.pattern ?? 'fins' } }))} options={[{ value: 'ds', label: 'Design system' }, { value: 'own', label: 'Its own' }]} />
-        {f.skin?.pattern && <IconPick<SkinPattern> label="Skin pattern" value={f.skin.pattern} set={(pt) => setF((x) => ({ ...x, skin: { ...(x.skin ?? {}), pattern: pt } }))} options={SKINS.map((s) => ({ value: s.value, icon: `pat-${s.value}`, label: s.label }))} />}
-      </>)}
-      {residential && wrap('mix', <>Mix</>, own ? 'Its own flat mix' : 'The flat mix (the project’s)', <>
-        <b>Flat mix</b>
-        <Toggle label="Its own mix" value={own} set={(v) => setB((x) => ({ ...x, mix: v ? [...p.mix] as [number, number, number] : undefined }))} />
-        <MixBar mix={mix} set={(m) => (own ? setB((x) => ({ ...x, mix: m })) : once({ mix: m }))} />
-        <small>{own ? 'This building only.' : 'Every building without its own: the project’s mix.'} Drag the dividers; {UNIT_LABEL[0]}, {UNIT_LABEL[1]}, {UNIT_LABEL[2]}.</small>
-      </>)}
-      {wrap('style', <><Icon n="palette" size={15} />Style</>, ds ? `Design system: ${ds.name}` : 'Design system: the project’s', <>
-        <b>Design system</b>
-        <div class="huses" role="radiogroup" aria-label="Design system">
-          <button type="button" role="radio" aria-checked={!b.style} onClick={() => setB((x) => ({ ...x, style: undefined }))}>Project default ({presetOf(p.style).name})</button>
-          {PRESETS.map((x) => <button type="button" role="radio" aria-checked={b.style === x.id} onClick={() => setB((y) => ({ ...y, style: x.id }))}>{x.name}</button>)}
-        </div>
-      </>)}
+      {f && wrap('shape', <><Icon n="taper" size={15} />Shape</>, 'Its shape: presets, rounding, key floors, a slot', <><b>Shape</b><ShapeBody {...bp} /></>)}
+      {f && wrap('roof', <><Icon n={`roof-${f.roof.kind}`} size={15} />Roof</>, 'Its roof', <><b>Roof</b><RoofBody {...bp} /></>)}
+      {f && wrap('skin', <><Icon n={`pat-${f.skin?.pattern ?? 'grid'}`} size={15} />Skin</>, 'Its facade pattern', <><b>Skin</b><SkinBody {...bp} /></>)}
+      {residential && wrap('mix', <>Mix</>, own ? 'Its own flat mix' : 'The flat mix (the project’s)', <><b>Flat mix</b><MixBody {...bp} /></>)}
+      {wrap('style', <><Icon n="palette" size={15} />Style</>, ds ? `Design system: ${ds.name}` : 'Design system: the project’s', <><b>Design system</b><StyleBody {...bp} /></>)}
     </span>
   );
 }

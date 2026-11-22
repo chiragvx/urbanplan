@@ -34,6 +34,8 @@ interface Props {
   up: (o: Partial<ProProject>) => void; tx: Tx; snap: boolean;
   /** the scheme can be re-worked while dragging (the wireframe); shaded, only the outline moves until it's let go */
   live: boolean; readOnly: boolean; inspect: () => void; toast: (s: string) => void;
+  /** the inspector is open: the bar keeps to the quick changes, the rest is there */
+  inspecting?: boolean;
 }
 type HKind = 'height' | 'end0' | 'end1' | 'side' | 'turn' | 'move';
 const r1 = (x: number) => Math.round(x * 10) / 10;
@@ -75,6 +77,8 @@ export function usePins(view: ProView | null) {
     const res = R.parentElement?.querySelector<HTMLElement>('.results'), top = res ? res.offsetTop + res.offsetHeight + 10 : 12;
     const tools = R.parentElement?.querySelector<HTMLElement>('.tools'), floor = tools ? tools.offsetTop - 8 : H - 60;
     const shelf = R.parentElement?.querySelector<HTMLElement>('.shelf'), left = shelf ? shelf.offsetLeft + shelf.offsetWidth + 8 : 8;
+    // (and left of the inspector, when it's open)
+    const insp = R.parentElement?.querySelector<HTMLElement>('.insp'), right = insp ? insp.offsetLeft - 8 : W - 8;
     for (const [k, el] of spanEls.current) {
       const sp = spans.current.get(k), a = sp && toS(sp.a), b = sp && toS(sp.b);
       if (!sp || !a || !b || !Number.isFinite(x0)) { el.style.visibility = 'hidden'; continue; }
@@ -83,7 +87,7 @@ export function usePins(view: ProView | null) {
       // (kept on screen: a tall building's strip is squeezed into the room there is)
       t = Math.max(top + 76, t); bt = Math.min(floor, bt); if (bt - t < 90) t = Math.max(top + 76, bt - 90);
       const hgt = Math.max(60, bt - t);
-      const w = el.offsetWidth, x = sp.side > 0 ? Math.min(W - w - 6, x1 + 16) : Math.max(left, x0 - 16 - w);
+      const w = el.offsetWidth, x = sp.side > 0 ? Math.min(right - w + 2, x1 + 16) : Math.max(left, x0 - 16 - w);
       el.style.visibility = 'visible'; el.style.height = `${Math.round(hgt)}px`; el.style.transform = `translate(${Math.round(x)}px,${Math.round(t)}px)`;
     }
     const B = bar.current;
@@ -95,7 +99,7 @@ export function usePins(view: ProView | null) {
       let y = y0 - bh - 26;
       if (y < top) y = y1 + 40 <= bottom ? y1 + 40 : top;
       y = Math.max(top, Math.min(bottom, y));
-      const x = Math.max(Math.min(left, W - bw - 8), Math.min(W - bw - 8, (x0 + x1) / 2 - bw / 2));
+      const x = Math.max(Math.min(left, right - bw), Math.min(right - bw, (x0 + x1) / 2 - bw / 2));
       B.style.visibility = 'visible'; B.style.transform = `translate(${Math.round(x)}px,${Math.round(y)}px)`;
     }
   };
@@ -106,7 +110,7 @@ export function usePins(view: ProView | null) {
   return { root, bar, at, box, ref, spans, span };
 }
 
-export function Hud({ view, p, e, picked, pick, up, tx, snap, live, readOnly, inspect, toast }: Props) {
+export function Hud({ view, p, e, picked, pick, up, tx, snap, live, readOnly, inspect, toast, inspecting }: Props) {
   const { root, bar, at, box, ref } = usePins(view);
   const [dragging, setDragging] = useState<HKind | null>(null);
   const [typing, setTyping] = useState<'len' | 'depth' | 'h' | null>(null);
@@ -298,10 +302,10 @@ export function Hud({ view, p, e, picked, pick, up, tx, snap, live, readOnly, in
         {!ownB.form && ownB.spine.length === 4 && !ownB.closed && <button type="button" data-tip="Shape it: give it a form to sculpt" aria-label="Shape it" onClick={() => setB((b) => shapeIt(b, br.floors))}><Icon n="wand" size={15} /></button>}
         <button type="button" aria-label="Duplicate" data-tip="Duplicate (Ctrl+D)" onClick={() => { const s = own(p, e), src = s.buildings.find((b) => b.id === br.b.id); if (!src) return; const c = duplicated(src); once({ scheme: { ...s, buildings: [...s.buildings, c] } }); pick({ k: 'building', id: c.id }); toast(`Duplicated ${name}.`); }}><Icon n="copy" size={15} /></button>
         <button type="button" aria-label="Remove" data-tip="Remove (Delete)" onClick={() => { once(removed(p, e, { k: 'building', id: br.b.id })); pick(null); toast(`Removed ${name} · Ctrl+Z to undo`); }}><Icon n="trash" size={15} /></button>
-        <span class="hsep" />
+        {!inspecting && <><span class="hsep" />
         <BarExtras p={p} b={ownB} residential={!ownB.form || ownB.form.uses.some((u) => u.use === 'residential')} setB={setB} once={once} />
-        <span class="hsep" />
-        <button type="button" class="hinspect" data-tip="Its systems, flat plans, and shaping by hand" onClick={inspect}><Icon n="panel" size={15} />Inspect</button>
+        <span class="hsep" /></>}
+        {!inspecting && <button type="button" class="hinspect" data-tip="The inspector: all of it, its checks, systems and flat plans" onClick={inspect}><Icon n="panel" size={15} />Inspect</button>}
         <button type="button" aria-label="Deselect" data-tip="Deselect (Esc)" onClick={() => pick(null)}><Icon n="x" size={14} /></button>
       </div>
     </div>

@@ -294,15 +294,16 @@ export class ProView {
     this.pipe?.setSize(r.width, r.height);
     this.frame();
   }
-  /** how much of the canvas a sheet covers (px: its left edge, its bottom), so the view's middle stays in what's seen */
-  private cover = { x: 0, y: 0 };
-  setCover(x: number, y: number) {
-    if (x === this.cover.x && y === this.cover.y) return;
-    this.cover = { x, y }; this.applyCover(); this.frame();
+  /** how much of the canvas a sheet covers (px: its left edge, its bottom, and the inspector's right edge), so the
+   *  view's middle stays in what's seen */
+  private cover = { x: 0, y: 0, r: 0 };
+  setCover(x: number, y: number, r = this.cover.r) {
+    if (x === this.cover.x && y === this.cover.y && r === this.cover.r) return;
+    this.cover = { x, y, r }; this.applyCover(); this.frame();
   }
   private applyCover() {
-    const r = this.canvas.parentElement!.getBoundingClientRect(), W = Math.max(1, r.width), H = Math.max(1, r.height), { x, y } = this.cover;
-    for (const c of [this.camera, this.ortho]) { if (x || y) c.setViewOffset(W, H, -x / 2, y / 2, W, H); else c.clearViewOffset(); }
+    const b = this.canvas.parentElement!.getBoundingClientRect(), W = Math.max(1, b.width), H = Math.max(1, b.height), { x, y, r } = this.cover;
+    for (const c of [this.camera, this.ortho]) { if (x || y || r) c.setViewOffset(W, H, (r - x) / 2, y / 2, W, H); else c.clearViewOffset(); }
   }
   /** bring a point into the middle of the view, near enough to see something this big round it (a building picked
    *  from a check), keeping the way the camera looks; over a third of a second, or at once with reduced motion */
