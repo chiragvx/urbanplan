@@ -9,7 +9,8 @@
 // - the 3D in the middle, with the result bar over it (built-up, homes, profit, IRR, the rules), which flashes what
 //   each change did to it, so cause and effect are never a scroll away;
 // - view tools along the bottom of the 3D (exterior or an X-ray floor, the camera, the sun);
-// - on a phone the steps move to a bar along the bottom, and the 3D fills the rest.
+// - on a phone the steps move to a bar along the bottom, and the 3D fills the rest; and a phone only looks and shares:
+//   nothing changes on it (../device.ts, docs/plans/mobile-view-only.md).
 // Every change can be undone (Ctrl+Z). The project is kept in this browser and, signed in, in the account a few
 // seconds behind (./cloud.ts); a share link carries the whole project in the URL and opens read-only.
 import { render } from 'preact';
@@ -48,7 +49,8 @@ import { ObjectHud } from './objHud';
 import { Shelf } from './shelf';
 import { PlotHud } from './plotHud';
 import { FormHud } from './formHud';
-import { Sheet, usePhone, type Detent } from './sheet';
+import { Sheet, useNarrow, type Detent } from './sheet';
+import { isPhone, usePhone } from '../device';
 import { withFloors } from './shapePanel';
 import { pole } from './form/curve';
 import { Btn, cr, Dialog, Icon, Menu, nf, Num, pct, Range, Seg, Select, sqft, TooltipLayer } from './ui';
@@ -77,7 +79,7 @@ function App() {
   const txOpen = useRef(false);
   const [busy, setBusy] = useState(false);
   const tx: Tx & { once(o: Partial<ProProject>): void } = {
-    begin: () => { if (txOpen.current || readOnly) return; past.current = [...past.current.slice(-80), pRef.current]; future.current = []; txOpen.current = true; setBusy(true); },
+    begin: () => { if (txOpen.current || roRef.current) return; past.current = [...past.current.slice(-80), pRef.current]; future.current = []; txOpen.current = true; setBusy(true); },
     live: (o) => up(o),
     commit: () => { txOpen.current = false; lastPush.current = 0; setBusy(false); },
     /** a change of its own (a key, a button): one undo step */
@@ -85,7 +87,7 @@ function App() {
     cancel: () => { if (!txOpen.current) return; txOpen.current = false; const x = past.current.pop(); if (x) { store.set(KEY, x); setP(x); } setBusy(false); },
   };
   const up = (o: Partial<ProProject>) => {
-    if (readOnly) return;
+    if (roRef.current) return;
     setP((x) => {
       // (a burst of changes, typing a number, is one undo step)
       const now = Date.now();
@@ -95,20 +97,21 @@ function App() {
     });
   };
   const replace = (n: ProProject) => { past.current = [...past.current.slice(-80), p]; future.current = []; store.set(KEY, n); setP(n); };
-  const undo = () => { const x = past.current.pop(); if (!x) return; future.current.push(p); store.set(KEY, x); setP(x); };
-  const redo = () => { const x = future.current.pop(); if (!x) return; past.current.push(p); store.set(KEY, x); setP(x); };
+  const undo = () => { if (roRef.current) return; const x = past.current.pop(); if (!x) return; future.current.push(p); store.set(KEY, x); setP(x); };
+  const redo = () => { if (roRef.current) return; const x = future.current.pop(); if (!x) return; past.current.push(p); store.set(KEY, x); setP(x); };
 
   const [step, setStep] = useState<Step>(() => store.get<Step>('urbanplan:pro:step', 'site'));
   // the step's sheet: open or not, pinned beside the view (a wide screen), its height (a phone)
   const [panel, setPanel] = useState(true);
-  const phone = usePhone();
+  /** a narrow screen (the sheet's layout), and a phone (nothing changes on it) */
+  const narrow = useNarrow(), phone = usePhone();
   const [pinned, setPinnedS] = useState<boolean>(() => store.get<boolean>('urbanplan:pro:pin', false));
   const setPinned = (on: boolean) => { setPinnedS(on); store.set('urbanplan:pro:pin', on); };
   const [detent, setDetent] = useState<Detent>('half');
   /** what the sheet covers of the view (px from the left, from the bottom): the 3D and its tools keep clear of it */
   const [cov, setCov] = useState<[number, number]>([0, 0]);
   const cover = (x: number, y: number) => { setCov((c) => (c[0] === x && c[1] === y ? c : [x, y])); view.current?.setCover(x, y); };
-  const openSheet = () => { setPanel(true); if (phone && detent === 'peek') setDetent('half'); };
+  const openSheet = () => { setPanel(true); if (narrow && detent === 'peek') setDetent('half'); };
   const go = (s: Step) => { setStep(s); openSheet(); store.set('urbanplan:pro:step', s); setToolS(SELECT); edit.current?.setTool(SELECT); setPicked(null); };
   // ---------- the map's tool and what's picked on it ----------
   const [tool, setToolS] = useState<Tool>(SELECT), [picked, setPicked] = useState<EditPicked>(null), [hint, setHint] = useState<string | null>(null);
@@ -131,7 +134,7 @@ function App() {
   const toastT = useRef<number>();
   /** a line at the bottom for a few seconds; with `undo`, an Undo on it (for a change made away from the view) */
   const toast = (s: string, o?: { undo?: boolean }) => { setToastMsg({ s, undo: o?.undo }); clearTimeout(toastT.current); toastT.current = window.setTimeout(() => setToastMsg(null), o?.undo ? 7000 : 4200); };
-  const [dialog, setDialog] = useState<null | 'projects' | 'share' | 'drawings' | 'keys' | 'welcome' | 'team'>(() => (store.get(SEEN, false) || location.hash.startsWith('#s=') || new URLSearchParams(location.search).has('p') ? null : 'welcome'));
+  const [dialog, setDialog] = useState<null | 'projects' | 'share' | 'drawings' | 'keys' | 'welcome' | 'team'>(() => (store.get(SEEN, false) || isPhone() || location.hash.startsWith('#s=') || new URLSearchParams(location.search).has('p') ? null : 'welcome'));
 
   // ---------- a shared link: /pro/#s=<the project> opens read-only ----------
   useEffect(() => {
@@ -175,6 +178,7 @@ function App() {
   useEffect(() => {
     const start = new URLSearchParams(location.search).get('new');
     if (start === null) return;
+    if (isPhone()) { location.replace(`${BASE}dashboard/`); return; }
     let city = DEFAULT_PROJECT.city;
     try { const a = (JSON.parse(localStorage.getItem('urbanplan:prefs') ?? '{}') as { authority?: ProProject['city'] }).authority; if (a) city = a; } catch { /* */ }
     // (a city page's link names its city: Pune's rules, or Mumbai suburbs')
@@ -204,10 +208,12 @@ function App() {
     if (user && id && id !== ref?.id) void openId(id);
   }, [user?.id]);
   const viewer = ref?.role === 'viewer';
-  const roRef = useRef(false); roRef.current = readOnly || viewer;
+  /** nothing may change: a share link, a viewer on the team, or a phone */
+  const locked = readOnly || viewer || phone;
+  const roRef = useRef(false); roRef.current = locked;
   const fresh = (n: ProProject = { ...DEFAULT_PROJECT }) => { replace(n); setRef(null); lastSaved.current = ''; setDialog(null); history.replaceState(null, '', '?local'); };
   useEffect(() => {
-    if (!user || readOnly || viewer) { setCloud({ s: 'local' }); return; }
+    if (!user || locked) { setCloud({ s: 'local' }); return; }
     const text = toText(p);
     if (text === lastSaved.current) return;
     const t = setTimeout(async () => {
@@ -330,12 +336,12 @@ function App() {
         return;
       }
       if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') { if (typing(ev.target)) return; ev.preventDefault(); if (ev.shiftKey) redo(); else undo(); return; }
-      if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'd' && picked?.k === 'building' && !readOnly && !typing(ev.target)) { ev.preventDefault(); const s = own(p, e), src = s.buildings.find((b) => b.id === picked.id); if (!src) return; const c = duplicated(src); tx.once({ scheme: { ...s, buildings: [...s.buildings, c] } }); setPicked({ k: 'building', id: c.id }); return; }
+      if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'd' && picked?.k === 'building' && !locked && !typing(ev.target)) { ev.preventDefault(); const s = own(p, e), src = s.buildings.find((b) => b.id === picked.id); if (!src) return; const c = duplicated(src); tx.once({ scheme: { ...s, buildings: [...s.buildings, c] } }); setPicked({ k: 'building', id: c.id }); return; }
       if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'y') { if (typing(ev.target)) return; ev.preventDefault(); redo(); return; }
       if (ev.ctrlKey || ev.metaKey || ev.altKey || typing(ev.target)) return;
       if (ev.key === 'Escape') { if (dialog) setDialog(null); else if (picked && tool.k === 'select') setPicked(null); else if (panel && !pinned) setPanel(false); return; }
       // (the picked building: R turns it, + and − its floors, Ctrl+D below)
-      const pb = picked?.k === 'building' && !readOnly ? picked : null;
+      const pb = picked?.k === 'building' && !locked ? picked : null;
       if (pb && (ev.key === 'r' || ev.key === 'R')) { const s = own(p, e); tx.once({ scheme: { ...s, buildings: s.buildings.map((b) => (b.id === pb.id ? turned(b, ev.shiftKey ? -15 : 15) : b)) } }); return; }
       if (pb && (ev.key === '+' || ev.key === '=' || ev.key === '-')) { const s = own(p, e), br = e.d.buildings.find((x) => x.b.id === pb.id); if (!br) return; tx.once({ scheme: { ...s, buildings: s.buildings.map((b) => (b.id === pb.id ? withFloors(b, Math.max(1, br.floors + (ev.key === '-' ? -1 : 1))) : b)) } }); return; }
       const i = '123456'.indexOf(ev.key);
@@ -347,7 +353,7 @@ function App() {
       if (ev.key === 't') cam('top');
       if (ev.key === 'p') setPlan(!plan);
       if (ev.key === 'v') setTool(SELECT);
-      if (ev.key === 'm' && !readOnly) setTool(tool.k === 'measure' ? SELECT : { k: 'measure' });
+      if (ev.key === 'm' && !locked) setTool(tool.k === 'measure' ? SELECT : { k: 'measure' });
       if (ev.key === 's') cam('street');
       if (ev.key === '\\') setPanel((v) => !v);
       if (ev.key === '/') { ev.preventDefault(); setPinned(!pinned); setPanel(true); }
@@ -388,7 +394,7 @@ function App() {
     for (const q of br.quads) for (let i = 0; i + 1 < q.length; i += 2) { x0 = Math.min(x0, q[i]); x1 = Math.max(x1, q[i]); z0 = Math.min(z0, q[i + 1]); z1 = Math.max(z1, q[i + 1]); }
     setToolS(SELECT); edit.current?.setTool(SELECT);
     setPicked({ k: 'building', id });
-    if (phone) setDetent('peek');
+    if (narrow) setDetent('peek');
     if (Number.isFinite(x0)) view.current?.focus((x0 + x1) / 2, (z0 + z1) / 2, Math.max(x1 - x0, z1 - z0), br.height);
   };
   /** the plot's editor is on: picked, or on the Site step with nothing else picked */
@@ -398,24 +404,24 @@ function App() {
   const Body = { site: SiteStep2, build: SchemeStep, design: DesignSystemStep, money: MoneyStep, approve: ApproveStep, explore: ExploreStep }[step];
 
   return (
-    <div class={`pro${panel && pinned && !phone ? ' docked' : ''}${readOnly ? ' ro' : ''}`} style={`--cover:${cov[0]}px;--cover-b:${cov[1]}px`}>
+    <div class={`pro${panel && pinned && !narrow ? ' docked' : ''}${locked ? ' ro' : ''}`} style={`--cover:${cov[0]}px;--cover-b:${cov[1]}px`}>
       <header class="top">
         <a class="logo" href={`${BASE}dashboard/`} aria-label="Your dashboard"><Dither field="mark" cell={2} class="mark" />UrbanPlan</a>
         <b class="chip">Pro</b>
-        <label class="pname"><input value={p.name} aria-label="Project name" readOnly={readOnly} onChange={(ev) => up({ name: (ev.target as HTMLInputElement).value.trim() || 'Untitled project' })} /><Icon n="edit" size={14} /></label>
+        <label class="pname"><input value={p.name} aria-label="Project name" readOnly={locked} onChange={(ev) => up({ name: (ev.target as HTMLInputElement).value.trim() || 'Untitled project' })} /><Icon n="edit" size={14} /></label>
         <SaveState cloud={cloud} user={!!user} readOnly={readOnly} />
         <span class="gap" />
-        {!readOnly && <span class="hist">
+        {!locked && <span class="hist">
           <Btn kind="quiet" icon="undo" title="Undo (Ctrl+Z)" onClick={undo} disabled={!past.current.length} />
           <Btn kind="quiet" icon="redo" title="Redo (Ctrl+Shift+Z)" onClick={redo} disabled={!future.current.length} />
         </span>}
-        {readOnly
+        {readOnly && !phone
           ? <Btn kind="primary" icon="check" onClick={keepCopy}>Make it my copy</Btn>
           : <Btn icon="share" onClick={() => setDialog('share')}>Share</Btn>}
-        {authReady && user && ref && !readOnly && <Btn icon="team" title="People on this project, and comments" onClick={() => setDialog(dialog === 'team' ? null : 'team')}>Team</Btn>}
+        {authReady && user && ref && !readOnly && !phone && <Btn icon="team" title="People on this project, and comments" onClick={() => setDialog(dialog === 'team' ? null : 'team')}>Team</Btn>}
         {authReady && user && <Btn icon="folder" onClick={() => setDialog(dialog === 'projects' ? null : 'projects')}>Projects</Btn>}
         {authReady && session.value === null && <Btn icon="user" href={`${BASE}login/?next=${encodeURIComponent(location.pathname + location.search)}`} title="Keep your projects in your account">Sign in</Btn>}
-        <More openKeys={() => setDialog('keys')} newProject={() => fresh()} />
+        <More openKeys={() => setDialog('keys')} newProject={phone ? undefined : () => fresh()} />
       </header>
 
       <nav class="rail" aria-label="Steps">
@@ -430,7 +436,7 @@ function App() {
         <button type="button" class="step small" onClick={() => setPanel(!panel)} aria-label="Show or hide the sheet" aria-expanded={panel} data-tip="Show or hide the sheet (\) · pin it beside the view (/)" data-tip-side="right"><Icon n="panel" size={18} /></button>
       </nav>
 
-      <Sheet title={cur.title} open={panel} pinned={pinned} setPinned={setPinned} close={() => setPanel(false)} phone={phone} detent={detent} setDetent={setDetent} cover={cover}
+      <Sheet title={cur.title} open={panel} pinned={pinned} setPinned={setPinned} close={() => setPanel(false)} phone={narrow} detent={detent} setDetent={setDetent} cover={cover}
         footer={!(step === 'build' && picked?.k === 'building') && <footer class="panel-f">
           {STEPS.findIndex((s) => s.key === step) > 0 && <Btn kind="quiet" onClick={() => go(STEPS[STEPS.findIndex((s) => s.key === step) - 1].key)}>Back</Btn>}
           <span class="gap" />
@@ -439,27 +445,28 @@ function App() {
         <div class="panel-b" key={step}>
           {authReady && session.value === null && new URLSearchParams(location.search).has('p') && <p class="note">A project shared with you. <a href={`${BASE}login/?next=${encodeURIComponent(location.pathname + location.search)}`}>Sign in</a> with the email it was shared to and it opens here.</p>}
           {viewer && !readOnly && <p class="note">Shared with you to view and comment. <button type="button" class="linkbtn" onClick={() => setDialog('team')}>Comments</button></p>}
-          {readOnly && <p class="note">A shared scheme, view only. <button type="button" class="linkbtn" onClick={keepCopy}>Make it your own copy</button> to change it.</p>}
-          <fieldset disabled={readOnly || viewer}><Body {...props} /></fieldset>
+          {readOnly && !phone && <p class="note">A shared scheme, view only. <button type="button" class="linkbtn" onClick={keepCopy}>Make it your own copy</button> to change it.</p>}
+          {phone && <p class="note">On a phone you can look round your projects and share them. Change them on a computer.</p>}
+          <fieldset disabled={locked}><Body {...props} /></fieldset>
         </div>
       </Sheet>
 
       <main class="stage">
         <canvas ref={canvas} onPointerMove={(ev) => setHover(view.current?.pick(ev.clientX, ev.clientY) ?? null)} onPointerLeave={() => setHover(null)} />
         <ResultBar e={e} deal={deal} sum={sum} go={go} />
-        {!readOnly && !viewer && <Shelf tool={tool} setTool={setTool} />}
+        {!locked && <Shelf tool={tool} setTool={setTool} />}
         <div class="readout" ref={readout} hidden aria-live="polite"><b /><span /></div>
-        {tool.k === 'select' && plotOn && <PlotHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} pick={setPicked} tx={tx} snap={snap} live={mode === 'wire' && xr === null} readOnly={readOnly || viewer} toast={toast} setTool={setTool}
+        {tool.k === 'select' && plotOn && <PlotHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} pick={setPicked} tx={tx} snap={snap} live={mode === 'wire' && xr === null} readOnly={locked} toast={toast} setTool={setTool}
           openWay={(w) => { try { sessionStorage.setItem('urbanplan:pro:way', w); } catch { /* */ } setStep('site'); store.set('urbanplan:pro:step', 'site'); openSheet(); dispatchEvent(new CustomEvent('urbanplan:way', { detail: w })); }} northFree={northFree} setNorthFree={setNorthFree} />}
-        {tool.k === 'select' && (picked?.k === 'element' || picked?.k === 'feature') && <ObjectHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} pick={setPicked} tx={tx} snap={snap} readOnly={readOnly || viewer} toast={toast} />}
-        {tool.k === 'select' && picked?.k === 'building' && <FormHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} tx={tx} live={mode === 'wire' && xr === null} readOnly={readOnly || viewer} xray={xr} setXray={setXray} toast={toast} />}
-        {tool.k === 'select' && picked?.k === 'building' && <Hud view={view.current} p={p} e={e} picked={picked} pick={setPicked} up={up} tx={tx} snap={snap} live={mode === 'wire' && xr === null} readOnly={readOnly || viewer} toast={toast}
+        {tool.k === 'select' && (picked?.k === 'element' || picked?.k === 'feature') && <ObjectHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} pick={setPicked} tx={tx} snap={snap} readOnly={locked} toast={toast} />}
+        {tool.k === 'select' && picked?.k === 'building' && <FormHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} tx={tx} live={mode === 'wire' && xr === null} readOnly={locked} xray={xr} setXray={setXray} toast={toast} />}
+        {tool.k === 'select' && picked?.k === 'building' && <Hud view={view.current} p={p} e={e} picked={picked} pick={setPicked} up={up} tx={tx} snap={snap} live={mode === 'wire' && xr === null} readOnly={locked} toast={toast}
           inspect={() => { setStep('build'); store.set('urbanplan:pro:step', 'build'); openSheet(); }} />}
         {hint && <div class="drawhint" role="status"><span>{hint}</span><button type="button" class="linkbtn" onClick={() => setTool(SELECT)}>Done</button></div>}
         {(() => {
           // the compass: a click shows the plan from above; with the plot picked it's a dial: drag it (or the arrow keys)
           // to turn north, in 5° steps (unless the plot's place set it and it's locked)
-          const turnable = plotOn && !readOnly && !viewer && (!p.at || northFree);
+          const turnable = plotOn && !locked && (!p.at || northFree);
           const angleAt = (ev: PointerEvent) => { const r = (ev.currentTarget as HTMLElement).getBoundingClientRect(); return (Math.atan2(ev.clientX - (r.left + r.width / 2), -(ev.clientY - (r.top + r.height / 2))) * 180) / Math.PI; };
           const setNorth = (v: number) => ((Math.round(v / 5) * 5) % 360 + 360) % 360;
           return <button type="button" class={`compass${turnable ? ' dial' : ''}`} aria-label={turnable ? `North: ${p.north ?? 0}° (drag it, or the arrow keys, to turn it; click for the plan)` : 'North (the map from above)'}
@@ -516,7 +523,7 @@ function App() {
 
       {toastMsg && <div class="toast" role="status">{toastMsg.s}{toastMsg.undo && <button type="button" class="linkbtn" onClick={() => { undo(); setToastMsg(null); }}>Undo</button>}</div>}
       <TooltipLayer />
-      {dialog === 'projects' && user && <Projects current={ref?.id ?? null} open={(id) => void openId(id)} fresh={() => fresh()} close={() => setDialog(null)} />}
+      {dialog === 'projects' && user && <Projects current={ref?.id ?? null} open={(id) => void openId(id)} fresh={phone ? undefined : () => fresh()} close={() => setDialog(null)} />}
       {dialog === 'team' && user && ref && <Team pid={ref.id} role={ref.role ?? 'owner'} step={step} go={(s) => { go(s); }} close={() => setDialog(null)} />}
       {dialog === 'share' && <ShareDialog p={p} close={() => setDialog(null)} toast={toast} />}
       {dialog === 'keys' && <Keys close={() => setDialog(null)} />}
@@ -597,16 +604,17 @@ function SaveState({ cloud, user, readOnly }: { cloud: { s: string; msg?: string
   return <span class={`save ${cloud.s}`} title={cloud.msg} role="status">{cloud.s === 'saving' ? <Dither class="dz" cell={2} /> : <i />}{t}</span>;
 }
 
-function More({ openKeys, newProject }: { openKeys: () => void; newProject: () => void }) {
-  return <Menu label="More" items={[
+function More({ openKeys, newProject }: { openKeys: () => void; newProject?: () => void }) {
+  // (on a phone, without newProject: nothing that makes or edits)
+  return <Menu label="More" items={newProject ? [
     { label: 'New project', icon: 'plus', onSelect: newProject },
     { label: 'The simple editor', icon: 'site', href: `${BASE}app/` },
     { label: 'Keyboard shortcuts', icon: 'key', onSelect: openKeys },
-  ]} />;
+  ] : [{ label: 'Your dashboard', icon: 'folder', href: `${BASE}dashboard/` }]} />;
 }
 
 /** The account's Pro projects: open one, start a new one, delete (two clicks). */
-function Projects({ current, open, fresh, close }: { current: string | null; open: (id: string) => void; fresh: () => void; close: () => void }) {
+function Projects({ current, open, fresh, close }: { current: string | null; open: (id: string) => void; fresh?: () => void; close: () => void }) {
   const [list, setList] = useState<Project[] | null>(null), [shared, setShared] = useState<Project[]>([]);
   const [err, setErr] = useState(''), [sure, setSure] = useState('');
   const reload = () => { void listSharedPro().then(setShared); return listPro().then(setList, (x) => setErr(explain(x))); };
@@ -617,14 +625,14 @@ function Projects({ current, open, fresh, close }: { current: string | null; ope
   };
   return (
     <Dialog title="Your projects" close={close} side>
-      <Btn kind="primary" icon="plus" onClick={fresh}>New project</Btn>
+      {fresh && <Btn kind="primary" icon="plus" onClick={fresh}>New project</Btn>}
       {err && <p class="note bad">{err}</p>}
       {!list && !err && <p class="note">Loading…</p>}
       {list && !list.length && <p class="note">None yet: this one saves to your account as you work.</p>}
       {list && list.length > 0 && <ul class="plist">{list.map((x) => (
         <li class={x.id === current ? 'on' : ''}>
           <button type="button" class="pitem" onClick={() => open(x.id)}><b>{x.name}</b><span>{x.region.replace('pro:', '').replace('-', ' ')} · {ago(x.updated_at)}</span></button>
-          <Btn kind="quiet" onClick={() => void del(x.id)}>{sure === x.id ? 'Delete?' : 'Delete'}</Btn>
+          {fresh && <Btn kind="quiet" onClick={() => void del(x.id)}>{sure === x.id ? 'Delete?' : 'Delete'}</Btn>}
         </li>
       ))}</ul>}
       {shared.length > 0 && <>

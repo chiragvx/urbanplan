@@ -11,11 +11,12 @@ import { Btn } from './ui';
 export type Detent = 'peek' | 'half' | 'full';
 /** each height as a share of the room over the steps bar */
 const AT: Record<Detent, number> = { peek: 0.3, half: 0.56, full: 0.94 };
-export const PHONE = '(max-width: 900px)';
+/** a narrow screen: the sheet comes up from the bottom (layout only; what a phone may do is ../device.ts) */
+export const NARROW = '(max-width: 900px)';
 
-export function usePhone() {
-  const [on, setOn] = useState(() => typeof matchMedia !== 'undefined' && matchMedia(PHONE).matches);
-  useEffect(() => { const m = matchMedia(PHONE), f = () => setOn(m.matches); m.addEventListener('change', f); return () => m.removeEventListener('change', f); }, []);
+export function useNarrow() {
+  const [on, setOn] = useState(() => typeof matchMedia !== 'undefined' && matchMedia(NARROW).matches);
+  useEffect(() => { const m = matchMedia(NARROW), f = () => setOn(m.matches); m.addEventListener('change', f); return () => m.removeEventListener('change', f); }, []);
   return on;
 }
 

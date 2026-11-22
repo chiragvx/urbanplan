@@ -212,6 +212,7 @@ export interface EditHost {
   done: () => void;
   /** a word for the user: what to do next */
   hint: (s: string | null) => void;
+  /** nothing may change (a phone, a share link, a viewer): what's tapped is only picked */
   readOnly: () => boolean;
   /** a few words by the pointer: the length being drawn, what it snapped to, a typed number (null: none) */
   readout?: (r: { text: string; sub?: string; x: number; y: number; typed?: boolean } | null) => void;
@@ -471,7 +472,9 @@ export class CanvasEdit {
 
   // ---------- pointer ----------
   private down(ev: PointerEvent) {
-    if (ev.button !== 0 || this.h.readOnly()) return;
+    if (ev.button !== 0) return;
+    // (locked, a phone, a share link, a viewer: what's tapped is picked on release, nothing is moved)
+    if (this.h.readOnly()) { this.downAt = [ev.clientX, ev.clientY]; return; }
     const v = this.h.view(); if (!v) return;
     this.downAt = [ev.clientX, ev.clientY];
     const m = modeOf(this.tool);
@@ -516,6 +519,15 @@ export class CanvasEdit {
     // (a feature anywhere, once no building or thing is under the pointer; on the Site step it came first)
     const f = this.h.step() === 'site' ? null : this.featureAt(ev.clientX, ev.clientY);
     if (f) { this.h.pick({ k: 'feature', id: f.id }); this.startMove({ k: 'feature', id: f.id }, ev, v); return; }
+  }
+  /** pick only (locked): the building under the pointer, else an element, else a feature, else nothing */
+  private pickAt(x: number, y: number, v: ProView) {
+    const hit = v.buildingHit(x, y);
+    if (hit) { this.h.pick({ k: 'building', id: hit.id }); return; }
+    const el = this.elementAt(x, y, this.h.e());
+    if (el) { this.h.pick({ k: 'element', id: el.id }); return; }
+    const f = this.featureAt(x, y);
+    this.h.pick(f ? { k: 'feature', id: f.id } : null);
   }
   /** the picked building when it has a form (and can be edited here) */
   private pickedForm(): (ProBuilding & { form: Form }) | null {
@@ -615,6 +627,7 @@ export class CanvasEdit {
     const v = this.h.view(); if (!v) return;
     const d = this.drag; this.drag = null;
     const click = this.downAt && Math.hypot(ev.clientX - this.downAt[0], ev.clientY - this.downAt[1]) < 5;
+    if (this.h.readOnly()) { if (click && this.tool.k === 'select') this.pickAt(ev.clientX, ev.clientY, v); return; }
     if (d && d.kind !== 'rect') { this.guide = []; this.hotPt = null; this.draw(); }
     if (d?.kind === 'rect') {
       if (!click && Math.abs(d.to[0] - d.from[0]) > 1 && Math.abs(d.to[1] - d.from[1]) > 1) {
