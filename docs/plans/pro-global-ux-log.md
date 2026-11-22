@@ -4,6 +4,53 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-22 · Phase 4: Brief, Design, Numbers, Approval
+
+**What changed:**
+- **The rail has four places in place of six steps** (src/pro/places.tsx). The keys are 1–4, and Back and Next are gone.
+  - **Brief** has three parts:
+    - *The site gives:* the rules, the FSI ladder and the constraints;
+    - *You want:* Fill the plot and the flat mix;
+    - *Make options from it:* the written brief, options, screening many plots and the plotted layout. These were under Explore.
+  - **Design:**
+    - the plot (on the map, by survey number, or imported);
+    - what's on the site, living, the buildings, shops and parking;
+    - **Look**: the design system's name and elevation, with "Open the design system". That opens the old Design step as a large sheet.
+  - **Numbers:** the area statement first (a building line picks and frames it), then the money.
+  - **Approval:** as before. The view pins a "✕ 3 fail" chip over each building with checks to look at, and a click picks and frames the building.
+- **The pick stays when you change place.** Building A picked in Design is still picked, with its inspector, in Numbers and Approval.
+- **The plot's editor shows only when the plot is picked** (click open ground inside it). Before, it also showed whenever the Site step was open.
+- **The stage chooses where you land and what the scorecard shows.**
+  - **Looking** opens on Brief. The scorecard shows Potential (the permissible built-up and the FSI taken), Saleable (carpet), Land worth, Profit and Rules.
+  - **Designing** opens on Design. The scorecard is as before.
+  - **Applying** opens on Approval. The scorecard shows Built-up, Homes, Rules, Fees and Documents; Fees and Documents unfold their sections.
+  - Setting the stage moves you to its place, and opening a project lands on its stage's place.
+- **Old step values carry over.** A stored step from the six steps maps to the place that took it in, and a note says so once. The dashboard's starts (sample, template, survey or import, a design system) land on Design; a design system also opens Look.
+- **Search** has the new places. Its settings were re-filed, and the builder's sections open the Look sheet (shown as "Design › Look › …"). "Look" and "Area statement" were added, so the test covers 45 sections.
+
+**How it was checked:**
+- Browser at 1280×800:
+  - the stored "site" step opened on Brief, with the note;
+  - Design's sections and Look's sheet;
+  - Numbers opens on the area statement;
+  - Looking and Applying each landed on their place with their own scorecard, and the stage was set back to Designing;
+  - Building A stayed picked from Design to Approval;
+  - the check pin shows over A.
+- No new console errors.
+- `npm test` ALL OK; `npm run build` OK.
+
+**Left or known:**
+- Not built yet:
+  - the permissible envelope (a ghost volume) in Brief;
+  - the profit tint in Numbers;
+  - the inventory in Numbers.
+- The scorecard follows the stage, not the place.
+- Screening many plots is still under Brief until the dashboard's Sites (phase 7).
+- In Approval, at the sheet's width, some scrutiny rows overlap their text ("Commercial floors by road width"). This was there before phase 4.
+- The phone view isn't changed. Its links from the places map to Overview, Money and Rules.
+
+---
+
 ## 2026-11-22 · Phase 3: the inspector
 
 **What changed:**

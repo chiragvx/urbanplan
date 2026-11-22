@@ -23,7 +23,7 @@ export const VIEW_STEPS: { key: ViewStep; label: string; icon: string; title: st
   { key: 'share', label: 'Share', icon: 'share', title: 'Share' },
 ];
 /** where an editing step's link lands on a phone (a result bar figure, a check) */
-export const VIEW_OF: Record<string, ViewStep> = { site: 'overview', design: 'overview', build: 'overview', explore: 'overview', money: 'money', approve: 'rules' };
+export const VIEW_OF: Record<string, ViewStep> = { brief: 'overview', design: 'overview', numbers: 'money', approve: 'rules' };
 
 export const STATUS_ICON: Record<CheckStatus, string> = { pass: 'check', fail: 'x', warn: 'warn', info: 'info' };
 const m = (v: number) => `${nf(v, v < 10 ? 1 : 0)} m`;

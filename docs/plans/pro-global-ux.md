@@ -561,6 +561,18 @@ Each phase ships on its own and leaves Pro working. The order puts the **IA's mi
 - The project's stage picks where you land and the scorecard's figures.
 - The old `urbanplan:pro:step` values and `step=` links map to the new places, with a one-time note.
 - **Done when:** the six steps are gone; picking Building B and moving between places keeps B in focus everywhere.
+- **Status (2026-11-22): built, with two overlays left.**
+  - The four places are in src/pro/places.tsx.
+  - The Site and Scheme sections are split between Brief and Design by a `part`, and Explore sits under Brief.
+  - Look opens the design system in a sheet.
+  - The area statement heads Numbers.
+  - Approval pins its checks on the view.
+  - The stage picks where you land and the scorecard's figures.
+  - **Not done yet:**
+    - the permissible envelope in Brief;
+    - the profit tint in Numbers;
+    - the inventory in Numbers.
+  - See docs/plans/pro-global-ux-log.md.
 
 ### Phase 5: Options and Compare
 

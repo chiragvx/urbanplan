@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { FINDABLE } from '../../src/pro/findable';
 
-const files = ['src/pro/sitePanels.tsx', 'src/pro/steps.tsx', 'src/pro/designStep.tsx', 'src/pro/numbersUi.tsx'];
+const files = ['src/pro/sitePanels.tsx', 'src/pro/steps.tsx', 'src/pro/designStep.tsx', 'src/pro/numbersUi.tsx', 'src/pro/places.tsx'];
 const src = files.map((f) => readFileSync(f, 'utf8')).join('\n');
 // (none left out: a picked thing's own sections are in the inspector, reached by picking it)
 const NOT = new Set<string>([]);

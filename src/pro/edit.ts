@@ -204,7 +204,7 @@ export interface EditHost {
   p: () => ProProject;
   e: () => Evaluated;
   up: (o: Partial<ProProject>) => void;
-  /** which step is open: the site's corners are dragged on the Site step, buildings on the others */
+  /** 'site' while the plot is picked (its features come first under the pointer), else the open place */
   step: () => string;
   picked: () => Picked;
   pick: (x: Picked) => void;

@@ -874,3 +874,14 @@ details.chk .show { display: inline-flex; align-items: center; gap: 5px; margin:
 .insp-edges td { padding: 3px 4px 3px 0; border-top: 1px solid var(--up-line); }
 .insp-edges td:nth-child(3), .insp-edges td:nth-child(4) { width: 33%; }
 @media (max-height: 640px) { .insp { top: 64px; } }
+
+/* ---------- the places: a heading over each part of the question (Brief: the site gives, you want, options) ---------- */
+.place-h { margin: 14px 0 2px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--up-muted); }
+.place-h:first-child { margin-top: 0; }
+.dss-prev.look { margin: 0 0 10px; max-height: 150px; overflow: hidden; }
+.look-b { border: 0; padding: 0; margin: 0; min-width: 0; }
+/* Approval: a pin over each building with checks to look at */
+.cpins { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 1; }
+.cpin { position: absolute; left: 0; top: 0; pointer-events: auto; display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--up-ink); background: var(--up-surface); color: var(--up-ink); font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; box-shadow: var(--up-shadow-sm); }
+.cpin.bad { background: var(--up-ink); color: var(--up-paper); }
+.cpin.warn { text-decoration: underline; text-underline-offset: 2px; }

@@ -25,20 +25,25 @@ import { layoutDefaults, plotLayout, type LayoutOpts } from './layout';
 import { Btn, cr, download, Icon, Lines, Note, nf, Num, pct, Row, Section, Seg, Select, sqft, Stat, Toggle } from './ui';
 import { checkBuilding } from './viewer';
 
-export type Step = 'site' | 'build' | 'design' | 'money' | 'approve' | 'explore';
+export type Step = 'brief' | 'design' | 'numbers' | 'approve';
 export const STEPS: { key: Step; label: string; icon: string; title: string; sub: string }[] = [
-  { key: 'site', label: 'Site', icon: 'site', title: 'Site', sub: 'The plot, its roads and levels, what’s on it, the rules.' },
-  { key: 'design', label: 'Design', icon: 'palette', title: 'Design system', sub: 'The look and the materials: facade, windows, floors, roof.' },
-  { key: 'build', label: 'Scheme', icon: 'building', title: 'Scheme', sub: 'The buildings, each yours to place, shape and set.' },
-  { key: 'money', label: 'Money', icon: 'money', title: 'Money', sub: 'Price, cost, the deal on the land, and the cash month by month.' },
+  { key: 'brief', label: 'Brief', icon: 'site', title: 'Brief', sub: 'What the site gives and what you want: the rules, the FSI ladder, the type and mix; options from a written brief.' },
+  { key: 'design', label: 'Design', icon: 'building', title: 'Design', sub: 'The plot, what’s on it, the buildings and the look.' },
+  { key: 'numbers', label: 'Numbers', icon: 'money', title: 'Numbers', sub: 'The area statement, then the money: price, cost, the deal on the land, the cash.' },
   { key: 'approve', label: 'Approval', icon: 'shield', title: 'Approval', sub: 'Our own scrutiny, the NOCs and fees, and the drawings and files to submit.' },
-  { key: 'explore', label: 'Explore', icon: 'spark', title: 'Explore', sub: 'Many options at once, a written brief, screening plots, plotted layouts.' },
 ];
+/** the six steps before (stored, or in old links) and the place each one's settings went to */
+export const OLD_STEP: Record<string, Step> = { site: 'brief', build: 'design', design: 'design', money: 'numbers', approve: 'approve', explore: 'brief' };
+export const isStep = (s: unknown): s is Step => STEPS.some((x) => x.key === s);
 
 export interface StepProps {
   p: ProProject; e: Evaluated; up: (o: Partial<ProProject>) => void;
   rooms: FlatRooms[][]; checks: Check[]; deal: DealResult;
   go: (s: Step) => void; openDrawings: () => void;
+  /** the part of a step's sections a place shows (the Site and Scheme sections are split between Brief and Design) */
+  part?: 'brief' | 'design';
+  /** open the design system's builder (Design › Look) */
+  openLook?: () => void;
   /** the area statement, over the view */
   openStatement: () => void; toast: (s: string, o?: { undo?: boolean }) => void;
   /** pick a building and bring it into the middle of the view (by its id) */

@@ -42,9 +42,10 @@ import { parseBrief, runBrief } from './brief';
 import { downloadSet, Sheets, SHEET_CSS } from './drawings';
 import { buildModel, ifcLite, modelJson } from './model';
 import { FINDABLE } from './findable';
+import { documents, fees, permissionOf } from './approvals';
 import { findIn, Search, type Cmd } from './search';
-import { ApproveStep, ExploreStep, MoneyStep, PdfButton, slug, STEPS, type Step, type StepProps } from './steps';
-import { SchemeStep, SiteStep2 } from './sitePanels';
+import { ApproveStep, isStep, OLD_STEP, PdfButton, slug, STEPS, type Step, type StepProps } from './steps';
+import { BriefPlace, DesignPlace, NumbersPlace } from './places';
 import { DesignSystemStep } from './designStep';
 import { groundAt } from './terrain';
 import { CanvasEdit, duplicated, own, placeTemplate, SELECT, turned, type Picked as EditPicked, type Tool } from './edit';
@@ -56,6 +57,7 @@ import { FormHud } from './formHud';
 import { Sheet, useNarrow, type Detent } from './sheet';
 import { isPhone, usePhone } from '../device';
 import { Inspector } from './inspector';
+import { CheckPins } from './checkPins';
 import { BuildingInfo, buildingName, MoneyView, Overview, RulesView, VIEW_OF, VIEW_STEPS, type ViewStep } from './viewer';
 import { ShareBody } from './shareSheet';
 import { withFloors } from './shapePanel';
@@ -63,6 +65,8 @@ import { pole } from './form/curve';
 import { Btn, cr, Dialog, download, Icon, Menu, nf, Num, pct, Range, Seg, Select, sqft, TooltipLayer, type MenuItem } from './ui';
 
 const KEY = 'urbanplan:pro:project', REF = 'urbanplan:pro:cloud', SEEN = 'urbanplan:pro:seen';
+/** the place a project's stage opens on: Looking on Brief, Designing on Design, Applying on Approval */
+const placeOf = (st: Stage): Step => (st === 'looking' ? 'brief' : st === 'applying' ? 'approve' : 'design');
 const store = {
   get<T>(k: string, d: T): T { try { const v = JSON.parse(localStorage.getItem(k) || 'null'); return v ?? d; } catch { return d; } },
   set(k: string, v: unknown) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* not kept */ } },
@@ -107,7 +111,10 @@ function App() {
   const undo = () => { if (roRef.current) return; const x = past.current.pop(); if (!x) return; future.current.push(p); store.set(KEY, x); setP(x); };
   const redo = () => { if (roRef.current) return; const x = future.current.pop(); if (!x) return; past.current.push(p); store.set(KEY, x); setP(x); };
 
-  const [step, setStep] = useState<Step>(() => store.get<Step>('urbanplan:pro:step', 'site'));
+  // (the place: Brief, Design, Numbers or Approval; a project opens on its stage's place, and the six steps before
+  // map to the places that took them in)
+  const [step, setStep] = useState<Step>(() => { const s = store.get<string>('urbanplan:pro:step', ''); return isStep(s) ? s : OLD_STEP[s] ?? placeOf(stageOf(store.get<ProProject>(KEY, DEFAULT_PROJECT))); });
+  const oldStep = useRef(!!OLD_STEP[store.get<string>('urbanplan:pro:step', '')] && !isStep(store.get<string>('urbanplan:pro:step', '')));
   // the step's sheet: open or not, pinned beside the view (a wide screen), its height (a phone)
   const [panel, setPanel] = useState(true);
   /** a narrow screen (the sheet's layout), and a phone (nothing changes on it) */
@@ -123,7 +130,8 @@ function App() {
   const [vstep, setVstepS] = useState<ViewStep>(() => store.get<ViewStep>('urbanplan:pro:vstep', 'overview'));
   const setVstep = (v: ViewStep) => { setVstepS(v); store.set('urbanplan:pro:vstep', v); };
   const goView = (v: ViewStep) => { setVstep(v); setPicked(null); openSheet(); };
-  const go = (s: Step) => { if (isPhone()) { goView(VIEW_OF[s] ?? 'overview'); return; } setStep(s); openSheet(); store.set('urbanplan:pro:step', s); setToolS(SELECT); edit.current?.setTool(SELECT); setPicked(null); };
+  /** go to a place: the pick stays, so a building picked in Design is the one in focus in Numbers and Approval */
+  const go = (s: Step) => { if (isPhone()) { goView(VIEW_OF[s] ?? 'overview'); return; } setStep(s); openSheet(); store.set('urbanplan:pro:step', s); setToolS(SELECT); edit.current?.setTool(SELECT); };
   // ---------- the map's tool and what's picked on it ----------
   const [tool, setToolS] = useState<Tool>(SELECT), [picked, setPicked] = useState<EditPicked>(null), [hint, setHint] = useState<string | null>(null);
   const edit = useRef<CanvasEdit | null>(null);
@@ -146,7 +154,7 @@ function App() {
   /** a line at the bottom for a few seconds; with `undo`, an Undo on it (for a change made away from the view) */
   const toast = (s: string, o?: { undo?: boolean }) => { setToastMsg({ s, undo: o?.undo }); clearTimeout(toastT.current); toastT.current = window.setTimeout(() => setToastMsg(null), o?.undo ? 7000 : 4200); };
   const [search, setSearch] = useState(false);
-  const [dialog, setDialog] = useState<null | 'share' | 'drawings' | 'keys' | 'welcome' | 'team' | 'area'>(() => (store.get(SEEN, false) || isPhone() || location.hash.startsWith('#s=') || new URLSearchParams(location.search).has('p') ? null : 'welcome'));
+  const [dialog, setDialog] = useState<null | 'share' | 'drawings' | 'keys' | 'welcome' | 'team' | 'area' | 'look'>(() => (store.get(SEEN, false) || isPhone() || location.hash.startsWith('#s=') || new URLSearchParams(location.search).has('p') ? null : 'welcome'));
 
   // ---------- a shared link: /pro/#s=<the project> opens read-only ----------
   useEffect(() => {
@@ -179,7 +187,7 @@ function App() {
       setCloud({ s: 'saving', msg: 'Opening…' });
       const o = await openPro(id);
       lastSaved.current = toText(o.p);
-      replace(o.p); setRef(o.ref); setDialog(null);
+      replace(o.p); setRef(o.ref); setDialog(null); setPicked(null); go(placeOf(stageOf(o.p)));
       if (o.ref?.role && o.ref.role !== 'owner') void joinProject(id);
       history.replaceState(null, '', `?p=${id}`);
       setCloud({ s: 'saved', msg: `Opened ${hhmm()}` });
@@ -201,19 +209,19 @@ function App() {
       const n: ProProject = { ...DEFAULT_PROJECT, city }, e0 = evaluate(n), [x, z] = pole([e0.r.footprint]);
       const bs = placeTemplate(start.slice(9), [x, z], e0);
       fresh(bs.length ? { ...n, scheme: { ...own(n, e0), buildings: bs } } : n);
-      go('build');
+      go('design');
       return;
     }
     // (a design system from the builder: the sample in it, on its Design step)
     const dsId = new URLSearchParams(location.search).get('ds');
     if (dsId) {
-      void designLibrary.get(dsId).then((s) => { fresh({ ...DEFAULT_PROJECT, city, ...(s ? { custom: s.ds, style: presetOf(s.ds.id).id } : {}) }); go('design'); });
+      void designLibrary.get(dsId).then((s) => { fresh({ ...DEFAULT_PROJECT, city, ...(s ? { custom: s.ds, style: presetOf(s.ds.id).id } : {}) }); go('design'); setDialog('look'); });
       return;
     }
     fresh({ ...DEFAULT_PROJECT, city });
     if (start === 'blank') setDialog('welcome');
-    if (start === 'survey' || start === 'import') { try { sessionStorage.setItem('urbanplan:pro:way', start); } catch { /* */ } go('site'); }
-    if (start === 'sample') go('build');
+    if (start === 'survey' || start === 'import') { try { sessionStorage.setItem('urbanplan:pro:way', start); } catch { /* */ } go('design'); }
+    if (start === 'sample') go('design');
   }, []);
   useEffect(() => {
     const id = new URLSearchParams(location.search).get('p');
@@ -260,7 +268,7 @@ function App() {
     v.onPlan = (on) => setPlanS(on);
     v.onNorth = (deg) => { if (needle.current) needle.current.style.transform = `rotate(${deg}deg)`; };
     const ce = new CanvasEdit(canvas.current!, {
-      view: () => view.current, p: () => pRef.current, e: () => eRef.current, up: (o) => up(o), step: () => stepRef.current,
+      view: () => view.current, p: () => pRef.current, e: () => eRef.current, up: (o) => up(o), step: () => (pickedRef.current?.k === 'plot' ? 'site' : stepRef.current),
       picked: () => pickedRef.current, pick: (x) => setPicked(x), done: () => { setToolS(SELECT); ce.setTool(SELECT); }, hint: setHint, readOnly: () => roRef.current,
       readout: (o) => { const el = readout.current; if (!el) return; if (!o) { el.hidden = true; return; } el.hidden = false; el.classList.toggle('typed', !!o.typed); el.style.transform = `translate(${Math.round(o.x + 16)}px,${Math.round(o.y + 18)}px)`; el.firstElementChild!.textContent = o.text; el.lastElementChild!.textContent = o.sub ?? ''; },
     });
@@ -359,7 +367,7 @@ function App() {
       const pb = picked?.k === 'building' && !locked ? picked : null;
       if (pb && (ev.key === 'r' || ev.key === 'R')) { const s = own(p, e); tx.once({ scheme: { ...s, buildings: s.buildings.map((b) => (b.id === pb.id ? turned(b, ev.shiftKey ? -15 : 15) : b)) } }); return; }
       if (pb && (ev.key === '+' || ev.key === '=' || ev.key === '-')) { const s = own(p, e), br = e.d.buildings.find((x) => x.b.id === pb.id); if (!br) return; tx.once({ scheme: { ...s, buildings: s.buildings.map((b) => (b.id === pb.id ? withFloors(b, Math.max(1, br.floors + (ev.key === '-' ? -1 : 1))) : b)) } }); return; }
-      const i = '123456'.indexOf(ev.key);
+      const i = '1234'.indexOf(ev.key);
       if (i >= 0) { go(STEPS[i].key); return; }
       if (ev.key === 'x') setXray((v) => (v === null ? Math.max(1, Math.round(maxFloor / 2)) : null));
       if (ev.key === ']' ) setXray((v) => (v === null ? null : Math.min(maxFloor, v + 1)));
@@ -431,7 +439,7 @@ function App() {
     { label: 'Model as JSON', icon: 'down', sub: 'For scripts', onSelect: () => saveModel('json') },
     { label: 'IFC (spaces)', icon: 'down', sub: 'For Revit, ArchiCAD and other BIM tools', onSelect: () => saveModel('ifc') },
   ];
-  const setStage = (st: Stage) => { up({ stage: st }); toast(`Stage: ${STAGE_LABEL[st]}.`); };
+  const setStage = (st: Stage) => { up({ stage: st }); go(placeOf(st)); toast(`Stage: ${STAGE_LABEL[st]}. It opens on ${STEPS.find((x) => x.key === placeOf(st))!.title}.`); };
   /** everything search reaches: actions, the buildings, every setting */
   const commands = (): { all: Cmd[]; first: Cmd[] } => {
     const A = (label: string, icon: string, run: () => void, o: Partial<Cmd> = {}): Cmd => ({ label, icon, kind: 'Action', run, ...o });
@@ -459,10 +467,10 @@ function App() {
       ...(!phone ? [A('The simple editor', 'site', () => location.assign(`${BASE}app/`), { words: 'map editor city' })] : []),
     ];
     const settings: Cmd[] = phone ? [] : FINDABLE.map((f) => {
-      const st = STEPS.find((x) => x.key === f.step)!;
-      return { label: f.label, icon: f.field ? 'edit' : st.icon, kind: 'Setting', sub: f.field ? `${st.label} › ${f.sec}` : st.label, words: f.words, run: () => { go(f.step); findIn(f.sec, f.field); } };
+      const look = f.step === 'look', st = STEPS.find((x) => x.key === (look ? 'design' : f.step))!, where = look ? `${st.label} › Look` : st.label;
+      return { label: f.label, icon: f.field ? 'edit' : st.icon, kind: 'Setting', sub: f.field ? `${where} › ${f.sec}` : where, words: f.words, run: () => { go(st.key); if (look) setDialog('look'); findIn(f.sec, f.field); } };
     });
-    const all = [...steps, ...buildings, A('The plot', 'site', () => { go('site'); setPicked({ k: 'plot' }); }, { kind: 'Building', words: 'plot site land boundary corners' }), ...view, ...share, ...project, ...settings];
+    const all = [...steps, ...buildings, A('The plot', 'site', () => { go('design'); setPicked({ k: 'plot' }); }, { kind: 'Building', words: 'plot site land boundary corners' }), ...view, ...share, ...project, ...settings];
     const first = [...buildings.slice(0, 3), ...share.filter((x) => /link|Area statement|Drawing set$/.test(x.label)), ...steps];
     return { all, first };
   };
@@ -479,7 +487,9 @@ function App() {
   };
   useEffect(() => { if (phone && picked?.k === 'building') { setPanel(true); setDetent('peek'); } }, [phone, picked?.k === 'building' ? picked.id : null]);
   /** the plot's editor is on: picked, or on the Site step with nothing else picked */
-  const plotOn = picked?.k === 'plot' || (step === 'site' && !picked);
+  const plotOn = picked?.k === 'plot';
+  // (once, for someone who knew the six steps)
+  useEffect(() => { if (oldStep.current) toast('The six steps are now four places: Brief (the rules, the FSI ladder, the mix), Design (the plot, the buildings, the look), Numbers and Approval.'); }, []);
   // the inspector on the view's right: what's picked, on a wide screen; hidden by its ×, back with Inspect or a new pick
   const [insp, setInsp] = useState(true);
   const pickKey = picked ? `${picked.k}:${'id' in picked ? picked.id : ''}` : '';
@@ -488,8 +498,8 @@ function App() {
   const covR = inspOn ? 344 : 0;
   useEffect(() => { view.current?.setCover(cov[0], cov[1], covR); }, [covR]);
   const cur = STEPS.find((s) => s.key === step)!;
-  const props: StepProps = { p, e, up, rooms, checks, deal, go, openDrawings: () => setDialog('drawings'), openStatement: () => setDialog('area'), toast, tool, setTool, picked, pick: setPicked, show: showBuilding };
-  const Body = { site: SiteStep2, build: SchemeStep, design: DesignSystemStep, money: MoneyStep, approve: ApproveStep, explore: ExploreStep }[step];
+  const props: StepProps = { p, e, up, rooms, checks, deal, go, openDrawings: () => setDialog('drawings'), openStatement: () => setDialog('area'), openLook: () => setDialog('look'), toast, tool, setTool, picked, pick: setPicked, show: showBuilding };
+  const Body = { brief: BriefPlace, design: DesignPlace, numbers: NumbersPlace, approve: ApproveStep }[step];
 
   return (
     <div class={`pro${panel && pinned && !narrow ? ' docked' : ''}${locked ? ' ro' : ''}`} style={`--cover:${cov[0]}px;--cover-b:${cov[1]}px;--cover-r:${covR}px`}>
@@ -545,11 +555,7 @@ function App() {
         </div>
       </Sheet>}
       {!phone && <Sheet title={cur.title} open={panel} pinned={pinned} setPinned={setPinned} close={() => setPanel(false)} phone={narrow} detent={detent} setDetent={setDetent} cover={cover}
-        footer={<footer class="panel-f">
-          {STEPS.findIndex((s) => s.key === step) > 0 && <Btn kind="quiet" onClick={() => go(STEPS[STEPS.findIndex((s) => s.key === step) - 1].key)}>Back</Btn>}
-          <span class="gap" />
-          {STEPS.findIndex((s) => s.key === step) < STEPS.length - 1 && <Btn kind="primary" onClick={() => go(STEPS[STEPS.findIndex((s) => s.key === step) + 1].key)}>Next: {STEPS[STEPS.findIndex((s) => s.key === step) + 1].label}<Icon n="chevron" size={15} /></Btn>}
-        </footer>}>
+        >
         <div class="panel-b" key={step}>
           {authReady && session.value === null && new URLSearchParams(location.search).has('p') && <p class="note">A project shared with you. <a href={`${BASE}login/?next=${encodeURIComponent(location.pathname + location.search)}`}>Sign in</a> with the email it was shared to and it opens here.</p>}
           {viewer && !readOnly && <p class="note">Shared with you to view and comment. <button type="button" class="linkbtn" onClick={() => setDialog('team')}>Comments</button></p>}
@@ -560,16 +566,17 @@ function App() {
 
       <main class="stage">
         <canvas ref={canvas} onPointerMove={(ev) => setHover(view.current?.pick(ev.clientX, ev.clientY) ?? null)} onPointerLeave={() => setHover(null)} />
-        <ResultBar e={e} deal={deal} sum={sum} go={go} statement={() => setDialog('area')} />
+        <ResultBar e={e} deal={deal} sum={sum} go={go} statement={() => setDialog('area')} stage={stageOf(p)} />
         {!locked && <Shelf tool={tool} setTool={setTool} />}
         <div class="readout" ref={readout} hidden aria-live="polite"><b /><span /></div>
         {tool.k === 'select' && plotOn && <PlotHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} pick={setPicked} tx={tx} snap={snap} live={mode === 'wire' && xr === null} readOnly={locked} toast={toast} setTool={setTool}
-          openWay={(w) => { try { sessionStorage.setItem('urbanplan:pro:way', w); } catch { /* */ } setStep('site'); store.set('urbanplan:pro:step', 'site'); openSheet(); dispatchEvent(new CustomEvent('urbanplan:way', { detail: w })); }} northFree={northFree} setNorthFree={setNorthFree} />}
+          openWay={(w) => { try { sessionStorage.setItem('urbanplan:pro:way', w); } catch { /* */ } setStep('design'); store.set('urbanplan:pro:step', 'design'); openSheet(); dispatchEvent(new CustomEvent('urbanplan:way', { detail: w })); }} northFree={northFree} setNorthFree={setNorthFree} />}
         {tool.k === 'select' && (picked?.k === 'element' || picked?.k === 'feature') && <ObjectHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} pick={setPicked} tx={tx} snap={snap} readOnly={locked} toast={toast} />}
         {tool.k === 'select' && picked?.k === 'building' && <FormHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} tx={tx} live={mode === 'wire' && xr === null} readOnly={locked} xray={xr} setXray={setXray} toast={toast} />}
         {tool.k === 'select' && picked?.k === 'building' && <Hud view={view.current} p={p} e={e} picked={picked} pick={setPicked} up={up} tx={tx} snap={snap} live={mode === 'wire' && xr === null} readOnly={locked} toast={toast}
           inspect={() => setInsp(true)} inspecting={inspOn} />}
         {inspOn && picked && <Inspector p={p} e={e} up={up} rooms={rooms} checks={checks} picked={picked} pick={setPicked} toast={toast} xray={setXray} hide={() => setInsp(false)} readOnly={locked} />}
+        {step === 'approve' && !phone && tool.k === 'select' && xr === null && <CheckPins view={view.current} e={e} checks={checks} show={showBuilding} />}
         {hint && <div class="drawhint" role="status"><span>{hint}</span><button type="button" class="linkbtn" onClick={() => setTool(SELECT)}>Done</button></div>}
         {(() => {
           // the compass: a click shows the plan from above; with the plot picked it's a dial: drag it (or the arrow keys)
@@ -630,8 +637,9 @@ function App() {
       {dialog === 'team' && user && ref && <Team pid={ref.id} role={ref.role ?? 'owner'} step={step} go={(s) => { go(s); }} close={() => setDialog(null)} />}
       {dialog === 'share' && <Dialog title="Share this scheme" close={() => setDialog(null)}><ShareBody name={p.name} load={() => Promise.resolve(p)} id={readOnly ? null : ref?.id} team={!!ref && ref.role !== 'viewer'} image={shareImage} toast={toast} done={() => setDialog(null)} /></Dialog>}
       {dialog === 'keys' && <Keys close={() => setDialog(null)} />}
+      {dialog === 'look' && <Dialog title={`Look · ${e.ds.name}`} close={() => setDialog(null)} wide><fieldset class="look-b" disabled={locked}><DesignSystemStep {...props} /></fieldset></Dialog>}
       {dialog === 'area' && <Dialog title="Area statement" close={() => setDialog(null)} wide><AreaStatementBody e={e} show={(bi) => { const id = e.d.buildings[bi]?.b.id; if (id) { setDialog(null); showBuilding(id); } }} print={phone ? undefined : () => setDialog('drawings')} /></Dialog>}
-      {dialog === 'welcome' && <Welcome close={(n) => { store.set(SEEN, true); setDialog(null); if (n) { fresh(n); go('site'); } }} />}
+      {dialog === 'welcome' && <Welcome close={(n) => { store.set(SEEN, true); setDialog(null); if (n) { fresh(n); go('brief'); } }} />}
       {dialog === 'drawings' && (
         <div class="sheets-wrap" role="dialog" aria-label="Drawing set">
           <style>{SHEET_CSS}</style>
@@ -645,7 +653,7 @@ function App() {
 
 /** The answer, always in view: what the plot builds, sells and makes, and whether it passes. Each figure flashes
  *  by how much the last change moved it. */
-function ResultBar({ e, deal, sum, go, statement }: { e: ReturnType<typeof evaluate>; deal: ReturnType<typeof applyDeal>; sum: ReturnType<typeof scrutinySummary>; go: (s: Step) => void; statement: () => void }) {
+function ResultBar({ e, deal, sum, go, statement, stage }: { e: ReturnType<typeof evaluate>; deal: ReturnType<typeof applyDeal>; sum: ReturnType<typeof scrutinySummary>; go: (s: Step) => void; statement: () => void; stage: Stage }) {
   const { r, d, shops } = e;
   const k = { bua: d.bua, flats: d.flats + (shops?.count ?? 0), profit: deal.profit, irr: deal.irr ?? 0 };
   const prev = useRef(k), [delta, setDelta] = useState<Partial<Record<keyof typeof k, number>>>({});
@@ -662,42 +670,89 @@ function ResultBar({ e, deal, sum, go, statement }: { e: ReturnType<typeof evalu
   // (a scheme of public buildings only earns nothing: what it costs stands in for profit and return)
   const publicOnly = d.buildings.length > 0 && (d.money as { earns?: boolean }).earns === false;
   const D = (x: keyof typeof k, fmt: (v: number) => string) => delta[x] !== undefined && <i class={`delta ${delta[x]! > 0 ? 'up' : 'down'}`}>{delta[x]! > 0 ? '+' : '−'}{fmt(Math.abs(delta[x]!))}</i>;
+  const rules = (
+    <button type="button" class={`kpi rules ${sum.fail ? 'bad' : sum.warn ? 'warn' : 'ok'}`} onClick={() => go('approve')}>
+      <span>Rules</span>
+      <b><Icon n={sum.fail ? 'x' : sum.warn ? 'warn' : 'check'} size={16} />{sum.fail ? `${sum.fail} fail` : sum.warn ? `${sum.warn} to check` : 'All clear'}</b>
+      <small>{sum.pass} pass{sum.fail && sum.warn ? ` · ${sum.warn} to check` : ''}</small>
+    </button>
+  );
+  // (Looking: what the plot could give, and what to pay for it)
+  if (stage === 'looking') return (
+    <div class="results" role="region" aria-label="Result">
+      <button type="button" class="kpi" onClick={() => go('brief')} title="The FSI ladder (Brief)">
+        <span>Potential</span><b>{sqft(r.bua)}</b>
+        <small>{nf(r.area)} m² plot · FSI {nf(r.area > 0 ? r.bua / r.area : 0, 2)} taken</small>
+      </button>
+      <button type="button" class="kpi" onClick={statement} title="The area statement">
+        <span>Saleable</span><b>{sqft(d.carpet)}{D('bua', (v) => `${nf(v * 10.7639)}`)}</b>
+        <small>carpet · {d.flats} homes as laid out</small>
+      </button>
+      <LandKpi e={e} go={go} />
+      <button type="button" class="kpi" onClick={() => go('numbers')}>
+        <span>Profit</span><b class={deal.profit < 0 ? 'bad' : ''}>{cr(deal.profit)}{D('profit', (v) => `${nf(v / 1e7, 2)} cr`)}</b>
+        <small>{pct(deal.margin)} margin{e.p.land ? '' : ' · land not priced'}</small>
+      </button>
+      {rules}
+    </div>
+  );
+  // (Applying: what's built, whether it passes, what it costs to file)
+  if (stage === 'applying') {
+    const fs = fees(e), docs = documents(e, permissionOf(e, e.p.approval?.kind));
+    return (
+      <div class="results" role="region" aria-label="Result">
+        <button type="button" class="kpi" onClick={statement} title="The area statement">
+          <span>Built-up</span><b>{sqft(d.bua)}{D('bua', (v) => `${nf(v * 10.7639)}`)}</b>
+          <small><i class="meter"><i style={`width:${Math.min(100, used * 100)}%`} /></i>{nf(used * 100)}% of {nf(r.bua * 10.7639 / 1000)}k allowed</small>
+        </button>
+        <button type="button" class="kpi" onClick={() => go('design')}>
+          <span>Homes</span><b>{d.flats}{D('flats', (v) => nf(v))}</b>
+          <small>{d.buildings.length} bldg · {nf(d.height)} m</small>
+        </button>
+        {rules}
+        <button type="button" class="kpi" onClick={() => { go('approve'); findIn('Fees and charges'); }}>
+          <span>Fees</span><b>{cr(fs.reduce((a, f) => a + f.amount, 0))}</b>
+          <small>scrutiny, development, premium</small>
+        </button>
+        <button type="button" class="kpi" onClick={() => { go('approve'); findIn('Documents to file'); }}>
+          <span>Documents</span><b>{docs.length}</b>
+          <small>to file · {docs.filter((x) => x.from === 'us').length} from us</small>
+        </button>
+      </div>
+    );
+  }
   return (
     <div class="results" role="region" aria-label="Result">
       <button type="button" class="kpi" onClick={statement} title="The area statement">
         <span>Built-up</span><b>{sqft(d.bua)}{D('bua', (v) => `${nf(v * 10.7639)}`)}</b>
         <small><i class="meter"><i style={`width:${Math.min(100, used * 100)}%`} /></i>{nf(used * 100)}% of {nf(r.bua * 10.7639 / 1000)}k allowed</small>
       </button>
-      <button type="button" class="kpi" onClick={() => go('build')}>
+      <button type="button" class="kpi" onClick={() => go('design')}>
         {publicOnly ? <span>Buildings</span> : <span>Homes</span>}
         {publicOnly ? <b>{d.buildings.length}</b> : <b>{d.flats}{shops ? <em> + {shops.count} shops</em> : null}{D('flats', (v) => nf(v))}</b>}
         <small>{d.buildings.length} bldg · {d.buildings.map((b) => b.floors).join('+') || 0} floors · {nf(d.height)} m</small>
       </button>
       {publicOnly ? <>
-      <button type="button" class="kpi" onClick={() => go('money')}>
+      <button type="button" class="kpi" onClick={() => go('numbers')}>
         <span>Cost</span><b>{cr(d.money.cost)}</b>
         <small>public: nothing sold</small>
       </button>
-      <button type="button" class="kpi" onClick={() => go('money')}>
+      <button type="button" class="kpi" onClick={() => go('numbers')}>
         <span>Build per m²</span><b>{d.bua > 0 ? `₹${nf((d.money.build + d.money.parking + d.money.soft) / d.bua)}` : '—'}</b>
         <small>built-up, land aside</small>
       </button>
       </> : <>
-      <button type="button" class="kpi" onClick={() => go('money')}>
+      <button type="button" class="kpi" onClick={() => go('numbers')}>
         <span>Profit</span><b class={deal.profit < 0 ? 'bad' : ''}>{cr(deal.profit)}{D('profit', (v) => `${nf(v / 1e7, 2)} cr`)}</b>
         <small>{e.p.sale || e.p.land ? `${pct(deal.margin)} margin · ${cr(deal.revenue)} sales` : `${pct(deal.margin)} · starting prices`}</small>
       </button>
       {!e.p.land && <LandKpi e={e} go={go} />}
-      <button type="button" class="kpi" onClick={() => go('money')}>
+      <button type="button" class="kpi" onClick={() => go('numbers')}>
         <span>IRR</span><b class={deal.irr !== null && deal.irr < 0 ? 'bad' : ''}>{pct(deal.irr)}{D('irr', (v) => `${nf(v * 100, 1)} pt`)}</b>
         <small>peak cash {cr(deal.peak)}</small>
       </button>
       </>}
-      <button type="button" class={`kpi rules ${sum.fail ? 'bad' : sum.warn ? 'warn' : 'ok'}`} onClick={() => go('approve')}>
-        <span>Rules</span>
-        <b><Icon n={sum.fail ? 'x' : sum.warn ? 'warn' : 'check'} size={16} />{sum.fail ? `${sum.fail} fail` : sum.warn ? `${sum.warn} to check` : 'All clear'}</b>
-        <small>{sum.pass} pass{sum.fail && sum.warn ? ` · ${sum.warn} to check` : ''}</small>
-      </button>
+      {rules}
     </div>
   );
 }
@@ -707,7 +762,7 @@ function LandKpi({ e, go }: { e: ReturnType<typeof evaluate>; go: (s: Step) => v
   const T = targetOf(e.p), deal = e.p.deal ?? DEFAULT_DEAL;
   const w = useMemo(() => landWorth(e, deal, T), [e, JSON.stringify(deal), T.by, T.v]);
   return (
-    <button type="button" class="kpi" onClick={() => go('money')} title="The most the land is worth for your target (Money)">
+    <button type="button" class="kpi" onClick={() => go('numbers')} title="The most the land is worth for your target (Money)">
       <span>Land worth</span>
       <b class={w.outright === null ? 'bad' : ''}>{w.outright === null ? 'Nothing' : `≤ ${cr(w.outright)}`}</b>
       <small>for {pct(T.v, 0)} {T.by === 'irr' ? 'IRR' : 'margin'}{w.outright !== null && e.r.area > 0 ? ` · ₹${nf(w.outright / (e.r.area * 10.7639))}/sq ft` : ''}</small>
@@ -819,7 +874,7 @@ function Team({ pid, role, step, go, close }: { pid: string; role: 'owner' | 'ed
 }
 
 function Keys({ close }: { close: () => void }) {
-  const rows: [string, string][] = [['Ctrl K', 'Search: actions, buildings, settings'], ['1 – 6', 'Go to a step'], ['\\', 'Show or hide the sheet'], ['/', 'Pin the sheet beside the view, or float it'], ['F6 · Shift+F6', 'Move between the top bar, the steps, the sheet and the view'], ['R · Shift+R', 'Turn the picked building 15°'], ['+ −', 'A floor more or less on the picked building'], ['Ctrl+D', 'Duplicate the picked building'], ['M', 'Measure'], ['X', 'X-ray floor on or off'], ['[  ]', 'Floor down / up'], ['F · S · T', 'Camera: whole site, street, from above'], ['P', 'The plan from above, or back to 3D'], ['V', 'Back to picking'], ['Enter · Esc · Backspace', 'Drawing: finish, cancel, take back a point'], ['Shift', 'Drawing: keep a line square to the road'], ['Alt', 'Hold while dragging: no snapping'], ['← → ↑ ↓', 'Nudge what’s picked a grid step (Shift: ×10)'], ['Delete', 'Remove what’s picked'], ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · redo'], ['↑ ↓ in a number', 'Step it (Shift: ×10)'], ['Esc', 'Close this; let go of what’s picked; close the sheet']];
+  const rows: [string, string][] = [['Ctrl K', 'Search: actions, buildings, settings'], ['1 – 4', 'Brief, Design, Numbers, Approval'], ['\\', 'Show or hide the sheet'], ['/', 'Pin the sheet beside the view, or float it'], ['F6 · Shift+F6', 'Move between the top bar, the steps, the sheet and the view'], ['R · Shift+R', 'Turn the picked building 15°'], ['+ −', 'A floor more or less on the picked building'], ['Ctrl+D', 'Duplicate the picked building'], ['M', 'Measure'], ['X', 'X-ray floor on or off'], ['[  ]', 'Floor down / up'], ['F · S · T', 'Camera: whole site, street, from above'], ['P', 'The plan from above, or back to 3D'], ['V', 'Back to picking'], ['Enter · Esc · Backspace', 'Drawing: finish, cancel, take back a point'], ['Shift', 'Drawing: keep a line square to the road'], ['Alt', 'Hold while dragging: no snapping'], ['← → ↑ ↓', 'Nudge what’s picked a grid step (Shift: ×10)'], ['Delete', 'Remove what’s picked'], ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · redo'], ['↑ ↓ in a number', 'Step it (Shift: ×10)'], ['Esc', 'Close this; let go of what’s picked; close the sheet']];
   return <Dialog title="Keyboard shortcuts" close={close}><dl class="lines keys">{rows.map(([a, b]) => <div><dt><kbd>{a}</kbd></dt><dd>{b}</dd></div>)}</dl></Dialog>;
 }
 
