@@ -535,6 +535,7 @@ Each phase ships on its own and leaves Pro working. The order puts the **IA's mi
 - The account menu replaces More.
 - The project switcher replaces the Projects dialog, and shows the project's stage (Looking, Designing, Applying).
 - **Done when:** every output is under Share; "parking" in Ctrl+K lands on the field; the Projects dialog and More are gone.
+- **Status (2026-11-22): built.** See docs/plans/pro-global-ux-log.md.
 
 ### Phase 3: The inspector
 

@@ -492,16 +492,23 @@ export function Dialog({ title, close, children, side, wide }: { title: string; 
 }
 
 // ---------- a menu ----------
-export type MenuItem = { label: string; icon?: string; onSelect?: () => void; href?: string };
+export type MenuItem = { label: string; icon?: string; onSelect?: () => void; href?: string; checked?: boolean; sub?: string; disabled?: boolean }
+  /** a heading over the items after it (not an item: arrows skip it) */
+  | { heading: string };
+const isItem = (x: MenuItem): x is Exclude<MenuItem, { heading: string }> => !('heading' in x);
 /** A menu button (WAI-ARIA menu pattern): opens on click, Enter, Space or ArrowDown (focus on the first item) or
  *  ArrowUp (the last); arrows, Home and End move, a letter jumps; Escape closes and returns focus to the button, Tab
  *  closes and moves on; a click outside closes it. */
-export function Menu({ label, icon = 'more', items }: { label: string; icon?: string; items: MenuItem[] }) {
+export function Menu({ label, icon = 'more', items, text, onOpen, class: cls }: { label: string; icon?: string; items: MenuItem[];
+  /** show the label beside the icon (a labelled button, not an icon-only one) */
+  text?: boolean;
+  /** called as it opens (to load what it lists) */
+  onOpen?: () => void; class?: string }) {
   const id = useId();
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement>(null), box = useRef<HTMLDivElement>(null), wrap = useRef<HTMLSpanElement>(null);
   const start = useRef(0);
-  const els = () => [...(box.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
+  const els = () => [...(box.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled), [role="menuitemradio"]:not(:disabled)') ?? [])];
   const close = (focus = true) => { setOpen(false); if (focus) btn.current?.focus(); };
   useEffect(() => {
     if (!open) return;
@@ -525,20 +532,24 @@ export function Menu({ label, icon = 'more', items }: { label: string; icon?: st
     else if (e.key === ' ' && document.activeElement instanceof HTMLAnchorElement) { e.preventDefault(); document.activeElement.click(); }
     else if (e.key.length === 1 && e.key !== ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.stopPropagation();
-      const c = e.key.toLowerCase(), n = items.length;
-      for (let k = 1; k <= n; k++) { const j = (i + k) % n; if (items[j].label.toLowerCase().startsWith(c)) { go(j); break; } }
+      const c = e.key.toLowerCase(), its = items.filter(isItem), n = its.length;
+      for (let k = 1; k <= n; k++) { const j = (i + k) % n; if (its[j].label.toLowerCase().startsWith(c)) { go(j); break; } }
     }
   };
   return (
-    <span class="more" ref={wrap}>
-      <button ref={btn} type="button" class="btn quiet icon-only" id={`${id}-b`} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? `${id}-m` : undefined}
-        aria-label={label} data-tip={open ? undefined : label} onClick={() => { start.current = 0; setOpen(!open); }} onKeyDown={onBtnKey}>
-        <Icon n={icon} size={16} />
+    <span class={`more${cls ? ` ${cls}` : ''}`} ref={wrap}>
+      <button ref={btn} type="button" class={`btn ${text ? '' : 'quiet icon-only'}`} id={`${id}-b`} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? `${id}-m` : undefined}
+        aria-label={text ? undefined : label} data-tip={open || text ? undefined : label} onClick={() => { start.current = 0; if (!open) onOpen?.(); setOpen(!open); }} onKeyDown={(e) => { if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) onOpen?.(); onBtnKey(e); }}>
+        <Icon n={icon} size={16} />{text && label}
       </button>
       {open && <div ref={box} class="menu" role="menu" id={`${id}-m`} aria-labelledby={`${id}-b`} onKeyDown={onMenuKey}>
-        {items.map((it) => it.href
-          ? <a role="menuitem" tabIndex={-1} href={it.href} onClick={() => setOpen(false)}>{it.icon && <Icon n={it.icon} size={15} />}{it.label}</a>
-          : <button type="button" role="menuitem" tabIndex={-1} onClick={() => { close(); it.onSelect?.(); }}>{it.icon && <Icon n={it.icon} size={15} />}{it.label}</button>)}
+        {items.map((it) => {
+          if (!isItem(it)) return <div class="menu-h" role="presentation">{it.heading}</div>;
+          const inner = <>{it.icon ? <Icon n={it.icon} size={15} /> : it.checked !== undefined ? <span class="menu-c">{it.checked && <Icon n="check" size={14} />}</span> : null}<span class="menu-l">{it.label}{it.sub && <small>{it.sub}</small>}</span></>;
+          return it.href
+            ? <a role="menuitem" tabIndex={-1} href={it.href} onClick={() => setOpen(false)}>{inner}</a>
+            : <button type="button" role={it.checked !== undefined ? 'menuitemradio' : 'menuitem'} aria-checked={it.checked} tabIndex={-1} disabled={it.disabled} onClick={() => { close(); it.onSelect?.(); }}>{inner}</button>;
+        })}
       </div>}
     </span>
   );

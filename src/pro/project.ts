@@ -110,6 +110,8 @@ export interface ProProject {
   scheme?: { buildings: ProBuilding[]; elements: SiteElement[] };
   /** the building systems' settings (./systems.ts): the site's plant, and each building's own by its id */
   systems?: { site?: import('./systems').SystemsSettings; byBuilding?: Record<string, import('./systems').SystemsSettings> };
+  /** where the project is: looking at the land, designing the scheme, or applying for permission (set by the user) */
+  stage?: Stage;
   /** the FSI ladder: which of the paid parts on top of basic FSI are taken (unset: taken). Basic is always taken. */
   load?: Partial<Load>;
   /** what the land is worth is worked out for: a margin on revenue, or an IRR (a share: 0.2 is 20%) */
@@ -120,6 +122,10 @@ export interface ProProject {
  *  fungible (paid, a share of the rest), each taken or left. */
 export interface Load { premium: boolean; tdr: boolean; ancillary: boolean }
 export const loadOf = (p: ProProject): Load => ({ premium: p.load?.premium !== false, tdr: p.load?.tdr !== false, ancillary: p.load?.ancillary !== false });
+export type Stage = 'looking' | 'designing' | 'applying';
+export const STAGE_LABEL: Record<Stage, string> = { looking: 'Looking', designing: 'Designing', applying: 'Applying' };
+export const STAGE_SUB: Record<Stage, string> = { looking: 'Sizing up the land', designing: 'Working on the scheme', applying: 'Filing for permission' };
+export const stageOf = (p: ProProject): Stage => p.stage ?? 'designing';
 export const DEFAULT_TARGET = { by: 'margin' as const, v: 0.2 };
 export const targetOf = (p: ProProject) => p.target ?? DEFAULT_TARGET;
 

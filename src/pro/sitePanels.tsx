@@ -189,12 +189,6 @@ export function SchemeStep({ p, e, up, rooms, toast, picked, pick }: StepProps) 
         ]} />
       </Section>
 
-      <Section title="Export the model" fold open={false} sub="Every floor, flat, room, window and door: JSON for scripts, IFC for Revit and other BIM tools (spaces only).">
-        <Row>
-          <Btn icon="down" onClick={() => { download(`${slug(p.name)}.model.json`, modelJson(buildModel(e, rooms)), 'application/json'); toast('Model saved as JSON.'); }}>Model JSON</Btn>
-          <Btn icon="down" onClick={() => { download(`${slug(p.name)}.ifc`, ifcLite(e, rooms), 'application/x-step'); toast('IFC saved: open it in Revit, ArchiCAD or BIMvision.'); }}>IFC (spaces)</Btn>
-        </Row>
-      </Section>
     </>
   );
 }

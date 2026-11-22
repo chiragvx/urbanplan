@@ -21,10 +21,10 @@ import { buildingCores } from './coreDetail';
 import { TIERS, type Tier } from './render/quality';
 import * as designLibrary from './designLibrary';
 import { presetOf } from './design';
-import { DEFAULT_PROJECT, outline, roadLines, targetOf, type ProProject } from './project';
-import { deletePro, listPro, listSharedPro, openPro, savePro, toText, type CloudRef } from './cloud';
+import { DEFAULT_PROJECT, outline, roadLines, STAGE_LABEL, STAGE_SUB, stageOf, targetOf, type ProProject, type Stage } from './project';
+import { listPro, listSharedPro, openPro, savePro, toText, type CloudRef } from './cloud';
 import { addComment, addMember, comments as listComments, deleteComment, EMAIL, joinProject, members as listMembers, NotSetUp, projectLink, removeMember, resolveComment, sendInvite, type Comment, type Member } from './team';
-import { authReady, explain, peekSession, session, startAuth } from '../auth/auth';
+import { authReady, explain, peekSession, session, signOut, startAuth } from '../auth/auth';
 import type { Project } from '../app/cloud';
 import { evaluate, dsOfBuilding } from './evaluate';
 import { ProView, type CameraView, type Picked, type RenderMode } from './scene';
@@ -39,8 +39,11 @@ import { CITY_LATLON, indiaTime, sunDirection } from './sun';
 import { encodeShare, decodeShare } from './share';
 import { exploreOptions } from './options';
 import { parseBrief, runBrief } from './brief';
-import { Sheets, SHEET_CSS } from './drawings';
-import { ApproveStep, ExploreStep, MoneyStep, PdfButton, STEPS, type Step, type StepProps } from './steps';
+import { downloadSet, Sheets, SHEET_CSS } from './drawings';
+import { buildModel, ifcLite, modelJson } from './model';
+import { FINDABLE } from './findable';
+import { findIn, Search, type Cmd } from './search';
+import { ApproveStep, ExploreStep, MoneyStep, PdfButton, slug, STEPS, type Step, type StepProps } from './steps';
 import { SchemeStep, SiteStep2 } from './sitePanels';
 import { DesignSystemStep } from './designStep';
 import { groundAt } from './terrain';
@@ -56,7 +59,7 @@ import { BuildingInfo, buildingName, MoneyView, Overview, RulesView, VIEW_OF, VI
 import { ShareBody } from './shareSheet';
 import { withFloors } from './shapePanel';
 import { pole } from './form/curve';
-import { Btn, cr, Dialog, Icon, Menu, nf, Num, pct, Range, Seg, Select, sqft, TooltipLayer } from './ui';
+import { Btn, cr, Dialog, download, Icon, Menu, nf, Num, pct, Range, Seg, Select, sqft, TooltipLayer, type MenuItem } from './ui';
 
 const KEY = 'urbanplan:pro:project', REF = 'urbanplan:pro:cloud', SEEN = 'urbanplan:pro:seen';
 const store = {
@@ -141,7 +144,8 @@ function App() {
   const toastT = useRef<number>();
   /** a line at the bottom for a few seconds; with `undo`, an Undo on it (for a change made away from the view) */
   const toast = (s: string, o?: { undo?: boolean }) => { setToastMsg({ s, undo: o?.undo }); clearTimeout(toastT.current); toastT.current = window.setTimeout(() => setToastMsg(null), o?.undo ? 7000 : 4200); };
-  const [dialog, setDialog] = useState<null | 'projects' | 'share' | 'drawings' | 'keys' | 'welcome' | 'team' | 'area'>(() => (store.get(SEEN, false) || isPhone() || location.hash.startsWith('#s=') || new URLSearchParams(location.search).has('p') ? null : 'welcome'));
+  const [search, setSearch] = useState(false);
+  const [dialog, setDialog] = useState<null | 'share' | 'drawings' | 'keys' | 'welcome' | 'team' | 'area'>(() => (store.get(SEEN, false) || isPhone() || location.hash.startsWith('#s=') || new URLSearchParams(location.search).has('p') ? null : 'welcome'));
 
   // ---------- a shared link: /pro/#s=<the project> opens read-only ----------
   useEffect(() => {
@@ -344,6 +348,7 @@ function App() {
         (n.querySelector<HTMLElement>('h2[tabindex], button:not([disabled]), input, [tabindex="0"]') ?? n).focus();
         return;
       }
+      if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') { ev.preventDefault(); setSearch((v) => !v); return; }
       if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') { if (typing(ev.target)) return; ev.preventDefault(); if (ev.shiftKey) redo(); else undo(); return; }
       if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'd' && picked?.k === 'building' && !locked && !typing(ev.target)) { ev.preventDefault(); const s = own(p, e), src = s.buildings.find((b) => b.id === picked.id); if (!src) return; const c = duplicated(src); tx.once({ scheme: { ...s, buildings: [...s.buildings, c] } }); setPicked({ k: 'building', id: c.id }); return; }
       if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'y') { if (typing(ev.target)) return; ev.preventDefault(); redo(); return; }
@@ -396,6 +401,71 @@ function App() {
     };
   }, []);
 
+  // ---------- outputs: one place (Share), the long ones as a job by the save state ----------
+  const [pdf, setPdf] = useState(false);
+  const makePdf = async () => {
+    if (pdf) return;
+    setPdf(true);
+    try { await downloadSet({ e: eS, checks, rooms }, `${slug(p.name)}-drawings`); toast('Drawings saved as a PDF.'); }
+    catch (err) { console.error(err); toast('Couldn’t make the PDF. Open the drawing set and print it instead.'); }
+    finally { setPdf(false); }
+  };
+  const saveModel = (kind: 'json' | 'ifc') => {
+    if (kind === 'json') { download(`${slug(p.name)}.model.json`, modelJson(buildModel(eS, rooms)), 'application/json'); toast('Model saved as JSON.'); }
+    else { download(`${slug(p.name)}.ifc`, ifcLite(eS, rooms), 'application/x-step'); toast('IFC saved: open it in Revit, ArchiCAD or BIMvision.'); }
+  };
+  const team = authReady && !!user && !!ref && !readOnly && !phone;
+  const shareItems: MenuItem[] = [
+    { heading: 'Send' },
+    { label: 'A link to it…', icon: 'link', sub: 'People on the project, or anyone with the link', onSelect: () => setDialog('share') },
+    ...(team ? [{ label: 'People and comments…', icon: 'team', sub: 'Who can edit or view; the comments', onSelect: () => setDialog('team') }] : []),
+    { heading: 'Images' },
+    { label: 'Image of the view', icon: 'camera', sub: 'A few seconds', disabled: !!still, onSelect: () => void renderImage('raster') },
+    { label: 'Path-traced image', icon: 'spark', sub: 'About a minute', disabled: !!still, onSelect: () => void renderImage('path') },
+    { heading: 'Drawings' },
+    { label: 'Drawing set', icon: 'print', sub: 'Open it, print it', onSelect: () => setDialog('drawings') },
+    { label: 'Drawings as a PDF', icon: 'down', sub: 'A3 sheets', disabled: pdf, onSelect: () => void makePdf() },
+    { label: 'Area statement', icon: 'book', onSelect: () => setDialog('area') },
+    { heading: 'Model files' },
+    { label: 'Model as JSON', icon: 'down', sub: 'For scripts', onSelect: () => saveModel('json') },
+    { label: 'IFC (spaces)', icon: 'down', sub: 'For Revit, ArchiCAD and other BIM tools', onSelect: () => saveModel('ifc') },
+  ];
+  const setStage = (st: Stage) => { up({ stage: st }); toast(`Stage: ${STAGE_LABEL[st]}.`); };
+  /** everything search reaches: actions, the buildings, every setting */
+  const commands = (): { all: Cmd[]; first: Cmd[] } => {
+    const A = (label: string, icon: string, run: () => void, o: Partial<Cmd> = {}): Cmd => ({ label, icon, kind: 'Action', run, ...o });
+    const steps = STEPS.map((x, i) => A(`Go to ${x.title}`, x.icon, () => go(x.key), { keys: String(i + 1), words: `${x.label} step ${x.sub}` }));
+    const buildings = e.d.buildings.map((b, i): Cmd => ({ label: buildingName(p, e, i), icon: 'building', kind: 'Building', sub: `${b.floors} floors · ${nf(b.height)} m`, words: 'building tower block', run: () => showBuilding(b.b.id) }));
+    const view: Cmd[] = [
+      A(plan ? 'See it in 3D' : 'See the plan from above', plan ? 'cube' : 'plan', () => setPlan(!plan), { kind: 'View', keys: 'P', words: 'plan 3d camera' }),
+      A('Whole site', 'fit', () => cam('fit'), { kind: 'View', keys: 'F', words: 'fit zoom camera' }),
+      A('From the street', 'street', () => cam('street'), { kind: 'View', keys: 'S', words: 'camera eye level' }),
+      A('From above', 'top', () => cam('top'), { kind: 'View', keys: 'T', words: 'camera top' }),
+      A(xr === null ? 'X-ray a floor' : 'Stop the X-ray', 'layers', () => setXray(xr === null ? Math.max(1, Math.round(maxFloor / 2)) : null), { kind: 'View', keys: 'X', words: 'floor plan section inside' }),
+      A(mode === 'wire' ? 'Shaded view' : 'Wireframe view', mode === 'wire' ? 'shade' : 'wire', () => setMode(mode === 'wire' ? 'shaded' : 'wire'), { kind: 'View', words: 'render materials wireframe shaded' }),
+      A(sun.on ? 'Sun off' : 'Sun and shadows', 'sun', () => { if (!sun.on && mode === 'wire') setMode('shaded'); setSun({ ...sun, on: !sun.on }); }, { kind: 'View', words: 'shadow daylight time' }),
+      A(panel ? 'Hide the sheet' : 'Show the sheet', 'panel', () => setPanel(!panel), { kind: 'View', keys: '\\' }),
+      A(pinned ? 'Float the sheet' : 'Pin the sheet beside the view', 'panel', () => { setPinned(!pinned); setPanel(true); }, { kind: 'View', keys: '/' }),
+    ];
+    const share: Cmd[] = shareItems.flatMap((x) => ('label' in x && !x.disabled ? [{ label: x.label.replace('…', ''), icon: x.icon ?? 'share', kind: 'Share' as const, sub: x.sub, words: 'share export download send', run: x.onSelect ?? (() => {}) }] : []));
+    const project: Cmd[] = [
+      ...(!locked ? [A('Undo', 'undo', undo, { keys: 'Ctrl Z' }), A('Redo', 'redo', redo, { keys: 'Ctrl Shift Z' })] : []),
+      ...(!locked ? [A('Rename the project', 'edit', () => (document.querySelector('.pname input') as HTMLInputElement | null)?.select(), { kind: 'Project', words: 'name title' })] : []),
+      ...(!locked ? (Object.keys(STAGE_LABEL) as Stage[]).map((st) => A(`Stage: ${STAGE_LABEL[st]}`, 'check', () => setStage(st), { kind: 'Project', sub: STAGE_SUB[st], words: 'stage status phase' })) : []),
+      ...(!phone ? [A('New project', 'plus', () => fresh(), { kind: 'Project', words: 'start blank' })] : []),
+      A('Your dashboard', 'folder', () => location.assign(`${BASE}dashboard/`), { kind: 'Project', words: 'projects all list home' }),
+      A('Keyboard shortcuts', 'key', () => setDialog('keys'), { keys: '?' }),
+      ...(!phone ? [A('The simple editor', 'site', () => location.assign(`${BASE}app/`), { words: 'map editor city' })] : []),
+    ];
+    const settings: Cmd[] = phone ? [] : FINDABLE.map((f) => {
+      const st = STEPS.find((x) => x.key === f.step)!;
+      return { label: f.label, icon: f.field ? 'edit' : st.icon, kind: 'Setting', sub: f.field ? `${st.label} › ${f.sec}` : st.label, words: f.words, run: () => { go(f.step); findIn(f.sec, f.field); } };
+    });
+    const all = [...steps, ...buildings, A('The plot', 'site', () => { go('site'); setPicked({ k: 'plot' }); }, { kind: 'Building', words: 'plot site land boundary corners' }), ...view, ...share, ...project, ...settings];
+    const first = [...buildings.slice(0, 3), ...share.filter((x) => /link|Area statement|Drawing set$/.test(x.label)), ...steps];
+    return { all, first };
+  };
+
   /** pick a building and bring it into the middle of the view (a check's Show); on a phone the sheet lowers to a peek */
   const showBuilding = (id: string) => {
     const br = e.d.buildings.find((b) => b.b.id === id); if (!br) return;
@@ -419,19 +489,20 @@ function App() {
         <a class="logo" href={`${BASE}dashboard/`} aria-label="Your dashboard"><Dither field="mark" cell={2} class="mark" />UrbanPlan</a>
         <b class="chip">Pro</b>
         <label class="pname"><input value={p.name} aria-label="Project name" readOnly={locked} onChange={(ev) => up({ name: (ev.target as HTMLInputElement).value.trim() || 'Untitled project' })} /><Icon n="edit" size={14} /></label>
+        <ProjectMenu stage={stageOf(p)} setStage={locked ? undefined : setStage} user={!!user} current={ref?.id ?? null} open={(id) => void openId(id)} fresh={phone ? undefined : () => fresh()} />
         <SaveState cloud={cloud} user={!!user} readOnly={readOnly} />
+        {(still || pdf) && <span class="job" role="status">{still ? <>{still.kind === 'path' ? 'Path tracing' : 'Rendering'} {Math.round(still.f * 100)}%<i class="bar"><i style={`width:${Math.round(still.f * 100)}%`} /></i>{still.kind === 'path' && <button type="button" class="linkbtn" onClick={() => still.stop.abort()}>Cancel</button>}</> : <>Making the PDF…<Dither class="dz" cell={2} /></>}</span>}
         <span class="gap" />
+        {!phone && <button type="button" class="btn quiet find" onClick={() => setSearch(true)} aria-keyshortcuts="Control+K"><Icon n="cursor" size={15} /><span>Search</span><kbd>Ctrl K</kbd></button>}
         {!locked && <span class="hist">
           <Btn kind="quiet" icon="undo" title="Undo (Ctrl+Z)" onClick={undo} disabled={!past.current.length} />
           <Btn kind="quiet" icon="redo" title="Redo (Ctrl+Shift+Z)" onClick={redo} disabled={!future.current.length} />
         </span>}
         {readOnly && !phone
           ? <Btn kind="primary" icon="check" onClick={keepCopy}>Make it my copy</Btn>
-          : <Btn icon="share" onClick={() => (phone ? goView('share') : setDialog('share'))}>Share</Btn>}
-        {authReady && user && ref && !readOnly && !phone && <Btn icon="team" title="People on this project, and comments" onClick={() => setDialog(dialog === 'team' ? null : 'team')}>Team</Btn>}
-        {authReady && user && <Btn icon="folder" onClick={() => setDialog(dialog === 'projects' ? null : 'projects')}>Projects</Btn>}
+          : phone ? <Btn icon="share" onClick={() => goView('share')}>Share</Btn> : <Menu text label="Share" icon="share" items={shareItems} />}
         {authReady && session.value === null && <Btn icon="user" href={`${BASE}login/?next=${encodeURIComponent(location.pathname + location.search)}`} title="Keep your projects in your account">Sign in</Btn>}
-        <More openKeys={() => setDialog('keys')} newProject={phone ? undefined : () => fresh()} />
+        <Account email={user?.email ?? null} phone={phone} search={() => setSearch(true)} keys={() => setDialog('keys')} />
       </header>
 
       <nav class="rail" aria-label="Steps">
@@ -538,20 +609,15 @@ function App() {
           </div>
           <div class="tgroup">
             {(mode === 'shaded' || xr !== null) && <Select<Exclude<Tier, 'still'>> size="sm" quiet aria-label="Quality" value={tier} onChange={(t) => { setTierS(t); view.current?.setTier(t); }} options={TIERS} />}
-            {!phone && <Menu label="Render an image" icon="camera" items={[
-              { label: 'Image (a few seconds)', icon: 'down', onSelect: () => void renderImage('raster') },
-              { label: 'Path-traced image (about a minute)', icon: 'spark', onSelect: () => void renderImage('path') },
-            ]} />}
           </div>
         </div>
         {xr !== null && <div class="legend floating">{[0, 1, 2].map((t) => <span><i style={`background:${UNIT_COLOR[t]}`} />{UNIT_LABEL[t]}</span>)}{(['living', 'bed', 'kitchen', 'toilet'] as const).map((k) => <span><i style={`background:${ROOM_COLOR[k]}`} />{k === 'bed' ? 'bedroom' : k}</span>)}</div>}
-        {still && <div class="still-prog" role="status"><span>{still.kind === 'path' ? 'Path tracing' : 'Rendering'} · {Math.round(still.f * 100)}%</span><i style={`width:${Math.round(still.f * 100)}%`} />{still.kind === 'path' && <button type="button" class="linkbtn" onClick={() => still.stop.abort()}>Cancel</button>}</div>}
         {hover && <div class="tip" style={`left:${hover.x + 14}px;top:${hover.y + 14}px`}><b>{hover.label}</b><span>{hover.size}</span><span>Floor {hover.floor}</span></div>}
       </main>
 
       {toastMsg && <div class="toast" role="status">{toastMsg.s}{toastMsg.undo && <button type="button" class="linkbtn" onClick={() => { undo(); setToastMsg(null); }}>Undo</button>}</div>}
       <TooltipLayer />
-      {dialog === 'projects' && user && <Projects current={ref?.id ?? null} open={(id) => void openId(id)} fresh={phone ? undefined : () => fresh()} close={() => setDialog(null)} />}
+      {search && (() => { const c = commands(); return <Search cmds={c.all} first={c.first} close={() => setSearch(false)} />; })()}
       {dialog === 'team' && user && ref && <Team pid={ref.id} role={ref.role ?? 'owner'} step={step} go={(s) => { go(s); }} close={() => setDialog(null)} />}
       {dialog === 'share' && <Dialog title="Share this scheme" close={() => setDialog(null)}><ShareBody name={p.name} load={() => Promise.resolve(p)} id={readOnly ? null : ref?.id} team={!!ref && ref.role !== 'viewer'} image={shareImage} toast={toast} done={() => setDialog(null)} /></Dialog>}
       {dialog === 'keys' && <Keys close={() => setDialog(null)} />}
@@ -647,47 +713,35 @@ function SaveState({ cloud, user, readOnly }: { cloud: { s: string; msg?: string
   return <span class={`save ${cloud.s}`} title={cloud.msg} role="status">{cloud.s === 'saving' ? <Dither class="dz" cell={2} /> : <i />}{t}</span>;
 }
 
-function More({ openKeys, newProject }: { openKeys: () => void; newProject?: () => void }) {
-  // (on a phone, without newProject: nothing that makes or edits)
-  return <Menu label="More" items={newProject ? [
-    { label: 'New project', icon: 'plus', onSelect: newProject },
-    { label: 'The simple editor', icon: 'site', href: `${BASE}app/` },
-    { label: 'Keyboard shortcuts', icon: 'key', onSelect: openKeys },
-  ] : [{ label: 'Your dashboard', icon: 'folder', href: `${BASE}dashboard/` }]} />;
+/** The project's stage and the projects round it: recent ones (yours and shared with you), all of them on the
+ *  dashboard, a new one. Loads the list as it opens. */
+function ProjectMenu({ stage, setStage, user, current, open, fresh }: { stage: Stage; setStage?: (s: Stage) => void; user: boolean; current: string | null; open: (id: string) => void; fresh?: () => void }) {
+  const [list, setList] = useState<Project[] | null>(null);
+  const load = () => { if (!user) return; void Promise.all([listPro(), listSharedPro()]).then(([a, b]) => setList([...a, ...b].sort((x, y) => y.updated_at.localeCompare(x.updated_at))), () => setList([])); };
+  const recent = (list ?? []).filter((x) => x.id !== current).slice(0, 5);
+  const items: MenuItem[] = [
+    { heading: 'Stage' },
+    ...(Object.keys(STAGE_LABEL) as Stage[]).map((s) => ({ label: STAGE_LABEL[s], sub: STAGE_SUB[s], checked: s === stage, disabled: !setStage, onSelect: () => setStage?.(s) })),
+    ...(user ? [{ heading: 'Recent' } as MenuItem, ...(list === null ? [{ label: 'Loading…', disabled: true }] : recent.length ? recent.map((x) => ({ label: x.name, icon: 'folder', sub: ago(x.updated_at), onSelect: () => open(x.id) })) : [{ label: 'None yet', disabled: true }])] : []),
+    { heading: 'Projects' },
+    { label: 'All your projects', icon: 'folder', href: `${BASE}dashboard/` },
+    ...(fresh ? [{ label: 'New project', icon: 'plus', onSelect: fresh }] : []),
+  ];
+  return <Menu text label={STAGE_LABEL[stage]} icon="chevron" class="left pmenu" items={items} onOpen={load} />;
 }
 
-/** The account's Pro projects: open one, start a new one, delete (two clicks). */
-function Projects({ current, open, fresh, close }: { current: string | null; open: (id: string) => void; fresh?: () => void; close: () => void }) {
-  const [list, setList] = useState<Project[] | null>(null), [shared, setShared] = useState<Project[]>([]);
-  const [err, setErr] = useState(''), [sure, setSure] = useState('');
-  const reload = () => { void listSharedPro().then(setShared); return listPro().then(setList, (x) => setErr(explain(x))); };
-  useEffect(() => { void reload(); }, []);
-  const del = async (id: string) => {
-    if (sure !== id) { setSure(id); return; }
-    try { await deletePro(id); setSure(''); void reload(); } catch (x) { setErr(explain(x)); }
-  };
-  return (
-    <Dialog title="Your projects" close={close} side>
-      {fresh && <Btn kind="primary" icon="plus" onClick={fresh}>New project</Btn>}
-      {err && <p class="note bad">{err}</p>}
-      {!list && !err && <p class="note">Loading…</p>}
-      {list && !list.length && <p class="note">None yet: this one saves to your account as you work.</p>}
-      {list && list.length > 0 && <ul class="plist">{list.map((x) => (
-        <li class={x.id === current ? 'on' : ''}>
-          <button type="button" class="pitem" onClick={() => open(x.id)}><b>{x.name}</b><span>{x.region.replace('pro:', '').replace('-', ' ')} · {ago(x.updated_at)}</span></button>
-          {fresh && <Btn kind="quiet" onClick={() => void del(x.id)}>{sure === x.id ? 'Delete?' : 'Delete'}</Btn>}
-        </li>
-      ))}</ul>}
-      {shared.length > 0 && <>
-        <h3 class="mh">Shared with you</h3>
-        <ul class="plist">{shared.map((x) => (
-          <li class={x.id === current ? 'on' : ''}>
-            <button type="button" class="pitem" onClick={() => open(x.id)}><b>{x.name}</b><span>{x.region.replace('pro:', '').replace('-', ' ')} · {ago(x.updated_at)}</span></button>
-          </li>
-        ))}</ul>
-      </>}
-    </Dialog>
-  );
+/** The account: search, the shortcuts, the dashboard, the simple editor, signing out. */
+function Account({ email, phone, search, keys }: { email: string | null; phone: boolean; search: () => void; keys: () => void }) {
+  return <Menu label="Account" icon="user" items={[
+    ...(email ? [{ heading: email } as MenuItem] : []),
+    { label: 'Your dashboard', icon: 'folder', href: `${BASE}dashboard/` },
+    ...(phone ? [] : [
+      { label: 'Search', icon: 'cursor', sub: 'Ctrl K', onSelect: search },
+      { label: 'Keyboard shortcuts', icon: 'key', sub: '?', onSelect: keys },
+      { label: 'The simple editor', icon: 'site', href: `${BASE}app/` },
+    ]),
+    ...(email ? [{ label: 'Sign out', icon: 'x', onSelect: () => void signOut().then(() => location.reload()) }] : []),
+  ]} />;
 }
 
 const STEP_NAME: Record<string, string> = Object.fromEntries(STEPS.map((s) => [s.key, s.label]));
@@ -756,7 +810,7 @@ function Team({ pid, role, step, go, close }: { pid: string; role: 'owner' | 'ed
 }
 
 function Keys({ close }: { close: () => void }) {
-  const rows: [string, string][] = [['1 – 6', 'Go to a step'], ['\\', 'Show or hide the sheet'], ['/', 'Pin the sheet beside the view, or float it'], ['F6 · Shift+F6', 'Move between the top bar, the steps, the sheet and the view'], ['R · Shift+R', 'Turn the picked building 15°'], ['+ −', 'A floor more or less on the picked building'], ['Ctrl+D', 'Duplicate the picked building'], ['M', 'Measure'], ['X', 'X-ray floor on or off'], ['[  ]', 'Floor down / up'], ['F · S · T', 'Camera: whole site, street, from above'], ['P', 'The plan from above, or back to 3D'], ['V', 'Back to picking'], ['Enter · Esc · Backspace', 'Drawing: finish, cancel, take back a point'], ['Shift', 'Drawing: keep a line square to the road'], ['Alt', 'Hold while dragging: no snapping'], ['← → ↑ ↓', 'Nudge what’s picked a grid step (Shift: ×10)'], ['Delete', 'Remove what’s picked'], ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · redo'], ['↑ ↓ in a number', 'Step it (Shift: ×10)'], ['Esc', 'Close this; let go of what’s picked; close the sheet']];
+  const rows: [string, string][] = [['Ctrl K', 'Search: actions, buildings, settings'], ['1 – 6', 'Go to a step'], ['\\', 'Show or hide the sheet'], ['/', 'Pin the sheet beside the view, or float it'], ['F6 · Shift+F6', 'Move between the top bar, the steps, the sheet and the view'], ['R · Shift+R', 'Turn the picked building 15°'], ['+ −', 'A floor more or less on the picked building'], ['Ctrl+D', 'Duplicate the picked building'], ['M', 'Measure'], ['X', 'X-ray floor on or off'], ['[  ]', 'Floor down / up'], ['F · S · T', 'Camera: whole site, street, from above'], ['P', 'The plan from above, or back to 3D'], ['V', 'Back to picking'], ['Enter · Esc · Backspace', 'Drawing: finish, cancel, take back a point'], ['Shift', 'Drawing: keep a line square to the road'], ['Alt', 'Hold while dragging: no snapping'], ['← → ↑ ↓', 'Nudge what’s picked a grid step (Shift: ×10)'], ['Delete', 'Remove what’s picked'], ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · redo'], ['↑ ↓ in a number', 'Step it (Shift: ×10)'], ['Esc', 'Close this; let go of what’s picked; close the sheet']];
   return <Dialog title="Keyboard shortcuts" close={close}><dl class="lines keys">{rows.map(([a, b]) => <div><dt><kbd>{a}</kbd></dt><dd>{b}</dd></div>)}</dl></Dialog>;
 }
 

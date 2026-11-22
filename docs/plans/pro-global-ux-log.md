@@ -4,6 +4,50 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-22 · Phase 2: find anything, one Share
+
+**What changed:**
+- **Search (Ctrl+K, or the Search button)** (src/pro/search.tsx). It reaches:
+  - every step, and the view commands;
+  - undo and redo;
+  - the stage;
+  - each building (it picks and frames it) and the plot;
+  - every Share item;
+  - every setting.
+- **Settings in search** come from a hand-kept list, src/pro/findable.ts: 45 sections and 49 fields. Choosing one opens its step, unfolds the section, then scrolls to the field, focuses it and flashes it.
+- **tools/dev/test-findable.ts** is in `npm test`. It fails if a section is missing from the list, or if the list names a section or field that isn't there. It caught the Design › Roof section on its first run.
+- **Share ▾ is the one place for outputs:** a link, people and comments (Team's button is gone from the top bar), an image or a path-traced image, the drawing set, drawings as a PDF, the area statement, model JSON and IFC.
+  - The Render-an-image menu in the view tools is gone.
+  - Scheme › Export the model is gone.
+- **One job chip** by the save state. It shows rendering or path tracing with progress and Cancel, and "Making the PDF…". It replaces the floating `still-prog`.
+- **The project menu** sits beside the name. It holds:
+  - the project's stage (Looking, Designing, Applying), stored as `ProProject.stage`, Designing by default;
+  - five recent projects, yours and shared with you, when signed in;
+  - All your projects (the dashboard);
+  - New project.
+  
+  The Projects dialog, and its delete, are gone: deleting is on the dashboard.
+- **The account menu** replaces More: the email, the dashboard, search, shortcuts, the simple editor, sign out.
+- **`Menu`** (ui.tsx) can now have a label, headings, ticked items, a second line, disabled items, and an `onOpen`.
+
+**How it was checked:**
+- Browser at 1280×800:
+  - "parking" in search landed on Scheme › Living › Parking, focused and flashed;
+  - the Share menu;
+  - a path trace started from Share showed in the chip and cancelled from it;
+  - the stage menu.
+- Phone (375 px): the top bar and the share sheet are unchanged.
+- No new console errors.
+- `npm test` ALL OK, including the new search test; `npm run build` OK.
+
+**Left or known:**
+- The stage does nothing yet beyond being set and shown. Phase 4 makes it choose where you land and the scorecard's figures.
+- The dashboard card doesn't show the stage yet.
+- Not checked: the recent-projects list and sign-out (accounts are off locally).
+- Approval › Drawings and report keeps its own PDF button and busy state, outside the job chip.
+
+---
+
 ## 2026-11-22 · Phase 1: the numbers everyone shares
 
 **What changed:**
