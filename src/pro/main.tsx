@@ -57,6 +57,8 @@ import { FormHud } from './formHud';
 import { Sheet, useNarrow, type Detent } from './sheet';
 import { isPhone, usePhone } from '../device';
 import { Inspector } from './inspector';
+import { Compare } from './compare';
+import { asOption, currentOption, duplicated as duplicatedOption, optionName, optionsOf, removedOption, renamed, switchTo } from './variants';
 import { CheckPins } from './checkPins';
 import { BuildingInfo, buildingName, MoneyView, Overview, RulesView, VIEW_OF, VIEW_STEPS, type ViewStep } from './viewer';
 import { ShareBody } from './shareSheet';
@@ -154,13 +156,14 @@ function App() {
   /** a line at the bottom for a few seconds; with `undo`, an Undo on it (for a change made away from the view) */
   const toast = (s: string, o?: { undo?: boolean }) => { setToastMsg({ s, undo: o?.undo }); clearTimeout(toastT.current); toastT.current = window.setTimeout(() => setToastMsg(null), o?.undo ? 7000 : 4200); };
   const [search, setSearch] = useState(false);
-  const [dialog, setDialog] = useState<null | 'share' | 'drawings' | 'keys' | 'welcome' | 'team' | 'area' | 'look'>(() => (store.get(SEEN, false) || isPhone() || location.hash.startsWith('#s=') || new URLSearchParams(location.search).has('p') ? null : 'welcome'));
+  const [dialog, setDialog] = useState<null | 'share' | 'drawings' | 'keys' | 'welcome' | 'team' | 'area' | 'look' | 'compare'>(() => (store.get(SEEN, false) || isPhone() || location.hash.startsWith('#s=') || new URLSearchParams(location.search).has('p') ? null : 'welcome'));
 
   // ---------- a shared link: /pro/#s=<the project> opens read-only ----------
   useEffect(() => {
-    const m = location.hash.match(/^#s=(.+)$/);
+    const m = location.hash.match(/^#s=([^&]+)(?:&o=([\w-]+))?$/);
     if (!m) return;
-    decodeShare(m[1]).then((x) => { setP(x); setReadOnly(true); setDialog(null); }, () => toast('That share link is damaged.'));
+    // (&o= opens one of its options)
+    decodeShare(m[1]).then((x) => { setP(m[2] && optionsOf(x).some((o) => o.id === m[2]) ? { ...x, ...switchTo(x, m[2]) } : x); setReadOnly(true); setDialog(null); }, () => toast('That share link is damaged.'));
   }, []);
   const keepCopy = () => { store.set(KEY, p); setReadOnly(false); history.replaceState(null, '', '?local'); toast('This scheme is now your own copy.'); };
 
@@ -439,6 +442,24 @@ function App() {
     { label: 'Model as JSON', icon: 'down', sub: 'For scripts', onSelect: () => saveModel('json') },
     { label: 'IFC (spaces)', icon: 'down', sub: 'For Revit, ArchiCAD and other BIM tools', onSelect: () => saveModel('ifc') },
   ];
+  // ---------- options: switch, duplicate, rename, delete, compare, choose ----------
+  // (the scorecard's "vs": each figure against a base option, the chosen one, else the first other one)
+  const [vsOn, setVsOn] = useState(false);
+  const vsBase = optionsOf(p).length > 1 ? (optionsOf(p).find((o) => o.id === p.chosen && o.id !== p.option) ?? optionsOf(p).find((o) => o.id !== p.option) ?? null) : null;
+  const vsFig = useMemo(() => {
+    if (!vsOn || !vsBase) return null;
+    const x = evaluate(asOption(p, vsBase.id)), dl = applyDeal(x, x.p.deal ?? DEFAULT_DEAL);
+    return { name: vsBase.name, bua: x.d.bua, flats: x.d.flats, profit: dl.profit, irr: dl.irr ?? 0 };
+  }, [vsOn, vsBase?.id, p]);
+  const openOption = (id: string) => { if (id === p.option) return; up(switchTo(p, id)); setPicked(null); toast(`Opened ${optionsOf(p).find((o) => o.id === id)?.name ?? 'the option'}.`); };
+  const optionActs = {
+    open: openOption,
+    duplicate: () => { const c = duplicatedOption(p); up(c); setPicked(null); toast(`Made ${optionsOf({ ...p, ...c }).find((o) => o.id === c.option)?.name}, a copy, and opened it.`); },
+    rename: () => { const o = currentOption(p); const n = prompt('Name this option', o?.name ?? 'Option A'); if (n) up(renamed(p, o?.id ?? null, n)); },
+    remove: () => { const o = currentOption(p); if (!o) return; const c = removedOption(p, o.id); if (!c) return; up(c); setPicked(null); toast(`Deleted ${o.name} · Ctrl+Z to undo`); },
+    compare: () => setDialog('compare'),
+    choose: (id: string) => { up({ chosen: id }); toast(`${optionsOf(p).find((o) => o.id === id)?.name} is the one chosen to take forward.`); },
+  };
   const setStage = (st: Stage) => { up({ stage: st }); go(placeOf(st)); toast(`Stage: ${STAGE_LABEL[st]}. It opens on ${STEPS.find((x) => x.key === placeOf(st))!.title}.`); };
   /** everything search reaches: actions, the buildings, every setting */
   const commands = (): { all: Cmd[]; first: Cmd[] } => {
@@ -462,6 +483,8 @@ function App() {
       ...(!locked ? [A('Rename the project', 'edit', () => (document.querySelector('.pname input') as HTMLInputElement | null)?.select(), { kind: 'Project', words: 'name title' })] : []),
       ...(!locked ? (Object.keys(STAGE_LABEL) as Stage[]).map((st) => A(`Stage: ${STAGE_LABEL[st]}`, 'check', () => setStage(st), { kind: 'Project', sub: STAGE_SUB[st], words: 'stage status phase' })) : []),
       ...(!phone ? [A('New project', 'plus', () => fresh(), { kind: 'Project', words: 'start blank' })] : []),
+      ...(!locked && !phone ? [A('Duplicate this option', 'copy', optionActs.duplicate, { kind: 'Project', words: 'option variant alternative copy scheme' })] : []),
+      ...(optionsOf(p).length > 1 ? [A('Compare options', 'layers', optionActs.compare, { kind: 'Project', words: 'compare options side by side' }), ...optionsOf(p).filter((o) => o.id !== p.option).map((o) => A(`Open ${o.name}`, 'layers', () => optionActs.open(o.id), { kind: 'Project', words: 'option switch' }))] : []),
       A('Your dashboard', 'folder', () => location.assign(`${BASE}dashboard/`), { kind: 'Project', words: 'projects all list home' }),
       A('Keyboard shortcuts', 'key', () => setDialog('keys'), { keys: '?' }),
       ...(!phone ? [A('The simple editor', 'site', () => location.assign(`${BASE}app/`), { words: 'map editor city' })] : []),
@@ -508,6 +531,7 @@ function App() {
         <b class="chip">Pro</b>
         <label class="pname"><input value={p.name} aria-label="Project name" readOnly={locked} onChange={(ev) => up({ name: (ev.target as HTMLInputElement).value.trim() || 'Untitled project' })} /><Icon n="edit" size={14} /></label>
         <ProjectMenu stage={stageOf(p)} setStage={locked ? undefined : setStage} user={!!user} current={ref?.id ?? null} open={(id) => void openId(id)} fresh={phone ? undefined : () => fresh()} />
+        {!phone && <OptionMenu p={p} acts={locked ? null : optionActs} />}
         <SaveState cloud={cloud} user={!!user} readOnly={readOnly} />
         {(still || pdf) && <span class="job" role="status">{still ? <>{still.kind === 'path' ? 'Path tracing' : 'Rendering'} {Math.round(still.f * 100)}%<i class="bar"><i style={`width:${Math.round(still.f * 100)}%`} /></i>{still.kind === 'path' && <button type="button" class="linkbtn" onClick={() => still.stop.abort()}>Cancel</button>}</> : <>Making the PDF…<Dither class="dz" cell={2} /></>}</span>}
         <span class="gap" />
@@ -566,7 +590,7 @@ function App() {
 
       <main class="stage">
         <canvas ref={canvas} onPointerMove={(ev) => setHover(view.current?.pick(ev.clientX, ev.clientY) ?? null)} onPointerLeave={() => setHover(null)} />
-        <ResultBar e={e} deal={deal} sum={sum} go={go} statement={() => setDialog('area')} stage={stageOf(p)} />
+        <ResultBar e={e} deal={deal} sum={sum} go={go} statement={() => setDialog('area')} stage={stageOf(p)} vs={vsBase ? { on: vsOn, set: setVsOn, name: vsBase.name, fig: vsFig } : null} />
         {!locked && <Shelf tool={tool} setTool={setTool} />}
         <div class="readout" ref={readout} hidden aria-live="polite"><b /><span /></div>
         {tool.k === 'select' && plotOn && <PlotHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} pick={setPicked} tx={tx} snap={snap} live={mode === 'wire' && xr === null} readOnly={locked} toast={toast} setTool={setTool}
@@ -637,6 +661,7 @@ function App() {
       {dialog === 'team' && user && ref && <Team pid={ref.id} role={ref.role ?? 'owner'} step={step} go={(s) => { go(s); }} close={() => setDialog(null)} />}
       {dialog === 'share' && <Dialog title="Share this scheme" close={() => setDialog(null)}><ShareBody name={p.name} load={() => Promise.resolve(p)} id={readOnly ? null : ref?.id} team={!!ref && ref.role !== 'viewer'} image={shareImage} toast={toast} done={() => setDialog(null)} /></Dialog>}
       {dialog === 'keys' && <Keys close={() => setDialog(null)} />}
+      {dialog === 'compare' && <Compare p={p} close={() => setDialog(null)} go={optionActs.open} choose={locked ? undefined : optionActs.choose} />}
       {dialog === 'look' && <Dialog title={`Look · ${e.ds.name}`} close={() => setDialog(null)} wide><fieldset class="look-b" disabled={locked}><DesignSystemStep {...props} /></fieldset></Dialog>}
       {dialog === 'area' && <Dialog title="Area statement" close={() => setDialog(null)} wide><AreaStatementBody e={e} show={(bi) => { const id = e.d.buildings[bi]?.b.id; if (id) { setDialog(null); showBuilding(id); } }} print={phone ? undefined : () => setDialog('drawings')} /></Dialog>}
       {dialog === 'welcome' && <Welcome close={(n) => { store.set(SEEN, true); setDialog(null); if (n) { fresh(n); go('brief'); } }} />}
@@ -653,7 +678,8 @@ function App() {
 
 /** The answer, always in view: what the plot builds, sells and makes, and whether it passes. Each figure flashes
  *  by how much the last change moved it. */
-function ResultBar({ e, deal, sum, go, statement, stage }: { e: ReturnType<typeof evaluate>; deal: ReturnType<typeof applyDeal>; sum: ReturnType<typeof scrutinySummary>; go: (s: Step) => void; statement: () => void; stage: Stage }) {
+type VsFig = { name: string; bua: number; flats: number; profit: number; irr: number };
+function ResultBar({ e, deal, sum, go, statement, stage, vs }: { e: ReturnType<typeof evaluate>; deal: ReturnType<typeof applyDeal>; sum: ReturnType<typeof scrutinySummary>; go: (s: Step) => void; statement: () => void; stage: Stage; vs: null | { on: boolean; set: (on: boolean) => void; name: string; fig: VsFig | null } }) {
   const { r, d, shops } = e;
   const k = { bua: d.bua, flats: d.flats + (shops?.count ?? 0), profit: deal.profit, irr: deal.irr ?? 0 };
   const prev = useRef(k), [delta, setDelta] = useState<Partial<Record<keyof typeof k, number>>>({});
@@ -670,6 +696,13 @@ function ResultBar({ e, deal, sum, go, statement, stage }: { e: ReturnType<typeo
   // (a scheme of public buildings only earns nothing: what it costs stands in for profit and return)
   const publicOnly = d.buildings.length > 0 && (d.money as { earns?: boolean }).earns === false;
   const D = (x: keyof typeof k, fmt: (v: number) => string) => delta[x] !== undefined && <i class={`delta ${delta[x]! > 0 ? 'up' : 'down'}`}>{delta[x]! > 0 ? '+' : '−'}{fmt(Math.abs(delta[x]!))}</i>;
+  // (with "vs" on, a figure's second line is its difference from the base option)
+  const V = (x: keyof VsFig & keyof typeof k, fmt: (v: number) => string, el: preact.ComponentChildren) => {
+    const f = vs?.on ? vs.fig : null; if (!f) return el;
+    const dv = k[x] - f[x];
+    return <small class="vs">{Math.abs(dv) < 1e-6 ? 'same as' : `${dv > 0 ? '+' : '−'}${fmt(Math.abs(dv))} vs`} {f.name}</small>;
+  };
+  const vsBtn = vs && <button type="button" class="kpi vs-t" aria-pressed={vs.on} onClick={() => vs.set(!vs.on)} title={`Each figure against ${vs.name}`}><span>vs</span><b>{vs.name}</b><small>{vs.on ? 'showing' : 'off'}</small></button>;
   const rules = (
     <button type="button" class={`kpi rules ${sum.fail ? 'bad' : sum.warn ? 'warn' : 'ok'}`} onClick={() => go('approve')}>
       <span>Rules</span>
@@ -725,12 +758,12 @@ function ResultBar({ e, deal, sum, go, statement, stage }: { e: ReturnType<typeo
     <div class="results" role="region" aria-label="Result">
       <button type="button" class="kpi" onClick={statement} title="The area statement">
         <span>Built-up</span><b>{sqft(d.bua)}{D('bua', (v) => `${nf(v * 10.7639)}`)}</b>
-        <small><i class="meter"><i style={`width:${Math.min(100, used * 100)}%`} /></i>{nf(used * 100)}% of {nf(r.bua * 10.7639 / 1000)}k allowed</small>
+        {V('bua', (v) => `${nf(v * 10.7639)} sq ft`, <small><i class="meter"><i style={`width:${Math.min(100, used * 100)}%`} /></i>{nf(used * 100)}% of {nf(r.bua * 10.7639 / 1000)}k allowed</small>)}
       </button>
       <button type="button" class="kpi" onClick={() => go('design')}>
         {publicOnly ? <span>Buildings</span> : <span>Homes</span>}
         {publicOnly ? <b>{d.buildings.length}</b> : <b>{d.flats}{shops ? <em> + {shops.count} shops</em> : null}{D('flats', (v) => nf(v))}</b>}
-        <small>{d.buildings.length} bldg · {d.buildings.map((b) => b.floors).join('+') || 0} floors · {nf(d.height)} m</small>
+        {V('flats', (v) => `${nf(v)} homes`, <small>{d.buildings.length} bldg · {d.buildings.map((b) => b.floors).join('+') || 0} floors · {nf(d.height)} m</small>)}
       </button>
       {publicOnly ? <>
       <button type="button" class="kpi" onClick={() => go('numbers')}>
@@ -744,15 +777,16 @@ function ResultBar({ e, deal, sum, go, statement, stage }: { e: ReturnType<typeo
       </> : <>
       <button type="button" class="kpi" onClick={() => go('numbers')}>
         <span>Profit</span><b class={deal.profit < 0 ? 'bad' : ''}>{cr(deal.profit)}{D('profit', (v) => `${nf(v / 1e7, 2)} cr`)}</b>
-        <small>{e.p.sale || e.p.land ? `${pct(deal.margin)} margin · ${cr(deal.revenue)} sales` : `${pct(deal.margin)} · starting prices`}</small>
+        {V('profit', (v) => cr(v), <small>{e.p.sale || e.p.land ? `${pct(deal.margin)} margin · ${cr(deal.revenue)} sales` : `${pct(deal.margin)} · starting prices`}</small>)}
       </button>
       {!e.p.land && <LandKpi e={e} go={go} />}
       <button type="button" class="kpi" onClick={() => go('numbers')}>
         <span>IRR</span><b class={deal.irr !== null && deal.irr < 0 ? 'bad' : ''}>{pct(deal.irr)}{D('irr', (v) => `${nf(v * 100, 1)} pt`)}</b>
-        <small>peak cash {cr(deal.peak)}</small>
+        {V('irr', (v) => `${nf(v * 100, 1)} pt`, <small>peak cash {cr(deal.peak)}</small>)}
       </button>
       </>}
       {rules}
+      {vsBtn}
     </div>
   );
 }
@@ -779,6 +813,24 @@ function SaveState({ cloud, user, readOnly }: { cloud: { s: string; msg?: string
 
 /** The project's stage and the projects round it: recent ones (yours and shared with you), all of them on the
  *  dashboard, a new one. Loads the list as it opens. */
+/** The option open, and the others: open one, duplicate this one, rename or delete it, compare them, choose one. */
+function OptionMenu({ p, acts }: { p: ProProject; acts: null | { open: (id: string) => void; duplicate: () => void; rename: () => void; remove: () => void; compare: () => void; choose: (id: string) => void } }) {
+  const os = optionsOf(p), cur = p.option;
+  const items: MenuItem[] = [
+    { heading: 'Options' },
+    ...(os.length ? os.map((o) => ({ label: o.name, sub: `${o.made}${o.id === p.chosen ? ' · chosen' : ''}`, checked: o.id === cur, disabled: !acts, onSelect: () => acts?.open(o.id) })) : [{ label: 'Option A', sub: 'the only one', checked: true, onSelect: () => {} }]),
+    ...(acts ? [
+      { heading: 'This option' } as MenuItem,
+      { label: 'Duplicate it', icon: 'copy', sub: 'a new option to change', onSelect: acts.duplicate },
+      { label: 'Rename it…', icon: 'edit', onSelect: acts.rename, disabled: !os.length },
+      ...(cur ? [{ label: cur === p.chosen ? 'Chosen to take forward' : 'Choose it', icon: 'check', disabled: cur === p.chosen, onSelect: () => acts.choose(cur) }] : []),
+      { label: 'Delete it', icon: 'trash', onSelect: acts.remove, disabled: os.length < 2 },
+    ] : []),
+    { label: 'Compare options…', icon: 'layers', onSelect: () => acts?.compare(), disabled: os.length < 2 || !acts },
+  ];
+  return <Menu text label={optionName(p)} icon="chevron" class="left pmenu omenu" items={items} />;
+}
+
 function ProjectMenu({ stage, setStage, user, current, open, fresh }: { stage: Stage; setStage?: (s: Stage) => void; user: boolean; current: string | null; open: (id: string) => void; fresh?: () => void }) {
   const [list, setList] = useState<Project[] | null>(null);
   const load = () => { if (!user) return; void Promise.all([listPro(), listSharedPro()]).then(([a, b]) => setList([...a, ...b].sort((x, y) => y.updated_at.localeCompare(x.updated_at))), () => setList([])); };

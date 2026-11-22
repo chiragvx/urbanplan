@@ -116,6 +116,12 @@ export interface ProProject {
   load?: Partial<Load>;
   /** what the land is worth is worked out for: a margin on revenue, or an IRR (a share: 0.2 is 20%) */
   target?: { by: 'margin' | 'irr'; v: number };
+  /** the options: other schemes on the same plot (./variants.ts); the project's own fields are the current one's */
+  options?: import('./variants').ProOption[];
+  /** the option the project's fields are */
+  option?: string;
+  /** the option chosen to take forward */
+  chosen?: string;
 }
 
 /** The FSI ladder: basic, then premium (paid to the authority), TDR (bought in the market) and ancillary or

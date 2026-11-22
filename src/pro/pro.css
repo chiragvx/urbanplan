@@ -885,3 +885,24 @@ details.chk .show { display: inline-flex; align-items: center; gap: 5px; margin:
 .cpin { position: absolute; left: 0; top: 0; pointer-events: auto; display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--up-ink); background: var(--up-surface); color: var(--up-ink); font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; box-shadow: var(--up-shadow-sm); }
 .cpin.bad { background: var(--up-ink); color: var(--up-paper); }
 .cpin.warn { text-decoration: underline; text-underline-offset: 2px; }
+
+/* ---------- options: Compare, and the scorecard against a base option ---------- */
+.cmp-pick { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 14px; }
+.cmp-wrap { overflow-x: auto; }
+.cmp { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.cmp th, .cmp td { padding: 8px 10px; border-bottom: 1px solid var(--up-line); text-align: right; vertical-align: top; }
+.cmp th:first-child { text-align: left; font-weight: 500; color: var(--up-ink-2); }
+.cmp thead th { border-bottom: 1px solid var(--up-line-strong); }
+.cmp thead th b { display: block; font-size: 14px; }
+.cmp thead th small { display: block; font-weight: 400; color: var(--up-muted); font-size: 11.5px; }
+.cmp td.best { font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.cmp td.cmp-act { border-bottom: 0; display: table-cell; }
+.cmp td.cmp-act .btn { margin-left: 4px; }
+.kpi small.vs { color: var(--up-ink); font-weight: 600; }
+.kpi.vs-t[aria-pressed="true"] { background: var(--up-ink); color: var(--up-paper); }
+.kpi.vs-t[aria-pressed="true"] span, .kpi.vs-t[aria-pressed="true"] small { color: inherit; opacity: .8; }
+.omenu > button { max-width: 220px; overflow: hidden; justify-content: flex-start; white-space: nowrap; }
+.kpi.vs-t { max-width: 120px; } .kpi.vs-t b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmp thead th:not(:first-child), .cmp td { width: 22%; }
+.cmp thead th b { white-space: normal; font-size: 13px; line-height: 1.3; }
+.cmp td.cmp-act { white-space: nowrap; }

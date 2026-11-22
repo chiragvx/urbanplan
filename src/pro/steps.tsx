@@ -3,6 +3,7 @@
 // layouts). The Site and Scheme panels are in ./sitePanels.tsx, the Design system in ./designStep.tsx. Each panel
 // opens on what most people change; the rest folds away. Every figure here comes from the one evaluation in
 // main.tsx (./evaluate.ts), so a panel never shows a number another disagrees with.
+import { added, type Varying } from './variants';
 import { Dither } from '../theme/Dither';
 import { LandWorthBox } from './numbersUi';
 import { useMemo, useState } from 'preact/hooks';
@@ -362,15 +363,22 @@ function BriefBox({ p, up, toast }: { p: ProProject; up: StepProps['up']; toast:
   return (
     <Section title="Brief">
       <textarea class="brief" rows={3} value={text} onInput={(ev) => setText((ev.target as HTMLTextAreaElement).value)} onKeyDown={(ev) => { if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) run(); }} />
-      <Row><Btn kind="primary" icon="play" onClick={run}>Plan it</Btn>{res?.best && <Btn icon="check" onClick={() => { up({ ...res.patch, scheme: undefined }); toast(`Applied: ${res.best!.label}`, { undo: true }); }}>Use the best</Btn>}</Row>
+      <Row><Btn kind="primary" icon="play" onClick={run}>Plan it</Btn>{res?.best && <Btn icon="plus" onClick={() => addOpt(p, up, toast, res.patch, 'brief', `Brief: ${res.best!.label}`)}>Add the best as an option</Btn>}</Row>
       {res && <>
         {res.understood.length > 0 && <div class="chips">{res.understood.map((u) => <span class="chip">{u}</span>)}{res.ignored.map((u) => <span class="chip off" title="Not understood">{u}</span>)}</div>}
         <ol class="trace">{res.steps.map((s) => <li class={s.kind}>{s.text}</li>)}</ol>
-        {[res.best, ...res.alternatives].filter(Boolean).map((o, i) => <OptionCard o={o!} best={i === 0} apply={() => { up({ ...o!.patch, scheme: undefined }); toast(`Applied: ${o!.label}`, { undo: true }); }} />)}
+        {[res.best, ...res.alternatives].filter(Boolean).map((o, i) => <OptionCard o={o!} best={i === 0} apply={() => addOpt(p, up, toast, o!.patch, 'brief', `Brief: ${o!.label}`)} />)}
         {!res.met && <Note tone="warn">Nothing met the whole brief: the closest is shown.</Note>}
       </>}
     </Section>
   );
+}
+
+/** a brief's or Explore's result as a new option (filled afresh), never over the one open; you're switched to it */
+function addOpt(p: ProProject, up: StepProps['up'], toast: StepProps['toast'], patch: Partial<ProProject>, made: 'brief' | 'explore', label: string) {
+  const c = added(p, { ...(patch as Partial<Varying>), scheme: undefined }, made, label);
+  up(c);
+  toast(`Added “${label}” as an option, and opened it. The option menu by the project’s name switches back.`, { undo: true });
 }
 
 function OptionCard({ o, best, apply }: { o: OptionRow; best?: boolean; apply: () => void }) {
@@ -378,7 +386,7 @@ function OptionCard({ o, best, apply }: { o: OptionRow; best?: boolean; apply: (
     <div class={`opt${best ? ' best' : ''}`}>
       <div><b>{o.label}</b><small>{o.buildings} bldg · {o.floors} floors · {nf(o.height, 1)} m · {o.flats} flats{o.shops ? ` · ${o.shops} shops` : ''}{o.departures ? ` · ${o.departures} departure${o.departures > 1 ? 's' : ''}` : ''}</small></div>
       <div class="opt-n"><b class={o.profit < 0 ? 'bad' : ''}>{cr(o.profit)}</b><small>IRR {pct(o.irr)}</small></div>
-      <Btn kind="quiet" onClick={apply}>Use</Btn>
+      <Btn kind="quiet" icon="plus" title="Add as an option" onClick={apply}>Add</Btn>
     </div>
   );
 }
@@ -390,7 +398,7 @@ function OptionsBox({ p, up, toast }: { p: ProProject; up: StepProps['up']; toas
     <Section title="Options">
       <Row><Btn icon={busy ? undefined : 'layers'} onClick={run} disabled={busy}>{busy ? <><Dither class="dz" cell={2} />Working…</> : rows ? 'Run again' : 'Find options'}</Btn></Row>
       {busy && <div class="working" role="status"><Dither class="working-art" cell={3} /><span>Working out every option…</span></div>}
-      {rows && <div class="opts">{rows.map((o, i) => <OptionCard o={o} best={i === 0} apply={() => { up({ ...o.patch, scheme: undefined }); toast(`Applied: ${o.label}`, { undo: true }); }} />)}</div>}
+      {rows && <div class="opts">{rows.map((o, i) => <OptionCard o={o} best={i === 0} apply={() => addOpt(p, up, toast, o.patch, 'explore', o.label)} />)}</div>}
     </Section>
   );
 }

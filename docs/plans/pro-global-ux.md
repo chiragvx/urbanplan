@@ -580,6 +580,19 @@ Each phase ships on its own and leaves Pro working. The order puts the **IA's mi
 - Compare is a top-bar mode: the figures from any place side by side, thumbnails, then the split view. The filter chart appears when there are many options.
 - The scorecard gets "vs A". A shared link takes `&o=`.
 - **Done when:** a brief adds three options, two are compared side by side, and nothing you had is lost.
+- **Status (2026-11-23): built, without the pictures.**
+  - Options are in src/pro/variants.ts. src/pro/options.ts stays Explore's engine.
+  - The switcher sits in the top bar.
+  - The brief and Explore add options instead of replacing the current one.
+  - Compare is a table, with Choose.
+  - The scorecard has a "vs" toggle, and shared links take `&o=`.
+  - **Not done yet:**
+    - thumbnails in Compare;
+    - the split view;
+    - the filter chart for many options;
+    - undo kept separately for each option;
+    - the chosen option on the dashboard card.
+  - See docs/plans/pro-global-ux-log.md.
 
 ### Phase 6: The architect's floor: the typical floor and flat sizes
 

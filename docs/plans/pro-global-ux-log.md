@@ -4,6 +4,54 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-23 · Phase 5: options and Compare
+
+**What changed:**
+- **Options** (src/pro/variants.ts) are other schemes on the same plot.
+  - Each option has its own scheme, fill, type, floor cap, mix, shops, look, systems and FSI ladder.
+  - The plot, rules, prices and deal are shared.
+  - The project's own fields are always the option that's open, so the rest of Pro is unchanged. The list keeps each option's copy, and switching saves the open one first.
+  - Options are stored in the project's JSON: `options`, `option`, `chosen`. There's no new table.
+- **The option menu** sits by the stage menu in the top bar. From it you can:
+  - open another option;
+  - duplicate, rename, choose or delete the one open (never the last);
+  - open Compare.
+  
+  Search has the same actions.
+- **The brief and Explore add options and no longer overwrite the open one.**
+  - "Use" became "Add" (+), and "Use the best" became "Add the best as an option".
+  - Each new option is filled afresh, opened, and named after the result, for example "Brief: Slabs, at most 6 floors…".
+  - The first option added turns what you had into Option A.
+- **Compare** shows two to four options side by side: Built-up, Homes, Profit, Margin, IRR, Peak cash, Height, Failing checks and Departures.
+  - The best value in each row is underlined.
+  - Each column has "Open it" and "Choose".
+- **The scorecard's "vs" toggle** appears once there are two options. It shows each figure's difference from a base option: the chosen one, or else the first other option.
+- **Shared links:** `#s=…&o=<id>` opens that option.
+- **tools/dev/test-variants.ts**, in `npm test`, checks that:
+  - switching keeps each option's own fields;
+  - shared inputs stay shared;
+  - duplicate, rename and delete work, and the last option can't be deleted;
+  - a field a brief clears (the hand-placed scheme) stays cleared.
+
+**How it was checked:**
+- The test caught one bug. A brief's option kept the hand-placed tower because the change went through a JSON copy, which drops `undefined`. It's fixed, and the test now covers it.
+- Browser at 1280×800, on your project, backed up first and restored exactly afterwards:
+  - "Plan it" made three options, each filled afresh;
+  - Compare showed all four, with the best marked;
+  - Choose set the chosen option;
+  - "vs" showed the differences;
+  - switching back to Option A brought its hand-placed tower back (1,20,153 sq ft).
+- No console errors. `npm test` ALL OK; `npm run build` OK.
+
+**Left or known:**
+- Compare has no thumbnails or split view yet, and there's no filter chart for many options.
+- Undo is shared across options: undoing just after a switch can step back over it.
+- The dashboard card doesn't show the chosen option.
+- Approval files whichever option is open, not necessarily the chosen one.
+- Brief option names are long; the top bar clips them at 220 px.
+
+---
+
 ## 2026-11-22 · Phase 4: Brief, Design, Numbers, Approval
 
 **What changed:**
