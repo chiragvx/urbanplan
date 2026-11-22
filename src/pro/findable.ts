@@ -49,10 +49,12 @@ export const FINDABLE: Findable[] = [
   ...S('brief', 'Fill the plot', 'generate layout typology', [['How much of it to build', 'amount share'], ['Building type', 'typology tower slab'], ['Most floors', 'height storeys'], 'Most buildings']),
   ...S('design', 'Living', 'green play spacing parking basements', ['Green', 'Play area', 'Roads inside', 'Parking', 'Basements']),
   ...S('brief', 'Flat mix', 'bhk 1bhk 2bhk 3bhk units'),
+  ...S('brief', 'Flat sizes', 'carpet area size sq ft 1bhk 2bhk 3bhk flat size unit size'),
   ...S('design', 'Buildings', 'towers list'),
   ...S('design', 'Shops at the front', 'retail commercial ground floor', ['Depth from the front']),
   ...S('design', 'Parking', 'bays cars stilt basement podium'),
   // numbers
+  ...S('numbers', 'Inventory', 'flats units list sales stock carpet value'),
   ...S('numbers', 'Area statement', 'permissible proposed fsi built-up carpet statement'),
   ...S('numbers', 'What the land is worth', 'residual land value offer price jda share target margin irr', [['Target margin', 'target'], ['Target IRR', 'target']]),
   ...S('numbers', 'Result', 'irr margin profit peak funding'),

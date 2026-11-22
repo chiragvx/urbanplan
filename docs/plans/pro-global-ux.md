@@ -599,6 +599,16 @@ Each phase ships on its own and leaves Pro working. The order puts the **IA's mi
 - **Flat types with sizes**: carpet per type (1, 2, 3 BHK…), set in Brief › you want (the project's default) and per building in the inspector. The generator lays flats out to those sizes, and the inventory (Numbers) becomes editable.
 - **The typical floor as an object**: pick a floor band in the outline or the X-ray. The inspector shows flats per floor, their types and sizes, the core (stairs, lifts) and the floor's efficiency (carpet ÷ built-up). Change them, and every floor in the band follows.
 - **Done when:** "2BHK at 650 sq ft carpet, 6 flats a floor" can be set on Building A, and the area statement, inventory and money follow it.
+- **Status (2026-11-23): built, without picking a floor band.**
+  - Flat sizes are in Brief › Flat sizes (the project's) and in the inspector, "Its own flat sizes" (a building's). The layout cuts flats near them.
+  - The inspector's Typical floor shows flats a floor by type, carpet each against the size asked, cores, the floor's area and carpet, efficiency, and how many floors are like it.
+  - A straight building can be fitted to a number of flats a floor ("Fit its length").
+  - Numbers › Inventory lists every flat by building and type, with its value at the sale price.
+  - **Not done yet:**
+    - picking a floor band in the outline or the X-ray;
+    - flats a floor on a formed (hand-shaped) building: its plan sets them;
+    - editing sizes in the inventory itself (it links to Brief).
+  - See docs/plans/pro-global-ux-log.md.
 
 ### Phase 7: Sites, above projects
 

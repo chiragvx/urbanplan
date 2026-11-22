@@ -5,7 +5,7 @@
 import type { ProProject } from './project';
 
 /** what differs from option to option; the plot, rules, prices and the deal are shared */
-export const VARY = ['typology', 'maxFloors', 'mix', 'style', 'custom', 'shops', 'buildingStyle', 'fill', 'scheme', 'systems', 'load'] as const;
+export const VARY = ['typology', 'maxFloors', 'mix', 'sizes', 'style', 'custom', 'shops', 'buildingStyle', 'fill', 'scheme', 'systems', 'load'] as const;
 export type Varying = Pick<ProProject, (typeof VARY)[number]>;
 
 export interface ProOption {

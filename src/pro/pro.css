@@ -906,3 +906,10 @@ details.chk .show { display: inline-flex; align-items: center; gap: 5px; margin:
 .cmp thead th:not(:first-child), .cmp td { width: 22%; }
 .cmp thead th b { white-space: normal; font-size: 13px; line-height: 1.3; }
 .cmp td.cmp-act { white-space: nowrap; }
+
+/* ---------- the typical floor (inspector) and the inventory (Numbers) ---------- */
+.tfloor td small { color: var(--up-muted); font-size: 11px; }
+.insp-row.fitrow { grid-template-columns: 1fr auto; align-items: end; }
+.astmt.inv td:nth-child(n+3), .astmt.inv th:nth-child(n+3) { text-align: right; font-variant-numeric: tabular-nums; }
+.astmt.inv tr.tot td { font-weight: 600; border-top: 1px solid var(--up-line-strong); }
+.insp-sizes { display: grid; grid-template-columns: 1fr; gap: 8px; }

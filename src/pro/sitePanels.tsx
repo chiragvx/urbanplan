@@ -6,7 +6,8 @@
 // Scheme: "Fill the plot" (how much, what, the green, the play area, the roads, the parking), then the buildings
 // and the site's things, each the user's to place, shape and set: floors, mix, design system, its systems.
 import { useEffect, useState } from 'preact/hooks';
-import { UNIT_LABEL } from '../doc/site';
+import { SQFT, UNIT_LABEL } from '../doc/site';
+import { sizesOf } from './floor';
 import { ACCESS, TYPOLOGIES, type Typology } from '../doc/optimise';
 import { CITIES, fillOf, type Fill } from './project';
 import { longestEdge } from './importPlot';
@@ -91,6 +92,7 @@ export function SchemeStep({ p, e, up, toast, picked, pick, show, part }: StepPr
   const setShops = (x: Partial<typeof sh>) => up({ shops: { ...sh, ...x } });
   const allowed = shopFloorsAllowed(r.roadW);
   const bi = picked?.k === 'building' ? d.buildings.findIndex((b) => b.b.id === picked.id) : -1;
+  const sizes = sizesOf(p);
   const nameOf = (i: number) => (p.scheme?.buildings.find((b) => b.id === d.buildings[i].b.id)?.name) ?? `Building ${String.fromCharCode(65 + i)}`;
   return (
     <>
@@ -122,6 +124,12 @@ export function SchemeStep({ p, e, up, toast, picked, pick, show, part }: StepPr
         <div class="mixbar" aria-hidden="true">{[0, 1, 2].map((i) => <i class={`m${i}`} style={`flex:${p.mix[i] || 0.0001}`}>{mixPct[i] >= 12 ? `${mixPct[i]}%` : ''}</i>)}</div>
         <Row n={3}>{[0, 1, 2].map((i) => <Num label={UNIT_LABEL[i]} value={mixPct[i]} set={(v) => setMix(i, v)} max={100} step={5} unit="%" />)}</Row>
         <Note>{[0, 1, 2].filter((t) => d.count[t]).map((t) => `${d.count[t]} × ${UNIT_LABEL[t]}`).join(' · ') || 'No flats fit.'}</Note>
+      </Section>}
+
+      {B && <Section title="Flat sizes" fold open={!!p.sizes} aside={<span class="sec-meta">{sizes.map((m) => nf(m * SQFT, 0)).join(' · ')} sq ft</span>} sub="RERA carpet of each type: the layout cuts flats near these sizes. A building can have its own (in the inspector).">
+        <Row n={3}>{[0, 1, 2].map((t) => <Num label={`${UNIT_LABEL[t]} carpet`} value={Math.round((sizes[t] * SQFT) / 5) * 5} set={(v) => { const z = [...sizes] as [number, number, number]; z[t] = Math.round((v / SQFT) * 10) / 10; up({ sizes: z }); }} min={200} max={4000} step={25} unit="sq ft" />)}</Row>
+        {p.sizes && <Row><Btn kind="quiet" icon="undo" onClick={() => up({ sizes: undefined })}>The starting sizes</Btn></Row>}
+        <Note>Flats come whole: on a given floor they land near these sizes (about 15% under to 40% over), and the area statement and money follow what's laid.</Note>
       </Section>}
 
       {D && <Section title="Buildings" aside={<span class="sec-meta">{d.buildings.length}</span>}>

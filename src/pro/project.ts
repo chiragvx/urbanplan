@@ -72,6 +72,8 @@ export interface ProProject {
   typology: Typology; maxFloors: number;
   /** flat mix (1 / 2 / 3 BHK shares) */
   mix: [number, number, number];
+  /** flat sizes: 1 / 2 / 3 BHK RERA carpet (m²; unset: the starting sizes, 42, 65 and 95 m²) */
+  sizes?: [number, number, number];
   /** the design system: a preset, and the project's own copy once any token is changed */
   style: string;
   custom: import('./design').DesignSystem | null;
@@ -256,7 +258,7 @@ export function generate(p: ProProject, r: PlotReport, specRate = 0, premium = 0
   const cost = { ...(p.costs ?? {}), ...(p.rents ?? {}), build: c.build + specRate, ...(p.land ? { land: p.land } : {}), sale: p.sale > 0 ? p.sale : Math.round((c.sale * (1 + premium)) / 50) * 50, ...(p.shops && p.shops.sale > 0 ? { retail: p.shops.sale } : {}) };
   const f = fillOf(p);
   const base: PlotSite = {
-    ...siteDefaults('residential'), ...parkingOf(f), mix: p.mix, cost, keepOut: keepOutOf(p.features),
+    ...siteDefaults('residential'), ...parkingOf(f), mix: p.mix, ...(p.sizes ? { sizes: p.sizes } : {}), cost, keepOut: keepOutOf(p.features),
     design: { ...DEFAULT_DESIGN, type: p.typology, maxFloors: p.maxFloors, maxBuildings: f.buildings, spacing: f.spacing, access: f.access, green: f.green, ...kit },
   };
   // the user's own buildings: as they stand, checked

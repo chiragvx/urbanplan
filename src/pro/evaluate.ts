@@ -61,7 +61,7 @@ export function evaluate(p: ProProject): Evaluated {
   const forms: Record<string, FormLayout> = {};
   for (const b of p.scheme?.buildings ?? []) {
     if (!b.form) continue;
-    const L = layForm(b, { floorH: ds.floorH, mix: b.mix ?? p.mix, sizes: DEFAULT_SITE.sizes, round: languageOf(dsOfBuilding(p, 0, ds, b.id)).round });
+    const L = layForm(b, { floorH: ds.floorH, mix: b.mix ?? p.mix, sizes: b.sizes ?? p.sizes ?? DEFAULT_SITE.sizes, round: languageOf(dsOfBuilding(p, 0, ds, b.id)).round });
     if (L && L.floors.length) forms[b.id] = L;
   }
   // (the design system's gates and internal roads go to the site engine: their widths)

@@ -4,6 +4,39 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-23 · Phase 6: the architect's floor
+
+**What changed:**
+- **Flat sizes are a design input.**
+  - `sizes` (carpet m² for 1, 2, 3 BHK) is on the project and on each building, and kept per option.
+  - Brief › Flat sizes sets the project's, in sq ft, with "The starting sizes" to reset them.
+  - The inspector's "Its own flat sizes" sets a building's.
+  - The layout (both plain and formed buildings) cuts flats near the sizes asked. Flats come whole, so they land about 15% under to 40% over.
+- **The typical floor** (src/pro/floor.ts, in the inspector): flats a floor by type, carpet each against the size asked, cores, the floor's area and carpet, its efficiency, and how many floors are like it.
+- **Fit its length:** for a straight building, "Flats a floor" and a button that finds the shortest length holding at least that many. The toast says when the count it gets differs (counts jump, for example 4 to 8).
+- **Numbers › Inventory** (folded): every flat by building and type, count, carpet each, and value at the sale price, with a total. A building's name picks it; "Change them" opens Brief › Flat sizes.
+- Search finds Flat sizes and Inventory.
+- **tools/dev/test-floor.ts**, in `npm test`, checks that:
+  - bigger 2 BHK sizes give bigger flats;
+  - the inventory counts every flat and all their carpet;
+  - the fit holds at least the target, and a metre shorter holds fewer;
+  - fewer flats a floor gives a shorter building.
+
+**How it was checked:**
+- Browser at 1280×800, on your project, backed up first and restored exactly afterwards:
+  - Building A (your tower) with its own sizes, 2 BHK at 650 sq ft: the typical floor showed 2 BHKs at 601 sq ft (asked 650), and the inventory followed (58 flats, ₹52.33 cr);
+  - "Change them" opened Brief › Flat sizes;
+  - the size fields were too narrow at 29 px; they now stack one per row.
+- No console errors. `npm test` ALL OK; `npm run build` OK.
+
+**Left or known:**
+- Picking a floor band in the outline or X-ray isn't built.
+- "6 flats a floor" can be set only on a straight building; a formed building's plan sets its count.
+- An exact flat count isn't always possible: the fit gives the shortest length with at least that many.
+- The inventory is read-only, and its "Sizes asked" line shows the project's sizes even where a building has its own.
+
+---
+
 ## 2026-11-23 · Phase 5: options and Compare
 
 **What changed:**

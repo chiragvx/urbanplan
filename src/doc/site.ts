@@ -67,6 +67,8 @@ export interface SiteBuilding {
   auto?: boolean;
   /** its own flat mix (1 / 2 / 3 BHK shares; unset: the site's) */
   mix?: [number, number, number];
+  /** its own flat sizes (1 / 2 / 3 BHK RERA carpet, m²; unset: the site's) */
+  sizes?: [number, number, number];
   /** its floors as a form lays them out (src/pro/form), worked out afresh on every evaluation and never saved: each
    *  floor its own area, height, units and use. Unset: the plain building of spine and depth. */
   laid?: Laid;
@@ -555,7 +557,7 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
     const height = L ? L.floors.reduce((s, f) => s + f.h, 0) + under * fh + (L.roof ?? 0) : (x.floors + under) * fh;
     const bu0 = useOf(x.b);
     // (a building with its own mix lays its flats by it, counted on its own)
-    const lay: Pick<BuildingReport, 'units' | 'cores' | 'corridors' | 'perFloor' | 'laid' | 'typical' | 'repeats'> = L ? layLaid(L, bu0) : x.b.mix ? layFloor(x.b, { ...site, mix: x.b.mix }, bu0, height, [0, 0, 0]) : layFloor(x.b, site, bu0, height, placed);
+    const lay: Pick<BuildingReport, 'units' | 'cores' | 'corridors' | 'perFloor' | 'laid' | 'typical' | 'repeats'> = L ? layLaid(L, bu0) : x.b.mix ? layFloor(x.b, { ...site, mix: x.b.mix, ...(x.b.sizes ? { sizes: x.b.sizes } : {}) }, bu0, height, [0, 0, 0]) : layFloor(x.b, x.b.sizes ? { ...site, sizes: x.b.sizes } : site, bu0, height, placed);
     // (a formed building counts as the use of its typical floor)
     const bu = L && lay.typical !== undefined ? FLOOR_USE[floorKind(L.floors[lay.typical], bu0)].plot : bu0;
     const clash = x.overlap ? 'overlap' : x.zone ? 'zone' : !fits(x.quads, height) ? 'margins' : null;

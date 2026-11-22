@@ -3,10 +3,12 @@
 // their roads, and levels; a thing on the site its few numbers. The step's sheet keeps the project's settings; the
 // view's bars stay for the quick changes. Desktop only: a phone keeps its read-only building card.
 import type { ComponentChildren } from 'preact';
+import { useState } from 'preact/hooks';
+import { fitLength, fittable, sizesOf, typicalOf } from './floor';
 import type { Evaluated } from './evaluate';
 import { CITIES, outline, type ProBuilding, type ProProject } from './project';
 import { duplicated, ELEMENT_TOOLS, own, removed, spineLength, stretched, turned, type Picked } from './edit';
-import { ELEMENTS, UNIT_LABEL, type SiteElement } from '../doc/site';
+import { ELEMENTS, SQFT, UNIT_LABEL, type SiteElement } from '../doc/site';
 import { featureOf, INTERNAL_WIDTHS, DEFAULT_LEVELS, PLINTH_MIN, roadWidths, type Levels, type SiteFeature } from './siteObjects';
 import { cap, DIRS, edgeFacing, withEdgeRoad } from './plotOps';
 import { ShapePanel, shapeIt, withFloors } from './shapePanel';
@@ -18,7 +20,7 @@ import type { FlatRooms } from './rooms';
 import type { Check } from './scrutiny';
 import { checkBuilding, STATUS_ICON } from './viewer';
 import { USE_LABEL } from './deal';
-import { Btn, Icon, Lines, Note, nf, Num, Section, Select, sqft } from './ui';
+import { Btn, Icon, Lines, Note, nf, Num, pct, Section, Select, sqft, Toggle } from './ui';
 
 interface Props {
   p: ProProject; e: Evaluated; up: (o: Partial<ProProject>) => void;
@@ -103,6 +105,7 @@ function BuildingInspector({ p, e, up, rooms, checks, pick, toast, xray, hide, r
             <Section title="Skin"><SkinBody {...bp} /></Section>
           </>
           : straight && <Section title="Shape" sub="Give it a form to sculpt: rings for its width, lean and twist, key floors, a slot."><Btn icon="wand" onClick={() => setB((b) => shapeIt(b, br.floors))}>Shape it</Btn></Section>}
+        {residential && <TypicalFloor key={id} p={p} e={e} br={br} b={ownB} setB={setB} toast={toast} readOnly={readOnly} />}
         {residential && <Section title="Flat mix"><MixBody {...bp} /></Section>}
         <Section title="Design system" fold open={!!ownB.style}><StyleBody {...bp} /></Section>
       </fieldset>
@@ -122,6 +125,47 @@ function BuildingInspector({ p, e, up, rooms, checks, pick, toast, xray, hide, r
         <div class="flats">{flats.map((fr) => <FlatPlan t={fr.t} fr={fr} />)}</div>
       </Section>}
     </Frame>
+  );
+}
+
+// ================================================================ its typical floor
+/** The floor an architect designs: its flats by type and size, cores, efficiency; its own flat sizes; and, for a
+ *  straight building, its length fitted to a number of flats a floor. */
+function TypicalFloor({ p, e, br, b, setB, toast, readOnly }: { p: ProProject; e: Evaluated; br: Evaluated['d']['buildings'][number]; b: ProBuilding; setB: (fn: (b: ProBuilding) => ProBuilding) => void; toast: (s: string) => void; readOnly: boolean }) {
+  const T = typicalOf(br), sizes = sizesOf(p, b), ownSizes = !!b.sizes;
+  const [want, setWant] = useState<number>(T.flats || 4), [busy, setBusy] = useState(false);
+  const fit = () => {
+    setBusy(true);
+    setTimeout(() => {
+      const r = fitLength(p, e, b.id, want);
+      setBusy(false);
+      if (!r) { toast(`${want} flats a floor don't fit on this plate between 8 and 400 m long.`); return; }
+      setB((x) => stretched(x, r.len));
+      toast(r.got === want ? `${nf(r.len, 1)} m long: ${want} flats a floor.` : `${nf(r.len, 1)} m long: ${r.got} flats a floor, the nearest to ${want} that lays out (flats come in steps on this plate).`);
+    }, 20);
+  };
+  return (
+    <Section title="Typical floor" aside={<span class="sec-meta">{T.flats} flats · {pct(T.eff, 0)} efficient</span>}>
+      <table class="insp-edges tfloor">
+        <thead><tr><th>Type</th><th>A floor</th><th>Carpet each</th></tr></thead>
+        <tbody>{T.types.map((x) => <tr><td>{UNIT_LABEL[x.t]}</td><td>{x.n}</td><td>{nf(x.carpet * SQFT, 0)} sq ft <small>(asked {nf(sizes[x.t] * SQFT, 0)})</small></td></tr>)}</tbody>
+      </table>
+      <Lines rows={[
+        ['Cores', `${T.cores} (stairs and lifts)`],
+        ['Floor area', sqft(T.area)],
+        ['Carpet a floor', `${sqft(T.carpet)} · ${pct(T.eff, 0)} of the floor`],
+        ['Floors like it', String(T.repeats)],
+      ]} />
+      <fieldset disabled={readOnly}>
+        <Toggle label="Its own flat sizes" value={ownSizes} set={(v) => setB((x) => ({ ...x, sizes: v ? [...sizesOf(p)] as [number, number, number] : undefined }))} />
+        {ownSizes && <div class="insp-sizes">{[0, 1, 2].map((t) => <Num label={`${UNIT_LABEL[t]}, sq ft`} value={Math.round((sizes[t] * SQFT) / 5) * 5} set={(v) => setB((x) => { const z = [...sizesOf(p, x)] as [number, number, number]; z[t] = Math.round((v / SQFT) * 10) / 10; return { ...x, sizes: z }; })} min={200} max={4000} step={25} />)}</div>}
+        {fittable(b) && <div class="insp-row fitrow">
+          <Num label="Flats a floor" value={want} set={setWant} min={1} max={40} />
+          <Btn icon="sideways" disabled={busy} onClick={fit}>{busy ? 'Fitting…' : 'Fit its length'}</Btn>
+        </div>}
+        {!fittable(b) && <p class="hint-line">{b.form ? 'A formed building’s floor follows its plan: shape it by hand to change it.' : 'Its length is fitted for a straight building.'}</p>}
+      </fieldset>
+    </Section>
   );
 }
 

@@ -188,7 +188,7 @@ function fitRules(f: Form, e: Evaluated, parts: number): Form {
   // its floor area as laid out (a taper's upper floors are smaller than its base), parking aside
   const bua = (uses: UseBand[]) => {
     const b: ProBuilding = { id: 'fit', name: 'fit', floors: uses.reduce((t, x) => t + x.floors, 0), depth: 14, spine: [0, 0, 1, 0], form: { ...f, uses } };
-    try { return (layForm(b, { floorH: fh, mix: e.p.mix, sizes: DEFAULT_SITE.sizes })?.floors ?? []).reduce((s, x) => s + (x.use === 'parking' ? 0 : x.area), 0); } catch { return 0; }
+    try { return (layForm(b, { floorH: fh, mix: b.mix ?? e.p.mix, sizes: b.sizes ?? e.p.sizes ?? DEFAULT_SITE.sizes })?.floors ?? []).reduce((s, x) => s + (x.use === 'parking' ? 0 : x.area), 0); } catch { return 0; }
   };
   const over = (k: number) => { const u = trim(k); return under * fh + u.reduce((t, x) => t + hOf(x), 0) > R.maxH + 1e-6 || bua(u) > left + 1; };
   // the fewest floors taken off that pass (more off is always less), by halves
