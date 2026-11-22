@@ -7,7 +7,7 @@ import { finishRate, languageOf, presetOf, siteKitOf, specRateNet, type DesignSy
 import { facadeTakeoff, type Takeoff } from './palette';
 import type { Shops } from './mixed';
 import { planFloor, schedule, type FloorPlan, type ScheduleRow, type UnitCheck } from './openings';
-import { generate, plotReport, type ProProject } from './project';
+import { generate, loadOf, plotReport, type ProProject } from './project';
 import { siteSystems, type SystemsResult } from './systems';
 import { DEFAULT_SITE, SQFT } from '../doc/site';
 import { layForm, type FormLayout } from './form';
@@ -15,6 +15,9 @@ import { layForm, type FormLayout } from './form';
 export interface Evaluated {
   p: ProProject; ds: DesignSystem;
   r: PlotReport; d: SiteReport; shops: Shops | null;
+  /** the plot with every FSI part the rules permit, whether the ladder takes it or not (the same as `r` when it
+   *  takes them all) */
+  full: PlotReport;
   plans: FloorPlan[]; rows: ScheduleRow[];
   /** the light and ventilation check per flat of the typical floor, with how many floors it repeats on */
   checks: (UnitCheck & { floors: number })[];
@@ -51,6 +54,7 @@ export const dsOfBuilding = (p: ProProject, i: number, ds = designOf(p), id?: st
 export function evaluate(p: ProProject): Evaluated {
   const ds = designOf(p);
   const r = plotReport(p, ds.floorH);
+  const ld = loadOf(p), full = ld.premium && ld.tdr && ld.ancillary ? r : plotReport(p, ds.floorH, true);
   // (the specification's extras and the chosen finishes over plain ones, ₹ per sq ft of built-up)
   const rate = specRateNet(ds) + finishRate(ds);
   // (the formed buildings laid out once, at the design system's floor height and each building's flat mix)
@@ -85,5 +89,5 @@ export function evaluate(p: ProProject): Evaluated {
   const rows = schedule(d, plans, ds, (bi, ui) => (shops?.removed.get(bi)?.has(ui) ? shops.upperOf[bi] : 0));
   // (a formed building's typical floor repeats only on the floors like it)
   const checks = plans.flatMap((pl, i) => pl.checks.map((c) => ({ ...c, floors: d.buildings[i].repeats ?? d.buildings[i].floors })));
-  return { p, ds, r, d, shops, plans, rows, checks, rate: used, sys, sysRate, forms, facade: M.T, finishQty: M.q };
+  return { p, ds, r, full, d, shops, plans, rows, checks, rate: used, sys, sysRate, forms, facade: M.T, finishQty: M.q };
 }

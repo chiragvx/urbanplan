@@ -160,3 +160,30 @@ export function applyDeal(e: Evaluated, deal: Deal): DealResult {
   if (M.exit > 0) notes.push(`Offices and hotels are let or run, not sold: valued at their yields once leased up, ${LEASE_UP} months after completion, as if sold on or refinanced then.`);
   return { revenue, cost, profit, margin: revenue > 0 ? profit / revenue : 0, irr: earns ? s.irr : null, peak: s.peak, flow: s.flow, cum: s.cum, saleCarpet, ownerCarpet, owner, lines, gstCollected, stampDuty, notes, earns, uses };
 }
+
+/** What the land is worth to this scheme: the most that can be paid for it and still make the target (a margin on
+ *  revenue, or an IRR), bought outright; and under a joint development, the largest share of the revenue the
+ *  landowner can be given. Solved by bisection on applyDeal, so the stamp duty, the cash flow's timing and the FSI
+ *  bought all count. null: the target isn't made even with the land free (or the owner given nothing). */
+export function landWorth(e: Evaluated, deal: Deal, target: { by: 'margin' | 'irr'; v: number }): { outright: number | null; share: number | null } {
+  const M = e.d.money;
+  const meets = (x: DealResult) => (target.by === 'margin' ? x.margin : x.irr ?? -Infinity) >= target.v;
+  if (!(M.revenue > 0) || M.earns === false) return { outright: null, share: null };
+  // outright: the land's price (₹), from nothing up to the whole revenue
+  const at = (land: number) => applyDeal({ ...e, d: { ...e.d, money: { ...M, land } } }, { ...deal, kind: 'outright' });
+  let outright: number | null = null;
+  if (meets(at(0))) {
+    let lo = 0, hi = M.revenue;
+    for (let k = 0; k < 40 && hi - lo > 1e4; k++) { const mid = (lo + hi) / 2; if (meets(at(mid))) lo = mid; else hi = mid; }
+    outright = lo;
+  }
+  // a joint development on a revenue share: the owner's %, 0 to 95
+  const js = (s: number) => applyDeal(e, { ...deal, kind: 'jda-revenue', ownerShare: s, deposit: deal.kind === 'jda-revenue' || deal.kind === 'jda-area' ? deal.deposit : 0 });
+  let share: number | null = null;
+  if (meets(js(0))) {
+    let lo = 0, hi = 95;
+    for (let k = 0; k < 30 && hi - lo > 0.05; k++) { const mid = (lo + hi) / 2; if (meets(js(mid))) lo = mid; else hi = mid; }
+    share = lo;
+  }
+  return { outright, share };
+}

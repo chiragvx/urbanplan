@@ -21,6 +21,7 @@ import { featureOf } from './siteObjects';
 import { FindPlot, FlatPlan, ImportBox, slug, type StepProps } from './steps';
 import { Btn, download, Icon, Lines, Note, nf, Num, Row, Section, Seg, Select, Slider, sqft, Stat, Toggle } from './ui';
 import { SystemsPanel } from './systemsPanel';
+import { LadderBox } from './numbersUi';
 import { mergeSettings, splitSettings } from './systems';
 
 type PlotWay = 'view' | 'survey' | 'import';
@@ -30,7 +31,7 @@ function Picked({ title, children, remove, copy }: { title: ComponentChildren; c
 }
 
 // ================================================================ site
-export function SiteStep2({ p, e, up, toast, tool, picked, pick }: StepProps) {
+export function SiteStep2({ p, e, up, toast, tool, picked, pick, openStatement }: StepProps) {
   const { r } = e;
   const city = CITIES.find((c) => c.value === p.city)!;
   // (the dashboard can ask for a plot found by its survey number or imported: that way open, once)
@@ -62,6 +63,7 @@ export function SiteStep2({ p, e, up, toast, tool, picked, pick }: StepProps) {
         {way === 'import' && <ImportBox done={(ring, src, at) => { found(ring, `Outline from ${src}`, undefined, at); setWay('view'); }} />}
       </Section>
 
+      <LadderBox p={p} e={e} up={up} openStatement={openStatement} />
       <Section title="On the site" fold open={fs.length > 0 || tool.k === 'feature'} aside={<span class="sec-meta">{fs.length ? `${fs.length} marked` : 'none'}</span>} sub="What to build round: draw it from the tools on the map's left edge (the tree), then drag its points and rings there.">
         {fs.length > 0 && <ul class="flist">{fs.map((f, i) => {
           const F = featureOf(f.kind), n = fs.slice(0, i).filter((x) => x.kind === f.kind).length + 1;
@@ -69,22 +71,6 @@ export function SiteStep2({ p, e, up, toast, tool, picked, pick }: StepProps) {
         })}</ul>}
       </Section>
 
-      <Section title="Allowed" fold open={false} sub={`On a ${nf(r.roadW)} m road${r.roadW !== (r.road?.today ?? r.roadW) ? ' (the DP width)' : ''}.`}>
-        <div class="stats">
-          <Stat label="FSI" value={nf(r.fsi, 2)} sub={`+ ${Math.round(r.rules.ancillary * 100)}% ${r.code === 'udcpr' ? 'ancillary' : 'fungible'}`} />
-          <Stat label="Built-up allowed" value={sqft(r.bua)} sub={`${nf(r.bua)} m²`} />
-          <Stat label="Height limit" value={`${nf(r.rules.maxH)} m`} sub={r.limit === 'height' ? 'what stops it' : ''} />
-          <Stat label="Margins" value={`${nf(r.rules.front, 1)} m front`} sub={`${nf(r.side, 1)} m sides at full height`} />
-        </div>
-        <Lines rows={[
-          ['Basic FSI on the net plot', `${nf(r.parts.basic)} m²`],
-          ['Premium FSI (paid)', `${nf(r.parts.premium)} m²`],
-          ['TDR that can be loaded', `${nf(r.parts.tdr)} m²`],
-          ...(r.parts.credit ? [['DP road handed over (counted)', `${nf(r.parts.credit)} m²`] as [string, string]] : []),
-          [r.code === 'udcpr' ? 'Ancillary' : 'Fungible', `${nf(r.parts.ancillary)} m²`],
-          ['Land lost to DP roads', `${nf(r.lost)} m²`],
-        ]} />
-      </Section>
 
       <Section title="Constraints" fold open={!!(LM.maxH || LM.tod)} sub="An airport or fire height cap, a metro transit zone.">
         <Num label="Height cap (0: none)" value={LM.maxH} set={(v) => setLM({ maxH: v })} max={900} unit="m" hint="From the AAI colour-coded zoning map, or a fire or heritage limit" />
@@ -144,7 +130,7 @@ export function SchemeStep({ p, e, up, rooms, toast, picked, pick }: StepProps) 
           ? <><Note>The buildings are yours: drag them on the map, set each one below. Filling again replaces them.</Note>
             <Row><Btn icon="spark" onClick={() => { up({ scheme: undefined }); pick(null); toast('Filled again from the settings.'); }}>Fill again</Btn></Row></>
           : <>
-            <Slider label="How much" value={Math.round(f.amount * 100)} set={(v) => setFill({ amount: v / 100 })} min={30} max={100} step={5} fmt={(v) => (v >= 100 ? 'All the rules allow' : `${v}% of what's allowed`)} />
+            <Slider label="How much of it to build" value={Math.round(f.amount * 100)} set={(v) => setFill({ amount: v / 100 })} min={30} max={100} step={5} fmt={(v) => (v >= 100 ? 'All the FSI taken' : `${v}% of the FSI taken`)} />
             <Seg<Typology> value={p.typology} set={(v) => up({ typology: v })} label="Building type" options={TYPOLOGIES} />
             <Row>
               <Num label="Most floors" value={p.maxFloors} set={(v) => up({ maxFloors: v })} min={0} max={300} zero="Auto" />

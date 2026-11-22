@@ -22,6 +22,7 @@ import { render } from 'preact';
 import { floorKind, SQFT, UNIT_COLOR, UNIT_LABEL, type FloorUse } from '../doc/site';
 import { sideMargin } from '../doc/plot';
 import { USE_LABEL } from './deal';
+import { areaStatement } from './areaStatement';
 import type { Evaluated } from './evaluate';
 import { CITIES, outline, roadLines } from './project';
 import type { Check, CheckStatus } from './scrutiny';
@@ -798,50 +799,8 @@ function Section({ e, no, total }: { e: Evaluated; no: number; total: number }) 
 }
 
 function AreaStatement({ e, no, total }: { e: Evaluated; no: number; total: number }) {
-  const { r, d, shops } = e, P = r.parts, R = r.rules;
-  const rows: [string, string, string?][] = [];
-  const h = (s: string) => rows.push([s, '', 'h']);
-  const row = (a: string, b: number | string) => rows.push([a, typeof b === 'number' ? m2(b) : b]);
-  h('PLOT');
-  row('Plot area (as per the record)', r.area);
-  row('Less: road widening (DP)', r.lost);
-  row('Net plot area', r.netArea);
-  row('Road width for the rules', `${f2(r.roadW)} m`);
-  h('PERMISSIBLE BUILT-UP AREA');
-  row(`Basic FSI ${f2(R.basic)} on the net plot`, P.basic);
-  row(`Premium FSI ${f2(R.premium)}`, P.premium);
-  row(`TDR ${f2(R.tdr)}`, P.tdr);
-  if (P.credit > 0) row('FSI of the road widening handed over', P.credit);
-  row(`${r.code === 'udcpr' ? 'Ancillary' : 'Fungible'} FSI ${Math.round(R.ancillary * 100)}%`, P.ancillary);
-  row('Total permissible', r.bua);
-  h('PROPOSED BUILT-UP AREA');
-  if (shops) row('Ground floor shops', shops.ground);
-  d.buildings.forEach((b, i) => {
-    if (b.laid) { formedGroups(e, i).forEach((g) => row(`Building ${letter(i)}: ${levelsName(g.a, g.z).toLowerCase()} ${USE_LABEL[g.kind].toLowerCase()}, ${g.z - g.a + 1} × ${f2(g.area)} m²${g.kind === 'parking' ? ' (free of FSI)' : ''}`, g.kind === 'parking' ? 0 : g.area * (g.z - g.a + 1))); return; }
-    const plate = b.quads.reduce((s, q) => s + polyArea(q), 0);
-    if (d.under) row(`Building ${letter(i)}: stilt (parking)`, 'free of FSI');
-    row(`Building ${letter(i)}: floors 1–${b.floors}, ${b.floors} × ${f2(plate)} m²`, plate * b.floors);
-  });
-  row('Total proposed', d.bua);
-  row('FSI used', f2(d.fsi));
-  rows.push(['Balance', m2(d.left)]);
-  h('COVERAGE, OPEN SPACE AND HEIGHT');
-  row('Ground coverage', `${m2(d.coverage * r.area)} · ${Math.round(d.coverage * 100)}%`);
-  row('Recreational open space required', d.open.need);
-  row('Recreational open space provided', d.open.have);
-  row('Height proposed (to the terrace)', `${f2(d.height)} m`);
-  row('Height limit', `${f2(R.maxH)} m`);
-  h('CARPET (RERA)');
-  [0, 1, 2].forEach((t) => { if (d.count[t]) rows.push([`${UNIT_LABEL[t]}`, `${d.count[t]} flats`]); });
-  if (shops) rows.push(['Shops', `${shops.count} · ${m2(shops.carpet)}`]);
-  for (const x of d.money.uses) if (x.use !== 'residential') rows.push([USE_LABEL[x.use], `${x.units} unit${x.units === 1 ? '' : 's'} · ${m2(x.carpet)}`]);
-  row('Total carpet (flats)', d.carpet);
-  rows.push(['', `${nf(d.carpet * SQFT)} sq ft`]);
-  rows.push(['Tenements', `${d.flats + (shops?.count ?? 0) + d.count[3]}`]);
-  h('PARKING');
-  rows.push(['Car bays required', `${d.parking.need}`]);
-  d.parking.levels.filter((l) => l.bays.length).forEach((l, i) => rows.push([`${l.kind[0].toUpperCase()}${l.kind.slice(1)}${l.kind === 'basement' ? ` ${i}` : ''}`, `${l.bays.length} bays`]));
-  rows.push(['Car bays provided', `${d.parking.have}`]);
+  // (the rows Pro shows live: one source, so the sheet and the screen can't disagree)
+  const rows: [string, string, string?][] = areaStatement(e, (x, bi) => formedGroups(x, bi)).map((x) => (x.k === 'h' ? [x.label.toUpperCase(), '', 'h'] : [x.label, x.value]));
   // two columns of rows
   let per = Math.ceil(rows.length / 2);
   if (rows[per - 1]?.[2] === 'h') per--; // a heading never ends a column

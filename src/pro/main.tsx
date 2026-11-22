@@ -21,7 +21,7 @@ import { buildingCores } from './coreDetail';
 import { TIERS, type Tier } from './render/quality';
 import * as designLibrary from './designLibrary';
 import { presetOf } from './design';
-import { DEFAULT_PROJECT, outline, roadLines, type ProProject } from './project';
+import { DEFAULT_PROJECT, outline, roadLines, targetOf, type ProProject } from './project';
 import { deletePro, listPro, listSharedPro, openPro, savePro, toText, type CloudRef } from './cloud';
 import { addComment, addMember, comments as listComments, deleteComment, EMAIL, joinProject, members as listMembers, NotSetUp, projectLink, removeMember, resolveComment, sendInvite, type Comment, type Member } from './team';
 import { authReady, explain, peekSession, session, startAuth } from '../auth/auth';
@@ -33,7 +33,8 @@ import { UNIT_COLOR, UNIT_LABEL } from '../doc/site';
 import { fitRooms } from './rooms';
 import { ROOM_COLOR } from './rooms';
 import { scrutiny, scrutinySummary } from './scrutiny';
-import { applyDeal, DEFAULT_DEAL } from './deal';
+import { applyDeal, DEFAULT_DEAL, landWorth } from './deal';
+import { AreaStatementBody } from './numbersUi';
 import { CITY_LATLON, indiaTime, sunDirection } from './sun';
 import { encodeShare, decodeShare } from './share';
 import { exploreOptions } from './options';
@@ -140,7 +141,7 @@ function App() {
   const toastT = useRef<number>();
   /** a line at the bottom for a few seconds; with `undo`, an Undo on it (for a change made away from the view) */
   const toast = (s: string, o?: { undo?: boolean }) => { setToastMsg({ s, undo: o?.undo }); clearTimeout(toastT.current); toastT.current = window.setTimeout(() => setToastMsg(null), o?.undo ? 7000 : 4200); };
-  const [dialog, setDialog] = useState<null | 'projects' | 'share' | 'drawings' | 'keys' | 'welcome' | 'team'>(() => (store.get(SEEN, false) || isPhone() || location.hash.startsWith('#s=') || new URLSearchParams(location.search).has('p') ? null : 'welcome'));
+  const [dialog, setDialog] = useState<null | 'projects' | 'share' | 'drawings' | 'keys' | 'welcome' | 'team' | 'area'>(() => (store.get(SEEN, false) || isPhone() || location.hash.startsWith('#s=') || new URLSearchParams(location.search).has('p') ? null : 'welcome'));
 
   // ---------- a shared link: /pro/#s=<the project> opens read-only ----------
   useEffect(() => {
@@ -409,7 +410,7 @@ function App() {
   /** the plot's editor is on: picked, or on the Site step with nothing else picked */
   const plotOn = picked?.k === 'plot' || (step === 'site' && !picked);
   const cur = STEPS.find((s) => s.key === step)!;
-  const props: StepProps = { p, e, up, rooms, checks, deal, go, openDrawings: () => setDialog('drawings'), toast, tool, setTool, picked, pick: setPicked, show: showBuilding };
+  const props: StepProps = { p, e, up, rooms, checks, deal, go, openDrawings: () => setDialog('drawings'), openStatement: () => setDialog('area'), toast, tool, setTool, picked, pick: setPicked, show: showBuilding };
   const Body = { site: SiteStep2, build: SchemeStep, design: DesignSystemStep, money: MoneyStep, approve: ApproveStep, explore: ExploreStep }[step];
 
   return (
@@ -480,7 +481,7 @@ function App() {
 
       <main class="stage">
         <canvas ref={canvas} onPointerMove={(ev) => setHover(view.current?.pick(ev.clientX, ev.clientY) ?? null)} onPointerLeave={() => setHover(null)} />
-        <ResultBar e={e} deal={deal} sum={sum} go={go} />
+        <ResultBar e={e} deal={deal} sum={sum} go={go} statement={() => setDialog('area')} />
         {!locked && <Shelf tool={tool} setTool={setTool} />}
         <div class="readout" ref={readout} hidden aria-live="polite"><b /><span /></div>
         {tool.k === 'select' && plotOn && <PlotHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} pick={setPicked} tx={tx} snap={snap} live={mode === 'wire' && xr === null} readOnly={locked} toast={toast} setTool={setTool}
@@ -554,6 +555,7 @@ function App() {
       {dialog === 'team' && user && ref && <Team pid={ref.id} role={ref.role ?? 'owner'} step={step} go={(s) => { go(s); }} close={() => setDialog(null)} />}
       {dialog === 'share' && <Dialog title="Share this scheme" close={() => setDialog(null)}><ShareBody name={p.name} load={() => Promise.resolve(p)} id={readOnly ? null : ref?.id} team={!!ref && ref.role !== 'viewer'} image={shareImage} toast={toast} done={() => setDialog(null)} /></Dialog>}
       {dialog === 'keys' && <Keys close={() => setDialog(null)} />}
+      {dialog === 'area' && <Dialog title="Area statement" close={() => setDialog(null)} wide><AreaStatementBody e={e} show={(bi) => { const id = e.d.buildings[bi]?.b.id; if (id) { setDialog(null); showBuilding(id); } }} print={phone ? undefined : () => setDialog('drawings')} /></Dialog>}
       {dialog === 'welcome' && <Welcome close={(n) => { store.set(SEEN, true); setDialog(null); if (n) { fresh(n); go('site'); } }} />}
       {dialog === 'drawings' && (
         <div class="sheets-wrap" role="dialog" aria-label="Drawing set">
@@ -568,7 +570,7 @@ function App() {
 
 /** The answer, always in view: what the plot builds, sells and makes, and whether it passes. Each figure flashes
  *  by how much the last change moved it. */
-function ResultBar({ e, deal, sum, go }: { e: ReturnType<typeof evaluate>; deal: ReturnType<typeof applyDeal>; sum: ReturnType<typeof scrutinySummary>; go: (s: Step) => void }) {
+function ResultBar({ e, deal, sum, go, statement }: { e: ReturnType<typeof evaluate>; deal: ReturnType<typeof applyDeal>; sum: ReturnType<typeof scrutinySummary>; go: (s: Step) => void; statement: () => void }) {
   const { r, d, shops } = e;
   const k = { bua: d.bua, flats: d.flats + (shops?.count ?? 0), profit: deal.profit, irr: deal.irr ?? 0 };
   const prev = useRef(k), [delta, setDelta] = useState<Partial<Record<keyof typeof k, number>>>({});
@@ -587,7 +589,7 @@ function ResultBar({ e, deal, sum, go }: { e: ReturnType<typeof evaluate>; deal:
   const D = (x: keyof typeof k, fmt: (v: number) => string) => delta[x] !== undefined && <i class={`delta ${delta[x]! > 0 ? 'up' : 'down'}`}>{delta[x]! > 0 ? '+' : '−'}{fmt(Math.abs(delta[x]!))}</i>;
   return (
     <div class="results" role="region" aria-label="Result">
-      <button type="button" class="kpi" onClick={() => go('build')}>
+      <button type="button" class="kpi" onClick={statement} title="The area statement">
         <span>Built-up</span><b>{sqft(d.bua)}{D('bua', (v) => `${nf(v * 10.7639)}`)}</b>
         <small><i class="meter"><i style={`width:${Math.min(100, used * 100)}%`} /></i>{nf(used * 100)}% of {nf(r.bua * 10.7639 / 1000)}k allowed</small>
       </button>
@@ -610,6 +612,7 @@ function ResultBar({ e, deal, sum, go }: { e: ReturnType<typeof evaluate>; deal:
         <span>Profit</span><b class={deal.profit < 0 ? 'bad' : ''}>{cr(deal.profit)}{D('profit', (v) => `${nf(v / 1e7, 2)} cr`)}</b>
         <small>{e.p.sale || e.p.land ? `${pct(deal.margin)} margin · ${cr(deal.revenue)} sales` : `${pct(deal.margin)} · starting prices`}</small>
       </button>
+      {!e.p.land && <LandKpi e={e} go={go} />}
       <button type="button" class="kpi" onClick={() => go('money')}>
         <span>IRR</span><b class={deal.irr !== null && deal.irr < 0 ? 'bad' : ''}>{pct(deal.irr)}{D('irr', (v) => `${nf(v * 100, 1)} pt`)}</b>
         <small>peak cash {cr(deal.peak)}</small>
@@ -621,6 +624,19 @@ function ResultBar({ e, deal, sum, go }: { e: ReturnType<typeof evaluate>; deal:
         <small>{sum.pass} pass{sum.fail && sum.warn ? ` · ${sum.warn} to check` : ''}</small>
       </button>
     </div>
+  );
+}
+
+/** While the land's price isn't put in, what the land is worth for the target: the buyer's first question. */
+function LandKpi({ e, go }: { e: ReturnType<typeof evaluate>; go: (s: Step) => void }) {
+  const T = targetOf(e.p), deal = e.p.deal ?? DEFAULT_DEAL;
+  const w = useMemo(() => landWorth(e, deal, T), [e, JSON.stringify(deal), T.by, T.v]);
+  return (
+    <button type="button" class="kpi" onClick={() => go('money')} title="The most the land is worth for your target (Money)">
+      <span>Land worth</span>
+      <b class={w.outright === null ? 'bad' : ''}>{w.outright === null ? 'Nothing' : `≤ ${cr(w.outright)}`}</b>
+      <small>for {pct(T.v, 0)} {T.by === 'irr' ? 'IRR' : 'margin'}{w.outright !== null && e.r.area > 0 ? ` · ₹${nf(w.outright / (e.r.area * 10.7639))}/sq ft` : ''}</small>
+    </button>
   );
 }
 

@@ -110,7 +110,18 @@ export interface ProProject {
   scheme?: { buildings: ProBuilding[]; elements: SiteElement[] };
   /** the building systems' settings (./systems.ts): the site's plant, and each building's own by its id */
   systems?: { site?: import('./systems').SystemsSettings; byBuilding?: Record<string, import('./systems').SystemsSettings> };
+  /** the FSI ladder: which of the paid parts on top of basic FSI are taken (unset: taken). Basic is always taken. */
+  load?: Partial<Load>;
+  /** what the land is worth is worked out for: a margin on revenue, or an IRR (a share: 0.2 is 20%) */
+  target?: { by: 'margin' | 'irr'; v: number };
 }
+
+/** The FSI ladder: basic, then premium (paid to the authority), TDR (bought in the market) and ancillary or
+ *  fungible (paid, a share of the rest), each taken or left. */
+export interface Load { premium: boolean; tdr: boolean; ancillary: boolean }
+export const loadOf = (p: ProProject): Load => ({ premium: p.load?.premium !== false, tdr: p.load?.tdr !== false, ancillary: p.load?.ancillary !== false });
+export const DEFAULT_TARGET = { by: 'margin' as const, v: 0.2 };
+export const targetOf = (p: ProProject) => p.target ?? DEFAULT_TARGET;
 
 export const fillOf = (p: ProProject): Fill => ({ ...DEFAULT_FILL, ...(p.fill ?? {}) });
 
@@ -179,8 +190,9 @@ export function roadLines(ring: number[], roads: (EdgeRoad | null)[]): { k: numb
   return out;
 }
 
-/** The plot against its roads, under its city's rules. */
-export function plotReport(p: ProProject, floorH = 3): PlotReport {
+/** The plot against its roads, under its city's rules, with only the FSI the ladder takes (`all`: every part, as
+ *  the rules permit it). */
+export function plotReport(p: ProProject, floorH = 3, all = false): PlotReport {
   const cfg = CITIES.find((c) => c.value === p.city) ?? CITIES[0];
   const { ring, roads } = outline(p);
   const lines = roadLines(ring, roads);
@@ -194,13 +206,20 @@ export function plotReport(p: ProProject, floorH = 3): PlotReport {
   const C = { geo: (id: string) => geo.get(id) } as unknown as Compiler;
   const plot: PlotObj = { kind: 'plot', id: 'plot', name: p.name, use: 'residential', congested: p.city === 'pune-congested', rules: { floorH }, ring };
   const r = analysePlot(doc, C, () => ids, plot, cfg.code);
-  const L = p.limits;
-  if (!L || (!(L.maxH > 0) && !L.tod)) return r;
+  const L = p.limits, ld = loadOf(p);
+  const laddered = !all && (!ld.premium || !ld.tdr || !ld.ancillary);
+  if ((!L || (!(L.maxH > 0) && !L.tod)) && !laddered) return r;
   // the site's limits on top of the code's: a lower height cap; in a transit zone, premium FSI up to the zone's total
   // (as Maharashtra's TOD policy allows on wide enough roads; check the notified zone)
   const rules: Partial<PlotRules> = { floorH };
-  if (L.maxH > 0) rules.maxH = Math.min(r.rules.maxH, L.maxH);
-  if (L.tod && r.roadW >= 9) rules.premium = Math.max(r.rules.premium, (L.todFsi || 4) - r.rules.basic - r.rules.tdr);
+  if (L && L.maxH > 0) rules.maxH = Math.min(r.rules.maxH, L.maxH);
+  if (L?.tod && r.roadW >= 9) rules.premium = Math.max(r.rules.premium, (L.todFsi || 4) - r.rules.basic - r.rules.tdr);
+  // then the ladder: a part not taken isn't there to build with (or to pay for)
+  if (laddered) {
+    if (!ld.premium) rules.premium = 0;
+    if (!ld.tdr) rules.tdr = 0;
+    if (!ld.ancillary) rules.ancillary = 0;
+  }
   return analysePlot(doc, C, () => ids, { ...plot, rules }, cfg.code);
 }
 

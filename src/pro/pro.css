@@ -787,3 +787,32 @@ details.chk .show { display: inline-flex; align-items: center; gap: 5px; margin:
 .sharebody { display: grid; gap: 12px; }
 .sharebody .row { margin: 0; }
 .sharebody .export { margin-top: 4px; }
+
+/* the numbers everyone shares: the FSI ladder, what the land is worth, the area statement */
+.muted { color: var(--up-muted); } .small { font-size: 11.5px; }
+.ladder { list-style: none; margin: 2px 0 10px; padding: 0; display: grid; }
+.ladder li { display: grid; gap: 2px; padding: 9px 0; border-bottom: 1px solid var(--up-line); }
+.ladder .rung-t, .ladder .rung-m { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.ladder .rung-t b { font-weight: 600; font-size: 12.5px; }
+.ladder .n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 12.5px; }
+.ladder .rung-s { color: var(--up-muted); font-size: 11px; line-height: 1.35; padding-left: 26px; }
+.ladder .rung-m { padding-left: 26px; font-size: 11.5px; color: var(--up-ink-2); font-variant-numeric: tabular-nums; }
+.ladder .rung-m .n { font-size: 11.5px; } .ladder .rung-m b { font-weight: 600; } .ladder .rung-m b.bad { text-decoration: underline; text-underline-offset: 3px; }
+.rung-fixed { display: inline-flex; gap: 8px; align-items: center; } .rung-fixed > .ico { margin: 0 2px; flex: none; color: var(--up-muted); }
+.ladder li.off .rung-t .n, .ladder li.off .rung-m > span:first-child { color: var(--up-muted); text-decoration: line-through; text-decoration-color: var(--up-line-strong); }
+.ladder .rung-tot { border-bottom: 0; border-top: 1.5px solid var(--up-ink); margin-top: -1px; }
+.ladder .rung-tot .rung-m { padding-left: 0; color: var(--up-muted); }
+.worth { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.worth > div { display: grid; gap: 2px; padding: 10px 12px; border-radius: 10px; background: var(--up-surface-2); }
+.worth span { font: 400 9.5px/1.4 var(--up-font-mono); color: var(--up-muted); text-transform: uppercase; letter-spacing: .07em; }
+.worth b { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.worth small { font-size: 11px; color: var(--up-muted); }
+@container (max-width: 380px) { .worth { grid-template-columns: 1fr; } }
+.astmt table { font-size: 12.5px; }
+.astmt td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 500; }
+.astmt td.s { width: 22px; text-align: center; padding-left: 0; } .astmt td.s .bad { display: inline-flex; padding: 1px; border-radius: 4px; background: var(--up-ink); color: var(--up-paper); }
+.astmt tr.h th { padding-top: 16px; color: var(--up-ink); font: 500 10px/1.4 var(--up-font-mono); text-transform: uppercase; letter-spacing: .07em; }
+.astmt tr.t td { font-weight: 600; border-bottom: 1.5px solid var(--up-ink); }
+.astmt tr.off td { color: var(--up-muted); }
+.astmt .linkbtn { text-align: left; }
+.astmt .row { margin-top: 12px; align-items: center; }

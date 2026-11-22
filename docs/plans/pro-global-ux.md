@@ -519,6 +519,14 @@ Each phase ships on its own and leaves Pro working. The order puts the **IA's mi
 - **The FSI ladder**: basic, premium, TDR, ancillary, each taken or left, with its area, cost and what it adds to profit. It replaces the "How much" slider. The generator takes a cap made of the chosen parts (sitePanels.tsx:147, src/doc/plot.ts:155-218, deal.ts:77).
 - **The most the land is worth**: the land price solved for a target margin or IRR (the inverse of `applyDeal`), and the largest owner's share under joint development. It's shown on the scorecard when the deal's land price is empty.
 - **Done when:** "is TDR worth buying here?" and "what can I pay for this land?" are each answered in one look; the area statement in Pro and on the drawing set match line for line.
+- **Status (2026-11-22): built.**
+  - **The ladder** lives in `ProProject.load`, src/pro/ladder.ts and `plotReport(p, floorH, all)`. It replaces Site › Allowed. "How much" is now "How much of it to build".
+  - **What each part adds** is worked out a part at a time once the project settles. It's shown only for a scheme that Fill the plot lays out, not for buildings placed by hand.
+  - **What the land is worth** comes from `landWorth` in deal.ts. It appears in Money, and as a Land worth figure on the scorecard while no land price is put in.
+  - **The area statement** (src/pro/areaStatement.ts) opens from Built-up, and the drawing set's sheet prints the same rows.
+  - **Not done yet:**
+    - per-floor lines for buildings that aren't formed;
+    - the stage-dependent scorecard (Phase 4).
 
 ### Phase 2: Find anything, one Share
 

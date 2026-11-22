@@ -4,6 +4,7 @@
 // opens on what most people change; the rest folds away. Every figure here comes from the one evaluation in
 // main.tsx (./evaluate.ts), so a panel never shows a number another disagrees with.
 import { Dither } from '../theme/Dither';
+import { LandWorthBox } from './numbersUi';
 import { useMemo, useState } from 'preact/hooks';
 import { UNIT_LABEL } from '../doc/site';
 import { outline, type ProProject } from './project';
@@ -37,7 +38,9 @@ export const STEPS: { key: Step; label: string; icon: string; title: string; sub
 export interface StepProps {
   p: ProProject; e: Evaluated; up: (o: Partial<ProProject>) => void;
   rooms: FlatRooms[][]; checks: Check[]; deal: DealResult;
-  go: (s: Step) => void; openDrawings: () => void; toast: (s: string, o?: { undo?: boolean }) => void;
+  go: (s: Step) => void; openDrawings: () => void;
+  /** the area statement, over the view */
+  openStatement: () => void; toast: (s: string, o?: { undo?: boolean }) => void;
   /** pick a building and bring it into the middle of the view (by its id) */
   show: (id: string) => void;
   /** the tool on the map, and what's picked on it (./edit.ts) */
@@ -163,6 +166,7 @@ export function MoneyStep({ p, e, up, deal, go }: StepProps) {
   const setR = (o: Partial<NonNullable<ProProject['rents']>>) => up({ rents: { ...(p.rents ?? {}), ...o } });
   return (
     <>
+      {deal.earns && <LandWorthBox p={p} e={e} up={up} />}
       {deal.earns ? <Section title="Result">
         <Lines rows={[['IRR', pct(deal.irr)], ['Margin', pct(deal.margin)], ['Peak funding', cr(deal.peak)], [deal.owner.label, cr(deal.owner.value)]]} />
         <CashChart flow={deal.flow} cum={deal.cum} months={c.months} />
