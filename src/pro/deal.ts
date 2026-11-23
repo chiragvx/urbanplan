@@ -8,6 +8,7 @@
 // Stamp duty is the developer's: on the conveyance when land is bought, on the agreement under a JDA. All the rates
 // are starting figures to replace with the project's own.
 import { cashflow, FLOOR_USE, LEASE_UP, SQFT, type UseLine } from '../doc/site';
+import { byUse } from '../doc/uses';
 import type { Evaluated } from './evaluate';
 
 export type DealKind = 'outright' | 'jda-revenue' | 'jda-area' | 'redevelopment';
@@ -50,7 +51,7 @@ export interface DealResult {
   uses: { label: string; amount: number; note: string; kind: 'in' | 'out' }[];
 }
 
-export const USE_LABEL: Record<UseLine['use'], string> = { residential: 'Homes', office: 'Offices', retail: 'Shops', hotel: 'Hotel', library: 'Library', toilet: 'Public toilet', community: 'Community hall', school: 'School', clinic: 'Clinic', parking: 'Parking floors' };
+export const USE_LABEL: Record<UseLine['use'], string> = byUse('line');
 
 /** Annual internal rate of return of monthly flows, by bisection; null when there isn't one (as in site.ts). */
 export function irr(flow: number[]): number | null {

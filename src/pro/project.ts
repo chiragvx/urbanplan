@@ -1,7 +1,7 @@
 // A Pro project: a plot set up by its outline and the roads along its edges (no city map needed), the rules it falls under,
 // the builder's design system, and what the generator is asked for. Turned into the same PlotReport and SiteReport
 // the editor's Site Studio works from (src/doc/plot.ts, site.ts, optimise.ts), so both give the same numbers.
-import { analysePlot, type PlotCode, type PlotReport, type PlotRules } from '../doc/plot';
+import { analysePlot, useInfo, type PlotCode, type PlotReport, type PlotRules, type PlotUse } from '../doc/plot';
 import { defaultCosts, FLOOR_USE, solveSite, type Laid, type PlotSite, type UseRates, type SiteBuilding, type SiteElement, type SiteReport } from '../doc/site';
 import type { Form, FormLayout } from './form/types';
 import { DEFAULT_DESIGN, optimise, park, siteDefaults, type Access, type Typology } from '../doc/optimise';
@@ -128,6 +128,56 @@ export interface ProProject {
   chosen?: string;
   /** a new project whose plot hasn't been set yet: the view shows the ways in (./start.tsx) */
   blank?: boolean;
+  /** what the project is: the use its buildings take unless they say otherwise (unset: homes). Its rules, fill and
+   *  parking follow it (docs/plans/pro-design-freedom.md §2) */
+  use?: ProjectUse;
+  /** who it's for: sold (profit, IRR, what the land is worth), or built for a client or for the owner's own use (what
+   *  it costs). Unset: sold */
+  purpose?: Purpose;
+}
+
+/** What a project is. Homes over shops is homes with a floor of shops along the front road (`shops`). */
+export type ProjectUse = 'residential' | 'mixed' | 'commercial' | 'shops' | 'hospital' | 'school' | 'government' | 'custom' | 'none';
+export const PROJECT_USES: { value: ProjectUse; label: string; icon: string }[] = [
+  { value: 'residential', label: 'Homes', icon: 'home' },
+  { value: 'mixed', label: 'Homes over shops', icon: 'building' },
+  { value: 'commercial', label: 'Offices', icon: 'briefcase' },
+  { value: 'shops', label: 'Shops', icon: 'shop' },
+  { value: 'hospital', label: 'Clinic or hospital', icon: 'plus' },
+  { value: 'school', label: 'School', icon: 'school' },
+  { value: 'government', label: 'Public building', icon: 'people' },
+  { value: 'custom', label: 'Something else', icon: 'cube' },
+  { value: 'none', label: 'Not decided yet', icon: 'circle' },
+];
+export type Purpose = 'sale' | 'client' | 'own';
+export const PURPOSES: { value: Purpose; label: string; sub: string }[] = [
+  { value: 'sale', label: 'To sell', sub: 'profit, IRR, what the land is worth' },
+  { value: 'client', label: 'For a client', sub: 'what it costs to build' },
+  { value: 'own', label: 'For my own use', sub: 'what it costs to build' },
+];
+/** the project's use as the engine reads it (homes over shops is homes, with its shops) */
+export const plotUseOf = (p: Pick<ProProject, 'use'>): PlotUse => (!p.use || p.use === 'mixed' ? 'residential' : p.use);
+export const purposeOf = (p: Pick<ProProject, 'purpose'>): Purpose => p.purpose ?? 'sale';
+/** sold: profit and IRR mean something (a public building or one built for a client or its owner isn't) */
+export const sold = (p: Pick<ProProject, 'purpose' | 'use'>) => purposeOf(p) === 'sale' && useInfo(plotUseOf(p)).sells;
+/** whether the project has homes: its use, or any of its buildings' */
+export function hasHomes(p: Pick<ProProject, 'use' | 'scheme'>): boolean {
+  if (plotUseOf(p) === 'residential') return true;
+  return (p.scheme?.buildings ?? []).some((b) => (b.form ? b.form.uses.some((u) => u.use === 'residential') : b.use === 'residential'));
+}
+/** The change for a new answer to what it is or who it's for: homes over shops brings a floor of shops at the front
+ *  (unless it has some), and going back to homes from it takes them off. */
+export function framed(p: ProProject, x: { use?: ProjectUse; purpose?: Purpose }): Partial<ProProject> {
+  const out: Partial<ProProject> = { ...x };
+  if (x.use === 'mixed' && !(p.shops && p.shops.floors > 0)) out.shops = { depth: 9, sale: 0, ...(p.shops ?? {}), floors: 1 };
+  if (x.use === 'residential' && p.use === 'mixed' && p.shops) out.shops = { ...p.shops, floors: 0 };
+  return out;
+}
+/** what a project is, in a few words: "Clinic or hospital · for a client" (nothing for homes to sell, the old default) */
+export function framingOf(p: Pick<ProProject, 'use' | 'purpose'>): string {
+  if (!p.use && !p.purpose) return '';
+  const u = PROJECT_USES.find((x) => x.value === (p.use ?? 'residential'))!.label, w = purposeOf(p);
+  return w === 'sale' ? `${u} to sell` : `${u} · ${w === 'client' ? 'for a client' : 'own use'}`;
 }
 
 /** The FSI ladder: basic, then premium (paid to the authority), TDR (bought in the market) and ancillary or
@@ -223,7 +273,7 @@ export function plotReport(p: ProProject, floorH = 3, all = false): PlotReport {
   const geo = new Map(lines.map((l, i) => [ids[i], { pts: l.pts }]));
   const doc = { get: (id: string) => sections.get(id) } as unknown as CityDoc;
   const C = { geo: (id: string) => geo.get(id) } as unknown as Compiler;
-  const plot: PlotObj = { kind: 'plot', id: 'plot', name: p.name, use: 'residential', congested: p.city === 'pune-congested', rules: { floorH }, ring };
+  const plot: PlotObj = { kind: 'plot', id: 'plot', name: p.name, use: plotUseOf(p), congested: p.city === 'pune-congested', rules: { floorH }, ring };
   const r = analysePlot(doc, C, () => ids, plot, cfg.code);
   const L = p.limits, ld = loadOf(p);
   const laddered = !all && (!ld.premium || !ld.tdr || !ld.ancillary);
@@ -259,11 +309,11 @@ export function laidOf(L: FormLayout, roof?: Form['roof']): Laid {
  *  buildings laid out (by id, see ./evaluate.ts), each counted floor by floor; a building whose form lays out to
  *  nothing stays the plain building of its spine. */
 export function generate(p: ProProject, r: PlotReport, specRate = 0, premium = 0, forms: Record<string, FormLayout> = {}, kit: { gateW?: number; roadW?: number } = {}): { d: SiteReport; shops: Shops | null } {
-  const c = defaultCosts(r.code, 'residential');
+  const use = plotUseOf(p), c = defaultCosts(r.code, use);
   const cost = { ...(p.costs ?? {}), ...(p.rents ?? {}), build: c.build + specRate, ...(p.land ? { land: p.land } : {}), sale: p.sale > 0 ? p.sale : Math.round((c.sale * (1 + premium)) / 50) * 50, ...(p.shops && p.shops.sale > 0 ? { retail: p.shops.sale } : {}) };
   const f = fillOf(p);
   const base: PlotSite = {
-    ...siteDefaults('residential'), ...parkingOf(f), mix: p.mix, ...(p.sizes ? { sizes: p.sizes } : {}), cost, keepOut: keepOutOf(p.features),
+    ...siteDefaults(use), ...parkingOf(f), mix: p.mix, ...(p.sizes ? { sizes: p.sizes } : {}), cost, keepOut: keepOutOf(p.features),
     design: { ...DEFAULT_DESIGN, type: p.typology, maxFloors: p.maxFloors, maxBuildings: f.buildings, spacing: f.spacing, access: f.access, green: f.green, ...kit },
   };
   // the user's own buildings: as they stand, checked
@@ -273,35 +323,35 @@ export function generate(p: ProProject, r: PlotReport, specRate = 0, premium = 0
     // (the optimiser's own roads are dropped: the site derives them afresh from the buildings as they now stand)
     const handEls = (p.scheme.elements ?? []).filter((e) => !(e.auto && (e.kind === 'road' || e.kind === 'roundabout')));
     let own: PlotSite = { ...base, buildings, elements: handEls, manual: true, design: { ...DEFAULT_DESIGN, ...base.design, deriveRoads: true } };
-    own = f.basements === undefined ? park(r, own, 'residential') : { ...own, basements: f.basements };
-    const sh = p.shops;
-    if (!sh || sh.floors <= 0) return { d: solveSite(r, own, 'residential'), shops: null };
-    return withShops(r, own, 'residential', sh, sh.sale > 0 ? sh.sale : Math.round((cost.sale * SHOP_PREMIUM) / 50) * 50);
+    own = f.basements === undefined ? park(r, own, use) : { ...own, basements: f.basements };
+    const sh = use === 'residential' ? p.shops : undefined;
+    if (!sh || sh.floors <= 0) return { d: solveSite(r, own, use), shops: null };
+    return withShops(r, own, use, sh, sh.sale > 0 ? sh.sale : Math.round((cost.sale * SHOP_PREMIUM) / 50) * 50);
   }
-  let site = optimise(r, base, 'residential');
+  let site = optimise(r, base, use);
   // 'auto' picks the layout that builds the most, which on a small plot can be a block too short for a flat beside
   // its core: then whichever building type houses the most
   if (p.typology === 'auto') {
-    const carpet = (x: typeof site) => solveSite(r, x, 'residential').carpet;
+    const carpet = (x: typeof site) => solveSite(r, x, use).carpet;
     if (carpet(site) < 1) {
-      const alt = (['tower', 'slab'] as const).map((type) => optimise(r, { ...base, design: { ...DEFAULT_DESIGN, ...base.design, type } }, 'residential'));
+      const alt = (['tower', 'slab'] as const).map((type) => optimise(r, { ...base, design: { ...DEFAULT_DESIGN, ...base.design, type } }, use));
       const best = alt.map((x) => ({ x, c: carpet(x) })).sort((a, b) => b.c - a.c)[0];
       if (best && best.c >= 1) site = best.x;
     }
   }
-  site = shaped(r, site, f);
+  site = shaped(r, site, f, use);
   if (f.basements !== undefined) site = { ...site, basements: f.basements };
-  const sh = p.shops;
-  if (!sh || sh.floors <= 0) return { d: solveSite(r, site, 'residential'), shops: null };
-  return withShops(r, site, 'residential', sh, sh.sale > 0 ? sh.sale : Math.round((cost.sale * SHOP_PREMIUM) / 50) * 50);
+  const sh = use === 'residential' ? p.shops : undefined;
+  if (!sh || sh.floors <= 0) return { d: solveSite(r, site, use), shops: null };
+  return withShops(r, site, use, sh, sh.sale > 0 ? sh.sale : Math.round((cost.sale * SHOP_PREMIUM) / 50) * 50);
 }
 
 /** The fill as asked: less than the most (floors off the tallest first until it's under the share), and a play
  *  area in the open space. */
-function shaped(r: PlotReport, site: PlotSite, f: Fill): PlotSite {
+function shaped(r: PlotReport, site: PlotSite, f: Fill, use: PlotUse = 'residential'): PlotSite {
   let out = site;
   if (f.amount < 0.999 && site.buildings.length) {
-    const d = solveSite(r, site, 'residential'), target = r.bua * Math.max(0.1, f.amount);
+    const d = solveSite(r, site, use), target = r.bua * Math.max(0.1, f.amount);
     const fl = d.buildings.map((b) => b.floors), plate = d.buildings.map((b) => b.plate);
     let bua = fl.reduce((s, n, i) => s + n * plate[i], 0);
     while (bua > target) {

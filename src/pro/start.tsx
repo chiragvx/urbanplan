@@ -3,7 +3,7 @@
 // The help corner (? at the end of the view tools) keeps a short checklist that ticks itself as you go, the keyboard
 // shortcuts and the guides.
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { CITIES, type ProProject } from './project';
+import { CITIES, PROJECT_USES, PURPOSES, purposeOf, type ProjectUse, type ProProject, type Purpose } from './project';
 import { optionsOf } from './variants';
 import { Btn, Icon, Num, Select } from './ui';
 
@@ -20,6 +20,23 @@ export interface StartWays {
   size: (x: Pick<ProProject, 'city' | 'width' | 'depth' | 'road' | 'dpRoad' | 'name'>) => void;
   /** keep the plot as it is and look round */
   skip: () => void;
+  /** say what the project is and who it's for (homes over shops brings a floor of shops at the front) */
+  frame: (x: { use?: ProjectUse; purpose?: Purpose }) => void;
+}
+
+/** What the project is and who it's for: two rows of choices (the empty state's, and the project panel's). */
+export function Framing({ p, set }: { p: Pick<ProProject, 'use' | 'purpose'>; set: (x: { use?: ProjectUse; purpose?: Purpose }) => void }) {
+  const use = p.use ?? 'residential', who = purposeOf(p);
+  return (
+    <div class="framing">
+      <div class="fr-row" role="radiogroup" aria-label="What it is">
+        {PROJECT_USES.map((u) => <button type="button" role="radio" aria-checked={use === u.value} class={use === u.value ? 'on' : ''} onClick={() => set({ use: u.value })}><Icon n={u.icon} size={15} />{u.label}</button>)}
+      </div>
+      <div class="fr-row fr-who" role="radiogroup" aria-label="Who it's for">
+        {PURPOSES.map((w) => <button type="button" role="radio" aria-checked={who === w.value} class={who === w.value ? 'on' : ''} onClick={() => set({ purpose: w.value })} data-tip={w.sub}>{w.label}</button>)}
+      </div>
+    </div>
+  );
 }
 
 export function EmptyState({ p, ways }: { p: ProProject; ways: StartWays }) {
@@ -27,8 +44,10 @@ export function EmptyState({ p, ways }: { p: ProProject; ways: StartWays }) {
   const [x, setX] = useState({ city: p.city, width: 40, depth: 50, road: 12 });
   return (
     <section class="empty-v" aria-label="Start with the plot">
-      <h2>Start with the plot</h2>
-      <p class="muted">The most the rules allow on it, in 3D, with the money. Four ways in:</p>
+      <h2>What are you designing?</h2>
+      <Framing p={p} set={ways.frame} />
+      <h2 class="h-plot">Then the plot</h2>
+      <p class="muted">What the rules allow on it, in 3D, with the numbers. Four ways in:</p>
       {!typing ? (
         <div class="ways">
           <button type="button" onClick={ways.find}><Icon n="pin" size={20} /><b>Find it on the map</b><small>By its survey number, or a place</small></button>
@@ -61,11 +80,12 @@ const flags = (): Partial<Record<Flag, boolean>> => { try { return JSON.parse(lo
 export const ticked = (f: Flag) => !!flags()[f];
 export const tick = (f: Flag) => { const x = flags(); if (x[f]) return; try { localStorage.setItem(TASKS, JSON.stringify({ ...x, [f]: true })); } catch { /* */ } };
 
-export type Task = 'plot' | 'building' | 'moved' | 'numbers' | 'option' | 'share';
+export type Task = 'purpose' | 'plot' | 'building' | 'moved' | 'numbers' | 'option' | 'share';
 export function taskList(p: ProProject): { k: Task; label: string; done: boolean }[] {
   const f = flags();
   const plotSet = !p.blank && (!!p.at || p.shape === 'poly' || p.width !== 40 || p.depth !== 50 || p.road !== 12);
   return [
+    { k: 'purpose', label: 'Say what it’s for', done: !!(p.use || p.purpose) },
     { k: 'plot', label: 'Set the plot', done: plotSet },
     { k: 'building', label: 'Put a building on it', done: (p.scheme?.buildings.length ?? 0) > 0 },
     { k: 'moved', label: 'Change its height or move it in 3D', done: !!f.moved },

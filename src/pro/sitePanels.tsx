@@ -9,7 +9,8 @@ import { useEffect, useState } from 'preact/hooks';
 import { SQFT, UNIT_LABEL } from '../doc/site';
 import { sizesOf } from './floor';
 import { ACCESS, TYPOLOGIES } from '../doc/optimise';
-import { CITIES, fillOf, type Fill } from './project';
+import { CITIES, fillOf, framed, framingOf, hasHomes, plotUseOf, type Fill } from './project';
+import { Framing } from './start';
 import { longestEdge } from './importPlot';
 import { readGround } from './plotOps';
 import { shopFloorsAllowed } from './mixed';
@@ -41,6 +42,9 @@ export function SiteStep2({ p, e, up, toast, tool, picked, pick, openStatement, 
   };
   return (
     <>
+      {B && <Section title="What it’s for" aside={<span class="sec-meta">{framingOf(p) || 'Homes to sell'}</span>} sub="Its rules, layout, parking and the money follow this.">
+        <Framing p={p} set={(x) => up(framed(p, x))} />
+      </Section>}
       {B && <Section title="Rules">
         <Select label="Planning authority" hint={city.note} value={p.city} onChange={(v) => up({ city: v })} options={CITIES.map((c) => ({ value: c.value, label: c.label }))} />
       </Section>}
@@ -68,7 +72,7 @@ export function SiteStep2({ p, e, up, toast, tool, picked, pick, openStatement, 
 // ================================================================ scheme
 const PARKING: { value: Fill['parking']; label: string; title: string }[] = [
   { value: 'auto', label: 'Auto', title: 'Whatever needs the fewest basements' },
-  { value: 'stilt', label: 'Stilt', title: 'The ground floor as parking, flats above' },
+  { value: 'stilt', label: 'Stilt', title: 'The ground floor as parking, the building above' },
   { value: 'basement', label: 'Basement', title: 'Under the ground' },
   { value: 'podium', label: 'Podium', title: 'Two levels of parking over the ground' },
   { value: 'surface', label: 'Open', title: 'Bays on the open ground' },
@@ -85,6 +89,8 @@ export function SchemeStep({ p, e, up, toast, pick, part }: StepProps) {
   const setShops = (x: Partial<typeof sh>) => up({ shops: { ...sh, ...x } });
   const allowed = shopFloorsAllowed(r.roadW);
   const sizes = sizesOf(p);
+  // (the flat mix and sizes, and shops priced against the flats, only where there are homes)
+  const homes = hasHomes(p);
   return (
     <>
       {B && <Section title="Layout" aside={<span class="sec-meta">{owned ? 'yours now' : `${TYPOLOGIES.find((t) => t.value === p.typology)?.label ?? 'Auto'} · ${Math.round(f.amount * 100)}% of the FSI`}</span>}>
@@ -97,7 +103,7 @@ export function SchemeStep({ p, e, up, toast, pick, part }: StepProps) {
             </Row>
           </>
           : <>
-            <Note>The plot is filled to these settings, and to the mix, sizes, living and parking below. To try another, duplicate the option first (the option menu).</Note>
+            <Note>The plot is filled to these settings, and to the {homes ? 'mix, sizes, ' : ''}living and parking below. To try another, duplicate the option first (the option menu).</Note>
             <Seg label="Building type" value={p.typology} set={(v) => up({ typology: v })} options={TYPOLOGIES} />
             <Row>
               <Num label="Most floors" value={p.maxFloors} set={(v) => up({ maxFloors: v })} min={0} max={300} zero="Auto" />
@@ -117,20 +123,20 @@ export function SchemeStep({ p, e, up, toast, pick, part }: StepProps) {
         {owned && <Note>The layout is yours: these apply when you fill again, except parking and basements, which apply now.</Note>}
       </Section>}
 
-      {B && <Section title="Flat mix" fold open={false} aside={<span class="sec-meta">{d.flats} flats</span>} sub="Every building, unless one has its own.">
+      {B && homes && <Section title="Flat mix" fold open={false} aside={<span class="sec-meta">{d.flats} flats</span>} sub="Every building, unless one has its own.">
         <div class="mixbar" aria-hidden="true">{[0, 1, 2].map((i) => <i class={`m${i}`} style={`flex:${p.mix[i] || 0.0001}`}>{mixPct[i] >= 12 ? `${mixPct[i]}%` : ''}</i>)}</div>
         <Row n={3}>{[0, 1, 2].map((i) => <Num label={UNIT_LABEL[i]} value={mixPct[i]} set={(v) => setMix(i, v)} max={100} step={5} unit="%" />)}</Row>
         <Note>{[0, 1, 2].filter((t) => d.count[t]).map((t) => `${d.count[t]} × ${UNIT_LABEL[t]}`).join(' · ') || 'No flats fit.'}</Note>
       </Section>}
 
-      {B && <Section title="Flat sizes" fold open={!!p.sizes} aside={<span class="sec-meta">{sizes.map((m) => nf(m * SQFT, 0)).join(' · ')} sq ft</span>} sub="RERA carpet of each type: the layout cuts flats near these sizes. A building can have its own (in the inspector).">
+      {B && homes && <Section title="Flat sizes" fold open={!!p.sizes} aside={<span class="sec-meta">{sizes.map((m) => nf(m * SQFT, 0)).join(' · ')} sq ft</span>} sub="RERA carpet of each type: the layout cuts flats near these sizes. A building can have its own (in the inspector).">
         <Row n={3}>{[0, 1, 2].map((t) => <Num label={`${UNIT_LABEL[t]} carpet`} value={Math.round((sizes[t] * SQFT) / 5) * 5} set={(v) => { const z = [...sizes] as [number, number, number]; z[t] = Math.round((v / SQFT) * 10) / 10; up({ sizes: z }); }} min={200} max={4000} step={25} unit="sq ft" />)}</Row>
         {p.sizes && <Row><Btn kind="quiet" icon="undo" onClick={() => up({ sizes: undefined })}>The starting sizes</Btn></Row>}
         <Note>Flats come whole: on a given floor they land near these sizes (about 15% under to 40% over), and the area statement and money follow what's laid.</Note>
       </Section>}
 
 
-      {D && <Section title="Shops at the front" fold open={sh.floors > 0} aside={shops ? <span class="sec-meta">{shops.count} shops</span> : undefined}>
+      {D && plotUseOf(p) === 'residential' && <Section title="Shops at the front" fold open={sh.floors > 0} aside={shops ? <span class="sec-meta">{shops.count} shops</span> : undefined}>
         <Seg<string> value={String(sh.floors)} set={(v) => setShops({ floors: +v })} options={[{ value: '0', label: 'None' }, { value: '1', label: 'Ground' }, { value: '2', label: 'G + 1' }, { value: '3', label: 'G + 2' }]} />
         {sh.floors > 0 && <>
           <Row>

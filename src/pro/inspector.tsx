@@ -6,7 +6,8 @@ import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
 import { fitLength, fittable, sizesOf, typicalOf } from './floor';
 import type { Evaluated } from './evaluate';
-import { CITIES, outline, type ProBuilding, type ProProject } from './project';
+import { CITIES, outline, plotUseOf, PROJECT_USES, type ProBuilding, type ProProject } from './project';
+import type { PlotUse } from '../doc/plot';
 import { duplicated, ELEMENT_TOOLS, own, removed, spineLength, stretched, turned, type Picked } from './edit';
 import { ELEMENTS, SQFT, UNIT_LABEL, type SiteElement } from '../doc/site';
 import { featureOf, INTERNAL_WIDTHS, DEFAULT_LEVELS, PLINTH_MIN, roadWidths, type Levels, type SiteFeature } from './siteObjects';
@@ -62,9 +63,14 @@ function BuildingInspector({ p, e, up, rooms, checks, pick, toast, xray, hide, r
   const setB = (fn: (b: ProBuilding) => ProBuilding) => { const s = own(p, e); up({ scheme: { ...s, buildings: s.buildings.map((b) => (b.id === id ? fn(b) : b)) } }); };
   const name = ownB.name ?? `Building ${String.fromCharCode(65 + bi)}`;
   const bp = { p, b: ownB, setB, once: up };
-  const residential = !ownB.form || ownB.form.uses.some((u) => u.use === 'residential');
+  const residential = ownB.form ? ownB.form.uses.some((u) => u.use === 'residential') : (ownB.use ?? plotUseOf(p)) === 'residential';
   const straight = !ownB.form && !ownB.closed && ownB.spine.length === 4;
   const homes = [0, 1, 2].map((t) => br.perFloor[t] * br.floors);
+  // (what it's for: a plain building's own use or the project's; a formed one's floors each say theirs, on the strip.
+  // No use yet: counted for its built-up area, height and margins only: docs/plans/pro-design-freedom.md step 2)
+  const projUse = PROJECT_USES.find((u) => u.value === (p.use === 'mixed' ? 'residential' : plotUseOf(p)))?.label ?? 'Homes';
+  const noUse = ownB.form ? ownB.form.uses.every((u) => u.use === 'none') : (ownB.use ?? plotUseOf(p)) === 'none';
+  const others = br.laid ? br.laid.floors.reduce((s, f) => s + f.units.filter((u) => u.t === 3).length, 0) : br.perFloor[3] * br.floors;
   const bua = br.laid ? br.laid.floors.reduce((s, f) => s + f.area, 0) : br.plate * br.floors;
   const runs: { use: string; from: number; to: number }[] = [];
   br.laid?.floors.forEach((f, k) => { const u = f.kind ?? 'residential', last = runs[runs.length - 1]; if (last && last.use === u) last.to = k + 1; else runs.push({ use: u, from: k + 1, to: k + 1 }); });
@@ -81,8 +87,11 @@ function BuildingInspector({ p, e, up, rooms, checks, pick, toast, xray, hide, r
       {deps.map((x) => <Note tone="bad">{x.text}</Note>)}
       <Lines rows={[
         ['Built-up', sqft(bua)],
-        ['Homes', `${homes.reduce((a, b) => a + b, 0)}${homes.some(Boolean) ? ` (${homes.map((n, t) => (n ? `${n} ${UNIT_LABEL[t]}` : '')).filter(Boolean).join(', ')})` : ''}`],
+        ...(noUse ? [['Use', 'No use yet']] as [string, string][]
+          : residential || homes.some(Boolean) ? [['Homes', `${homes.reduce((a, b) => a + b, 0)}${homes.some(Boolean) ? ` (${homes.map((n, t) => (n ? `${n} ${UNIT_LABEL[t]}` : '')).filter(Boolean).join(', ')})` : ''}`]] as [string, string][] : []),
+        ...(!noUse && others ? [['Other units', nf(others)]] as [string, string][] : []),
       ]} />
+      {noUse && <Note>No use yet: counted for its built-up area, height, margins and cost to build. Its units, parking and money wait for a use.</Note>}
       <fieldset disabled={readOnly}>
         <Section title="Size">
           <div class="insp-row">
@@ -97,6 +106,10 @@ function BuildingInspector({ p, e, up, rooms, checks, pick, toast, xray, hide, r
             <button type="button" class="btn quiet" onClick={() => setB((b) => turned(b, 90))}>90°</button>
           </div>
         </Section>
+        {!ownB.form && <Section title="What it’s for" sub="Its floors, parking and money follow this. Shaped, each band of floors can have its own.">
+          <Select<string> label="Use" value={ownB.use ?? ''} onChange={(v) => setB((b) => ({ ...b, use: v ? (v as PlotUse) : undefined }))}
+            options={[{ value: '', label: `As the project (${projUse})` }, ...PROJECT_USES.filter((u) => u.value !== 'mixed').map((u) => ({ value: u.value, label: u.value === 'none' ? 'No use yet' : u.label }))]} />
+        </Section>}
         {ownB.form
           ? <>
             <Section title="Shape"><ShapeBody {...bp} /></Section>
@@ -104,7 +117,7 @@ function BuildingInspector({ p, e, up, rooms, checks, pick, toast, xray, hide, r
             <Section title="Roof"><RoofBody {...bp} /></Section>
             <Section title="Skin"><SkinBody {...bp} /></Section>
           </>
-          : straight && <Section title="Shape" sub="Give it a form to sculpt: rings for its width, lean and twist, key floors, a slot."><Btn icon="wand" onClick={() => setB((b) => shapeIt(b, br.floors))}>Shape it</Btn></Section>}
+          : straight && <Section title="Shape" sub="Give it a form to sculpt: rings for its width, lean and twist, key floors, a slot."><Btn icon="wand" onClick={() => setB((b) => shapeIt(b, br.floors, plotUseOf(p)))}>Shape it</Btn></Section>}
         {residential && <TypicalFloor key={id} p={p} e={e} br={br} b={ownB} setB={setB} toast={toast} readOnly={readOnly} />}
         {residential && <Section title="Flat mix"><MixBody {...bp} /></Section>}
         <Section title="Design system" fold open={!!ownB.style}><StyleBody {...bp} /></Section>

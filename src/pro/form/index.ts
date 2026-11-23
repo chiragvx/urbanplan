@@ -5,7 +5,7 @@ import type { SiteBuilding } from '../../doc/site';
 import { sampleCurve as sample } from './curve';
 import { layMemo } from './lay';
 import { TEMPLATES as GALLERY } from './templates';
-import type { Curve, Form, FormContext, FormLayout, FormTemplate, Pt } from './types';
+import type { BuildingUse, Curve, Form, FormContext, FormLayout, FormTemplate, Pt } from './types';
 
 export * from './types';
 
@@ -39,10 +39,11 @@ export function layForm(b: SiteBuilding & { form?: Form }, ctx: FormContext): Fo
 /** The templates, in the gallery's order. */
 export const TEMPLATES: FormTemplate[] = GALLERY;
 
-/** A plain box form (the default for a building given a form by hand): a rectangle w × d, `floors` of homes. */
-export function boxForm(w: number, d: number, floors: number): Form {
+/** A plain box form (the default for a building given a form by hand): a rectangle w × d, `floors` of a use (homes
+ *  unless said). */
+export function boxForm(w: number, d: number, floors: number, use: BuildingUse = 'residential'): Form {
   return {
     plan: { pts: [[-w / 2, -d / 2], [w / 2, -d / 2], [w / 2, d / 2], [-w / 2, d / 2]] },
-    keys: [], ease: 'smooth', carves: [], roof: { kind: 'flat', pitch: 0, overhang: 0, dir: 0, parapet: 1 }, uses: [{ use: 'residential', floors }],
+    keys: [], ease: 'smooth', carves: [], roof: { kind: 'flat', pitch: 0, overhang: 0, dir: 0, parapet: 1 }, uses: [{ use, floors }],
   };
 }

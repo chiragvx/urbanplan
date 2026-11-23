@@ -22,7 +22,7 @@ import { buildingCores } from './coreDetail';
 import { TIERS, type Tier } from './render/quality';
 import * as designLibrary from './designLibrary';
 import { presetOf } from './design';
-import { CITIES, DEFAULT_PROJECT, outline, roadLines, targetOf, type ProProject } from './project';
+import { CITIES, DEFAULT_PROJECT, framed, framingOf, outline, plotUseOf, roadLines, sold, targetOf, type ProProject } from './project';
 import { listPro, listSharedPro, openPro, savePro, toText, type CloudRef } from './cloud';
 import { addMember, anchorsOff, EMAIL, joinProject, members as listMembers, NotSetUp, projectLink, removeMember, sendInvite, type Member } from './team';
 import { clearLocalNotes, cloudNotes, countsByThing, localNotes, mine as mineNote, threads, useNotes, type Note } from './comments';
@@ -318,6 +318,7 @@ function App() {
   useEffect(() => { if (firstPick && (ticked('moved') || picked?.k !== 'building')) { if (ticked('moved')) tick('pickhint'); setFirstPick(false); } }, [p.scheme, picked]);
   /** a checklist task, done for you as far as it can be: the tool armed, the report opened */
   const doTask = (t: Task) => {
+    if (t === 'purpose') { go('design'); setTimeout(() => findIn('What it’s for'), 40); toast('Say what it is and who it’s for: the rules, layout, parking and money follow.'); return; }
     if (t === 'plot') { setPicked({ k: 'plot' }); toast('The plot is picked: drag its corners, or set its size and roads in the inspector.'); return; }
     if (t === 'building') { setTool({ k: 'building', shape: 'tower' } as Tool); toast('Click on the plot where the tower goes.'); return; }
     if (t === 'moved') { const b = e.d.buildings[0]; if (b) { showBuilding(b.b.id); toast('Drag the arrow on its top for floors, or its middle to move it.'); } else { setTool({ k: 'building', shape: 'tower' } as Tool); toast('Put a building on the plot first: click where it goes.'); } return; }
@@ -756,6 +757,7 @@ function App() {
           importIt: () => { up({ blank: undefined }); openWay('import'); },
           size: (x) => { up({ ...x, shape: 'rect', corner: false, blank: undefined }); fitSoon(); toast(`The plot: ${x.width} × ${x.depth} m on a ${x.road} m road. Add a building from the toolbar, or pick the plot to change it.`); },
           skip: () => up({ blank: undefined }),
+          frame: (x) => up(framed(p, x)),
         }} />}
         <div class="readout" ref={readout} hidden aria-live="polite"><b /><span /></div>
         {tool.k === 'select' && plotOn && <PlotHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} pick={setPicked} tx={tx} snap={snap} live={mode === 'wire' && xr === null} readOnly={locked} toast={toast} setTool={setTool}
@@ -768,7 +770,7 @@ function App() {
         {noteStore && N.notes && xr === null && <CommentLayer view={view.current} e={e} notes={N.notes} mode={cmode} setMode={setCmode} openId={openNote} setOpenId={setOpenNote} option={p.option}
           add={(body, anchor) => void N.run(() => noteStore.add(body, step, anchor))} resolve={(n, v) => void N.run(() => noteStore.resolve(n.id, v))} remove={(n) => void N.run(() => noteStore.remove(n.id))}
           canResolve={canResolve} canDelete={(n) => mineNote(n) || ref?.role === 'owner' || !ref} />}
-        {inspOn && !picked && <InspFrame hide={() => setProjOpen(false)} title={<b>{p.name}</b>} meta={<>{nf(e.r.area)} m² · {CITIES.find((c) => c.value === p.city)?.label ?? p.city}</>}>
+        {inspOn && !picked && <InspFrame hide={() => setProjOpen(false)} title={<b>{p.name}</b>} meta={<>{framingOf(p) ? `${framingOf(p)} · ` : ''}{nf(e.r.area)} m² · {CITIES.find((c) => c.value === p.city)?.label ?? p.city}</>}>
           <fieldset disabled={locked}><ProjectBody {...props} /></fieldset>
         </InspFrame>}
         {inspOn && picked && <Inspector p={p} e={e} up={up} rooms={rooms} checks={checks} picked={picked} pick={setPicked} toast={toast} xray={setXray} hide={() => setInsp(false)} readOnly={locked} />}
@@ -876,6 +878,15 @@ function ResultBar({ e, deal, sum, go, statement, vs }: { e: ReturnType<typeof e
   const used = r.bua > 0 ? d.bua / r.bua : 0;
   // (a scheme of public buildings only earns nothing: what it costs stands in for profit and return)
   const publicOnly = d.buildings.length > 0 && (d.money as { earns?: boolean }).earns === false;
+  // (the figures follow what the project is and who it's for: homes only where there are homes, else its units or its
+  // buildings; profit and IRR only when it's sold, else what it costs, the land aside: docs/plans/pro-design-freedom.md §2)
+  const pu = plotUseOf(e.p), homesN = d.count[0] + d.count[1] + d.count[2];
+  // (every building with no use yet: what it costs and how big, nothing to sell or count until it has one)
+  const unused = d.buildings.length > 0 && d.buildings.every((b) => (b.laid ? b.laid.floors.every((f) => f.kind === 'none') : b.use === 'none'));
+  const show: 'homes' | 'units' | 'bldg' = publicOnly || unused || pu === 'none' ? 'bldg' : pu === 'residential' || homesN > 0 ? 'homes' : d.count[3] > 0 ? 'units' : 'bldg';
+  const unitWord = pu === 'commercial' ? 'Offices' : pu === 'shops' ? 'Shops' : 'Units';
+  const forWhom = (!sold(e.p) || unused) && !publicOnly;
+  const costOnly = publicOnly || forWhom;
   const D = (x: keyof typeof k, fmt: (v: number) => string) => delta[x] !== undefined && <i class={`delta ${delta[x]! > 0 ? 'up' : 'down'}`}>{delta[x]! > 0 ? '+' : '−'}{fmt(Math.abs(delta[x]!))}</i>;
   // (with "vs" on, a figure's second line is its difference from the base option)
   const V = (x: keyof VsFig & keyof typeof k, fmt: (v: number) => string, el: preact.ComponentChildren) => {
@@ -899,14 +910,14 @@ function ResultBar({ e, deal, sum, go, statement, vs }: { e: ReturnType<typeof e
         {V('bua', (v) => `${nf(v * 10.7639)} sq ft`, <small><i class="meter"><i style={`width:${Math.min(100, used * 100)}%`} /></i>{nf(used * 100)}% of {nf(r.bua * 10.7639 / 1000)}k allowed</small>)}
       </button>
       <button type="button" class="kpi" onClick={() => go('design')}>
-        {publicOnly ? <span>Buildings</span> : <span>Homes</span>}
-        {publicOnly ? <b>{d.buildings.length}</b> : <b>{d.flats}{shops ? <em> + {shops.count} shops</em> : null}{D('flats', (v) => nf(v))}</b>}
-        {V('flats', (v) => `${nf(v)} homes`, <small>{d.buildings.length} bldg · {d.buildings.map((b) => b.floors).join('+') || 0} floors · {nf(d.height)} m</small>)}
+        <span>{show === 'homes' ? 'Homes' : show === 'units' ? unitWord : 'Buildings'}</span>
+        {show === 'bldg' ? <b>{d.buildings.length}</b> : show === 'units' ? <b>{d.count[3]}{D('flats', (v) => nf(v))}</b> : <b>{d.flats}{shops ? <em> + {shops.count} shops</em> : null}{D('flats', (v) => nf(v))}</b>}
+        {V('flats', (v) => `${nf(v)} ${show === 'units' ? unitWord.toLowerCase() : 'homes'}`, <small>{d.buildings.length} bldg · {d.buildings.map((b) => b.floors).join('+') || 0} floors · {nf(d.height)} m</small>)}
       </button>
-      {publicOnly ? <>
+      {costOnly ? <>
       <button type="button" class="kpi" onClick={() => go('numbers')}>
-        <span>Cost</span><b>{cr(d.money.cost)}</b>
-        <small>public: nothing sold</small>
+        <span>Cost</span><b>{cr(forWhom ? d.money.cost - d.money.land : d.money.cost)}</b>
+        <small>{forWhom ? `${unused ? 'no use yet' : e.p.purpose === 'client' ? 'for a client' : e.p.purpose === 'own' ? 'own use' : 'nothing sold'} · land aside` : 'public: nothing sold'}</small>
       </button>
       <button type="button" class="kpi" onClick={() => go('numbers')}>
         <span>Build per m²</span><b>{d.bua > 0 ? `₹${nf((d.money.build + d.money.parking + d.money.soft) / d.bua)}` : '—'}</b>

@@ -2,6 +2,7 @@
 // floors (scaled, shifted, turned, or its own plan) with the carves cut out of it. All in local metres; the
 // layout (./lay.ts) turns them to world metres at the very end, since a turn and a move change no area.
 import { sampleCurve } from './curve';
+import { USE_TABLE } from '../../doc/uses';
 import { USE_INFO, type BuildingUse, type Carve, type Curve, type Form, type FormContext, type KeyFloor } from './types';
 
 /** how finely curves are sampled (m): fine enough to read as smooth in 3D, coarse enough to stay quick */
@@ -26,7 +27,7 @@ export function floorsOf(form: Form, total: number, ctx: FormContext): { use: Bu
   }
   const out: { use: BuildingUse; h: number }[] = [];
   for (const u of bands) {
-    const h = u.floorH && u.floorH > 1.8 ? u.floorH : u.use === 'residential' ? ctx.floorH || USE_INFO.residential.floorH : USE_INFO[u.use].floorH;
+    const h = u.floorH && u.floorH > 1.8 ? u.floorH : USE_TABLE[u.use].dsFloor ? ctx.floorH || USE_INFO[u.use].floorH : USE_INFO[u.use].floorH;
     for (let i = 0; i < u.floors; i++) out.push({ use: u.use, h });
   }
   return out;

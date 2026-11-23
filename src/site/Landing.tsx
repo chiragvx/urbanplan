@@ -16,8 +16,8 @@ const REPORT = href('site/sample-report.html');
 const STEPS = [
   { key: 'site', label: 'Site', title: 'Draw the site', body: 'The plot, its roads at the city’s widths, levels and north. Trees, power lines and no-build zones, on the map.' },
   { key: 'design', label: 'Design', title: 'A design system', body: 'Facade, windows, floors and finishes from a library of materials. Save it, change it, use it on any building.' },
-  { key: 'scheme', label: 'Scheme', title: 'Every building yours', body: 'Fill the plot to your settings, or place, turn and size each building. Its own flat mix, lifts, stairs and services.' },
-  { key: 'money', label: 'Money', title: 'Is it worth it', body: 'Price, cost and the land deal. Profit, IRR and the cash, month by month.' },
+  { key: 'scheme', label: 'Scheme', title: 'Every building yours', body: 'Fill the plot to your settings, or place, turn and size each building. Its own uses, lifts, stairs and services.' },
+  { key: 'money', label: 'Money', title: 'Is it worth it', body: 'What it costs to build. To sell: price, the land deal, profit, IRR and the cash, month by month.' },
   { key: 'approval', label: 'Approval', title: 'Ready for the authority', body: 'The scrutiny, NOCs, fees and documents. Drawings, IFC and a PreDCR DXF.' },
   { key: 'explore', label: 'Options', title: 'Every option', body: 'Several schemes for one plot, each kept as an option, compared side by side.' },
 ];
@@ -87,7 +87,7 @@ export function Landing() {
         <div class="wrap">
           <a class="pill" href="#pro"><i />UrbanPlan Pro · Beta · Pune and Mumbai</a>
           <h1>From a plot to a project.</h1>
-          <p class="lede">What a plot can hold under the rules, what it’s worth, and what the authority will ask for. Worked out in your browser, as you change it.</p>
+          <p class="lede">Homes, a shop, an office or a clinic; to sell, for a client or for your own use. What a plot can hold under the rules, what it costs, and what the authority will ask for. Worked out in your browser, as you change it.</p>
           <div class="cta-row">
             <StartLink class="btn btn-primary btn-lg">Start a project <Icon.arrow /></StartLink>
             <a class="btn btn-lg" href={REPORT} target="_blank" rel="noopener">See a sample report</a>
@@ -102,7 +102,7 @@ export function Landing() {
         <div class="wrap">
           <div class="section-head center reveal">
             <h2>Any building, any shape.</h2>
-            <p>Pick a template or draw your own. The floors, cores, flats and the rules follow it, from a tower to a public toilet.</p>
+            <p>Pick a template or draw your own. The floors, cores, units and the rules follow it, from a tower to a public toilet.</p>
           </div>
           <FormMorph />
         </div>

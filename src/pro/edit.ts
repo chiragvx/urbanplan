@@ -14,6 +14,7 @@
 // shows a short dashed guide. Moving a building snaps its corners the same way. Escape cancels, Delete removes
 // what's picked, the arrow keys nudge it a grid step (Shift: ten). Everything goes through `up`, so it undoes.
 import { DEFAULT_SITE, ELEMENTS, elementRings, roadFrame, buildingQuads, newBuildingId, pointIn, type SiteElement, type ElementKind } from '../doc/site';
+import { USE_TABLE } from '../doc/uses';
 import type { ProView, Overlay } from './scene';
 import type { Evaluated } from './evaluate';
 import { outline, ownScheme, type ProBuilding, type ProProject } from './project';
@@ -176,7 +177,7 @@ export function placeTemplate(id: string, o: Pt, e: Evaluated): ProBuilding[] {
  *  own, if fewer), so a tower still reads as one. */
 function fitRules(f: Form, e: Evaluated, parts: number): Form {
   const R = e.r.rules, under = e.d.under, fh = R.floorH;
-  const hOf = (u: UseBand) => (u.use === 'residential' ? fh : u.floorH ?? USE_INFO[u.use].floorH) * u.floors;
+  const hOf = (u: UseBand) => (USE_TABLE[u.use].dsFloor ? fh : u.floorH ?? USE_INFO[u.use].floorH) * u.floors;
   const left = Math.max(0, e.r.bua - (e.p.scheme ? e.d.bua : 0)) / Math.max(1, parts);
   const total = f.uses.reduce((t, u) => t + u.floors, 0), least = Math.min(2, total);
   // (k floors off the top band, then the next band down)

@@ -11,6 +11,8 @@
 // n = (−u.z, u.x)). Moving or turning the building's spine moves or turns the form; nothing else is stored.
 // Local coordinates are metres about that origin.
 
+import { FLOOR_USES, USE_TABLE, type FloorUse } from '../../doc/uses';
+
 export type Pt = [number, number];
 
 /** A free closed curve through its points: smooth points are passed through with a continuous tangent
@@ -67,9 +69,9 @@ export interface Roof {
   parapet?: number;
 }
 
-/** What a band of floors is used for. Each use has its own floor height, its own flats or rooms, its own parking,
- *  fire class, lifts and money (sold, leased, or a public building's cost only). */
-export type BuildingUse = 'residential' | 'office' | 'retail' | 'hotel' | 'library' | 'toilet' | 'community' | 'school' | 'clinic' | 'parking';
+/** What a band of floors is used for: a row of the use table (src/doc/uses.ts), which gives each its own floor height,
+ *  flats or rooms, parking, fire class, lifts and money (sold, leased, or a public building's cost only). */
+export type BuildingUse = FloorUse;
 export interface UseBand {
   use: BuildingUse;
   floors: number;
@@ -77,18 +79,9 @@ export interface UseBand {
   floorH?: number;
 }
 
-export const USE_INFO: Record<BuildingUse, { label: string; floorH: number; icon: string; sold: 'sale' | 'lease' | 'public' }> = {
-  residential: { label: 'Homes', floorH: 3.0, icon: 'home', sold: 'sale' },
-  office: { label: 'Offices', floorH: 3.6, icon: 'briefcase', sold: 'lease' },
-  retail: { label: 'Shops', floorH: 4.5, icon: 'shop', sold: 'sale' },
-  hotel: { label: 'Hotel', floorH: 3.3, icon: 'bed', sold: 'lease' },
-  library: { label: 'Library', floorH: 4.5, icon: 'book', sold: 'public' },
-  toilet: { label: 'Public toilet', floorH: 3.2, icon: 'drop', sold: 'public' },
-  community: { label: 'Community hall', floorH: 4.5, icon: 'people', sold: 'public' },
-  school: { label: 'School', floorH: 3.6, icon: 'school', sold: 'public' },
-  clinic: { label: 'Clinic', floorH: 3.6, icon: 'plus', sold: 'public' },
-  parking: { label: 'Parking', floorH: 3.0, icon: 'car', sold: 'public' },
-};
+/** each use's name, floor height, icon and how it earns, as the editor shows them: read off the use table */
+export const USE_INFO: Record<BuildingUse, { label: string; floorH: number; icon: string; sold: 'sale' | 'lease' | 'public' }> =
+  Object.fromEntries(FLOOR_USES.map((u) => { const x = USE_TABLE[u]; return [u, { label: x.label, floorH: x.floorH, icon: x.icon, sold: x.sold }]; })) as Record<BuildingUse, { label: string; floorH: number; icon: string; sold: 'sale' | 'lease' | 'public' }>;
 
 /** The skin's pattern: what the facade is made of, laid procedurally over every face of every floor. */
 export type SkinPattern = 'grid' | 'fins' | 'louvres' | 'bands' | 'diagrid' | 'screen' | 'curtain' | 'balconies';

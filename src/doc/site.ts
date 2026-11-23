@@ -7,6 +7,7 @@
 //
 // Pure: a site and a plot report in, numbers and rings (tile metres x,z) out.
 import { clipHalf, inset, polyArea, sideMargin, useInfo, type PlotCode, type PlotReport, type PlotUse } from './plot';
+import { FLOOR_USES, KIND_OF_PLOT, PLOT_PARK_PER, USE_TABLE, type FloorUse } from './uses';
 import { anglesFor, area as mpArea, diff, fromFlat, fromFlats, inside as mpInside, inter, layBays, layGround, NO_GROUND, offset, outlines, shrink, triangles, union, type GroundMap } from './ground';
 
 /** flat types: 1, 2 and 3 BHK; commercial floors are one office per stretch of corridor */
@@ -74,9 +75,8 @@ export interface SiteBuilding {
   laid?: Laid;
 }
 
-/** What a floor of a formed building is for. The same list as the form's uses (src/pro/form/types.ts BuildingUse),
- *  kept in step by hand: the engine doesn't reach into the Pro side for it. */
-export type FloorUse = 'residential' | 'office' | 'retail' | 'hotel' | 'library' | 'toilet' | 'community' | 'school' | 'clinic' | 'parking';
+/** What a floor of a formed building is for: a row of the use table (./uses.ts). */
+export type { FloorUse } from './uses';
 /** A floor of a formed building as the engine counts it. */
 export interface LaidFloor {
   /** floor area (m², after any carves) and floor to floor (m) */
@@ -97,29 +97,10 @@ export interface Laid {
 }
 
 /** Each floor use as the engine treats it: the plot use it counts as; a car for this many m² of carpet (0: none; homes
- *  go by UDCPR Table 8-B per flat instead); how it earns (sold, let and valued at a yield, run as a business and
- *  valued the same way, or a public building that only costs); and its construction cost over the base rate.
- *  Placeholders where the code has no figure of its own, as marked. */
-export const FLOOR_USE: Record<FloorUse, { plot: PlotUse; park: number; earns: 'sale' | 'lease' | 'operate' | 'public'; build: number }> = {
-  residential: { plot: 'residential', park: 0, earns: 'sale', build: 1 },
-  // offices and shops: a car per 100 m² of carpet, as PARK_PER has for commercial use
-  office: { plot: 'commercial', park: 100, earns: 'lease', build: 1.1 },
-  retail: { plot: 'shops', park: 100, earns: 'sale', build: 1 },
-  // a hotel: a car per four rooms of about 30 m² carpet each (placeholder: UDCPR Table 8-B goes by rooms and city
-  // class); dearer to build for its services and fit-out (placeholder)
-  hotel: { plot: 'commercial', park: 120, earns: 'operate', build: 1.6 },
-  // assembly by the seats it holds: a community hall a seat per 1.5 m² of carpet, a library a reader per 4 m², a car
-  // per 40 and 25 seats (placeholders)
-  library: { plot: 'government', park: 100, earns: 'public', build: 1.1 },
-  community: { plot: 'government', park: 60, earns: 'public', build: 1.1 },
-  // a public toilet needs no parking of its own; its tiling and fittings cost more a m² (placeholder)
-  toilet: { plot: 'government', park: 0, earns: 'public', build: 1.3 },
-  school: { plot: 'school', park: 200, earns: 'public', build: 1 },
-  clinic: { plot: 'hospital', park: 100, earns: 'public', build: 1.2 },
-  // a parking floor holds cars rather than needing them; free of FSI, priced at the parking rate
-  parking: { plot: 'carpark', park: 0, earns: 'public', build: 0 },
-};
-const KIND_OF_PLOT: Partial<Record<PlotUse, FloorUse>> = { residential: 'residential', commercial: 'office', shops: 'retail', school: 'school', hospital: 'clinic', government: 'library', carpark: 'parking' };
+ *  go by UDCPR Table 8-B per flat instead); how it earns; its construction cost over the base rate. Read off the use
+ *  table (./uses.ts), where the placeholders are marked. */
+export const FLOOR_USE: Record<FloorUse, { plot: PlotUse; park: number; earns: 'sale' | 'lease' | 'operate' | 'public'; build: number }> =
+  Object.fromEntries(FLOOR_USES.map((u) => { const x = USE_TABLE[u]; return [u, { plot: x.plot, park: x.park, earns: x.earns, build: x.build }]; })) as Record<FloorUse, { plot: PlotUse; park: number; earns: 'sale' | 'lease' | 'operate' | 'public'; build: number }>;
 /** A laid floor's use: its own, else the one its plot use stands for, else the building's. */
 export const floorKind = (f: LaidFloor, use: PlotUse): FloorUse => f.kind ?? KIND_OF_PLOT[f.use ?? use] ?? (use === 'residential' ? 'residential' : 'office');
 /** A laid floor counts in the built-up area (FSI) unless it's parking. */
@@ -743,7 +724,7 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
 }
 
 /** cars by use: one per this many m² of carpet (two two-wheelers with each); homes and sheds have their own tables */
-const PARK_PER: Partial<Record<PlotUse, number>> = { commercial: 100, shops: 100, government: 100, hospital: 100, worship: 100, custom: 100, school: 200 };
+const PARK_PER = PLOT_PARK_PER;
 
 const fm = (v: number) => (Math.round(v * 10) / 10).toLocaleString('en-IN');
 const fm2 = (v: number) => `${Math.round(v).toLocaleString('en-IN')} m²`;
@@ -853,6 +834,8 @@ function layFloorAs(b: SiteBuilding, site: PlotSite, use: PlotUse, height: numbe
   const corL = off(cor[0]), corR = off(cor[1]);
   if (!lobby) for (const g of segs) { const j = (g.k + 1) % n; corridors.push([corL[g.k * 2], corL[g.k * 2 + 1], corL[j * 2], corL[j * 2 + 1], corR[j * 2], corR[j * 2 + 1], corR[g.k * 2], corR[g.k * 2 + 1]]); }
 
+  // (no use yet: its plate, cores and corridor, but no units until it has a use; so no parking or sales either)
+  if (use === 'none') return { units, cores, corridors, perFloor };
   const width = site.sizes.map((a) => a / CARPET);
   for (const [oa, ob] of strips) {
     const depth = ob - oa;

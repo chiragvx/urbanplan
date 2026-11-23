@@ -13,6 +13,7 @@
 //   for the building as if it stood alone (those lines and spaces carry `site: true`, and `plantCost` says how much of
 //   `cost` is plant); `siteSystems` sizes it once for every building together.
 import { buaOf, floorKind, type BuildingReport, type FloorUse } from '../doc/site';
+import { FLOOR_USES, USE_TABLE } from '../doc/uses';
 
 export type Code = 'udcpr' | 'dcpr-island' | 'dcpr-suburbs';
 export type StairType = 'dog-leg' | 'scissor';
@@ -209,18 +210,23 @@ type Band = ReturnType<typeof fireBand>;
  *  40 times a day at about 9 L). `w` connected load (W/m² of carpet) and `trM2` (m² of carpet a tonne of AC, 0 for
  *  none) are rules of thumb (as assumed). Lift traffic (CIBSE Guide D): `hc` the share carried in 5 minutes and
  *  `interval` the longest wait (s), offices 12 % and 30 s, the rest about 10 % and 40–45 s (as assumed). */
-const USE_LOAD: Record<FloorUse, { cls: string; occ: number; lpcd: number; waterM2?: number; w: number; trM2: number; hc: number; interval: number }> = {
-  residential: { cls: 'A-4', occ: 12.5, lpcd: LPCD, w: 0, trM2: 0, hc: HC5, interval: INTERVAL },
-  hotel: { cls: 'A-5', occ: 12.5, lpcd: 180, w: 80, trM2: 25, hc: 0.1, interval: 45 },
-  school: { cls: 'B-1', occ: 4, lpcd: 45, w: 25, trM2: 0, hc: 0.1, interval: 45 },
-  clinic: { cls: 'C-1', occ: 10, lpcd: 45, w: 80, trM2: 20, hc: 0.1, interval: 45 },
-  community: { cls: 'D', occ: 1.5, lpcd: 15, w: 60, trM2: 25, hc: 0.1, interval: 45 },
-  library: { cls: 'D', occ: 4, lpcd: 15, w: 70, trM2: 25, hc: 0.1, interval: 45 },
-  office: { cls: 'E-1', occ: OFFICE_M2_PP, lpcd: OFFICE_LPCD, w: OFFICE_W, trM2: OFFICE_M2_TR, hc: 0.12, interval: 30 },
-  toilet: { cls: 'E', occ: 10, lpcd: 0, waterM2: 60, w: 15, trM2: 0, hc: 0.1, interval: 45 },
-  retail: { cls: 'F', occ: 6, lpcd: 45, w: 120, trM2: 20, hc: 0.1, interval: 40 },
-  parking: { cls: 'G-parking', occ: 30, lpcd: 0, w: 5, trM2: 0, hc: 0.05, interval: 90 },
+// (the class and the m² a person come from the use table, src/doc/uses.ts; the rest is the systems' own)
+const LOAD_OWN: Record<FloorUse, { lpcd: number; waterM2?: number; w: number; trM2: number; hc: number; interval: number }> = {
+  residential: { lpcd: LPCD, w: 0, trM2: 0, hc: HC5, interval: INTERVAL },
+  hotel: { lpcd: 180, w: 80, trM2: 25, hc: 0.1, interval: 45 },
+  school: { lpcd: 45, w: 25, trM2: 0, hc: 0.1, interval: 45 },
+  clinic: { lpcd: 45, w: 80, trM2: 20, hc: 0.1, interval: 45 },
+  community: { lpcd: 15, w: 60, trM2: 25, hc: 0.1, interval: 45 },
+  library: { lpcd: 15, w: 70, trM2: 25, hc: 0.1, interval: 45 },
+  office: { lpcd: OFFICE_LPCD, w: OFFICE_W, trM2: OFFICE_M2_TR, hc: 0.12, interval: 30 },
+  toilet: { lpcd: 0, waterM2: 60, w: 15, trM2: 0, hc: 0.1, interval: 45 },
+  retail: { lpcd: 45, w: 120, trM2: 20, hc: 0.1, interval: 40 },
+  parking: { lpcd: 0, w: 5, trM2: 0, hc: 0.05, interval: 90 },
+  // (no use yet: a shell, sized for nothing until it has one)
+  none: { lpcd: 0, w: 0, trM2: 0, hc: 0.1, interval: 45 },
 };
+const USE_LOAD: Record<FloorUse, { cls: string; occ: number; lpcd: number; waterM2?: number; w: number; trM2: number; hc: number; interval: number }> =
+  Object.fromEntries(FLOOR_USES.map((u) => [u, { cls: USE_TABLE[u].nbc ?? '—', occ: USE_TABLE[u].load || 30, ...LOAD_OWN[u] }])) as Record<FloorUse, { cls: string; occ: number; lpcd: number; waterM2?: number; w: number; trM2: number; hc: number; interval: number }>;
 
 /** The fire provisions a non-residential occupancy asks for over the apartments' Table 7 band (as assumed, until
  *  each group's own column of Table 7 is checked): above 15 m a wet riser, sprinklers throughout and a manual alarm
@@ -230,7 +236,7 @@ const USE_LOAD: Record<FloorUse, { cls: string; occ: number; lpcd: number; water
 function bandFor(kinds: Set<FloorUse>, h: number, biggestRetail: number): Band & { classes: string[] } {
   const band: Band = { ...fireBand(h) };
   const classes = [...new Set([...kinds].map((k) => USE_LOAD[k].cls))];
-  const other = [...kinds].filter((k) => k !== 'residential' && k !== 'parking');
+  const other = [...kinds].filter((k) => k !== 'residential' && k !== 'parking' && k !== 'none');
   const up = (x: Partial<Band>) => {
     if (x.riser && RISER_RANK[x.riser] > RISER_RANK[band.riser]) band.riser = x.riser;
     if (x.sprinklers && SPRINKLER_RANK[x.sprinklers] > SPRINKLER_RANK[band.sprinklers]) band.sprinklers = x.sprinklers;

@@ -11,7 +11,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { Vector3 } from 'three';
 import type { ProView } from './scene';
 import type { Evaluated } from './evaluate';
-import type { ProBuilding, ProProject } from './project';
+import { plotUseOf, type ProBuilding, type ProProject } from './project';
 import { duplicated, formRing, moved, own, removed, spineLength, stretched, turned, type Picked } from './edit';
 import { buildingQuads } from '../doc/site';
 import { shapeIt, withFloors } from './shapePanel';
@@ -299,11 +299,11 @@ export function Hud({ view, p, e, picked, pick, up, tx, snap, live, readOnly, in
         <button type="button" data-tip="Turn 15° clockwise (R)" onClick={() => setB((b) => turned(b, 15))}>+15°</button>
         <button type="button" data-tip="Turn a quarter" onClick={() => setB((b) => turned(b, 90))}>90°</button>
         <span class="hsep" />
-        {!ownB.form && ownB.spine.length === 4 && !ownB.closed && <button type="button" data-tip="Shape it: give it a form to sculpt" aria-label="Shape it" onClick={() => setB((b) => shapeIt(b, br.floors))}><Icon n="wand" size={15} /></button>}
+        {!ownB.form && ownB.spine.length === 4 && !ownB.closed && <button type="button" data-tip="Shape it: give it a form to sculpt" aria-label="Shape it" onClick={() => setB((b) => shapeIt(b, br.floors, plotUseOf(p)))}><Icon n="wand" size={15} /></button>}
         <button type="button" aria-label="Duplicate" data-tip="Duplicate (Ctrl+D)" onClick={() => { const s = own(p, e), src = s.buildings.find((b) => b.id === br.b.id); if (!src) return; const c = duplicated(src); once({ scheme: { ...s, buildings: [...s.buildings, c] } }); pick({ k: 'building', id: c.id }); toast(`Duplicated ${name}.`); }}><Icon n="copy" size={15} /></button>
         <button type="button" aria-label="Remove" data-tip="Remove (Delete)" onClick={() => { once(removed(p, e, { k: 'building', id: br.b.id })); pick(null); toast(`Removed ${name} · Ctrl+Z to undo`); }}><Icon n="trash" size={15} /></button>
         {!inspecting && <><span class="hsep" />
-        <BarExtras p={p} b={ownB} residential={!ownB.form || ownB.form.uses.some((u) => u.use === 'residential')} setB={setB} once={once} />
+        <BarExtras p={p} b={ownB} residential={ownB.form ? ownB.form.uses.some((u) => u.use === 'residential') : (ownB.use ?? plotUseOf(p)) === 'residential'} setB={setB} once={once} />
         <span class="hsep" /></>}
         {!inspecting && <button type="button" class="hinspect" data-tip="The inspector: all of it, its checks, systems and flat plans" onClick={inspect}><Icon n="panel" size={15} />Inspect</button>}
         <button type="button" aria-label="Deselect" data-tip="Deselect (Esc)" onClick={() => pick(null)}><Icon n="x" size={14} /></button>

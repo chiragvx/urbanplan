@@ -6,7 +6,9 @@
 // same size in the same place: its spine becomes the form's anchor (its first node the middle, its first segment
 // the way it faces).
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { boxForm, sampleCurve, USE_INFO, type BuildingUse, type Form, type KeyFloor, type Pt, type RoofKind, type SkinPattern } from './form';
+import { boxForm, sampleCurve, type BuildingUse, type Form, type KeyFloor, type Pt, type RoofKind, type SkinPattern } from './form';
+import { floorUseOf, FLOOR_USES } from '../doc/uses';
+import type { PlotUse } from '../doc/plot';
 import type { ProBuilding } from './project';
 import { keyAt, keysOf, PlanEditor, SilhouetteEditor } from './silhouette';
 import { spineLength } from './edit';
@@ -71,8 +73,8 @@ export function rounded(f: Form, c: number): Form {
 }
 
 // ---------------------------------------------------------------- uses
-export const USES = Object.keys(USE_INFO) as BuildingUse[];
-export const USE_FLOORS: Record<BuildingUse, number> = { residential: 8, office: 6, retail: 1, hotel: 6, library: 2, toilet: 1, community: 1, school: 3, clinic: 2, parking: 2 };
+export const USES: BuildingUse[] = FLOOR_USES;
+export const USE_FLOORS: Record<BuildingUse, number> = { residential: 8, office: 6, retail: 1, hotel: 6, library: 2, toilet: 1, community: 1, school: 3, clinic: 2, parking: 2, none: 4 };
 
 /** floors over the ground set to a number: the top band grows, or the top bands shrink (and go when empty) */
 export function setFloors(f: Form, n: number): Form {
@@ -151,19 +153,21 @@ export const SKINS: { value: SkinPattern; label: string }[] = [
 
 // ---------------------------------------------------------------- the section
 /** Make a straight building of the engine's a box form of its size, in its place, facing the same way. */
-export function shapeIt(b: ProBuilding, floors: number): ProBuilding {
+/** A plain building given a box form of its size, in its place; its floors take its use, or the project's (`use`), so
+ *  an office project's building shapes into offices (docs/plans/pro-design-freedom.md step 2). */
+export function shapeIt(b: ProBuilding, floors: number, use?: PlotUse): ProBuilding {
   const [ax, az, bx, bz] = b.spine, L = Math.hypot(bx - ax, bz - az) || 1, ux = (bx - ax) / L, uz = (bz - az) / L;
   const cx = (ax + bx) / 2, cz = (az + bz) / 2, r = (q: number) => Math.round(q * 100) / 100;
   // (its exact size: rounding it up could carry a building that fits its margins past them)
-  const form = boxForm(Math.round(spineLength(b) * 100) / 100, b.depth, Math.max(1, floors));
+  const form = boxForm(Math.round(spineLength(b) * 100) / 100, b.depth, Math.max(1, floors), floorUseOf(b.use ?? use));
   return { ...b, spine: [r(cx), r(cz), r(cx + ux), r(cz + uz)], closed: undefined, form, floors: Math.max(1, floors) };
 }
 
-export function ShapePanel({ b, floors, set }: { b: ProBuilding; floors: number; set: (fn: (b: ProBuilding) => ProBuilding) => void }) {
+export function ShapePanel({ b, floors, set, use }: { b: ProBuilding; floors: number; set: (fn: (b: ProBuilding) => ProBuilding) => void; use?: PlotUse }) {
   const f = b.form;
   if (!f) {
     if (b.spine.length !== 4 || b.closed) return null;
-    return <div class="shape-it"><Btn kind="primary" icon="wand" onClick={() => set((x) => shapeIt(x, floors))}>Shape it</Btn></div>;
+    return <div class="shape-it"><Btn kind="primary" icon="wand" onClick={() => set((x) => shapeIt(x, floors, use))}>Shape it</Btn></div>;
   }
   const setF = (fn: (f: Form) => Form) => set((x) => (x.form ? withForm(x, fn(x.form)) : x));
   // (its floors, shape, uses, roof and skin are on the view: the handles and the bar's popovers)

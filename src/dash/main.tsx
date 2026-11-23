@@ -268,7 +268,7 @@ function Home({ data, name, signedIn }: { data: Data; name: string; signedIn: bo
           <div><small>Projects</small><b>{nf(totals.n)}</b></div>
           <div><small>Plot area</small><b>{area(totals.area)}</b></div>
           <div><small>Built-up</small><b>{area(totals.bua)}</b></div>
-          <div><small>Homes</small><b>{nf(totals.homes)}</b></div>
+          {totals.homes > 0 && <div><small>Homes</small><b>{nf(totals.homes)}</b></div>}
         </section>
       )}
       <section class="d-sec">
@@ -343,7 +343,8 @@ function LocalCard({ data }: { data: Data }) {
 
 function Facts({ s }: { s: Summary | null | undefined }) {
   if (!s || !s.area) return null;
-  return <p class="d-facts">{area(s.area)}{s.homes ? ` · ${nf(s.homes)} homes` : ''}{s.floors ? ` · ${s.floors} fl` : ''}{s.profit !== null && s.homes ? ` · ${money(s.profit)}` : ''}</p>;
+  // (what it is first when it isn't homes to sell; its homes or other units; profit when it's sold, else its cost)
+  return <p class="d-facts">{s.what ? `${s.what} · ` : ''}{area(s.area)}{s.homes ? ` · ${nf(s.homes)} homes` : ''}{s.units ? ` · ${nf(s.units)} units` : ''}{s.floors ? ` · ${s.floors} fl` : ''}{s.profit !== null && s.homes ? ` · ${money(s.profit)}` : s.cost ? ` · ${money(s.cost)} to build` : ''}</p>;
 }
 
 function actions(r: D.Row, data: Data, ask: (k: 'rename' | 'delete' | 'move', r: D.Row) => void): { label: string; icon: string; onSelect?: () => void; href?: string }[] {

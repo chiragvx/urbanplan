@@ -7,6 +7,7 @@ import { inter, type MP } from '../../doc/ground';
 import { TRAVEL } from '../../doc/site';
 import { axisOf, edgeDist, inRings, pole } from './curve';
 import { largest, mpOf, ringsOf } from './shape';
+import { byUse, FLOOR_USES, USE_TABLE } from '../../doc/uses';
 import type { BuildingUse, Pt } from './types';
 
 /** a stair (two flights and landings, 2.8 × 5.7 m), a lift (car and shaft, 2.5 × 2.5 m) */
@@ -14,8 +15,9 @@ const STAIR_A = 16, LIFT_A = 6.2;
 /** the narrowest a core can be: a stair's length */
 const CORE_MIN = 5.8;
 /** floor area a person takes, by use (m²): what the lifts are counted from */
-const DENSITY: Record<BuildingUse, number> = { residential: 15, office: 10, retail: 6, hotel: 18, library: 8, toilet: 4, community: 4, school: 6, clinic: 8, parking: 30 };
-const PUBLIC = new Set<BuildingUse>(['library', 'toilet', 'community', 'school', 'clinic']);
+const DENSITY: Record<BuildingUse, number> = byUse('density');
+/** public rooms: a building with one gets a lift */
+const PUBLIC = new Set<BuildingUse>(FLOOR_USES.filter((u) => USE_TABLE[u].room));
 
 /** A core's floor area: its stairs (each with a fire-check lobby above 15 m, as NBC 2016 asks of a high-rise's
  *  escape stairs), its lifts and their lobby (2.5 m deep in front of them), service shafts (about 2 % of the floor),

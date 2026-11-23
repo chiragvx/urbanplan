@@ -23,6 +23,7 @@ const S = (step: Step | 'look', sec: string, words?: string, fields: (string | [
 
 export const FINDABLE: Findable[] = [
   // the site (Brief and Design)
+  ...S('brief', 'What it’s for', 'use purpose homes offices shops clinic hospital school public client own sell sale residential commercial mixed'),
   ...S('brief', 'Rules', 'authority city code udcpr dcpr', [['Planning authority', 'city rules code']]),
   ...S('design', 'Plot', 'size frontage depth outline corners survey import'),
   ...S('brief', 'What the plot permits', 'fsi ladder premium tdr ancillary fungible basic allowed permissible built-up'),

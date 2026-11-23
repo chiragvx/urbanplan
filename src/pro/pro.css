@@ -973,6 +973,16 @@ details.chk .show { display: inline-flex; align-items: center; gap: 5px; margin:
 .ways button b { font-size: 14px; font-weight: 600; margin-top: 4px; }
 .ways button small { font-size: 12px; color: var(--up-muted); }
 .ways-size { width: 100%; display: grid; gap: 10px; text-align: left; }
+/* what the project is and who it's for: chips (the empty state's and the project panel's) */
+.empty-v h2.h-plot { font-size: 16px; margin-top: 6px; }
+.framing { width: 100%; display: grid; gap: 8px; }
+.fr-row { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.fr-row button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; border: 1px solid var(--up-line); border-radius: 999px; background: var(--up-surface); color: var(--up-ink); font: inherit; font-size: 13px; cursor: pointer; }
+.fr-row button:hover { border-color: var(--up-ink); }
+.fr-row button.on { background: var(--up-ink); border-color: var(--up-ink); color: var(--up-paper); }
+.fr-row button:focus-visible { outline: 2px solid var(--up-focus); outline-offset: 2px; }
+.fr-who button { padding: 5px 12px; }
+.sec .framing .fr-row { justify-content: flex-start; }
 .ways-a { display: flex; justify-content: flex-end; gap: 8px; }
 @media (max-width: 640px) { .ways { grid-template-columns: 1fr; } }
 

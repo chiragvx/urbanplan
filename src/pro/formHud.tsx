@@ -11,6 +11,7 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { sampleCurve, toLocal, toWorld, USE_INFO, type BuildingUse, type Form, type KeyFloor } from './form';
+import { byUse } from '../doc/uses';
 import { keyAt, keyed, keysOf, previewFloors, slotCarve, sortedKeys, yOfT } from './silhouette';
 import { usePins, type Tx } from './hud';
 import { own, type CanvasEdit, type Picked } from './edit';
@@ -26,7 +27,7 @@ import type { RoofKind, SkinPattern } from './form';
 type W3 = [number, number, number];
 const r2 = (x: number) => Math.round(x * 100) / 100;
 /** a use's colour on the strip */
-const USE_COLOR: Record<BuildingUse, string> = { residential: '#9db9e3', office: '#a7c7b5', retail: '#f0b67f', hotel: '#c9a8e0', library: '#e6d28a', toilet: '#b9c2cc', community: '#e3a3a3', school: '#f2d38c', clinic: '#9fd6d0', parking: '#b5b5b5' };
+const USE_COLOR: Record<BuildingUse, string> = byUse('color');
 
 /** the keys as the procedure reads them, made real (the stand-ins at the ground and the top become keys) */
 const withKeys = (f: Form): Form => ({ ...f, keys: keysOf(f).map((k) => ({ ...k })) });

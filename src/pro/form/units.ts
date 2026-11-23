@@ -6,6 +6,7 @@
 // band. Odd leftovers (a deep plan's middle, a sliver at a carve) are lost area, not forced into rectangles.
 import { area, diff, inter, offset, type MP } from '../../doc/ground';
 import { CARPET } from '../../doc/site';
+import { FLOOR_USES, USE_TABLE } from '../../doc/uses';
 import { bbox, edgeDist, inRings, pole, ringArea } from './curve';
 import { mpOf, ringsOf } from './shape';
 import type { BuildingUse, FormContext, Pt } from './types';
@@ -14,14 +15,15 @@ import type { BuildingUse, FormContext, Pt } from './types';
 export const CORRIDOR = 1.8;
 /** the deepest a unit cut in from the facade runs when nothing meets it sooner (m) */
 const DEEP = 14;
-const PUBLIC = new Set<BuildingUse>(['library', 'toilet', 'community', 'school', 'clinic']);
+/** public rooms: each floor is one unit */
+const PUBLIC = new Set<BuildingUse>(FLOOR_USES.filter((u) => USE_TABLE[u].room));
 
 export interface Unit { t: 0 | 1 | 2 | 3; ring: number[]; carpet: number }
 
 /** What to cut a band into: each unit's type and its share (by area, or for shops by frontage), or the whole
  *  floor as one, or nothing. `placed` (flats of each type so far, up the building) keeps the mix on track. */
 function targets(use: BuildingUse, B: number, P: number, ctx: FormContext, placed: number[]): { t: Unit['t']; w: number }[] | 'whole' | null {
-  if (use === 'parking') return null;
+  if (use === 'parking' || use === 'none') return null;
   if (PUBLIC.has(use)) return 'whole';
   if (use === 'office' || use === 'hotel') {
     // offices of 100 to 150 m², or the whole floor when it's small; a hotel's rooms in clusters about as big
@@ -233,7 +235,7 @@ function wedges(piece: MP, rings: number[][], r: number[], w: number[], spine: n
  *  by CORRIDOR (one shape), `centres` the cores' centres. `houses`: the plan cut across into that many homes. */
 export function planUnits(floor: MP, use: BuildingUse, cores: number[][], corridor: MP, centres: Pt[], ctx: FormContext, placed: number[], houses = 0, outer?: number[]): Unit[] {
   const units: Unit[] = [];
-  if (!floor.length || use === 'parking') return units;
+  if (!floor.length || use === 'parking' || use === 'none') return units;
   const typeOf = (carpet: number): Unit['t'] => (use !== 'residential' ? 3 : carpet >= ctx.sizes[2] * 0.9 ? 2 : carpet >= ctx.sizes[1] * 0.9 ? 1 : 0);
   if (houses > 0) {
     // side by side across local x: one home a floor each, its own stair inside it

@@ -4,6 +4,125 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-23 · No use yet, and the use set last (docs/plans/pro-design-freedom.md, step 2)
+
+**Why:** designers want to make the form first and say what it's for afterwards. Shaping a building turned it into homes whatever the project was.
+
+**What changed:**
+- **"No use yet" is a use.** It's a row in the use table (src/doc/uses.ts) and the last entry in the use strip's "Add floors for…" list. A no-use building or band is counted for:
+  - its built-up area, height and margins;
+  - its cores;
+  - its cost to build.
+
+  It gets no units, parking, sales or occupancy class.
+  - A plain building of no use is planned with its plate, cores and corridor, but no units (src/doc/site.ts).
+  - A formed band of no use gets no units (src/pro/form/units.ts).
+  - Its floors take the design system's floor height, as homes do, so giving it a use later doesn't make it taller. A 3.3 m default had pushed the sample tower 4.5 m past its margins.
+  - The building systems size it as a shell (src/pro/systems.ts).
+- **A plain building's own use.** The inspector has a "What it's for" section with "As the project (…)", each use, and No use yet. A building with no use shows "Use: No use yet" and a note saying what waits for a use. Its lines show Homes only with homes, and other units apart.
+- **Shape it keeps the use.** A box form's band takes the building's use, or the project's: offices in an office project, a clinic in a hospital project, no use in an undecided one. Before, it was always homes (`shapeIt`, `boxForm`).
+- **The scorecard with nothing used yet.** When every building has no use, it shows Buildings, then Cost ("no use yet · land aside") and Build per m², instead of Homes 0, a loss and no IRR.
+- **One less hand-kept list.** The building systems' NBC classes and m² a person now come from the use table (it holds the same values, from systems.ts's NBC 2016 Table 3 reading). The systems keep their own water, power, cooling and lift-traffic figures.
+
+**How it was checked:**
+- **The `evaluate()` snapshot** on the nine sample projects is byte-identical to before the framing step, including the systems' cost.
+- **In Node:**
+  - **Shape it** in a homes, offices, hospital, own-use and undecided project gives bands of homes, offices, clinic, offices and no use. The undecided one has no units, no parking need, and the same 48 m height as homes.
+  - **The sample tower,** plain or shaped, homes or no use: no failing checks.
+- **`npx tsc --noEmit -p .`, all eight tests and `npm run build`** pass.
+- **Browser,** on the sample project (this session's server, port 5175; storage backed up and restored exactly, no viewport size set):
+  - Use → No use yet: the scorecard became Buildings 1 · Cost · Build per m², and the inspector showed the note.
+  - Shape it gave one band, "No use yet: 15 floors".
+  - Rules: all clear.
+  - Switching the project to Offices kept the building's own no-use band.
+  - No console errors.
+
+**Left or known:**
+- **The use is set per building or per band of floors, not per space:** spaces are step 5.
+- **The Building tool's new buildings are plain,** so they already take the project's use. Templates keep their own uses, since they're presets.
+- **The simple editor shares the engine.** A plain building of plot use "none" there now gets no units either, as that use's own note already promised ("units, parking and money wait for a use").
+
+---
+
+## 2026-11-23 · One use table (docs/plans/pro-design-freedom.md, step 1)
+
+**Why:** what differs by use was kept in seven lists, in step by hand, across the engine, the form and the UI. Adding a use meant editing all of them.
+
+**What changed:**
+- **New: src/doc/uses.ts.** One row per floor use, holding:
+  - its name, the name on the area statement's lines, icon and colour;
+  - its floor height and how the editor says it earns;
+  - the plot use it counts as, its parking, how it earns and its cost factor;
+  - people per m² for the lifts;
+  - whether a floor of it is one public room.
+- **Two new fields on each row, not used in any figure yet:** its NBC 2016 occupancy group, and its occupant load for exits. Both are from secondary sources, for steps 6 and 7.
+- **The old lists are now read off the table:**
+  - `FloorUse`, `FLOOR_USE`, `KIND_OF_PLOT` and `PARK_PER` (src/doc/site.ts);
+  - `BuildingUse` and `USE_INFO` (src/pro/form/types.ts);
+  - `DENSITY` and the public-room sets (src/pro/form/skeleton.ts and units.ts);
+  - `USE_LABEL` (src/pro/deal.ts);
+  - `USE_COLOR` (src/pro/formHud.tsx);
+  - `USES` (src/pro/shapePanel.tsx).
+
+  Every name they exported is kept, so nothing else changed.
+
+**How it was checked:**
+- **Figures:** the `evaluate()` snapshot on the same nine sample projects is byte-identical to before the framing step. It covers built-up, units, parking, money, systems, every check's text, and each formed floor's use, area and units.
+- **`npx tsc --noEmit -p .`, all eight tests and `npm run build`** pass.
+- **Browser, on the Office on shops template:**
+  - the use strip reads "Offices: 16 floors" and "Shops: 2 floors";
+  - the "Add floors for…" list has all ten uses in their old order and colours;
+  - the area statement lines read "levels 3–18 offices" and "Shops 40 units".
+
+  No console errors. Storage was backed up and restored exactly.
+
+**Left or known:**
+- The plot uses (`USES` in src/doc/plot.ts, for the zone and the simple editor) are a separate list, on purpose: they are what the land is zoned for, not what a floor is used for. Each table row says which plot use it counts as.
+- UDCPR's office parking ratio looks higher than the table's 1 per 100 m² (research note N5). Correcting it changes figures, so it is a separate change, after reading the official Table 8-B.
+
+---
+
+## 2026-11-23 · Framing: the project says what it's for (docs/plans/pro-design-freedom.md, step F)
+
+**Why:** Pro talked as if every project were flats for sale. Many users design for themselves or a client: a house, a shop, an office, a clinic.
+
+**What changed:**
+- **Two new project fields, `use` and `purpose`** (src/pro/project.ts). An old project has neither, and reads as homes to sell, so nothing changes for it.
+  - **The use:** Homes, Homes over shops, Offices, Shops, Clinic or hospital, School, Public building, Something else, Not decided yet.
+  - **Who it's for:** To sell, For a client, For my own use.
+- **Asked at the start.** The empty state opens on "What are you designing?", with two rows of choices above the four ways to set the plot.
+- **Changed later in the project panel**, in a new first section, "What it's for". Search finds it. The panel's subtitle shows the answer ("Offices · for a client").
+- **The rules and the fill follow the use.** `plotReport` and `generate` take the project's use instead of a hard-coded `'residential'`. That covers the FSI, margins, parking, the fill and stilts by default. "Homes over shops" is homes with a floor of shops at the front, which it sets.
+- **The scorecard follows both answers.**
+  - It shows Homes only where there are homes. Otherwise it shows Offices, Shops or Units, or Buildings for "not decided yet".
+  - When the project isn't sold, Profit, Land worth and IRR give way to Cost (the land aside) and Build per m².
+- **The project panel and inspector:** Flat mix, Flat sizes and Shops at the front show only with homes, and the building's flat mix only on a building with homes. Stilt parking reads "the building above", not "flats above".
+- **The checklist** starts with "Say what it's for".
+- **The dashboard:**
+  - a card leads with what the project is ("Clinic or hospital · for a client") and shows its other units, and "to build" cost rather than profit when it isn't sold;
+  - the Homes total is hidden when there are none.
+- **The home page:** the lede names homes, a shop, an office or a clinic, to sell, for a client or for your own use. "Its own flat mix" is now "its own uses", and "flats" is now "units".
+
+**How it was checked:**
+- **Figures:** `evaluate()` was snapshotted on nine sample projects before and after: the default, towers, slabs, Mumbai, shops at the front, a mix, and formed homes, other uses and sculpted forms. The JSON is byte-identical.
+- **Every use × to sell and for a client** was evaluated with its summary. Nothing throws, and the offices, shops and public uses fill with units, not flats.
+- **`npx tsc --noEmit -p .`, `npm test` (ALL OK in all eight) and `npm run build`** all pass.
+- **In the browser** at `/pro/?new=blank`, on this session's own dev server (port 5175, since 5173 was the other session's). Storage was backed up to sessionStorage and restored exactly.
+  - The empty state shows the choices.
+  - Offices and For a client gave Built-up · Offices 60 · Cost · Build per m² · Rules.
+  - The project panel showed "What it's for", with no Flat mix, Flat sizes or Shops.
+  - Back to Homes and To sell gave Homes · Profit · Land worth · IRR, and the three sections came back.
+  - The checklist ticks "Say what it's for".
+  - No console errors.
+  - No viewport size was set.
+
+**Left or known:**
+- **Engine:** the engine's money for a plain building of a public use (school, hospital) still counts its units as sold. The scorecard hides that by showing Cost, but the Numbers report's Money tab still shows revenue. Money by use is step 6 of the plan.
+- **Rent:** "For rent" isn't offered yet: rent and a yield come with step 6.
+- **New buildings:** a new building drawn by hand is still homes whatever the project's use. That's step 2.
+
+---
+
 ## 2026-11-23 · Generate removed
 
 **Why:** tried on the sample project, Generate wasn't useful.
