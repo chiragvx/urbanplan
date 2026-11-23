@@ -124,6 +124,8 @@ export interface ProProject {
   option?: string;
   /** the option chosen to take forward */
   chosen?: string;
+  /** a new project whose plot hasn't been set yet: the view shows the ways in (./start.tsx) */
+  blank?: boolean;
 }
 
 /** The FSI ladder: basic, then premium (paid to the authority), TDR (bought in the market) and ancillary or

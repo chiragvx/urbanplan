@@ -19,7 +19,8 @@ function Grid({ items, tool, setTool, label }: { items: { t: Tool; label: string
   );
 }
 
-export function Shelf({ tool, setTool: set }: { tool: Tool; setTool: (t: Tool) => void }) {
+/** `hint`: what the tool in hand wants next (click the corners…, Enter to finish), beside the shelf */
+export function Shelf({ tool, setTool: set, hint }: { tool: Tool; setTool: (t: Tool) => void; hint?: import('preact').ComponentChildren }) {
   const [fly, setFly] = useState<Fly>(null);
   const root = useRef<HTMLDivElement>(null);
   const setTool = (t: Tool) => { set(t); setFly(null); };
@@ -57,6 +58,7 @@ export function Shelf({ tool, setTool: set }: { tool: Tool; setTool: (t: Tool) =
             <Grid label="On the site" tool={tool} setTool={setTool} items={FEATURES.map((f) => ({ t: { k: 'feature', kind: f.kind } as Tool, label: f.label, icon: f.icon }))} /></>}
         </div>
       )}
+      {!fly && hint}
     </div>
   );
 }

@@ -24,7 +24,11 @@ import * as designLibrary from './designLibrary';
 import { presetOf } from './design';
 import { DEFAULT_PROJECT, outline, roadLines, STAGE_LABEL, STAGE_SUB, stageOf, targetOf, type ProProject, type Stage } from './project';
 import { listPro, listSharedPro, openPro, savePro, toText, type CloudRef } from './cloud';
-import { addComment, addMember, comments as listComments, deleteComment, EMAIL, joinProject, members as listMembers, NotSetUp, projectLink, removeMember, resolveComment, sendInvite, type Comment, type Member } from './team';
+import { addMember, anchorsOff, EMAIL, joinProject, members as listMembers, NotSetUp, projectLink, removeMember, sendInvite, type Member } from './team';
+import { clearLocalNotes, cloudNotes, countsByThing, localNotes, mine as mineNote, threads, useNotes, type Note } from './comments';
+import { CommentLayer, CommentList } from './commentPins';
+import { Outline } from './outline';
+import { EmptyState, HelpCorner, tick } from './start';
 import { authReady, explain, peekSession, session, signOut, startAuth } from '../auth/auth';
 import type { Project } from '../app/cloud';
 import { evaluate, dsOfBuilding } from './evaluate';
@@ -127,7 +131,7 @@ function App() {
   const [detent, setDetent] = useState<Detent>('half');
   /** what the sheet covers of the view (px from the left, from the bottom): the 3D and its tools keep clear of it */
   const [cov, setCov] = useState<[number, number]>([0, 0]);
-  const cover = (x: number, y: number) => { setCov((c) => (c[0] === x && c[1] === y ? c : [x, y])); view.current?.setCover(x, y); };
+  const cover = (x: number, y: number) => { setCov((c) => (c[0] === x && c[1] === y ? c : [x, y])); };
   const openSheet = () => { setPanel(true); if (narrow && detent === 'peek') setDetent('half'); };
   // (a phone has its own four sheets: an editing step's link lands on the one that shows it)
   const [vstep, setVstepS] = useState<ViewStep>(() => store.get<ViewStep>('urbanplan:pro:vstep', 'overview'));
@@ -157,7 +161,12 @@ function App() {
   /** a line at the bottom for a few seconds; with `undo`, an Undo on it (for a change made away from the view) */
   const toast = (s: string, o?: { undo?: boolean }) => { setToastMsg({ s, undo: o?.undo }); clearTimeout(toastT.current); toastT.current = window.setTimeout(() => setToastMsg(null), o?.undo ? 7000 : 4200); };
   const [search, setSearch] = useState(false);
-  const [dialog, setDialog] = useState<null | 'share' | 'drawings' | 'keys' | 'welcome' | 'team' | 'area' | 'look' | 'compare'>(() => (store.get(SEEN, false) || isPhone() || location.hash.startsWith('#s=') || new URLSearchParams(location.search).has('p') ? null : 'welcome'));
+  const [dialog, setDialog] = useState<null | 'share' | 'drawings' | 'keys' | 'people' | 'area' | 'look' | 'compare'>(null);
+  // (a first visit with nothing kept here: the empty state on the view, not a dialog)
+  useEffect(() => {
+    if (!store.get(SEEN, false) && !isPhone() && !location.hash.startsWith('#s=') && !BOOT.has('p') && !BOOT.has('new') && localStorage.getItem(KEY) === null) setP({ ...DEFAULT_PROJECT, blank: true });
+    store.set(SEEN, true);
+  }, []);
 
   // ---------- a shared link: /pro/#s=<the project> opens read-only ----------
   useEffect(() => {
@@ -227,8 +236,7 @@ function App() {
       void designLibrary.get(dsId).then((s) => { fresh({ ...DEFAULT_PROJECT, city, ...(s ? { custom: s.ds, style: presetOf(s.ds.id).id } : {}) }); go('design'); setDialog('look'); });
       return;
     }
-    fresh({ ...DEFAULT_PROJECT, city });
-    if (start === 'blank') setDialog('welcome');
+    fresh({ ...DEFAULT_PROJECT, city, ...(start === 'blank' ? { blank: true } : {}) });
     if (start === 'survey' || start === 'import') { try { sessionStorage.setItem('urbanplan:pro:way', start); } catch { /* */ } go('design'); }
     if (start === 'sample') go('design');
   }, []);
@@ -240,7 +248,7 @@ function App() {
   /** nothing may change: a share link, a viewer on the team, or a phone */
   const locked = readOnly || viewer || phone;
   const roRef = useRef(false); roRef.current = locked;
-  const fresh = (n: ProProject = { ...DEFAULT_PROJECT }) => { replace(n); setRef(null); lastSaved.current = ''; setDialog(null); history.replaceState(null, '', '?local'); };
+  const fresh = (n: ProProject = { ...DEFAULT_PROJECT, blank: true }) => { clearLocalNotes(); replace(n); setRef(null); lastSaved.current = ''; setDialog(null); history.replaceState(null, '', '?local'); };
   useEffect(() => {
     if (!user || locked) { setCloud({ s: 'local' }); return; }
     const text = toText(p);
@@ -257,6 +265,33 @@ function App() {
     }, 2500);
     return () => clearTimeout(t);
   }, [JSON.stringify(p), user?.id]);
+
+  // ---------- the outline, focus mode, comments ----------
+  /** the outline beside the sheet: open by default on a wide screen, remembered */
+  const [olOpen, setOlOpenS] = useState<boolean>(() => store.get<boolean>('urbanplan:pro:outline', typeof innerWidth !== 'undefined' && innerWidth >= 1440));
+  const setOlOpen = (v: boolean) => { setOlOpenS(v); store.set('urbanplan:pro:outline', v); };
+  /** focus mode (Shift+\): the sheet and the outline away; the view, its tools and the scorecard kept */
+  const [focus, setFocusS] = useState(false);
+  const setFocus = (on: boolean) => { setFocusS(on); setPanel(!on); };
+  // (hidden in the view, and not picked there: this session's view of the project, not saved in it)
+  const [hidden, setHidden] = useState<Set<string>>(() => new Set());
+  const [lockedIds, setLockedIds] = useState<Set<string>>(() => new Set());
+  const toggleOl = (which: 'hidden' | 'locked', id: string) => {
+    const set = which === 'hidden' ? setHidden : setLockedIds;
+    set((x) => { const n = new Set(x); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+    if (picked && 'id' in picked && picked.id === id) setPicked(null);
+  };
+  useEffect(() => { if (edit.current) edit.current.locked = lockedIds; }, [lockedIds]);
+  // comments: the project's people, in the cloud; notes to self for a project only in this browser
+  const noteStore = useMemo(() => (phone || readOnly ? null : ref && user ? cloudNotes(ref.id) : !ref ? localNotes() : null), [ref?.id, user?.id, readOnly, phone]);
+  const N = useNotes(noteStore);
+  const [cmode, setCmodeS] = useState(false);
+  const setCmode = (on: boolean) => { setCmodeS(on); if (on) { setToolS(SELECT); edit.current?.setTool(SELECT); } };
+  const [openNote, setOpenNote] = useState<Note['id'] | null>(null);
+  const [showDone, setShowDone] = useState(false);
+  const noteThreads = useMemo(() => threads(N.notes ?? []), [N.notes]);
+  const openNotes = noteThreads.filter((t) => !t.root.resolved).length;
+  const canResolve = !ref || ref.role !== 'viewer';
 
   // ---------- the 3D ----------
   const canvas = useRef<HTMLCanvasElement>(null), view = useRef<ProView | null>(null);
@@ -295,15 +330,17 @@ function App() {
   useEffect(() => {
     setHover(null);
     const o = outline(p);
+    // (what the outline hides isn't drawn, so it can't be picked either; the numbers still count it)
+    const idx = e.d.buildings.map((_, i) => i).filter((i) => !hidden.has(e.d.buildings[i].b.id)), all = idx.length === e.d.buildings.length;
     view.current?.set({
-      r: e.r, d: e.d, plans: e.plans, ds: e.ds, xray: xr, shops: e.shops,
+      r: e.r, d: all ? e.d : { ...e.d, buildings: idx.map((i) => e.d.buildings[i]) }, plans: all ? e.plans : idx.map((i) => e.plans[i]), ds: e.ds, xray: xr, shops: e.shops,
       roads: roadLines(o.ring, o.roads).map((l) => ({ pts: l.pts, today: l.road.today })),
-      dsOf: (i) => dsOfBuilding(p, i, e.ds, e.d.buildings[i]?.b.id), rooms, roomColor: ROOM_COLOR,
-      features: p.features, levels: p.levels, north: p.north, sel: picked?.k === 'building' ? picked.id : null, forms: e.forms, at: p.at ?? null, city: p.city, cores: xr !== null ? e.d.buildings.map((_, i) => buildingCores(e, i)) : undefined,
+      dsOf: (i) => dsOfBuilding(p, idx[i], e.ds, e.d.buildings[idx[i]]?.b.id), rooms: all ? rooms : idx.map((i) => rooms[i]), roomColor: ROOM_COLOR,
+      features: hidden.size ? p.features?.filter((f) => !hidden.has(f.id)) : p.features, levels: p.levels, north: p.north, sel: picked?.k === 'building' ? picked.id : null, forms: e.forms, at: p.at ?? null, city: p.city, cores: xr !== null ? idx.map((i) => buildingCores(e, i)) : undefined,
     });
     edit.current?.draw();
     applySun();
-  }, [e, xr, rooms, picked]);
+  }, [e, xr, rooms, picked, hidden]);
   useEffect(() => { edit.current?.draw(); }, [step]);
   const applySun = () => {
     const [lat, lon] = CITY_LATLON[p.city] ?? [18.52, 73.86];
@@ -371,7 +408,7 @@ function App() {
       if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'd' && picked?.k === 'building' && !locked && !typing(ev.target)) { ev.preventDefault(); const s = own(p, e), src = s.buildings.find((b) => b.id === picked.id); if (!src) return; const c = duplicated(src); tx.once({ scheme: { ...s, buildings: [...s.buildings, c] } }); setPicked({ k: 'building', id: c.id }); return; }
       if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'y') { if (typing(ev.target)) return; ev.preventDefault(); redo(); return; }
       if (ev.ctrlKey || ev.metaKey || ev.altKey || typing(ev.target)) return;
-      if (ev.key === 'Escape') { if (dialog) setDialog(null); else if (picked && tool.k === 'select') setPicked(null); else if (panel && !pinned) setPanel(false); return; }
+      if (ev.key === 'Escape') { if (dialog) setDialog(null); else if (cmode) setCmode(false); else if (picked && tool.k === 'select') setPicked(null); else if (panel && !pinned) setPanel(false); return; }
       // (the picked building: R turns it, + and − its floors, Ctrl+D below)
       const pb = picked?.k === 'building' && !locked ? picked : null;
       if (pb && (ev.key === 'r' || ev.key === 'R')) { const s = own(p, e); tx.once({ scheme: { ...s, buildings: s.buildings.map((b) => (b.id === pb.id ? turned(b, ev.shiftKey ? -15 : 15) : b)) } }); return; }
@@ -387,7 +424,10 @@ function App() {
       if (ev.key === 'v') setTool(SELECT);
       if (ev.key === 'm' && !locked) setTool(tool.k === 'measure' ? SELECT : { k: 'measure' });
       if (ev.key === 's') cam('street');
+      if (ev.key === '|' || (ev.key === '\\' && ev.shiftKey)) { setFocus(!focus); toast(focus ? 'Focus mode off.' : 'Focus mode: the sheet and the outline are away. Shift+\\ brings them back.'); return; }
       if (ev.key === '\\') setPanel((v) => !v);
+      if (ev.key === 'o' && !phone) setOlOpen(!olOpen);
+      if (ev.key === 'c' && noteStore) setCmode(!cmode);
       if (ev.key === '/') { ev.preventDefault(); setPinned(!pinned); setPanel(true); }
       if (ev.key === '?') setDialog('keys');
     };
@@ -436,7 +476,7 @@ function App() {
   const shareItems: MenuItem[] = [
     { heading: 'Send' },
     { label: 'A link to it…', icon: 'link', sub: 'People on the project, or anyone with the link', onSelect: () => setDialog('share') },
-    ...(team ? [{ label: 'People and comments…', icon: 'team', sub: 'Who can edit or view; the comments', onSelect: () => setDialog('team') }] : []),
+    ...(team ? [{ label: 'People…', icon: 'team', sub: 'Who can edit it, who can view and comment', onSelect: () => setDialog('people') }] : []),
     { heading: 'Images' },
     { label: 'Image of the view', icon: 'camera', sub: 'A few seconds', disabled: !!still, onSelect: () => void renderImage('raster') },
     { label: 'Path-traced image', icon: 'spark', sub: 'About a minute', disabled: !!still, onSelect: () => void renderImage('path') },
@@ -523,15 +563,24 @@ function App() {
   const [insp, setInsp] = useState(true);
   const pickKey = picked ? `${picked.k}:${'id' in picked ? picked.id : ''}` : '';
   useEffect(() => { if (pickKey) setInsp(true); }, [pickKey]);
-  const inspOn = !!picked && insp && !narrow && !phone && tool.k === 'select';
-  const covR = inspOn ? 344 : 0;
-  useEffect(() => { view.current?.setCover(cov[0], cov[1], covR); }, [covR]);
+  const inspOn = !!picked && insp && !narrow && !phone && tool.k === 'select' && !cmode;
+  const listOn = cmode && !!noteStore && !narrow;
+  const covR = inspOn || listOn ? 344 : 0;
+  /** the outline: docked right of the sheet, and the view keeps clear of it */
+  const olOn = olOpen && !focus && !phone && !narrow;
+  const olW = olOn ? 248 : 0;
+  useEffect(() => { view.current?.setCover(cov[0] + olW, cov[1], covR); }, [covR, olW, cov[0], cov[1]]);
+  useEffect(() => { if (step === 'numbers') tick('numbers'); }, [step]);
+  const openWay = (w: 'survey' | 'import') => { try { sessionStorage.setItem('urbanplan:pro:way', w); } catch { /* */ } setStep('design'); store.set('urbanplan:pro:step', 'design'); openSheet(); dispatchEvent(new CustomEvent('urbanplan:way', { detail: w })); };
+  const frameRing = (ring: number[]) => { let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (let i = 0; i + 1 < ring.length; i += 2) { x0 = Math.min(x0, ring[i]); x1 = Math.max(x1, ring[i]); z0 = Math.min(z0, ring[i + 1]); z1 = Math.max(z1, ring[i + 1]); } if (Number.isFinite(x0)) view.current?.focus((x0 + x1) / 2, (z0 + z1) / 2, Math.max(8, x1 - x0, z1 - z0), 6); };
+  const reorder = locked ? null : (from: number, to: number) => { const s = own(p, e), id = e.d.buildings[from]?.b.id, bs = [...s.buildings], i = bs.findIndex((b) => b.id === id), j = bs.findIndex((b) => b.id === e.d.buildings[to]?.b.id); if (i < 0 || j < 0) return; const [b] = bs.splice(i, 1); bs.splice(j, 0, b); tx.once({ scheme: { ...s, buildings: bs } }); toast('Moved: the letters follow the new order.', { undo: true }); };
+  const openThread = (id: Note['id']) => { const t = noteThreads.find((x) => x.root.id === id); setOpenNote(id); const a = t?.root.anchor; if (a?.obj?.k === 'building' && a.obj.id && e.d.buildings.some((b) => b.b.id === a.obj!.id)) { const br = e.d.buildings.find((b) => b.b.id === a.obj!.id)!; let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (const q of br.quads) for (let k = 0; k + 1 < q.length; k += 2) { x0 = Math.min(x0, q[k]); x1 = Math.max(x1, q[k]); z0 = Math.min(z0, q[k + 1]); z1 = Math.max(z1, q[k + 1]); } if (Number.isFinite(x0)) view.current?.focus((x0 + x1) / 2, (z0 + z1) / 2, Math.max(x1 - x0, z1 - z0), br.height); } else if (a?.at) view.current?.focus(a.at[0], a.at[2], 30, 6); };
   const cur = STEPS.find((s) => s.key === step)!;
   const props: StepProps = { p, e, up, rooms, checks, deal, go, openDrawings: () => setDialog('drawings'), openStatement: () => setDialog('area'), openLook: () => setDialog('look'), toast, tool, setTool, picked, pick: setPicked, show: showBuilding };
   const Body = { brief: BriefPlace, design: DesignPlace, numbers: NumbersPlace, approve: ApproveStep }[step];
 
   return (
-    <div class={`pro${panel && pinned && !narrow ? ' docked' : ''}${locked ? ' ro' : ''}`} style={`--cover:${cov[0]}px;--cover-b:${cov[1]}px;--cover-r:${covR}px`}>
+    <div class={`pro${panel && pinned && !narrow ? ' docked' : ''}${locked ? ' ro' : ''}`} style={`--cover:${cov[0] + olW}px;--cover-s:${cov[0]}px;--cover-b:${cov[1]}px;--cover-r:${covR}px`}>
       <header class="top">
         <a class="logo" href={`${BASE}dashboard/`} aria-label="Your dashboard"><Dither field="mark" cell={2} class="mark" />UrbanPlan</a>
         <b class="chip">Pro</b>
@@ -546,9 +595,10 @@ function App() {
           <Btn kind="quiet" icon="undo" title="Undo (Ctrl+Z)" onClick={undo} disabled={!past.current.length} />
           <Btn kind="quiet" icon="redo" title="Redo (Ctrl+Shift+Z)" onClick={redo} disabled={!future.current.length} />
         </span>}
+        {noteStore && !phone && <span class={`cbtn${cmode ? ' on' : ''}`}><Btn kind={cmode ? 'primary' : 'quiet'} icon="chat" title={cmode ? 'Stop commenting (Esc)' : 'Comment on the view (C)'} onClick={() => setCmode(!cmode)}>{openNotes ? `Comment · ${openNotes}` : 'Comment'}</Btn></span>}
         {readOnly && !phone
           ? <Btn kind="primary" icon="check" onClick={keepCopy}>Make it my copy</Btn>
-          : phone ? <Btn icon="share" onClick={() => goView('share')}>Share</Btn> : <Menu text label="Share" icon="share" items={shareItems} />}
+          : phone ? <Btn icon="share" onClick={() => goView('share')}>Share</Btn> : <Menu text label="Share" icon="share" items={shareItems} onOpen={() => tick('share')} />}
         {authReady && session.value === null && <Btn icon="user" href={`${BASE}login/?next=${encodeURIComponent(location.pathname + location.search)}`} title="Keep your projects in your account">Sign in</Btn>}
         <Account email={user?.email ?? null} phone={phone} search={() => setSearch(true)} keys={() => setDialog('keys')} />
       </header>
@@ -569,6 +619,7 @@ function App() {
           </button>
         ))}
         <span class="gap" />
+        {!phone && !narrow && <button type="button" class="step small" onClick={() => setOlOpen(!olOpen)} aria-label="Show or hide the outline" aria-pressed={olOn} data-tip="The outline: what's in the project (O)" data-tip-side="right"><Icon n="list" size={18} /></button>}
         <button type="button" class="step small" onClick={() => setPanel(!panel)} aria-label="Show or hide the sheet" aria-expanded={panel} data-tip="Show or hide the sheet (\) · pin it beside the view (/)" data-tip-side="right"><Icon n="panel" size={18} /></button>
       </nav>
 
@@ -588,7 +639,7 @@ function App() {
         >
         <div class="panel-b" key={step}>
           {authReady && session.value === null && new URLSearchParams(location.search).has('p') && <p class="note">A project shared with you. <a href={`${BASE}login/?next=${encodeURIComponent(location.pathname + location.search)}`}>Sign in</a> with the email it was shared to and it opens here.</p>}
-          {viewer && !readOnly && <p class="note">Shared with you to view and comment. <button type="button" class="linkbtn" onClick={() => setDialog('team')}>Comments</button></p>}
+          {viewer && !readOnly && <p class="note">Shared with you to view and comment. <button type="button" class="linkbtn" onClick={() => setCmode(true)}>Comment</button></p>}
           {readOnly && !phone && <p class="note">A shared scheme, view only. <button type="button" class="linkbtn" onClick={keepCopy}>Make it your own copy</button> to change it.</p>}
           <fieldset disabled={locked}><Body {...props} /></fieldset>
         </div>
@@ -597,33 +648,28 @@ function App() {
       <main class="stage">
         <canvas ref={canvas} onPointerMove={(ev) => setHover(view.current?.pick(ev.clientX, ev.clientY) ?? null)} onPointerLeave={() => setHover(null)} />
         <ResultBar e={e} deal={deal} sum={sum} go={go} statement={() => setDialog('area')} stage={stageOf(p)} vs={vsBase ? { on: vsOn, set: setVsOn, name: vsBase.name, fig: vsFig } : null} />
-        {!locked && <Shelf tool={tool} setTool={setTool} />}
+        {!locked && <Shelf tool={tool} setTool={setTool} hint={hint ? <div class="drawhint" role="status"><span>{hint}</span><button type="button" class="linkbtn" onClick={() => setTool(SELECT)}>Done</button></div> : null} />}
+        {olOn && <Outline p={p} e={e} checks={checks} picked={picked} pick={(x) => { setToolS(SELECT); edit.current?.setTool(SELECT); setPicked(x); }} show={showBuilding} frame={frameRing} hidden={hidden} locked={lockedIds} toggle={toggleOl} reorder={reorder} notes={countsByThing(noteThreads)} close={() => setOlOpen(false)} />}
+        {p.blank && !locked && tool.k === 'select' && !cmode && <EmptyState p={p} ways={{
+          find: () => { up({ blank: undefined }); openWay('survey'); },
+          draw: () => { up({ blank: undefined }); setTool({ k: 'plot' }); },
+          importIt: () => { up({ blank: undefined }); openWay('import'); },
+          size: (x) => { up({ ...x, shape: 'rect', corner: false, blank: undefined }); go('brief'); },
+          skip: () => up({ blank: undefined }),
+        }} />}
         <div class="readout" ref={readout} hidden aria-live="polite"><b /><span /></div>
         {tool.k === 'select' && plotOn && <PlotHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} pick={setPicked} tx={tx} snap={snap} live={mode === 'wire' && xr === null} readOnly={locked} toast={toast} setTool={setTool}
-          openWay={(w) => { try { sessionStorage.setItem('urbanplan:pro:way', w); } catch { /* */ } setStep('design'); store.set('urbanplan:pro:step', 'design'); openSheet(); dispatchEvent(new CustomEvent('urbanplan:way', { detail: w })); }} northFree={northFree} setNorthFree={setNorthFree} />}
+          openWay={openWay} northFree={northFree} setNorthFree={setNorthFree} />}
         {tool.k === 'select' && (picked?.k === 'element' || picked?.k === 'feature') && <ObjectHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} pick={setPicked} tx={tx} snap={snap} readOnly={locked} toast={toast} />}
         {tool.k === 'select' && picked?.k === 'building' && <FormHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} tx={tx} live={mode === 'wire' && xr === null} readOnly={locked} xray={xr} setXray={setXray} toast={toast} />}
         {tool.k === 'select' && picked?.k === 'building' && <Hud view={view.current} p={p} e={e} picked={picked} pick={setPicked} up={up} tx={tx} snap={snap} live={mode === 'wire' && xr === null} readOnly={locked} toast={toast}
           inspect={() => setInsp(true)} inspecting={inspOn} />}
+        {listOn && <CommentList notes={N.notes} err={N.err} where={noteStore!.where} open={(t) => openThread(t.root.id)} close={() => setCmode(false)} showDone={showDone} setShowDone={setShowDone} offNote={anchorsOff ? 'Comments are being saved without their pins: the site’s owner turns pins on by running supabase/migrations/0007_comment_anchors.sql once.' : undefined} />}
+        {noteStore && N.notes && xr === null && <CommentLayer view={view.current} e={e} notes={N.notes} mode={cmode} setMode={setCmode} openId={openNote} setOpenId={setOpenNote} option={p.option}
+          add={(body, anchor) => void N.run(() => noteStore.add(body, step, anchor))} resolve={(n, v) => void N.run(() => noteStore.resolve(n.id, v))} remove={(n) => void N.run(() => noteStore.remove(n.id))}
+          canResolve={canResolve} canDelete={(n) => mineNote(n) || ref?.role === 'owner' || !ref} />}
         {inspOn && picked && <Inspector p={p} e={e} up={up} rooms={rooms} checks={checks} picked={picked} pick={setPicked} toast={toast} xray={setXray} hide={() => setInsp(false)} readOnly={locked} />}
         {step === 'approve' && !phone && tool.k === 'select' && xr === null && <CheckPins view={view.current} e={e} checks={checks} show={showBuilding} />}
-        {hint && <div class="drawhint" role="status"><span>{hint}</span><button type="button" class="linkbtn" onClick={() => setTool(SELECT)}>Done</button></div>}
-        {(() => {
-          // the compass: a click shows the plan from above; with the plot picked it's a dial: drag it (or the arrow keys)
-          // to turn north, in 5° steps (unless the plot's place set it and it's locked)
-          const turnable = plotOn && !locked && (!p.at || northFree);
-          const angleAt = (ev: PointerEvent) => { const r = (ev.currentTarget as HTMLElement).getBoundingClientRect(); return (Math.atan2(ev.clientX - (r.left + r.width / 2), -(ev.clientY - (r.top + r.height / 2))) * 180) / Math.PI; };
-          const setNorth = (v: number) => ((Math.round(v / 5) * 5) % 360 + 360) % 360;
-          return <button type="button" class={`compass${turnable ? ' dial' : ''}`} aria-label={turnable ? `North: ${p.north ?? 0}° (drag it, or the arrow keys, to turn it; click for the plan)` : 'North (the map from above)'}
-            data-tip={turnable ? `North ${p.north ?? 0}° · drag to turn it · click: the plan` : plotOn && p.at && !northFree ? 'North · set from the plot’s location' : 'North · the plan from above'}
-            onPointerDown={(ev) => { if (!turnable || ev.button !== 0) return; (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId); dial.current = { a0: angleAt(ev), n0: p.north ?? 0, moved: false, x: ev.clientX, y: ev.clientY }; }}
-            onPointerMove={(ev) => { const d = dial.current; if (!d) return; if (!d.moved && Math.hypot(ev.clientX - d.x, ev.clientY - d.y) < 4) return; if (!d.moved) { d.moved = true; tx.begin(); } up({ north: setNorth(d.n0 + angleAt(ev) - d.a0) }); }}
-            onPointerUp={() => { const d = dial.current; if (d?.moved) tx.commit(); else dial.current = null; }}
-            onClick={() => { if (dial.current?.moved) { dial.current = null; return; } setPlan(true); }}
-            onKeyDown={(ev) => { if (!turnable) return; const dir = ev.key === 'ArrowRight' || ev.key === 'ArrowUp' ? 1 : ev.key === 'ArrowLeft' || ev.key === 'ArrowDown' ? -1 : 0; if (!dir) return; ev.preventDefault(); ev.stopPropagation(); tx.once({ north: setNorth((p.north ?? 0) + dir * (ev.shiftKey ? 45 : 5)) }); }}>
-            <span ref={needle} class="needle"><Icon n="north" size={22} /><b>N</b></span>
-          </button>;
-        })()}
         <div class="tools">
           <Seg<'3d' | 'plan'> class="tgroup" value={plan ? 'plan' : '3d'} set={(v) => setPlan(v === 'plan')} options={[
             { value: '3d', label: '3D', icon: 'cube', title: 'Orbit round it' },
@@ -656,6 +702,23 @@ function App() {
           <div class="tgroup">
             {(mode === 'shaded' || xr !== null) && <Select<Exclude<Tier, 'still'>> size="sm" quiet aria-label="Quality" value={tier} onChange={(t) => { setTierS(t); view.current?.setTier(t); }} options={TIERS} />}
           </div>
+          {(() => {
+            // the compass: a click shows the plan from above; with the plot picked it's a dial: drag it (or the arrow keys)
+            // to turn north, in 5° steps (unless the plot's place set it and it's locked)
+            const turnable = plotOn && !locked && (!p.at || northFree);
+            const angleAt = (ev: PointerEvent) => { const r = (ev.currentTarget as HTMLElement).getBoundingClientRect(); return (Math.atan2(ev.clientX - (r.left + r.width / 2), -(ev.clientY - (r.top + r.height / 2))) * 180) / Math.PI; };
+            const setNorth = (v: number) => ((Math.round(v / 5) * 5) % 360 + 360) % 360;
+            return <button type="button" class={`compass${turnable ? ' dial' : ''}`} aria-label={turnable ? `North: ${p.north ?? 0}° (drag it, or the arrow keys, to turn it; click for the plan)` : 'North (the map from above)'}
+              data-tip={turnable ? `North ${p.north ?? 0}° · drag to turn it · click: the plan` : plotOn && p.at && !northFree ? 'North · set from the plot’s location' : 'North · the plan from above'}
+              onPointerDown={(ev) => { if (!turnable || ev.button !== 0) return; (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId); dial.current = { a0: angleAt(ev), n0: p.north ?? 0, moved: false, x: ev.clientX, y: ev.clientY }; }}
+              onPointerMove={(ev) => { const d = dial.current; if (!d) return; if (!d.moved && Math.hypot(ev.clientX - d.x, ev.clientY - d.y) < 4) return; if (!d.moved) { d.moved = true; tx.begin(); } up({ north: setNorth(d.n0 + angleAt(ev) - d.a0) }); }}
+              onPointerUp={() => { const d = dial.current; if (d?.moved) tx.commit(); else dial.current = null; }}
+              onClick={() => { if (dial.current?.moved) { dial.current = null; return; } setPlan(true); }}
+              onKeyDown={(ev) => { if (!turnable) return; const dir = ev.key === 'ArrowRight' || ev.key === 'ArrowUp' ? 1 : ev.key === 'ArrowLeft' || ev.key === 'ArrowDown' ? -1 : 0; if (!dir) return; ev.preventDefault(); ev.stopPropagation(); tx.once({ north: setNorth((p.north ?? 0) + dir * (ev.shiftKey ? 45 : 5)) }); }}>
+              <span ref={needle} class="needle"><Icon n="north" size={22} /><b>N</b></span>
+            </button>;
+          })()}
+          {!phone && <HelpCorner p={p} keys={() => setDialog('keys')} search={() => setSearch(true)} />}
         </div>
         {xr !== null && <div class="legend floating">{[0, 1, 2].map((t) => <span><i style={`background:${UNIT_COLOR[t]}`} />{UNIT_LABEL[t]}</span>)}{(['living', 'bed', 'kitchen', 'toilet'] as const).map((k) => <span><i style={`background:${ROOM_COLOR[k]}`} />{k === 'bed' ? 'bedroom' : k}</span>)}</div>}
         {hover && <div class="tip" style={`left:${hover.x + 14}px;top:${hover.y + 14}px`}><b>{hover.label}</b><span>{hover.size}</span><span>Floor {hover.floor}</span></div>}
@@ -664,13 +727,12 @@ function App() {
       {toastMsg && <div class="toast" role="status">{toastMsg.s}{toastMsg.undo && <button type="button" class="linkbtn" onClick={() => { undo(); setToastMsg(null); }}>Undo</button>}</div>}
       <TooltipLayer />
       {search && (() => { const c = commands(); return <Search cmds={c.all} first={c.first} close={() => setSearch(false)} />; })()}
-      {dialog === 'team' && user && ref && <Team pid={ref.id} role={ref.role ?? 'owner'} step={step} go={(s) => { go(s); }} close={() => setDialog(null)} />}
+      {dialog === 'people' && user && ref && <People pid={ref.id} role={ref.role ?? 'owner'} close={() => setDialog(null)} />}
       {dialog === 'share' && <Dialog title="Share this scheme" close={() => setDialog(null)}><ShareBody name={p.name} load={() => Promise.resolve(p)} id={readOnly ? null : ref?.id} team={!!ref && ref.role !== 'viewer'} image={shareImage} toast={toast} done={() => setDialog(null)} /></Dialog>}
       {dialog === 'keys' && <Keys close={() => setDialog(null)} />}
       {dialog === 'compare' && <Compare p={p} close={() => setDialog(null)} go={optionActs.open} choose={locked ? undefined : optionActs.choose} />}
       {dialog === 'look' && <Dialog title={`Look · ${e.ds.name}`} close={() => setDialog(null)} wide><fieldset class="look-b" disabled={locked}><DesignSystemStep {...props} /></fieldset></Dialog>}
       {dialog === 'area' && <Dialog title="Area statement" close={() => setDialog(null)} wide><AreaStatementBody e={e} show={(bi) => { const id = e.d.buildings[bi]?.b.id; if (id) { setDialog(null); showBuilding(id); } }} print={phone ? undefined : () => setDialog('drawings')} /></Dialog>}
-      {dialog === 'welcome' && <Welcome close={(n) => { store.set(SEEN, true); setDialog(null); if (n) { fresh(n); go('brief'); } }} />}
       {dialog === 'drawings' && (
         <div class="sheets-wrap" role="dialog" aria-label="Drawing set">
           <style>{SHEET_CSS}</style>
@@ -866,39 +928,23 @@ function Account({ email, phone, search, keys }: { email: string | null; phone: 
   ]} />;
 }
 
-const STEP_NAME: Record<string, string> = Object.fromEntries(STEPS.map((s) => [s.key, s.label]));
-
-/** The people on the project (the owner adds and removes them) and its comments, each tagged with its step. */
-function Team({ pid, role, step, go, close }: { pid: string; role: 'owner' | 'editor' | 'viewer'; step: Step; go: (s: Step) => void; close: () => void }) {
-  const [people, setPeople] = useState<Member[] | null>(null), [notes, setNotes] = useState<Comment[] | null>(null);
+/** The people on the project: the owner adds and removes them; the link; invites. (Its comments are on the view.) */
+function People({ pid, role, close }: { pid: string; role: 'owner' | 'editor' | 'viewer'; close: () => void }) {
+  const [people, setPeople] = useState<Member[] | null>(null);
   const [err, setErr] = useState(''), [off, setOff] = useState('');
   const [email, setEmail] = useState(''), [as, setAs] = useState<Member['role']>('editor');
-  const [text, setText] = useState(''), [busy, setBusy] = useState(false), [showDone, setShowDone] = useState(false);
-  const [sent, setSent] = useState('');
-  const me = session.value?.user.id, link = projectLink(pid);
+  const [busy, setBusy] = useState(false), [sent, setSent] = useState('');
+  const link = projectLink(pid);
   const copyLink = async () => { try { await navigator.clipboard.writeText(link); setSent('Link copied. Send it to them: it opens the project once they sign in with the email you added.'); } catch { setSent(`Copy this link and send it: ${link}`); } };
   const invite = (who: string) => run(async () => { const r = await sendInvite(pid, who); setSent(r === 'sent' ? `Invite emailed to ${who}.` : `Added. Email invites aren’t set up on this site yet, so send them the link: it opens the project once they sign in as ${who}.`); });
   const fail = (x: unknown) => { if (x instanceof NotSetUp) setOff(x.message); else setErr(explain(x)); };
-  const reload = () => Promise.all([listMembers(pid).then(setPeople), listComments(pid).then(setNotes)]).catch(fail);
-  useEffect(() => { void reload(); const t = setInterval(() => void listComments(pid).then(setNotes).catch(() => {}), 20000); return () => clearInterval(t); }, [pid]);
+  const reload = () => listMembers(pid).then(setPeople).catch(fail);
+  useEffect(() => { void reload(); }, [pid]);
   const run = async (f: () => Promise<unknown>) => { setBusy(true); setErr(''); try { await f(); await reload(); } catch (x) { fail(x); } finally { setBusy(false); } };
-  const open = (notes ?? []).filter((c) => !c.resolved), done = (notes ?? []).filter((c) => c.resolved);
-  const Item = ({ c }: { c: Comment }) => (
-    <li class={`cmt${c.resolved ? ' done' : ''}`}>
-      <div class="cmt-h"><b>{c.author === me ? 'You' : c.author_name || 'Someone'}</b><span>{ago(c.created_at)}</span>
-        {c.step && STEP_NAME[c.step] && <button type="button" class="chip-step" onClick={() => go(c.step as Step)}>{STEP_NAME[c.step]}</button>}</div>
-      <p>{c.body}</p>
-      <div class="cmt-a">
-        {(c.author === me || role !== 'viewer') && <button type="button" class="linkbtn" disabled={busy} onClick={() => void run(() => resolveComment(c.id, !c.resolved))}>{c.resolved ? 'Reopen' : 'Resolve'}</button>}
-        {(c.author === me || role === 'owner') && <button type="button" class="linkbtn" disabled={busy} onClick={() => void run(() => deleteComment(c.id))}>Delete</button>}
-      </div>
-    </li>
-  );
-  if (off) return <Dialog title="Team" close={close} side><p class="note">{off} The site's owner turns them on by running <code>supabase/migrations/0004_project_team.sql</code> once in Supabase.</p></Dialog>;
+  if (off) return <Dialog title="People" close={close} side><p class="note">{off} The site's owner turns them on by running <code>supabase/migrations/0004_project_team.sql</code> once in Supabase.</p></Dialog>;
   return (
-    <Dialog title="Team" close={close} side>
+    <Dialog title="People" close={close} side>
       {err && <p class="note bad">{err}</p>}
-      <h3 class="mh">People</h3>
       <ul class="people">
         <li><Icon n="user" size={15} /><span>{role === 'owner' ? 'You' : 'The owner'}</span><em>owner</em></li>
         {people?.map((m) => (
@@ -915,18 +961,7 @@ function Team({ pid, role, step, go, close }: { pid: string; role: 'owner' | 'ed
       {sent && <p class="note ok" role="status">{sent}</p>}
       {role !== 'viewer' && <div class="plink"><input class="txt" readOnly value={link} aria-label="Link to this project" onFocus={(ev) => (ev.target as HTMLInputElement).select()} /><Btn icon="link" onClick={() => void copyLink()}>Copy link</Btn></div>}
       {role === 'owner' && <p class="note">The link only works for people you’ve added, signed in with that email. New to UrbanPlan? They make an account with it.</p>}
-
-      <h3 class="mh">Comments{open.length ? ` (${open.length})` : ''}</h3>
-      <form class="cmt-new" onSubmit={(ev) => { ev.preventDefault(); if (text.trim()) void run(async () => { await addComment(pid, text, step); setText(''); }); }}>
-        <textarea class="txt" rows={3} maxLength={2000} placeholder={`A comment on ${STEP_NAME[step]}…`} value={text} onInput={(ev) => setText((ev.target as HTMLTextAreaElement).value)}
-          onKeyDown={(ev) => { if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey) && text.trim()) { ev.preventDefault(); void run(async () => { await addComment(pid, text, step); setText(''); }); } }} />
-        <Btn kind="primary" submit disabled={busy || !text.trim()}>Comment</Btn>
-      </form>
-      {!notes && !err && <p class="note">Loading…</p>}
-      {notes && !open.length && <p class="note">No open comments.</p>}
-      <ul class="cmts">{[...open].reverse().map((c) => <Item c={c} />)}</ul>
-      {done.length > 0 && <button type="button" class="linkbtn" onClick={() => setShowDone(!showDone)}>{showDone ? 'Hide' : 'Show'} {done.length} resolved</button>}
-      {showDone && <ul class="cmts">{[...done].reverse().map((c) => <Item c={c} />)}</ul>}
+      <p class="note">Comments are on the view now: Comment in the top bar (C) drops one on a building or a spot.</p>
     </Dialog>
   );
 }
@@ -934,25 +969,6 @@ function Team({ pid, role, step, go, close }: { pid: string; role: 'owner' | 'ed
 function Keys({ close }: { close: () => void }) {
   const rows: [string, string][] = [['Ctrl K', 'Search: actions, buildings, settings'], ['1 – 4', 'Brief, Design, Numbers, Approval'], ['\\', 'Show or hide the sheet'], ['/', 'Pin the sheet beside the view, or float it'], ['F6 · Shift+F6', 'Move between the top bar, the steps, the sheet and the view'], ['R · Shift+R', 'Turn the picked building 15°'], ['+ −', 'A floor more or less on the picked building'], ['Ctrl+D', 'Duplicate the picked building'], ['M', 'Measure'], ['X', 'X-ray floor on or off'], ['[  ]', 'Floor down / up'], ['F · S · T', 'Camera: whole site, street, from above'], ['P', 'The plan from above, or back to 3D'], ['V', 'Back to picking'], ['Enter · Esc · Backspace', 'Drawing: finish, cancel, take back a point'], ['Shift', 'Drawing: keep a line square to the road'], ['Alt', 'Hold while dragging: no snapping'], ['← → ↑ ↓', 'Nudge what’s picked a grid step (Shift: ×10)'], ['Delete', 'Remove what’s picked'], ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · redo'], ['↑ ↓ in a number', 'Step it (Shift: ×10)'], ['Esc', 'Close this; let go of what’s picked; close the sheet']];
   return <Dialog title="Keyboard shortcuts" close={close}><dl class="lines keys">{rows.map(([a, b]) => <div><dt><kbd>{a}</kbd></dt><dd>{b}</dd></div>)}</dl></Dialog>;
-}
-
-/** First visit: start from a plot in three numbers, or look round the sample. */
-function Welcome({ close }: { close: (p?: ProProject) => void }) {
-  const [w, setW] = useState(40), [dpt, setD] = useState(50), [road, setRoad] = useState(12), [city, setCity] = useState<ProProject['city']>('pune');
-  return (
-    <Dialog title="Size up a plot in a minute" close={() => close()} wide>
-      <p class="note">The plot and its road: the most the rules allow, in 3D, with the money.</p>
-      <div class="row r2">
-        <Select<ProProject['city']> label="Planning authority" value={city} onChange={setCity} options={[{ value: 'pune', label: 'Pune (UDCPR)' }, { value: 'pune-congested', label: 'Pune old city' }, { value: 'mumbai-suburbs', label: 'Mumbai suburbs' }, { value: 'mumbai-island', label: 'Mumbai island city' }]} />
-        <Num label="Road in front" value={road} set={setRoad} min={3} max={80} unit="m" />
-      </div>
-      <div class="row r2"><Num label="Frontage" value={w} set={setW} min={10} max={400} unit="m" /><Num label="Depth" value={dpt} set={setD} min={10} max={400} unit="m" /></div>
-      <div class="row r2">
-        <Btn kind="primary" onClick={() => close({ ...DEFAULT_PROJECT, city, width: w, depth: dpt, road, dpRoad: road, name: `${w} × ${dpt} m plot` })}>Work it out</Btn>
-        <Btn onClick={() => close()}>Open the sample</Btn>
-      </div>
-    </Dialog>
-  );
 }
 
 render(<App />, document.getElementById('pro')!);

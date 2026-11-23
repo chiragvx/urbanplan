@@ -4,6 +4,32 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-23 · Phase 8: the outline, comments on the view, the empty state
+
+**What changed:**
+- **The outline** (src/pro/outline.tsx), docked beside the sheet (O, or the rail's list button; open by default on a screen 1440 px or wider):
+  - the plot and its roads; the buildings with their letter, a failing-check dot and a comment count; the elements; the features;
+  - eye hides a building or feature from the view for this session (the numbers still count it); lock stops it being picked;
+  - drag a building, or Alt+↑↓, to reorder (the letters follow), with an undo toast.
+- **Comments on the view** (src/pro/comments.ts, commentPins.tsx): Comment in the top bar (C) drops a numbered pin on a building or a spot; a thread beside it with reply, resolve, delete; the list takes the inspector's place while commenting.
+  - In the cloud they're the project's comments, with an `anchor` (supabase/migrations/0007_comment_anchors.sql). Until that's run, they save without their pins and say so.
+  - A project only in this browser keeps them as notes to self.
+  - The Team dialog is now People (members only), from Share › People….
+- **No Welcome dialog:** a new project opens on the view with the four ways in (find it, draw it, type its size, import it) and "look round this sample".
+- **The help corner** (? after the compass at the end of the view tools): a checklist that ticks itself (set the plot, add a building, look at the numbers, a second option, share it), search, keys, guides.
+- **Density:** the compass is in the view tools; the drawing hint sits beside the shelf; focus mode (Shift+\) puts the sheet and outline away.
+
+**How it was checked:**
+- Browser at 1440×860, with your project backed up first and restored exactly afterwards: the outline docks and the shelf shifts clear; a comment dropped on Building A anchored to it and its count showed in the outline; the list opened a thread; `?new=blank` showed the empty state; no console errors.
+- `npm test` ALL OK; `npm run build` OK.
+
+**Left or known:**
+- Cloud comments are untested (the browser isn't signed in, and 0007 isn't run).
+- Not done: review clouds on the drawing set and its cover-sheet list, field dots, a building's comments in its inspector.
+- With the sheet, the outline and the empty state all open, the screen is crowded. Users also found the stage modes and the sheets confusing; docs/plans/pro-ia-rethink.md proposes a view-first Pro, and focus mode goes with it.
+
+---
+
 ## 2026-11-23 · Phase 7: Sites, above projects
 
 **What changed:**

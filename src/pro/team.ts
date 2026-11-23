@@ -5,7 +5,12 @@ import { session, shortName, supabase } from '../auth/auth';
 import type { Role } from './cloud';
 
 export interface Member { project: string; email: string; role: Exclude<Role, 'owner'>; created_at: string; joined_at?: string | null; invited_at?: string | null }
-export interface Comment { id: number; project: string; author: string; author_name: string | null; body: string; step: string | null; resolved: boolean; created_at: string }
+export interface Comment { id: number; project: string; author: string; author_name: string | null; body: string; step: string | null; resolved: boolean; created_at: string; anchor?: Anchor | null }
+/** what a comment is about (supabase/migrations/0007_comment_anchors.sql): a point, the thing it was dropped on, the
+ *  option it was made on, and the comment it replies to */
+export interface Anchor { at?: [number, number, number]; obj?: { k: 'building' | 'element' | 'feature' | 'plot'; id?: string }; option?: string; reply?: number | string }
+/** set once an insert found no anchor column (0007 not run): comments are saved without their pins */
+export let anchorsOff = false;
 
 /** The tables aren't there yet (the migration hasn't been run on this Supabase project). */
 export class NotSetUp extends Error {}
@@ -56,12 +61,20 @@ export async function sendInvite(project: string, email: string): Promise<'sent'
 export async function comments(project: string): Promise<Comment[]> {
   return check(await sb().from('project_comments').select('*').eq('project', project).order('created_at'));
 }
-export async function addComment(project: string, body: string, step: string) {
+export async function addComment(project: string, body: string, step: string, anchor?: Anchor | null) {
   const u = session.value?.user;
   if (!u) throw new Error('Sign in to comment.');
   const text = body.trim().slice(0, 2000);
   if (!text) return;
-  check(await sb().from('project_comments').insert({ project, body: text, step, author_name: shortName(u).slice(0, 80) }));
+  const row = { project, body: text, step, author_name: shortName(u).slice(0, 80) };
+  if (anchor && !anchorsOff) {
+    const r = await sb().from('project_comments').insert({ ...row, anchor });
+    // (no anchor column yet: 0007 hasn't been run; saved without it)
+    if (!r.error) return;
+    if (!/anchor/i.test(r.error.message)) check(r);
+    anchorsOff = true;
+  }
+  check(await sb().from('project_comments').insert(row));
 }
 export async function resolveComment(id: number, resolved: boolean) {
   check(await sb().from('project_comments').update({ resolved }).eq('id', id));

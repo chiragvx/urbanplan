@@ -245,6 +245,8 @@ export class CanvasEdit {
   tool: Tool = SELECT;
   /** snapping on (the view's magnet); Alt held suspends it */
   snapOn = true;
+  /** what the outline has locked: never picked in the view (buildings, things on the grounds, features, by id) */
+  locked = new Set<string>();
   private pts: number[] = [];
   private hover: Pt | null = null;
   private drag: Drag | null = null;
@@ -512,7 +514,7 @@ export class CanvasEdit {
         }
       }
     }
-    const hit = v.buildingHit(ev.clientX, ev.clientY);
+    const hit0 = v.buildingHit(ev.clientX, ev.clientY), hit = hit0 && !this.locked.has(hit0.id) ? hit0 : null;
     if (hit) { if (this.selPt?.id !== hit.id) this.selPt = null; this.h.pick({ k: 'building', id: hit.id }); this.startMove({ k: 'building', id: hit.id }, ev, v, hit.y); return; }
     const el = this.elementAt(ev.clientX, ev.clientY, e);
     if (el) { this.h.pick({ k: 'element', id: el.id }); this.startMove({ k: 'element', id: el.id }, ev, v); return; }
@@ -522,7 +524,7 @@ export class CanvasEdit {
   }
   /** pick only (locked): the building under the pointer, else an element, else a feature, else nothing */
   private pickAt(x: number, y: number, v: ProView) {
-    const hit = v.buildingHit(x, y);
+    const hit0 = v.buildingHit(x, y), hit = hit0 && !this.locked.has(hit0.id) ? hit0 : null;
     if (hit) { this.h.pick({ k: 'building', id: hit.id }); return; }
     const el = this.elementAt(x, y, this.h.e());
     if (el) { this.h.pick({ k: 'element', id: el.id }); return; }
@@ -797,7 +799,7 @@ export class CanvasEdit {
     const v = this.h.view(); if (!v) return null;
     const g = v.groundAt(px, py); if (!g) return null;
     const rect = this.canvas.getBoundingClientRect();
-    for (const f of [...(this.h.p().features ?? [])].reverse()) {
+    for (const f of [...(this.h.p().features ?? [])].reverse().filter((x) => !this.locked.has(x.id))) {
       if (featureOf(f.kind).shape === 'area' ? pointIn(f.pts, g[0], g[1]) : (() => { for (let i = 0; i + 1 < f.pts.length; i += 2) { const [qx, qy] = v.toScreen(f.pts[i], 0, f.pts[i + 1]); if (Math.hypot(qx - (px - rect.left), qy - (py - rect.top)) < 16) return true; } return false; })()) return f;
     }
     return null;
@@ -805,7 +807,7 @@ export class CanvasEdit {
   private elementAt(px: number, py: number, e: Evaluated): SiteElement | null {
     const v = this.h.view(); if (!v) return null;
     const g = v.groundAt(px, py); if (!g) return null;
-    for (const el of [...(e.d.site.elements ?? [])].reverse()) {
+    for (const el of [...(e.d.site.elements ?? [])].reverse().filter((x) => !this.locked.has(x.id))) {
       if (el.ring && el.ring.length >= 6 && pointIn(el.ring, g[0], g[1])) return el;
       // (a wall or a gate is thin: picked within a metre of it)
       const thin = el.kind === 'wall' || el.kind === 'gate';

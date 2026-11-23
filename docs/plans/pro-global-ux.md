@@ -638,6 +638,7 @@ Each phase ships on its own and leaves Pro working. The order puts the **IA's mi
 - The empty state in the view replaces Welcome; the help corner's checklist.
 - Density: the compass goes into the view tools, the drawhint into the shelf, and focus mode is added.
 - **Done when:** a comment dropped on Building B shows on B for a teammate; a new project starts without a dialog.
+- **Status (2026-11-23): built, without the drawing set's clouds or field dots.** Cloud comments wait on migration 0007. Next: the view-first rethink (docs/plans/pro-ia-rethink.md). See docs/plans/pro-global-ux-log.md.
 
 ### Later: the plotted layout, presence, a live board
 
