@@ -7,7 +7,7 @@ import { signal } from '@preact/signals';
 import { deleteProject, listProjects, readProject, renameProject, type Project } from '../app/cloud';
 import { BASE, session, supabase, type Profile, type Role as UserRole } from '../auth/auth';
 import { FORMAT, openPro, savePro } from '../pro/cloud';
-import { DEFAULT_PROJECT, type ProProject } from '../pro/project';
+import { DEFAULT_PROJECT, type ProProject, type Stage } from '../pro/project';
 import type { Summary } from './summary';
 
 export class NotReady extends Error { constructor(what: string) { super(`${what} needs the platform tables (supabase/migrations/0006_platform.sql).`); } }
@@ -21,6 +21,8 @@ export const me = () => session.value?.user ?? null;
 
 export interface Row extends Project {
   summary?: Summary | null; starred?: boolean; archived_at?: string | null; folder?: string | null; opened_at?: string | null;
+  /** its stage as just set here, before the summary catches up */
+  stage?: Stage;
   /** shared with me: my role on it */
   role?: 'editor' | 'viewer';
 }
@@ -61,6 +63,18 @@ export const archive = (id: string, v: boolean) => patch(id, { archived_at: v ? 
 export const moveTo = (id: string, folder: string | null) => patch(id, { folder }, 'Folders');
 export const rename = (id: string, name: string) => renameProject(id, name.trim() || 'Untitled project');
 export const remove = (id: string) => deleteProject(id);
+/** a project's stage, set from the dashboard: saved into its file (the card's summary follows) */
+export async function setStage(id: string, stage: Stage) {
+  const { p, ref } = await openPro(id);
+  if (p.stage === stage) return;
+  await savePro({ ...p, stage }, ref);
+  // (the browser's copy of the same project too, so opening it here doesn't put the old stage back)
+  const l = localProject(); if (l?.cloudId === id) setLocalStage(stage);
+}
+/** the browser's project's stage */
+export function setLocalStage(stage: Stage) {
+  try { const raw = JSON.parse(localStorage.getItem(LOCAL_KEY) ?? 'null'); if (raw) localStorage.setItem(LOCAL_KEY, JSON.stringify({ ...raw, stage })); } catch { /* */ }
+}
 /** a copy of a project in my account (mine or shared with me) */
 export async function duplicate(id: string): Promise<string> {
   const { p } = await openPro(id);

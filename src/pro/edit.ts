@@ -251,6 +251,16 @@ export class CanvasEdit {
   private hover: Pt | null = null;
   private drag: Drag | null = null;
   private downAt: Pt | null = null;
+  /** pressed on something not picked yet: a click (released in place) picks it; a drag orbits or pans the view as on
+   *  open ground, so turning the camera over a building never moves it. Only what's picked moves under a drag. */
+  private pend: Picked | null = null;
+  /** pressed on what's picked: it moves under a drag */
+  private isPicked(w: Picked): boolean { const pk = this.h.picked(); return !!pk && !!w && pk.k === w.k && 'id' in pk && 'id' in w && pk.id === w.id; }
+  /** a press on something: the picked one starts to move, anything else waits to see if it's a click */
+  private grab(w: Picked, ev: PointerEvent, v: ProView, y0 = 0) {
+    if (this.isPicked(w)) { this.startMove(w, ev, v, y0); return; }
+    this.pend = w;
+  }
   private off: (() => void)[] = [];
   /** what the last snap showed: a dashed guide and the point it took */
   private guide: number[] = [];
@@ -475,6 +485,7 @@ export class CanvasEdit {
   // ---------- pointer ----------
   private down(ev: PointerEvent) {
     if (ev.button !== 0) return;
+    this.pend = null;
     // (locked, a phone, a share link, a viewer: what's tapped is picked on release, nothing is moved)
     if (this.h.readOnly()) { this.downAt = [ev.clientX, ev.clientY]; return; }
     const v = this.h.view(); if (!v) return;
@@ -491,7 +502,7 @@ export class CanvasEdit {
     const p = this.h.p(), e = this.h.e(), rect = this.canvas.getBoundingClientRect(), sx = ev.clientX - rect.left, sy = ev.clientY - rect.top;
     if (this.h.step() === 'site') {
       const f = this.featureAt(ev.clientX, ev.clientY);
-      if (f) { this.h.pick({ k: 'feature', id: f.id }); this.startMove({ k: 'feature', id: f.id }, ev, v); return; }
+      if (f) { this.grab({ k: 'feature', id: f.id }, ev, v); return; }
     }
     // a formed building's plan points, and the + on each edge for a new one
     const fb = this.pickedForm();
@@ -515,12 +526,12 @@ export class CanvasEdit {
       }
     }
     const hit0 = v.buildingHit(ev.clientX, ev.clientY), hit = hit0 && !this.locked.has(hit0.id) ? hit0 : null;
-    if (hit) { if (this.selPt?.id !== hit.id) this.selPt = null; this.h.pick({ k: 'building', id: hit.id }); this.startMove({ k: 'building', id: hit.id }, ev, v, hit.y); return; }
+    if (hit) { this.grab({ k: 'building', id: hit.id }, ev, v, hit.y); return; }
     const el = this.elementAt(ev.clientX, ev.clientY, e);
-    if (el) { this.h.pick({ k: 'element', id: el.id }); this.startMove({ k: 'element', id: el.id }, ev, v); return; }
+    if (el) { this.grab({ k: 'element', id: el.id }, ev, v); return; }
     // (a feature anywhere, once no building or thing is under the pointer; on the Site step it came first)
     const f = this.h.step() === 'site' ? null : this.featureAt(ev.clientX, ev.clientY);
-    if (f) { this.h.pick({ k: 'feature', id: f.id }); this.startMove({ k: 'feature', id: f.id }, ev, v); return; }
+    if (f) { this.grab({ k: 'feature', id: f.id }, ev, v); return; }
   }
   /** pick only (locked): the building under the pointer, else an element, else a feature, else nothing */
   private pickAt(x: number, y: number, v: ProView) {
@@ -645,6 +656,9 @@ export class CanvasEdit {
     }
     v.controls.enabled = !modeOf(this.tool);
     if (d) { if (d.kind === 'plan' || d.moved) return; }
+    // (pressed on something not picked: a click picks it, a drag was the camera's)
+    const pend = this.pend; this.pend = null;
+    if (pend) { if (click) { if (pend.k === 'building' && this.selPt?.id !== pend.id) this.selPt = null; this.h.pick(pend); } return; }
     const m = modeOf(this.tool);
     // (a click on open ground, not a drag: inside the plot picks the plot; outside it, nothing)
     if (!m && click && !d && this.tool.k === 'select') {

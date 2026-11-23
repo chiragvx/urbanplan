@@ -78,7 +78,7 @@ export const newSite = (x: Omit<Site, 'id' | 'added' | 'status'> & { status?: Si
 export function projectOf(s: Site, pr: SitePrices = DEFAULT_PRICES): ProProject {
   return {
     ...DEFAULT_PROJECT, name: s.name, city: pr.city, shape: 'rect', width: s.width, depth: s.depth, road: s.road, dpRoad: s.dp, corner: false,
-    sale: pr.sale, ...(s.asking ? { land: s.asking } : {}), target: pr.target, stage: 'looking',
+    sale: pr.sale, ...(s.asking ? { land: s.asking } : {}), target: pr.target, stage: 'looking', site: s.id,
   };
 }
 

@@ -305,3 +305,9 @@ p { margin: 0; }
 .d-sites-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .d-sites-bar .seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 @media (max-width: 760px) { .d-head-a { flex-wrap: wrap; } .d-head-a .btn { flex: 1 1 auto; } }
+
+/* the stage on the card and in Sites (docs/plans/pro-ia-rethink.md step 7) */
+.d-card-st { position: relative; z-index: 2; margin-top: 6px; display: flex; }
+.d-stage { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 99px; background: var(--up-surface-2); font-size: 11.5px; font-weight: 600; color: var(--up-ink-2); white-space: nowrap; }
+.d-stage-s { display: inline-flex; margin-left: -6px; }
+.d-sstage { display: inline-flex; align-items: center; gap: 2px; margin-top: 2px; font-size: 11.5px; color: var(--up-muted); }

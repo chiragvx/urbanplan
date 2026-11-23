@@ -202,6 +202,7 @@ Smallest and most telling first, so the first two can be shown to users within d
 6. **First-run guidance (small).** Hover affordance, the HUD hint, the new checklist.
    - **Status (2026-11-23): built (cursor and name tag on hover, the first pick's hint, a checklist whose tasks do themselves); no 3D highlight yet.** See docs/plans/pro-global-ux-log.md.
 7. **The stage on the dashboard (small).** Show and set it on the card and in Sites.
+   - **Status (2026-11-23): built (card, list column and filter; Sites shows and sets the stage of the project opened from a plot).** Also: a drag only moves what's picked. See docs/plans/pro-global-ux-log.md.
 
 Phase 8's outline and comment pins carry on as planned. Its focus mode can wait until after step 5.
 

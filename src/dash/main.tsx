@@ -20,10 +20,10 @@ import { PRESETS } from '../pro/design';
 import * as Lib from '../pro/designLibrary';
 import { clone } from '../pro/design';
 import { Builder } from './builder';
-import { Sites } from './sites';
+import { Sites, type SiteProject } from './sites';
 import { listSites } from '../pro/sites';
 import { dropVersions } from '../pro/designVersions';
-import { CITIES } from '../pro/project';
+import { CITIES, STAGE_LABEL, STAGE_SUB, STAGES, stageOf, type Stage } from '../pro/project';
 import { I } from './icons';
 import * as D from './data';
 import { summaryOf, type Summary } from './summary';
@@ -145,7 +145,7 @@ function App() {
         {s === undefined ? <p class="d-loading"><Dither class="dz" cell={2} />Loading…</p>
           : r.view === 'home' ? <Home data={data} name={name} signedIn={!!user} />
           : r.view === 'projects' ? <Projects data={data} signedIn={!!user} />
-          : r.view === 'sites' ? <Sites phone={PHONE} area={area} toast={toast} authority={(CITIES.some((c) => c.value === D.prefs.value.authority) ? D.prefs.value.authority : 'pune') as ProProject['city']} />
+          : r.view === 'sites' ? <Sites linked={linkedSites(data)} phone={PHONE} area={area} toast={toast} authority={(CITIES.some((c) => c.value === D.prefs.value.authority) ? D.prefs.value.authority : 'pune') as ProProject['city']} />
           : r.view === 'designs' ? <Designs sub={location.hash.replace(/^#\/?/, '').split('/')[1] ?? ''} />
           : r.view === 'team' ? <Team data={data} signedIn={!!user} />
           : r.view === 'activity' ? <Activity data={data} signedIn={!!user} />
@@ -286,6 +286,36 @@ function Home({ data, name, signedIn }: { data: Data; name: string; signedIn: bo
   );
 }
 
+// ---------------- the stage (docs/plans/pro-ia-rethink.md §2.8) ----------------
+// Where a project is in the firm's pipeline: looking at the land, designing the scheme, applying for permission. It's
+// shown and set here, on the card and in Sites, not inside Pro, and it filters the list.
+
+const stageOfRow = (r: D.Row): Stage => r.stage ?? r.summary?.stage ?? 'designing';
+const STAGE_OPTS = STAGES.map((v) => ({ value: v, label: STAGE_LABEL[v] }));
+/** a project's stage: a menu to set it (mine, or shared with me to edit), else the word */
+export function StagePick({ name, stage, set }: { name: string; stage: Stage; set?: (s: Stage) => void }) {
+  if (!set || PHONE) return <span class={`d-stage s-${stage}`} title={STAGE_SUB[stage]}>{STAGE_LABEL[stage]}</span>;
+  return <span class="d-stage-s" data-tip={`Stage: ${STAGE_SUB[stage].toLowerCase()}`}><Select<Stage> size="sm" quiet aria-label={`${name}: stage`} value={stage} onChange={set} options={STAGE_OPTS} /></span>;
+}
+const canEdit = (r: D.Row) => !r.role || r.role === 'editor';
+function setRowStage(r: D.Row, data: Data, stage: Stage) {
+  const was = r.stage;
+  data.patch(r.id, { stage });
+  void act(() => D.setStage(r.id, stage), `${r.name}: ${STAGE_LABEL[stage]}.`).then((ok) => !ok && data.patch(r.id, { stage: was }));
+}
+function setLocal(data: Data, stage: Stage) { D.setLocalStage(stage); data.reload(); toast(`${data.local?.p.name ?? 'It'}: ${STAGE_LABEL[stage]}.`); }
+/** the projects opened from Sites' plots, by the site: the newest of each (a cloud one before the browser's) */
+function linkedSites(data: Data): (site: string) => SiteProject | null {
+  const m = new Map<string, SiteProject>();
+  for (const r of data.rows ?? []) {
+    const site = r.summary?.site;
+    if (site && !r.archived_at && !m.has(site)) m.set(site, { href: D.openUrl(r.id), stage: stageOfRow(r), set: (s) => setRowStage(r, data, s) });
+  }
+  const l = data.local;
+  if (l?.p.site && !m.has(l.p.site)) m.set(l.p.site, { href: D.proUrl('?local'), stage: stageOf(l.p), set: (s) => setLocal(data, s) });
+  return (site) => m.get(site) ?? null;
+}
+
 // ---------------- project cards ----------------
 
 function LocalCard({ data }: { data: Data }) {
@@ -302,10 +332,12 @@ function LocalCard({ data }: { data: Data }) {
     </div>
   );
   return (
-    <a class="d-card" href={D.proUrl('?local')}>
+    <div class="d-card">
+      <a href={D.proUrl('?local')} class="d-card-link" aria-label={`Open ${l.p.name}`} />
       <Thumb s={s} />
-      <div class="d-card-b"><b>{l.p.name}</b><small><I n="monitor" size={13} />In this browser · {s.city}</small><Facts s={s} /></div>
-    </a>
+      <div class="d-card-b"><b>{l.p.name}</b><small><I n="monitor" size={13} />In this browser · {s.city}</small><Facts s={s} />
+        <div class="d-card-st"><StagePick name={l.p.name} stage={stageOf(l.p)} set={(st) => setLocal(data, st)} /></div></div>
+    </div>
   );
 }
 
@@ -353,6 +385,7 @@ function Card({ r, data }: { r: D.Row; data: Data }) {
         <b>{r.name}</b>
         <small>{r.role ? <><I n="team" size={13} />{r.role === 'editor' ? 'Can edit' : 'Can view'} · </> : null}{r.summary?.city ?? (CITIES.find((c) => `pro:${c.value}` === r.region)?.label ?? '')}{' · '}{ago(r.updated_at)}</small>
         <Facts s={r.summary} />
+        <div class="d-card-st"><StagePick name={r.name} stage={stageOfRow(r)} set={canEdit(r) ? (s) => setRowStage(r, data, s) : undefined} /></div>
       </div>
       <span class="d-card-m"><Menu label={`${r.name}: more`} items={actions(r, data, ask_)} /></span>
     </div>
@@ -366,6 +399,7 @@ function Projects({ data, signedIn }: { data: Data; signedIn: boolean }) {
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [sort, setSort] = useState<'recent' | 'name' | 'created' | 'size'>('recent');
+  const [stg, setStg] = useState<'any' | Stage>('any');
   const [view, setView] = useState<'grid' | 'list'>(() => { try { return (localStorage.getItem('urbanplan:dash:view') as 'grid' | 'list') || 'grid'; } catch { return 'grid'; } });
   const setV = (v: 'grid' | 'list') => { setView(v); try { localStorage.setItem('urbanplan:dash:view', v); } catch { /* */ } };
   const [dlg, setDlg] = useState<{ k: 'rename' | 'delete' | 'move'; r: D.Row } | null>(null);
@@ -378,6 +412,7 @@ function Projects({ data, signedIn }: { data: Data; signedIn: boolean }) {
     if (filter === 'archived') { if (!r.archived_at) return false; } else if (r.archived_at) return false;
     if (filter === 'starred' && !r.starred) return false;
     if (filter.startsWith('folder:') && r.folder !== filter.slice(7)) return false;
+    if (stg !== 'any' && stageOfRow(r) !== stg) return false;
     return !q || `${r.name} ${r.summary?.city ?? ''}`.toLowerCase().includes(q.toLowerCase());
   }).sort((a, b) => sort === 'name' ? a.name.localeCompare(b.name) : sort === 'created' ? b.created_at.localeCompare(a.created_at) : sort === 'size' ? (b.summary?.bua ?? 0) - (a.summary?.bua ?? 0) : b.updated_at.localeCompare(a.updated_at));
   const count = (f: Filter) => (f === 'shared' ? data.shared?.length ?? 0 : (data.rows ?? []).filter((r) => (f === 'archived' ? !!r.archived_at : !r.archived_at && (f === 'all' || (f === 'starred' && r.starred) || (f.startsWith('folder:') && r.folder === f.slice(7))))).length);
@@ -410,6 +445,7 @@ function Projects({ data, signedIn }: { data: Data; signedIn: boolean }) {
         <div class="d-proj-b">
           <div class="d-toolbar">
             <label class="d-q"><I n="search" size={15} /><input type="search" placeholder="Search projects" value={q} onInput={(e) => setQ((e.target as HTMLInputElement).value)} aria-label="Search projects" /></label>
+            <Select<'any' | Stage> size="sm" aria-label="Stage" value={stg} onChange={setStg} options={[{ value: 'any', label: 'Any stage' }, ...STAGE_OPTS]} />
             <Select<typeof sort> size="sm" aria-label="Sort" value={sort} onChange={setSort} options={[{ value: 'recent', label: 'Last changed' }, { value: 'created', label: 'Newest' }, { value: 'name', label: 'Name' }, { value: 'size', label: 'Largest' }]} />
             <Seg<'grid' | 'list'> small ariaLabel="View" value={view} set={setV} options={[{ value: 'grid', label: '', icon: 'grid', title: 'Cards' }, { value: 'list', label: '', icon: 'list', title: 'List' }]} />
           </div>
@@ -417,15 +453,16 @@ function Projects({ data, signedIn }: { data: Data; signedIn: boolean }) {
           {data.rows === null && !data.err ? <div class="d-cards">{[0, 1, 2, 3].map(() => <div class="d-card skel" />)}</div>
             : !list.length ? <Empty icon={filter === 'archived' ? 'archive' : filter === 'starred' ? 'star' : 'folder'} title={q ? 'Nothing matches' : filter === 'archived' ? 'Nothing archived' : filter === 'starred' ? 'No starred projects' : filter === 'shared' ? 'Nothing shared with you yet' : 'No projects here'}>
                 {filter === 'all' && !q && !PHONE && <a class="btn primary" href={D.newUrl()}>New project</a>}</Empty>
-            : view === 'grid' ? <div class="d-cards">{filter === 'all' && !q && data.local && <LocalCard data={data} />}{list.map((r) => <Card r={r} data={data} />)}</div>
+            : view === 'grid' ? <div class="d-cards">{filter === 'all' && !q && data.local && (stg === 'any' || stageOf(data.local.p) === stg) && <LocalCard data={data} />}{list.map((r) => <Card r={r} data={data} />)}</div>
             : <table class="d-table">
-                <thead><tr><th>Name</th><th class="hide-s">Place</th><th class="num hide-s">Plot</th><th class="num hide-s">Homes</th><th class="num">Changed</th><th /></tr></thead>
+                <thead><tr><th>Name</th><th class="hide-s">Place</th><th class="num hide-s">Plot</th><th class="num hide-s">Homes</th><th class="hide-s">Stage</th><th class="num">Changed</th><th /></tr></thead>
                 <tbody>{list.map((r) => (
                   <tr>
                     <td><a href={D.openUrl(r.id)} class="d-tname">{r.starred && <I n="star" size={13} />}{r.name}</a>{r.role && <small class="d-chip">{r.role === 'editor' ? 'Can edit' : 'Can view'}</small>}</td>
                     <td class="hide-s">{r.summary?.city ?? ''}</td>
                     <td class="num hide-s">{r.summary?.area ? area(r.summary.area) : ''}</td>
                     <td class="num hide-s">{r.summary?.homes ? nf(r.summary.homes) : ''}</td>
+                    <td class="hide-s"><StagePick name={r.name} stage={stageOfRow(r)} set={canEdit(r) ? (s) => setRowStage(r, data, s) : undefined} /></td>
                     <td class="num">{ago(r.updated_at)}</td>
                     <td class="num"><Menu label={`${r.name}: more`} items={actions(r, data, ask_)} /></td>
                   </tr>))}</tbody>

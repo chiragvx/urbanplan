@@ -4,6 +4,29 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-23 · Rethink step 7: the stage on the dashboard, and a drag that turns the view
+
+**What changed (the drag, after "clicking a building makes it easy to move, but it's horrible while panning or orbiting"):**
+- **Only what's picked moves under a drag** (src/pro/edit.ts). A press on a building, a site element or a feature that isn't picked waits: let go in place and it's picked; drag and the view orbits or pans as it would on open ground. Before, any press on a building picked it and started moving it, so turning the camera over a tower shoved it.
+- Picked, it moves as before (the cursor says so: a pointer over the others, a move cursor over the picked one). The handles on the picked building are unchanged.
+
+**What changed (the stage, rethink §2.8):**
+- **The card shows the stage and sets it** (Looking, Designing, Applying): a small menu under the figures, on your projects and those shared with you to edit; the word alone on a phone or a view-only share. The browser's own project too. It's saved into the project's file, and the card's summary carries it.
+- **Projects filters by stage** ("Any stage" beside Sort), and the list view has a Stage column.
+- **Sites knows the project opened from a plot** (the project keeps the site it came from): its row says "Project: Looking ▾", settable there; Open opens that project instead of starting another, and "Start another project" is in its menu.
+
+**How it was checked:**
+- Browser at 1440×860, with your storage backed up and restored exactly: a drag across an unpicked tower turned the camera and left the tower where it was, unpicked; a click picked it; a drag then moved it and the camera stayed. On the dashboard the browser's card showed Designing; setting Applying saved it, toasted, and didn't open the project. In Sites, a plot whose project came from it showed "Project Applying" with "Open its project"; another plot kept "Start a project…".
+- `npm test` ALL OK; `npm run build` OK.
+
+**Left or known:**
+- Setting the stage on a cloud card opens and saves the file, so it counts as a change ("Changed just now") and as an open.
+- Projects opened from Sites before today don't know their site, so Sites can't show their stage.
+- The stage filter shows only when signed in (the signed-out page has just the browser's card).
+- On a building that fills the screen, orbiting needs a drag that starts on it while it isn't picked, or the right button to pan.
+
+---
+
 ## 2026-11-23 · Rethink step 6: first-run guidance, and the outline beside the tools
 
 **What changed (first-run guidance):**

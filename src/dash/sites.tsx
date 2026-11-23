@@ -6,16 +6,18 @@
 // draws, and kept with each site until its plot or the prices change.
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { Btn, cr, Dialog, download, Menu, nf, Num, pct, Seg, Select } from '../pro/ui';
-import { CITIES, type ProCity } from '../pro/project';
+import { CITIES, STAGE_LABEL, STAGES, type ProCity, type Stage } from '../pro/project';
 import { SQFT } from '../doc/site';
 import * as S from '../pro/sites';
 import { I } from './icons';
 import { proUrl } from './data';
 
 type Show = 'open' | 'all' | S.SiteStatus;
+/** the project opened from a site: where it is, and setting its stage (from the dashboard's projects) */
+export type SiteProject = { href: string; stage: Stage; set: (s: Stage) => void };
 const SAMPLE = 'Name, frontage, depth, road, DP road, asking ₹/sq ft\nBaner corner, 40, 55, 18, 24, 9500\nWakad, 30, 45, 12, 18\nKothrud lane, 22, 30, 9, 12, 14000';
 
-export function Sites({ phone, area, toast, authority }: { phone: boolean; area: (m2: number) => string; toast: (t: string) => void; authority: ProCity }) {
+export function Sites({ phone, area, toast, authority, linked }: { phone: boolean; area: (m2: number) => string; toast: (t: string) => void; authority: ProCity; linked?: (site: string) => SiteProject | null }) {
   const [sites, setSitesRaw] = useState<S.Site[]>(() => S.listSites());
   const [pr, setPrRaw] = useState<S.SitePrices>(() => { const x = S.sitePrices(); try { return localStorage.getItem('urbanplan:sites:prices') ? x : { ...x, city: authority }; } catch { return x; } });
   const [show, setShow] = useState<Show>('open');
@@ -44,9 +46,11 @@ export function Sites({ phone, area, toast, authority }: { phone: boolean; area:
   }, [sites, pr, show]);
   const count = (v: Show) => sites.filter((s) => (v === 'all' ? true : v === 'open' ? s.status !== 'dropped' && s.status !== 'bought' : s.status === v)).length;
 
-  const open = (s: S.Site) => {
+  /** its project when there is one; else a new one at the Looking stage */
+  const open = (s: S.Site, fresh = false) => {
+    const lk = fresh ? null : linked?.(s.id);
     change(s.id, { opened: new Date().toISOString(), ...(s.status === 'lead' ? { status: 'looking' as const } : {}) });
-    location.assign(proUrl(`?new=${encodeURIComponent(`site:${s.id}`)}`));
+    location.assign(lk ? lk.href : proUrl(`?new=${encodeURIComponent(`site:${s.id}`)}`));
   };
   const csv = () => {
     const q = (x: string) => (/[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x);
@@ -104,11 +108,12 @@ export function Sites({ phone, area, toast, authority }: { phone: boolean; area:
               <th>Status</th><th />
             </tr></thead>
             <tbody>{rows.map((x, i) => {
-              const f = x.f, s = x.s, over = f && s.asking && f.worthRate !== null ? s.asking > f.worthRate : false;
+              const lk = linked?.(x.s.id), f = x.f, s = x.s, over = f && s.asking && f.worthRate !== null ? s.asking > f.worthRate : false;
               return (
                 <tr class={s.status === 'dropped' ? 'off' : ''}>
                   <td class="num muted">{f ? i + 1 : ''}</td>
-                  <td><b>{s.name}</b><small class="d-sline">{nf(s.width, 1)} × {nf(s.depth, 1)} m{s.note ? ` · ${s.note}` : ''}{s.opened ? ' · opened' : ''}</small></td>
+                  <td><b>{s.name}</b><small class="d-sline">{nf(s.width, 1)} × {nf(s.depth, 1)} m{s.note ? ` · ${s.note}` : ''}{s.opened && !lk ? ' · opened' : ''}</small>
+                    {lk && <span class="d-sstage">Project{phone ? `: ${STAGE_LABEL[lk.stage]}` : <Select<Stage> size="sm" quiet aria-label={`${s.name}'s project: stage`} value={lk.stage} onChange={lk.set} options={STAGES.map((v) => ({ value: v, label: STAGE_LABEL[v] }))} />}</span>}</td>
                   <td class="num hide-s">{f ? area(f.area) : ''}</td>
                   <td class="num hide-s">{s.road} m{s.dp > s.road ? ` → ${s.dp}` : ''}</td>
                   <td class="num hide-s">{f ? area(f.potential) : ''}</td>
@@ -119,9 +124,9 @@ export function Sites({ phone, area, toast, authority }: { phone: boolean; area:
                   <td>{phone ? S.STATUSES.find((y) => y.value === s.status)?.label
                     : <Select<S.SiteStatus> size="sm" aria-label={`${s.name}: status`} value={s.status} onChange={(status) => change(s.id, { status })} options={S.STATUSES} />}</td>
                   <td class="num">{!phone && <span class="d-sact">
-                    <Btn kind="quiet" icon="open" title="Start a project on this plot, at the Looking stage" onClick={() => open(s)}>Open</Btn>
+                    <Btn kind="quiet" icon="open" title={lk ? 'Open its project' : 'Start a project on this plot, at the Looking stage'} onClick={() => open(s)}>Open</Btn>
                     <Menu label={`${s.name}: more`} items={[
-                      { label: 'Open as a project', icon: 'open', onSelect: () => open(s) },
+                      ...(lk ? [{ label: 'Open its project', icon: 'open', onSelect: () => open(s) }, { label: 'Start another project', icon: 'plus', onSelect: () => open(s, true) }] : [{ label: 'Open as a project', icon: 'open', onSelect: () => open(s) }]),
                       { label: 'Edit', icon: 'edit', onSelect: () => setDlg({ k: 'edit', s }) },
                       { label: 'Delete', icon: 'trash', onSelect: () => setDlg({ k: 'delete', s }) },
                     ]} />
