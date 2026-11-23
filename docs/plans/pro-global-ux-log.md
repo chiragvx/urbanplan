@@ -4,6 +4,34 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-23 · Rethink step 3: the project in the inspector
+
+**What changed:**
+- **With nothing picked, the inspector is the project** (src/pro/places.tsx `ProjectBody`): its name, area and authority on top, then
+  - **The site:** Rules, Plot (with Edit the plot, survey number, import), Constraints;
+  - **What you're building:** What the plot permits (the FSI ladder), Fill the plot, Living, Flat mix, Flat sizes, Shops at the front, Parking;
+  - **Look:** the design system, with Open the design system;
+  - **Make options from it:** the written brief and Explore, until Generate takes them in (step 4).
+- **Brief and Design are one rail entry, Project** (key 1; Numbers 2, Approval 3). It shows or hides the project's panel; the old `step=brief` and `step=design` land on it, with a one-time note.
+- **The duplicates are gone:** Design › Buildings and On the site (the outline lists them; picking one opens its inspector). Esc lets go of a pick and brings the project back.
+- Search, the chip's Brief link, Inventory's "Change them" and the empty state's find and import all open the project's panel at the right section (`findIn` now looks in the inspector too).
+- On a narrow screen the project is a sheet, as the places were.
+- Three numbers a row stack in the inspector, where they didn't fit.
+
+**How it was checked:**
+- Browser with your storage backed up and restored exactly:
+  - at 1440×860 the project showed on the right; Ctrl+K › Flat sizes opened it there, unfolded;
+  - picking Building A showed its inspector, and Esc brought the project back;
+  - at 820 px wide, 1 opened "The project" as a sheet.
+- `npm test` ALL OK (search reaches all 45 sections); `npm run build` OK.
+
+**Left or known:**
+- Deal and prices are still in Numbers; they join the project when Numbers becomes a report (step 5).
+- The project's panel is open at every desktop width; folding it to its header below 1440 px isn't done.
+- The written brief and Explore sit at the panel's end until Generate (step 4).
+
+---
+
 ## 2026-11-23 · Rethink step 2: generated or yours
 
 **What changed:**

@@ -71,8 +71,8 @@ export function Search({ cmds, close, first }: { cmds: Cmd[]; close: () => void;
 /** Bring a setting into view in the open sheet: unfold its section, scroll to it, focus its field and flash it.
  *  Tries for a moment, since the step may only just have opened. */
 export function findIn(sec: string, field?: string, tries = 12) {
-  const root = document.querySelector('.sheet .panel-b');
-  const s = root && [...root.querySelectorAll<HTMLElement>('section.sec')].find((x) => x.querySelector(':scope > .sec-h h3')?.textContent?.trim() === sec);
+  const roots = [...document.querySelectorAll<HTMLElement>('.insp .insp-b, .sheet .panel-b')];
+  const s = roots.flatMap((root) => [...root.querySelectorAll<HTMLElement>('section.sec')]).find((x) => x.querySelector(':scope > .sec-h h3')?.textContent?.trim() === sec);
   if (!s) { if (tries > 0) setTimeout(() => findIn(sec, field, tries - 1), 60); return; }
   if (s.classList.contains('fold') && !s.classList.contains('open')) (s.querySelector(':scope > .sec-h') as HTMLElement | null)?.click();
   setTimeout(() => {

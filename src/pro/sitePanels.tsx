@@ -13,16 +13,15 @@ import { CITIES, fillOf, type Fill } from './project';
 import { longestEdge } from './importPlot';
 import { readGround } from './plotOps';
 import { shopFloorsAllowed } from './mixed';
-import { featureOf } from './siteObjects';
 import { FindPlot, ImportBox, type StepProps } from './steps';
-import { Btn, Icon, Lines, Note, nf, Num, Row, Section, Seg, Select, Slider, sqft, Toggle } from './ui';
+import { Btn, Lines, Note, nf, Num, Row, Section, Seg, Select, Slider, sqft, Toggle } from './ui';
 import { LadderBox } from './numbersUi';
 
 type PlotWay = 'view' | 'survey' | 'import';
 
 // ================================================================ site
 export function SiteStep2({ p, e, up, toast, tool, picked, pick, openStatement, part }: StepProps) {
-  const B = part !== 'design', D = part !== 'brief';
+  const B = part !== 'design', D = part !== 'brief', P = part === 'project';
   const { r } = e;
   const city = CITIES.find((c) => c.value === p.city)!;
   // (the dashboard can ask for a plot found by its survey number or imported: that way open, once)
@@ -33,8 +32,6 @@ export function SiteStep2({ p, e, up, toast, tool, picked, pick, openStatement, 
   useEffect(() => { const on = (ev: Event) => setWay((ev as CustomEvent<PlotWay>).detail); addEventListener('urbanplan:way', on); return () => removeEventListener('urbanplan:way', on); }, []);
   const LM = p.limits ?? { maxH: 0, tod: false, todFsi: 4 };
   const setLM = (x: Partial<typeof LM>) => up({ limits: { ...LM, ...x } });
-  const fs = p.features ?? [];
-  const fPicked = picked?.k === 'feature' ? fs.find((f) => f.id === picked.id) : undefined;
   const found = (ring: number[], src: string, name?: string, at?: [number, number] | null) => {
     const k = longestEdge(ring);
     up({ shape: 'poly', ring, at: at ?? undefined, edgeRoads: Array.from({ length: ring.length / 2 }, (_, i) => (i === k ? { today: 12, dp: 0 } : null)), ...(name ? { name } : {}) });
@@ -48,19 +45,14 @@ export function SiteStep2({ p, e, up, toast, tool, picked, pick, openStatement, 
       </Section>}
 
       {D && <Section title="Plot" aside={<span class="sec-meta">{nf(r.area)} m² · {sqft(r.area)}</span>}>
-        <p class="hint-line"><Icon n="edit" size={14} />Drag its corners on the map, type its edges' lengths there, and set each edge's road with its chip. The plot's bar on the map has its size, levels and the authority.</p>
+        <p class="hint-line">Pick the plot in the view to drag its corners, type its edges' lengths and set each edge's road.</p>
+        <Row><Btn icon="edit" onClick={() => pick({ k: 'plot' })}>Edit the plot</Btn></Row>
         <Seg<PlotWay> value={way} set={setWay} options={[{ value: 'view', label: 'On the map' }, { value: 'survey', label: 'Survey no.' }, { value: 'import', label: 'Import' }]} ariaLabel="Set the plot by" />
         {way === 'survey' && <FindPlot start cancel={() => setWay('view')} done={(ring, src, at) => { found(ring, src, src.split(' · ')[0], at); setWay('view'); }} />}
         {way === 'import' && <ImportBox done={(ring, src, at) => { found(ring, `Outline from ${src}`, undefined, at); setWay('view'); }} />}
       </Section>}
 
-      {B && <LadderBox p={p} e={e} up={up} openStatement={openStatement} />}
-      {D && <Section title="On the site" fold open={fs.length > 0 || tool.k === 'feature'} aside={<span class="sec-meta">{fs.length ? `${fs.length} marked` : 'none'}</span>} sub="What to build round: draw it from the tools on the map's left edge (the tree), then drag its points and rings there.">
-        {fs.length > 0 && <ul class="flist">{fs.map((f, i) => {
-          const F = featureOf(f.kind), n = fs.slice(0, i).filter((x) => x.kind === f.kind).length + 1;
-          return <li aria-current={fPicked?.id === f.id ? 'true' : undefined}><button type="button" class="fitem" onClick={() => pick({ k: 'feature', id: f.id })}><Icon n={F.icon} size={16} /><span>{F.label} {n}</span><small>{nf(f.clear ?? F.clear, 1)} m clear</small></button></li>;
-        })}</ul>}
-      </Section>}
+      {B && !P && <LadderBox p={p} e={e} up={up} openStatement={openStatement} />}
 
 
       {B && <Section title="Constraints" fold open={!!(LM.maxH || LM.tod)} sub="An airport or fire height cap, a metro transit zone.">
@@ -81,7 +73,7 @@ const PARKING: { value: Fill['parking']; label: string; title: string }[] = [
   { value: 'surface', label: 'Open', title: 'Bays on the open ground' },
 ];
 
-export function SchemeStep({ p, e, up, toast, picked, pick, show, part }: StepProps) {
+export function SchemeStep({ p, e, up, toast, pick, part }: StepProps) {
   const B = part !== 'design', D = part !== 'brief';
   const { r, d, shops } = e;
   const f = fillOf(p), setFill = (x: Partial<Fill>) => up({ fill: { ...(p.fill ?? {}), ...x } });
@@ -91,9 +83,7 @@ export function SchemeStep({ p, e, up, toast, picked, pick, show, part }: StepPr
   const sh = p.shops ?? { floors: 0, depth: 9, sale: 0 };
   const setShops = (x: Partial<typeof sh>) => up({ shops: { ...sh, ...x } });
   const allowed = shopFloorsAllowed(r.roadW);
-  const bi = picked?.k === 'building' ? d.buildings.findIndex((b) => b.b.id === picked.id) : -1;
   const sizes = sizesOf(p);
-  const nameOf = (i: number) => (p.scheme?.buildings.find((b) => b.id === d.buildings[i].b.id)?.name) ?? `Building ${String.fromCharCode(65 + i)}`;
   return (
     <>
       {B && <Section title="Fill the plot" aside={owned ? <span class="sec-meta">shaped by hand</span> : undefined}>
@@ -132,19 +122,6 @@ export function SchemeStep({ p, e, up, toast, picked, pick, show, part }: StepPr
         <Note>Flats come whole: on a given floor they land near these sizes (about 15% under to 40% over), and the area statement and money follow what's laid.</Note>
       </Section>}
 
-      {D && <Section title="Buildings" aside={<span class="sec-meta">{d.buildings.length}</span>}>
-        <ul class="blist">{d.buildings.map((b, i) => (
-          <li aria-current={bi === i ? 'true' : undefined}>
-            <button type="button" class="bitem" onClick={() => (bi === i ? pick(null) : show(b.b.id))}>
-              <b class="bname">{String.fromCharCode(65 + i)}</b>
-              <span><b>{nameOf(i)}</b><small>{b.floors} floors · {nf(b.height, 1)} m · {b.perFloor.slice(0, 3).reduce((s, x) => s + x, 0) * b.floors} flats</small></span>
-              {b.clash || b.overHeight ? <Icon n="warn" size={16} /> : null}
-            </button>
-          </li>
-        ))}</ul>
-        {!d.buildings.length && <Note tone="warn">No buildings. Fill the plot, or add one from the tools on the map's left edge.</Note>}
-        <Note>Add buildings, gardens, parking, roads, gates and walls from the tools on the map's left edge. Pick one to edit it in the inspector.</Note>
-      </Section>}
 
       {D && <Section title="Shops at the front" fold open={sh.floors > 0} aside={shops ? <span class="sec-meta">{shops.count} shops</span> : undefined}>
         <Seg<string> value={String(sh.floors)} set={(v) => setShops({ floors: +v })} options={[{ value: '0', label: 'None' }, { value: '1', label: 'Ground' }, { value: '2', label: 'G + 1' }, { value: '3', label: 'G + 2' }]} />

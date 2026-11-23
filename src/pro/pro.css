@@ -1015,3 +1015,7 @@ details.chk .show { display: inline-flex; align-items: center; gap: 5px; margin:
 .lchip .linkbtn { font-size: 12.5px; }
 .lchip-m > button, .lchip-m .btn { height: 24px; padding: 0 8px; font-size: 12px; }
 @media (max-width: 600px) { .lchip { left: calc(62px + var(--cover)); top: 72px; } }
+
+/* the project in the inspector (docs/plans/pro-ia-rethink.md step 3): three numbers a row don't fit its width */
+.insp .row.r3 { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.insp .place-h { margin: 10px 0 0; }

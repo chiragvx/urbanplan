@@ -26,7 +26,6 @@ export const FINDABLE: Findable[] = [
   ...S('brief', 'Rules', 'authority city code udcpr dcpr', [['Planning authority', 'city rules code']]),
   ...S('design', 'Plot', 'size frontage depth outline corners survey import'),
   ...S('brief', 'What the plot permits', 'fsi ladder premium tdr ancillary fungible basic allowed permissible built-up'),
-  ...S('design', 'On the site', 'trees features obstructions power line well no-build'),
   ...S('brief', 'Constraints', 'height cap airport tod metro transit', [['Height cap (0: none)', 'airport aai fire heritage'], ['Transit-oriented zone', 'tod metro'], 'Total FSI in the zone']),
   // the design system (Design › Look)
   ...S('look', 'Start from', 'preset design system style'),
@@ -50,7 +49,6 @@ export const FINDABLE: Findable[] = [
   ...S('design', 'Living', 'green play spacing parking basements', ['Green', 'Play area', 'Roads inside', 'Parking', 'Basements']),
   ...S('brief', 'Flat mix', 'bhk 1bhk 2bhk 3bhk units'),
   ...S('brief', 'Flat sizes', 'carpet area size sq ft 1bhk 2bhk 3bhk flat size unit size'),
-  ...S('design', 'Buildings', 'towers list'),
   ...S('design', 'Shops at the front', 'retail commercial ground floor', ['Depth from the front']),
   ...S('design', 'Parking', 'bays cars stilt basement podium'),
   // numbers

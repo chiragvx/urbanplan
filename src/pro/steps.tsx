@@ -27,13 +27,12 @@ import { checkBuilding } from './viewer';
 
 export type Step = 'brief' | 'design' | 'numbers' | 'approve';
 export const STEPS: { key: Step; label: string; icon: string; title: string; sub: string }[] = [
-  { key: 'brief', label: 'Brief', icon: 'site', title: 'Brief', sub: 'What the site gives and what you want: the rules, the FSI ladder, the type and mix; options from a written brief.' },
-  { key: 'design', label: 'Design', icon: 'building', title: 'Design', sub: 'The plot, what’s on it, the buildings and the look.' },
+  { key: 'design', label: 'Project', icon: 'building', title: 'The project', sub: 'The site, what you’re building, the look, options from a brief: on the view’s right with nothing picked.' },
   { key: 'numbers', label: 'Numbers', icon: 'money', title: 'Numbers', sub: 'The area statement, then the money: price, cost, the deal on the land, the cash.' },
   { key: 'approve', label: 'Approval', icon: 'shield', title: 'Approval', sub: 'Our own scrutiny, the NOCs and fees, and the drawings and files to submit.' },
 ];
 /** the six steps before (stored, or in old links) and the place each one's settings went to */
-export const OLD_STEP: Record<string, Step> = { site: 'brief', build: 'design', design: 'design', money: 'numbers', approve: 'approve', explore: 'brief' };
+export const OLD_STEP: Record<string, Step> = { site: 'design', build: 'design', money: 'numbers', approve: 'approve', explore: 'design', brief: 'design' };
 export const isStep = (s: unknown): s is Step => STEPS.some((x) => x.key === s);
 
 export interface StepProps {
@@ -41,7 +40,7 @@ export interface StepProps {
   rooms: FlatRooms[][]; checks: Check[]; deal: DealResult;
   go: (s: Step) => void; openDrawings: () => void;
   /** the part of a step's sections a place shows (the Site and Scheme sections are split between Brief and Design) */
-  part?: 'brief' | 'design';
+  part?: 'brief' | 'design' | 'project';
   /** open the design system's builder (Design › Look) */
   openLook?: () => void;
   /** the area statement, over the view */

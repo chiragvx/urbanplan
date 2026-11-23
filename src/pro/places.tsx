@@ -1,9 +1,10 @@
-// The four places on the rail, each a question: Brief (what's given, what do I want?), Design (what's the scheme?),
-// Numbers (is it worth it?), Approval (will it pass, what do I file?). They're made from the old steps' sections:
-// the Site and Scheme sections split between Brief and Design (their `part`), Explore under Brief, the design
-// system behind Design › Look, the area statement ahead of the money. See docs/plans/pro-global-ux.md §A.4.
+// The project's settings, and the places left on the rail. With nothing picked, the inspector on the view's right is
+// the project (docs/plans/pro-ia-rethink.md §2.4): the site, what you're building, the look, and options from a brief
+// (Generate takes those in later). The plot, the buildings and what's on the site are picked in the view or the
+// outline, so they aren't listed here. Numbers (is it worth it?) and Approval (will it pass?) stay as places.
 import type { ComponentChildren } from 'preact';
 import { SchemeStep, SiteStep2 } from './sitePanels';
+import { LadderBox } from './numbersUi';
 import { ExploreStep, MoneyStep, type StepProps } from './steps';
 import { Elevation } from './designStep';
 import { AreaStatementBody } from './numbersUi';
@@ -15,29 +16,23 @@ import { SQFT, UNIT_LABEL } from '../doc/site';
 /** a heading over a run of sections: what part of the question they answer */
 const Part = ({ children }: { children: ComponentChildren }) => <h3 class="place-h">{children}</h3>;
 
-export function BriefPlace(props: StepProps) {
+/** The project, with nothing picked: one home for each of its settings. */
+export function ProjectBody(props: StepProps) {
+  const { p, e, up, openLook, openStatement } = props;
   return (
     <>
-      <Part>The site gives</Part>
-      <SiteStep2 {...props} part="brief" />
-      <Part>You want</Part>
-      <SchemeStep {...props} part="brief" />
-      <Part>Make options from it</Part>
-      <ExploreStep {...props} />
-    </>
-  );
-}
-
-export function DesignPlace(props: StepProps) {
-  const { e, openLook } = props;
-  return (
-    <>
-      <SiteStep2 {...props} part="design" />
-      <SchemeStep {...props} part="design" />
+      <Part>The site</Part>
+      <SiteStep2 {...props} part="project" />
+      <Part>What you’re building</Part>
+      <LadderBox p={p} e={e} up={up} openStatement={openStatement} />
+      <SchemeStep {...props} part="project" />
+      <Part>Look</Part>
       <Section title="Look" aside={<span class="sec-meta">{e.ds.name}</span>} sub="The design system: facade, windows, floors, finishes, the site’s walls and landscape.">
         <figure class="dss-prev look"><Elevation ds={e.ds} /></figure>
         {openLook && <Btn icon="palette" onClick={openLook}>Open the design system</Btn>}
       </Section>
+      <Part>Make options from it</Part>
+      <ExploreStep {...props} />
     </>
   );
 }
@@ -64,7 +59,7 @@ function Inventory({ p, e, go, show }: StepProps) {
           <tr class="tot"><td>All</td><td /><td>{tot.n}</td><td>{nf(tot.n ? (tot.carpet / tot.n) * SQFT : 0, 0)} sq ft</td><td>{cr(tot.value)}</td></tr>
         </tbody>
       </table> : <p class="note">No flats laid out.</p>}
-      <p class="hint-line">Sizes asked: {[0, 1, 2].map((t) => `${UNIT_LABEL[t]} ${nf(sizes[t] * SQFT, 0)}`).join(' · ')} sq ft carpet. <button type="button" class="linkbtn" onClick={() => { go('brief'); findIn('Flat sizes'); }}>Change them</button></p>
+      <p class="hint-line">Sizes asked: {[0, 1, 2].map((t) => `${UNIT_LABEL[t]} ${nf(sizes[t] * SQFT, 0)}`).join(' · ')} sq ft carpet. <button type="button" class="linkbtn" onClick={() => { go('design'); findIn('Flat sizes'); }}>Change them</button></p>
     </Section>
   );
 }

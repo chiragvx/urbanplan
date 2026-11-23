@@ -34,12 +34,12 @@ interface Props {
 
 const m = (v: number) => `${nf(v, 1)} m`;
 
-function Frame({ title, meta, actions, hide, children }: { title: ComponentChildren; meta?: ComponentChildren; actions?: ComponentChildren; hide: () => void; children: ComponentChildren }) {
+export function Frame({ title, meta, actions, hide, children }: { title: ComponentChildren; meta?: ComponentChildren; actions?: ComponentChildren; hide: () => void; children: ComponentChildren }) {
   return (
     <aside class="insp" aria-label="Inspector" onKeyDown={(ev) => { if (ev.key !== 'Escape') ev.stopPropagation(); }}>
       <header>
         <div class="insp-t">{title}{meta && <small>{meta}</small>}</div>
-        <span class="insp-a">{actions}<Btn kind="quiet" icon="x" title="Hide the inspector (the pick stays)" onClick={hide} /></span>
+        <span class="insp-a">{actions}<Btn kind="quiet" icon="x" title="Hide the inspector" onClick={hide} /></span>
       </header>
       <div class="insp-b">{children}</div>
     </aside>
