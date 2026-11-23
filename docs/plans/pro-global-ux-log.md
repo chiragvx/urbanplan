@@ -4,6 +4,55 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-23 · The camera on interactions (docs/plans/pro-camera.md, all four steps)
+
+**What changed:**
+- **Panels hold the picture still.** Opening or closing the inspector, the outline, a report or the project's panel no longer shifts the view. A panel now only changes where the next framing aims: the middle of the uncovered part. One exception: if a pick ends up wholly under a panel, it eases out by the smallest move (280 ms).
+- **One camera mover** (scene.ts `fly`) behind every command: Whole site, street, above, Show, F, double-click, Plan.
+  - Moves take 280 to 600 ms depending on distance and ease out, going the shortest way round.
+  - Any press or wheel on the view stops a move where it is.
+  - With reduced motion, a move is a jump.
+  - Opening a project or a new plot still frames the whole site at once.
+- **Plan and back.** P turns the camera to straight down, north up (300 ms), then switches to the plan at the same scale. P again returns to the 3D view you left.
+- **The controls.**
+  - **Drag:** orbits about the point under the pointer (a building's surface or the ground; on the sky, the middle). A dot marks that point while you drag.
+  - **Right-drag or Shift+drag:** pans across the ground, so the camera's height stays put.
+  - **Wheel:** zooms toward the pointer, slowing near the surface under it and stopping 3 m short.
+  - **Far limit:** 12 × the site (or the tallest building).
+  - **Phone:** one finger orbits about what's touched; pinch and two-finger pan are as before.
+- **Framing.**
+  - **F:** frames what's picked (a building, a site element or a feature); with nothing picked, the whole site. The toolbar's Whole site stays the whole site.
+  - **Double-click:** on a building, frames it; on open ground, frames the whole site. Drawing still finishes on a double-click.
+  - **Double-tap (phone):** does the same.
+  - Framing now fits the box's bounding sphere, so a tall tower fits whole.
+  - The shortcuts list says all this.
+- **Options don't fly.** Opening or making an option that leaves buildings out of the view adds "A building is outside the view" to its toast, with Whole site.
+
+**The decision (pro-camera.md §5):** I went with (b), extending OrbitControls, not (a), the camera-controls library. On a closer look, OrbitControls already has zoom to the cursor, distance limits and ground panning built in. Only the pivot needed our code: about 40 lines that turn the camera and its target together round the pointed-at point. So there's no new dependency, and edit.ts's `controls.enabled` hand-off is unchanged.
+
+**How it was checked:**
+- Browser at 1440×860 with the sample project, your storage backed up and restored exactly.
+- **Panels:** a fixed point's screen position didn't change through 1, N, Esc and O, nor when a pick opened the inspector (the camera stayed bit for bit).
+- **Orbit:** a drag from a ground point kept that point within 2 px of where it was pressed while the view turned; the dot hid on release.
+- **Zoom:** ten wheel bursts at the tower's face stopped 3.09 m from it, with the same point still under the pointer.
+- **F:** the move took about 600 ms, eased out, and framed the picked tower whole in the uncovered part.
+- **Interrupting:** a press during S's move stopped it where it was.
+- **Plan:** P then P returned to the identical 3D view.
+- **Reduced motion** (stubbed for the test): S jumped at once.
+- **Double-click:** on open ground, it framed the whole site.
+- **Reveal:** a tower picked at the right edge, wholly under where the inspector opens, eased out to just left of it.
+- **Pan:** a right-drag kept the camera's height exactly.
+- **Off-screen note:** with the camera turned away, opening Option A said "Opened Option A. A building is outside the view."
+- `npm test` ALL OK; `npm run build` OK.
+
+**Left or known:**
+- The plan's 15-minute user test ("did the view ever move when you didn't expect it?") hasn't been run.
+- The phone's double-tap and one-finger orbit about the touched point weren't tried on a real phone.
+- The figures bar across the top of the view isn't counted as covering it, so framing can sit a little high.
+- Orbiting has no inertia (OrbitControls' drift after letting go), on purpose: the view stops where you let go. Pans and zooms still glide a little.
+
+---
+
 ## 2026-11-23 · Rethink step 7: the stage on the dashboard, and a drag that turns the view
 
 **What changed (the drag, after "clicking a building makes it easy to move, but it's horrible while panning or orbiting"):**

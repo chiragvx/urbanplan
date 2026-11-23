@@ -134,6 +134,7 @@ function App() {
   const narrow = useNarrow(), phone = usePhone();
   const narrowRef = useRef(narrow); narrowRef.current = narrow;
   const setProjOpenRef = useRef<(v: boolean) => void>(() => {});
+  const frameRef = useRef<(w: EditPicked) => void>(() => {});
   const [pinned, setPinnedS] = useState<boolean>(() => store.get<boolean>('urbanplan:pro:pin', false));
   const setPinned = (on: boolean) => { setPinnedS(on); store.set('urbanplan:pro:pin', on); };
   const [detent, setDetent] = useState<Detent>('half');
@@ -367,7 +368,7 @@ function App() {
     v.onNorth = (deg) => { if (needle.current) needle.current.style.transform = `rotate(${deg}deg)`; };
     const ce = new CanvasEdit(canvas.current!, {
       view: () => view.current, p: () => pRef.current, e: () => eRef.current, up: (o) => up(o), step: () => (pickedRef.current?.k === 'plot' ? 'site' : stepRef.current),
-      picked: () => pickedRef.current, pick: (x) => setPicked(x), done: () => { setToolS(SELECT); ce.setTool(SELECT); }, hint: setHint, readOnly: () => roRef.current,
+      picked: () => pickedRef.current, pick: (x) => setPicked(x), done: () => { setToolS(SELECT); ce.setTool(SELECT); }, hint: setHint, readOnly: () => roRef.current, frame: (w) => frameRef.current(w),
       readout: (o) => { const el = readout.current; if (!el) return; if (!o) { el.hidden = true; return; } el.hidden = false; el.classList.toggle('typed', !!o.typed); el.style.transform = `translate(${Math.round(o.x + 16)}px,${Math.round(o.y + 18)}px)`; el.firstElementChild!.textContent = o.text; el.lastElementChild!.textContent = o.sub ?? ''; },
     });
     ce.snapOn = store.get<boolean>('urbanplan:pro:snap', true);
@@ -403,9 +404,9 @@ function App() {
     view.current?.setSun(s ? [s[0] * Math.cos(n) - s[2] * Math.sin(n), s[1], s[0] * Math.sin(n) + s[2] * Math.cos(n)] : null);
   };
   useEffect(applySun, [sun, p.city, p.north]);
-  const cam = (k: CameraView) => view.current?.look(k);
-  /** frame the whole site once a new plot is drawn */
-  const fitSoon = () => setTimeout(() => cam('fit'), 60);
+  const cam = (k: CameraView, jump = false) => view.current?.look(k, jump);
+  /** frame the whole site once a new plot is drawn or a project opens (at once: nothing to travel from) */
+  const fitSoon = () => setTimeout(() => cam('fit', true), 60);
   // (the 3D's quality tier, and rendering an image of the view: ./render)
   const [tier, setTierS] = useState<Exclude<Tier, 'still'>>('standard');
   useEffect(() => { const v = view.current; if (v) { setTierS(v.tier); v.onTier = (t) => { setTierS(t); toast(`The 3D stepped down to ${t} quality to keep it smooth.`); }; } }, []);
@@ -420,12 +421,12 @@ function App() {
       const suns: [string, [number, number, number] | null][] = [['day', null], ['low', [-0.7, 0.2, 0.68]], ['night', [0.3, -0.4, 0.45]]];
       const t0 = performance.now();
       for (const [sn, dir] of suns) for (const c of ['fit', 'street', 'top'] as CameraView[]) {
-        v.look(c); v.setSun(dir);
+        v.look(c, true); v.setSun(dir);
         await new Promise((ok) => setTimeout(ok, 600));
         const blob = await v.renderStill({ width: 1600, height: 1000, quality: 'raster' });
         await fetch(`/__render/shot?set=${set}&name=${c}-${sn}`, { method: 'POST', body: blob });
       }
-      v.look('fit'); v.setSun(null);
+      v.look('fit', true); v.setSun(null);
       const bench = await v.bench(300);
       await fetch(`/__render/done?set=${set}`, { method: 'POST', body: JSON.stringify({ seconds: Math.round((performance.now() - t0) / 1000), tier: set, bench }) });
     }, 3000);
@@ -476,7 +477,7 @@ function App() {
       if (ev.key === 'x') setXray((v) => (v === null ? Math.max(1, Math.round(maxFloor / 2)) : null));
       if (ev.key === ']' ) setXray((v) => (v === null ? null : Math.min(maxFloor, v + 1)));
       if (ev.key === '[') setXray((v) => (v === null ? null : Math.max(1, v - 1)));
-      if (ev.key === 'f') cam('fit');
+      if (ev.key === 'f') frameIt(picked);
       if (ev.key === 't') cam('top');
       if (ev.key === 'p') setPlan(!plan);
       if (ev.key === 'v') setTool(SELECT);
@@ -572,7 +573,8 @@ function App() {
     const buildings = e.d.buildings.map((b, i): Cmd => ({ label: buildingName(p, e, i), icon: 'building', kind: 'Building', sub: `${b.floors} floors · ${nf(b.height)} m`, words: 'building tower block', run: () => showBuilding(b.b.id) }));
     const view: Cmd[] = [
       A(plan ? 'See it in 3D' : 'See the plan from above', plan ? 'cube' : 'plan', () => setPlan(!plan), { kind: 'View', keys: 'P', words: 'plan 3d camera' }),
-      A('Whole site', 'fit', () => cam('fit'), { kind: 'View', keys: 'F', words: 'fit zoom camera' }),
+      A('Frame what’s picked', 'fit', () => frameIt(picked), { kind: 'View', keys: 'F', sub: 'Nothing picked: the whole site', words: 'frame zoom focus selection camera fit' }),
+      A('Whole site', 'fit', () => cam('fit'), { kind: 'View', words: 'fit zoom camera' }),
       A('From the street', 'street', () => cam('street'), { kind: 'View', keys: 'S', words: 'camera eye level' }),
       A('From above', 'top', () => cam('top'), { kind: 'View', keys: 'T', words: 'camera top' }),
       A(xr === null ? 'X-ray a floor' : 'Stop the X-ray', 'layers', () => setXray(xr === null ? Math.max(1, Math.round(maxFloor / 2)) : null), { kind: 'View', keys: 'X', words: 'floor plan section inside' }),
@@ -632,9 +634,38 @@ function App() {
   const olOn = olOpen && !focus && !phone && !narrow;
   const olW = olOn ? 248 : 0;
   const repOn = report && !narrow && !phone ? repH : 0;
-  useEffect(() => { view.current?.setCover(cov[0] + olW, cov[1] + repOn, covR); }, [covR, olW, cov[0], cov[1], repOn]);
+  useEffect(() => {
+    const v = view.current; if (!v) return;
+    v.setCover(cov[0] + olW, cov[1] + repOn, covR);
+    const q = boxOf(picked); if (q) v.reveal(q.x0, q.z0, q.x1, q.z1, q.h);
+  }, [covR, olW, cov[0], cov[1], repOn]);
+  // (an option opened or made that leaves buildings out of the view says so, and doesn't fly there)
+  const optSeen = useRef(p.option);
+  useEffect(() => {
+    if (optSeen.current === p.option) return;
+    optSeen.current = p.option;
+    const v = view.current; if (!v) return;
+    const n = v.outside(e.d.buildings.map((b) => boxOf({ k: 'building', id: b.b.id })).filter((q): q is Box => !!q));
+    if (!n) return;
+    const note = `${n === 1 ? 'A building is' : `${n} buildings are`} outside the view.`, fit = { label: 'Whole site', run: () => cam('fit') };
+    setToastMsg((m) => (m ? { ...m, s: `${m.s} ${note}`, act: m.act ?? fit } : { s: note, act: fit }));
+    clearTimeout(toastT.current); toastT.current = window.setTimeout(() => setToastMsg(null), 6000);
+  }, [p.option]);
   useEffect(() => { if (step === 'numbers') tick('numbers'); }, [step]);
   const openWay = (w: 'survey' | 'import') => { try { sessionStorage.setItem('urbanplan:pro:way', w); } catch { /* */ } go('design'); setTimeout(() => { dispatchEvent(new CustomEvent('urbanplan:way', { detail: w })); findIn('Plot'); }, 40); };
+  /** what's picked as a box on the ground and a height, to frame it (null: the plot or nothing) */
+  const boxOf = (w: EditPicked): Box | null => {
+    let pts: number[] = [], h = 6;
+    if (w?.k === 'building') { const br = e.d.buildings.find((b) => b.b.id === w.id); if (!br) return null; pts = br.quads.flat(); h = br.height; }
+    else if (w?.k === 'element') { const x = (e.d.site.elements ?? []).find((q) => q.id === w.id) as { ring?: number[]; quads?: number[][] } | undefined; pts = x?.ring ?? x?.quads?.flat() ?? []; }
+    else if (w?.k === 'feature') pts = (p.features?.find((f) => f.id === w.id) as { pts?: number[] } | undefined)?.pts ?? [];
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (let i = 0; i + 1 < pts.length; i += 2) { x0 = Math.min(x0, pts[i]); x1 = Math.max(x1, pts[i]); z0 = Math.min(z0, pts[i + 1]); z1 = Math.max(z1, pts[i + 1]); }
+    return Number.isFinite(x0) ? { x0, z0, x1, z1, h } : null;
+  };
+  /** F, a double-click: frame what's picked (or this), else the whole site */
+  const frameIt = (w: EditPicked) => { const q = boxOf(w); if (q) view.current?.focus((q.x0 + q.x1) / 2, (q.z0 + q.z1) / 2, Math.max(8, q.x1 - q.x0, q.z1 - q.z0), q.h); else cam('fit'); };
+  frameRef.current = frameIt;
   const frameRing = (ring: number[]) => { let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (let i = 0; i + 1 < ring.length; i += 2) { x0 = Math.min(x0, ring[i]); x1 = Math.max(x1, ring[i]); z0 = Math.min(z0, ring[i + 1]); z1 = Math.max(z1, ring[i + 1]); } if (Number.isFinite(x0)) view.current?.focus((x0 + x1) / 2, (z0 + z1) / 2, Math.max(8, x1 - x0, z1 - z0), 6); };
   const reorder = locked ? null : (from: number, to: number) => { const s = own(p, e), id = e.d.buildings[from]?.b.id, bs = [...s.buildings], i = bs.findIndex((b) => b.id === id), j = bs.findIndex((b) => b.id === e.d.buildings[to]?.b.id); if (i < 0 || j < 0) return; const [b] = bs.splice(i, 1); bs.splice(j, 0, b); tx.once({ scheme: { ...s, buildings: bs } }); toast('Moved: the letters follow the new order.', { undo: true }); };
   const openThread = (id: Note['id']) => { const t = noteThreads.find((x) => x.root.id === id); setOpenNote(id); const a = t?.root.anchor; if (a?.obj?.k === 'building' && a.obj.id && e.d.buildings.some((b) => b.b.id === a.obj!.id)) { const br = e.d.buildings.find((b) => b.b.id === a.obj!.id)!; let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (const q of br.quads) for (let k = 0; k + 1 < q.length; k += 2) { x0 = Math.min(x0, q[k]); x1 = Math.max(x1, q[k]); z0 = Math.min(z0, q[k + 1]); z1 = Math.max(z1, q[k + 1]); } if (Number.isFinite(x0)) view.current?.focus((x0 + x1) / 2, (z0 + z1) / 2, Math.max(x1 - x0, z1 - z0), br.height); } else if (a?.at) view.current?.focus(a.at[0], a.at[2], 30, 6); };
@@ -766,7 +797,7 @@ function App() {
             <button type="button" onClick={() => setXray(Math.min(maxFloor, xr + 1))} aria-label="Floor up" data-tip="Floor up (])"><Icon n="plus" size={14} /></button>
           </div>}
           <div class="tgroup">
-            <button type="button" aria-label="Whole site" aria-keyshortcuts="F" data-tip="Whole site (F)" onClick={() => cam('fit')}><Icon n="fit" size={16} /></button>
+            <button type="button" aria-label="Whole site" data-tip="Whole site (F with nothing picked)" onClick={() => cam('fit')}><Icon n="fit" size={16} /></button>
             {/* (the rest behind one click: they're used now and then, not all the time) */}
             <Menu label="More view tools" class="tmore" items={[
               { heading: 'Look from' },
@@ -1029,8 +1060,10 @@ function People({ pid, role, close }: { pid: string; role: 'owner' | 'editor' | 
   );
 }
 
+type Box = { x0: number; z0: number; x1: number; z1: number; h: number };
+
 function Keys({ close }: { close: () => void }) {
-  const rows: [string, string][] = [['Ctrl K', 'Search: actions, buildings, settings'], ['1 · N · A', 'The project’s settings · the Numbers report · the Approval report'], ['\\', 'Show or hide the sheet'], ['/', 'Pin the sheet beside the view, or float it'], ['F6 · Shift+F6', 'Move between the top bar, the steps, the sheet and the view'], ['R · Shift+R', 'Turn the picked building 15°'], ['+ −', 'A floor more or less on the picked building'], ['Ctrl+D', 'Duplicate the picked building'], ['M', 'Measure'], ['G', 'Generate options from a brief'], ['X', 'X-ray floor on or off'], ['[  ]', 'Floor down / up'], ['F · S · T', 'Camera: whole site, street, from above'], ['P', 'The plan from above, or back to 3D'], ['V', 'Back to picking'], ['Enter · Esc · Backspace', 'Drawing: finish, cancel, take back a point'], ['Shift', 'Drawing: keep a line square to the road'], ['Alt', 'Hold while dragging: no snapping'], ['← → ↑ ↓', 'Nudge what’s picked a grid step (Shift: ×10)'], ['Delete', 'Remove what’s picked'], ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · redo'], ['↑ ↓ in a number', 'Step it (Shift: ×10)'], ['Esc', 'Close this; let go of what’s picked; close the sheet']];
+  const rows: [string, string][] = [['Ctrl K', 'Search: actions, buildings, settings'], ['1 · N · A', 'The project’s settings · the Numbers report · the Approval report'], ['\\', 'Show or hide the sheet'], ['/', 'Pin the sheet beside the view, or float it'], ['F6 · Shift+F6', 'Move between the top bar, the steps, the sheet and the view'], ['R · Shift+R', 'Turn the picked building 15°'], ['+ −', 'A floor more or less on the picked building'], ['Ctrl+D', 'Duplicate the picked building'], ['M', 'Measure'], ['G', 'Generate options from a brief'], ['X', 'X-ray floor on or off'], ['[  ]', 'Floor down / up'], ['F', 'Frame what’s picked (nothing picked: the whole site)'], ['S · T', 'Camera: street, from above'], ['Drag · Right-drag · Wheel', 'Orbit about the point under the pointer · pan across the ground · zoom toward the pointer'], ['Double-click', 'Frame a building (on open ground: the whole site)'], ['P', 'The plan from above, or back to 3D'], ['V', 'Back to picking'], ['Enter · Esc · Backspace', 'Drawing: finish, cancel, take back a point'], ['Shift', 'Drawing: keep a line square to the road'], ['Alt', 'Hold while dragging: no snapping'], ['← → ↑ ↓', 'Nudge what’s picked a grid step (Shift: ×10)'], ['Delete', 'Remove what’s picked'], ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · redo'], ['↑ ↓ in a number', 'Step it (Shift: ×10)'], ['Esc', 'Close this; let go of what’s picked; close the sheet']];
   return <Dialog title="Keyboard shortcuts" close={close}><dl class="lines keys">{rows.map(([a, b]) => <div><dt><kbd>{a}</kbd></dt><dd>{b}</dd></div>)}</dl></Dialog>;
 }
 

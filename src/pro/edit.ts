@@ -214,6 +214,8 @@ export interface EditHost {
   hint: (s: string | null) => void;
   /** nothing may change (a phone, a share link, a viewer): what's tapped is only picked */
   readOnly: () => boolean;
+  /** frame this in the view (null: the whole site): a double-click, or a double-tap on a phone */
+  frame?: (w: Picked) => void;
   /** a few words by the pointer: the length being drawn, what it snapped to, a typed number (null: none) */
   readout?: (r: { text: string; sub?: string; x: number; y: number; typed?: boolean } | null) => void;
 }
@@ -276,12 +278,18 @@ export class CanvasEdit {
     on('pointermove', (e) => this.move(e));
     on('pointerup', (e) => this.upE(e));
     on('pointerleave', () => { if (!this.drag && (this.hover || this.ghost.length)) { this.hover = null; this.ghost = []; this.guide = []; this.hotPt = null; this.draw(); } });
-    on('dblclick', (e) => { if (modeOf(this.tool) && this.pts.length) { e.preventDefault(); this.finish(); } });
+    on('dblclick', (e) => { if (modeOf(this.tool) && this.pts.length) { e.preventDefault(); this.finish(); } else if (this.tool.k === 'select') this.frameAt(e.clientX, e.clientY); });
     const key = (e: KeyboardEvent) => this.key(e);
     addEventListener('keydown', key);
     this.off.push(() => removeEventListener('keydown', key));
   }
   dispose() { this.off.forEach((f) => f()); }
+  private tap: { t: number; x: number; y: number } | null = null;
+  /** a double-click or double-tap: frame the building under the pointer, or the whole site on open ground */
+  private frameAt(x: number, y: number) {
+    const id = this.h.view()?.buildingAt(x, y);
+    this.h.frame?.(id ? { k: 'building', id } : null);
+  }
 
   setTool(t: Tool) {
     this.tool = t; this.pts = []; this.drag = null; this.ghost = []; this.guide = []; this.hotPt = null; this.typed = ''; this.measured = []; this.h.readout?.(null);
@@ -640,7 +648,16 @@ export class CanvasEdit {
     const v = this.h.view(); if (!v) return;
     const d = this.drag; this.drag = null;
     const click = this.downAt && Math.hypot(ev.clientX - this.downAt[0], ev.clientY - this.downAt[1]) < 5;
-    if (this.h.readOnly()) { if (click && this.tool.k === 'select') this.pickAt(ev.clientX, ev.clientY, v); return; }
+    if (this.h.readOnly()) {
+      if (click && this.tool.k === 'select') {
+        // (a second tap close by, soon after: frame what's tapped)
+        const t = this.tap; this.tap = null;
+        if (ev.pointerType === 'touch' && t && ev.timeStamp - t.t < 350 && Math.hypot(ev.clientX - t.x, ev.clientY - t.y) < 30) { this.frameAt(ev.clientX, ev.clientY); return; }
+        this.tap = { t: ev.timeStamp, x: ev.clientX, y: ev.clientY };
+        this.pickAt(ev.clientX, ev.clientY, v);
+      }
+      return;
+    }
     if (d && d.kind !== 'rect') { this.guide = []; this.hotPt = null; this.draw(); }
     if (d?.kind === 'rect') {
       if (!click && Math.abs(d.to[0] - d.from[0]) > 1 && Math.abs(d.to[1] - d.from[1]) > 1) {

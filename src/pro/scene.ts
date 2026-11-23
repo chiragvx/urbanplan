@@ -62,6 +62,8 @@ export interface ViewData {
 /** a formed building as drawn: its layout, what it was drawn with, and the meshes (kept while nothing changes) */
 interface FormEntry { L: FormLayout; hash: string; key: string; built: Built }
 export type CameraView = 'fit' | 'street' | 'top';
+const UP = new THREE.Vector3(0, 1, 0), TAU = Math.PI * 2;
+const reduced = () => typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 /** what's being drawn or edited, over everything: lines (x,y,z pairs) and handles (x,y,z each), in ink */
 export interface Overlay { lines?: number[]; dashed?: number[]; points?: number[]; hot?: number[] }
 export type RenderMode = 'wire' | 'shaded';
@@ -245,7 +247,22 @@ export class ProView {
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = true;
     this.controls.maxPolarAngle = Math.PI / 2 - 0.03;
+    // (docs/plans/pro-camera.md: the wheel zooms toward the pointer and stops 3 m short; a left drag orbits about the
+    // point under the pointer (ours, below); a right drag pans across the ground, keeping the camera's height)
+    this.controls.zoomToCursor = true;
+    this.controls.enableRotate = false;
+    this.controls.minDistance = 3;
+    this.controls.minZoom = 0.08;
+    const cc = this.controls as unknown as { _pan: (x: number, y: number) => void }, pan = cc._pan.bind(this.controls);
+    cc._pan = (x, y) => { this.controls.screenSpacePanning = this.plan; pan(x, y); this.controls.screenSpacePanning = true; };
     this.controls.addEventListener('change', () => this.frame());
+    canvas.addEventListener('pointerdown', this.onDown);
+    addEventListener('pointermove', this.onMove);
+    addEventListener('pointerup', this.onUp);
+    addEventListener('pointercancel', this.onUp);
+    canvas.parentElement?.addEventListener('wheel', this.onWheel, { capture: true, passive: true });
+    this.dot.className = 'pv-pivot'; this.dot.hidden = true;
+    canvas.parentElement?.appendChild(this.dot);
     const pr = canvas.parentElement?.getBoundingClientRect();
     this.pipe = new Pipeline(this.renderer, this.scene, this.camera, pr?.width || 800, pr?.height || 600);
     this.pipe.setTier(this.tier);
@@ -290,38 +307,121 @@ export class ProView {
     this.camera.aspect = r.width / Math.max(1, r.height);
     this.camera.updateProjectionMatrix();
     this.fitOrtho();
-    this.applyCover();
     this.pipe?.setSize(r.width, r.height);
     this.frame();
   }
-  /** how much of the canvas a sheet covers (px: its left edge, its bottom, and the inspector's right edge), so the
-   *  view's middle stays in what's seen */
+  // ---------- the camera on interactions (docs/plans/pro-camera.md) ----------
+  // Nothing moves it but the person and their commands. A command's move is short (280 to 600 ms by how far), eases
+  // out, stops the moment the view is pressed or wheeled, and is a jump with reduced motion. A panel opening changes
+  // where the middle is for the next framing, never what's on screen.
+
+  /** how much of the canvas the panels cover (px: the sheet and outline on the left, a report at the bottom, the
+   *  inspector on the right): framing aims at the middle of the rest */
   private cover = { x: 0, y: 0, r: 0 };
-  setCover(x: number, y: number, r = this.cover.r) {
-    if (x === this.cover.x && y === this.cover.y && r === this.cover.r) return;
-    this.cover = { x, y, r }; this.applyCover(); this.frame();
+  setCover(x: number, y: number, r = this.cover.r) { this.cover = { x, y, r }; }
+  /** the part of the canvas no panel covers (px) */
+  private seen() {
+    const W = this.canvas.clientWidth || 1, H = this.canvas.clientHeight || 1, { x, y, r } = this.cover, x0 = Math.min(x, W - 80);
+    return { x0, x1: Math.max(x0 + 80, W - r), y0: 0, y1: Math.max(80, H - y), W, H };
   }
-  private applyCover() {
-    const b = this.canvas.parentElement!.getBoundingClientRect(), W = Math.max(1, b.width), H = Math.max(1, b.height), { x, y, r } = this.cover;
-    for (const c of [this.camera, this.ortho]) { if (x || y || r) c.setViewOffset(W, H, (r - x) / 2, y / 2, W, H); else c.clearViewOffset(); }
+  /** metres per pixel at this depth (3D) or in the plan at this zoom */
+  private mpp(depth: number, zoom = this.ortho.zoom) {
+    const H = this.canvas.clientHeight || 800;
+    return this.plan ? (2 * this.orthoH) / zoom / H : (2 * depth * Math.tan((this.camera.fov * Math.PI) / 360)) / H;
   }
-  /** bring a point into the middle of the view, near enough to see something this big round it (a building picked
-   *  from a check), keeping the way the camera looks; over a third of a second, or at once with reduced motion */
-  focus(cx: number, cz: number, size: number, h: number) {
-    const c = this.controls, t0 = c.target.clone(), t1 = new THREE.Vector3(cx, this.plan ? 0 : h * 0.4, cz);
-    const cam = this.plan ? this.ortho : this.camera, p0 = cam.position.clone();
-    const dir = p0.clone().sub(t0); const R = Math.max(size, h) * 1.7 + 12;
-    const p1 = this.plan ? new THREE.Vector3(cx, p0.y, cz) : t1.clone().addScaledVector(dir.normalize(), Math.min(R, p0.distanceTo(t0) * 1.4));
-    const z0 = this.ortho.zoom, z1 = this.plan ? Math.max(z0, Math.min(4, (this.orthoH * 1.2) / Math.max(10, size))) : z0;
-    const T = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 380, s0 = performance.now();
+  /** the screen's right and up, in the world, for a camera at p looking at t */
+  private axes(p: THREE.Vector3, t: THREE.Vector3): [THREE.Vector3, THREE.Vector3] {
+    if (this.plan) return [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, -1)];
+    const f = t.clone().sub(p).normalize(), r = new THREE.Vector3().crossVectors(f, UP);
+    if (r.lengthSq() < 1e-10) r.set(1, 0, 0);
+    r.normalize();
+    return [r, new THREE.Vector3().crossVectors(r, f)];
+  }
+  /** a camera at p looking at t, moved sideways so t shows in the middle of the uncovered part (`level`: sideways only) */
+  private aim(t: THREE.Vector3, p: THREE.Vector3, zoom?: number, level = false): [THREE.Vector3, THREE.Vector3] {
+    const v = this.seen(), mx = (v.x0 + v.x1) / 2 - v.W / 2, my = level ? 0 : v.H / 2 - (v.y0 + v.y1) / 2;
+    const [r, u] = this.axes(p, t), m = this.mpp(p.distanceTo(t), zoom);
+    const d = r.multiplyScalar(-mx * m).addScaledVector(u, -my * m);
+    const t2 = t.clone().add(d), p2 = p.clone().add(d);
+    // (never under the ground)
+    if (!this.plan && p2.y < 1.2) { const k = 1.2 - p2.y; p2.y += k; t2.y += k; }
+    return [t2, p2];
+  }
+  private flyN = 0;
+  /** stop a camera move where it is */
+  stopFly() { this.flyN++; }
+  /** move the camera to look at t1 from p1 (and the plan to this zoom): the shortest way round, eased out, over 280 to
+   *  600 ms by how far it goes; at once with reduced motion or `jump`. `cut` is told when something else stopped it. */
+  private fly(t1: THREE.Vector3, p1: THREE.Vector3, o: { zoom?: number; ms?: number; jump?: boolean; then?: () => void; cut?: () => void } = {}) {
+    const n = ++this.flyN, c = this.controls, cam = this.plan ? this.ortho : this.camera;
+    const t0 = c.target.clone(), p0 = cam.position.clone(), z0 = this.ortho.zoom, z1 = o.zoom ?? z0;
+    const s0 = new THREE.Spherical().setFromVector3(p0.clone().sub(t0)), s1 = new THREE.Spherical().setFromVector3(p1.clone().sub(t1));
+    const dth = ((((s1.theta - s0.theta) % TAU) + TAU * 1.5) % TAU) - Math.PI;
+    const R = Math.max(1, s0.radius, s1.radius), r0 = Math.max(0.01, s0.radius), r1 = Math.max(0.01, s1.radius);
+    const far = t0.distanceTo(t1) / R + Math.abs(Math.log(r1 / r0)) + (Math.abs(dth) + Math.abs(s1.phi - s0.phi)) / Math.PI + Math.abs(Math.log(z1 / z0));
+    const T = o.jump || reduced() || far < 0.003 ? 0 : o.ms ?? Math.round(280 + 320 * Math.min(1, far / 1.2));
+    const start = performance.now(), sp = new THREE.Spherical(), off = new THREE.Vector3();
     const step = () => {
-      const k = T ? Math.min(1, (performance.now() - s0) / T) : 1, e = 1 - (1 - k) ** 3;
-      c.target.lerpVectors(t0, t1, e); cam.position.lerpVectors(p0, p1, e);
-      if (this.plan) { this.ortho.zoom = z0 + (z1 - z0) * e; this.ortho.updateProjectionMatrix(); }
+      if (n !== this.flyN) { o.cut?.(); return; }
+      const k = T ? Math.min(1, (performance.now() - start) / T) : 1, e = 1 - (1 - k) ** 3;
+      if (k >= 1) { c.target.copy(t1); cam.position.copy(p1); }
+      else {
+        c.target.lerpVectors(t0, t1, e);
+        sp.set(r0 * Math.pow(r1 / r0, e), s0.phi + (s1.phi - s0.phi) * e, s0.theta + dth * e);
+        cam.position.copy(c.target).add(off.setFromSpherical(sp));
+      }
+      if (z1 !== z0) { this.ortho.zoom = z0 * Math.pow(z1 / z0, e); this.ortho.updateProjectionMatrix(); }
       c.update(); this.frame();
-      if (k < 1) requestAnimationFrame(step);
+      if (k < 1) requestAnimationFrame(step); else o.then?.();
     };
     step();
+  }
+  /** bring a box into the middle of what's seen, near enough to see it whole (a building from a check, a search, F),
+   *  keeping the way the camera looks */
+  focus(cx: number, cz: number, size: number, h: number) {
+    const c = this.controls, cam = this.plan ? this.ortho : this.camera, t1 = new THREE.Vector3(cx, this.plan ? 0 : h * 0.5, cz);
+    if (this.plan) {
+      const z1 = Math.max(c.minZoom, Math.min(c.maxZoom, (this.orthoH * 1.1) / Math.max(10, size)));
+      const [t, p] = this.aim(t1, new THREE.Vector3(cx, cam.position.y, cz), z1);
+      this.fly(t, p, { zoom: z1 });
+      return;
+    }
+    // (the way it looks now, far enough back for the box's bounding sphere, with a margin)
+    const dir = cam.position.clone().sub(c.target).normalize(), R = Math.max(15, (0.5 * Math.hypot(size * Math.SQRT2, h) * 1.25) / Math.sin((this.camera.fov * Math.PI) / 360));
+    const [t, p] = this.aim(t1, t1.clone().addScaledVector(dir, R));
+    this.fly(t, p);
+  }
+  /** a box (a picked building) on screen (px within the canvas), or null when some of it is behind the camera */
+  private rectOf(x0: number, z0: number, x1: number, z1: number, h: number) {
+    const v = new THREE.Vector3(), W = this.canvas.clientWidth || 1, H = this.canvas.clientHeight || 1;
+    let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
+    for (const x of [x0, x1]) for (const z of [z0, z1]) for (const y of [0, h]) {
+      v.set(x, y, z).project(this.cam);
+      if (v.z > 1) return null;
+      const px = ((v.x + 1) / 2) * W, py = ((1 - v.y) / 2) * H;
+      a = Math.min(a, px); b = Math.min(b, py); c = Math.max(c, px); d = Math.max(d, py);
+    }
+    return { x0: a, y0: b, x1: c, y1: d };
+  }
+  /** how many of these boxes are out of what's seen (off the canvas or under a panel; a sliver at the edge counts as out) */
+  outside(boxes: { x0: number; z0: number; x1: number; z1: number; h: number }[]) {
+    const v = this.seen(), m = 16;
+    return boxes.filter((q) => { const r = this.rectOf(q.x0, q.z0, q.x1, q.z1, q.h); return !r || r.x1 < v.x0 + m || r.x0 > v.x1 - m || r.y1 < v.y0 + m || r.y0 > v.y1 - m; }).length;
+  }
+  /** when a panel has come over the whole of this box (what's picked), ease it out by the least move */
+  reveal(x0: number, z0: number, x1: number, z1: number, h: number) {
+    const q = this.rectOf(x0, z0, x1, z1, h), v = this.seen(), m = 24;
+    if (!q || q.x1 < 0 || q.x0 > v.W || q.y1 < 0 || q.y0 > v.H) return; // (off the canvas: not the panel's doing)
+    if (q.x1 > v.x0 && q.x0 < v.x1 && q.y1 > v.y0 && q.y0 < v.y1) return; // (some of it shows)
+    let dx = 0, dy = 0;
+    if (q.x0 >= v.x1) dx = Math.max(v.x1 - m - q.x1, v.x0 + m - q.x0);
+    else if (q.x1 <= v.x0) dx = Math.min(v.x0 + m - q.x0, v.x1 - m - q.x1);
+    if (q.y0 >= v.y1) dy = Math.max(v.y1 - m - q.y1, v.y0 + m - q.y0);
+    const c = this.controls, cam = this.plan ? this.ortho : this.camera, mid = new THREE.Vector3((x0 + x1) / 2, h / 2, (z0 + z1) / 2);
+    const fw = new THREE.Vector3(); cam.getWorldDirection(fw);
+    const [r, u] = this.axes(cam.position, c.target), k = this.mpp(Math.max(1, mid.clone().sub(cam.position).dot(fw)));
+    const d = r.multiplyScalar(-dx * k).addScaledVector(u, dy * k);
+    this.fly(c.target.clone().add(d), cam.position.clone().add(d), { ms: 280 });
   }
   /** the plan's frustum for the canvas's shape (its zoom is the controls') */
   private orthoH = 60;
@@ -330,21 +430,39 @@ export class ProView {
     this.ortho.left = -H * a; this.ortho.right = H * a; this.ortho.top = H; this.ortho.bottom = -H;
     this.ortho.updateProjectionMatrix();
   }
-  /** 3D or the plan from straight above */
-  setPlan(on: boolean) {
-    if (on === this.plan) return;
-    this.plan = on;
-    this.onPlan?.(on);
+  /** the 3D view left for the plan, to come back to */
+  private saved3d: { t: THREE.Vector3; p: THREE.Vector3 } | null = null;
+  /** turning to straight down, on the way into the plan */
+  private toPlan = false;
+  /** 3D or the plan from straight above. Into the plan, the camera turns to straight down (north up) over where it
+   *  looks, then the plan takes over at the same scale; back, it returns to the 3D view left (`back`), else stays over
+   *  the plan's middle for the caller to move. */
+  setPlan(on: boolean, back = true) {
     const c = this.controls;
-    c.object = on ? this.ortho : this.camera;
-    c.enableRotate = !on;
-    c.screenSpacePanning = true;
+    if (on === this.plan) { if (!on && this.toPlan) { this.toPlan = false; this.stopFly(); } return; }
     if (on) {
-      const { cx, cz, s } = this.box;
-      this.orthoH = s * 0.75; this.ortho.zoom = 1; this.fitOrtho();
-      c.target.set(cx, 0, cz); this.ortho.position.set(cx, 800, cz); this.ortho.up.set(0, 0, -1); this.ortho.lookAt(cx, 0, cz);
-    } else this.look('fit');
-    c.update(); this.frame();
+      if (this.toPlan) return;
+      this.saved3d = { t: c.target.clone(), p: this.camera.position.clone() };
+      const g = new THREE.Vector3(c.target.x, 0, c.target.z), d = Math.max(20, this.camera.position.distanceTo(g));
+      const into = () => {
+        this.toPlan = false; this.plan = true; this.onPlan?.(true);
+        c.object = this.ortho;
+        this.orthoH = this.box.s * 0.75; c.maxZoom = Math.max(2, this.orthoH / 3); this.fitOrtho();
+        this.ortho.zoom = THREE.MathUtils.clamp(this.orthoH / (d * Math.tan((this.camera.fov * Math.PI) / 360)), c.minZoom, c.maxZoom); this.ortho.updateProjectionMatrix();
+        c.target.copy(g); this.ortho.position.set(g.x, 800, g.z); this.ortho.up.set(0, 0, -1); this.ortho.lookAt(g);
+        c.update(); this.frame();
+      };
+      this.toPlan = true;
+      this.fly(g, new THREE.Vector3(g.x, d, g.z + d * 0.001), { ms: 300, then: into, cut: () => { if (this.toPlan) { this.toPlan = false; this.onPlan?.(false); } } });
+      return;
+    }
+    this.plan = false; this.onPlan?.(false);
+    c.object = this.camera;
+    // (the 3D camera straight over the plan's middle at the plan's scale, then back to where it was)
+    const t = c.target.clone(), d = this.orthoH / this.ortho.zoom / Math.tan((this.camera.fov * Math.PI) / 360);
+    this.camera.position.set(t.x, d, t.z + d * 0.001); c.update();
+    if (back) { const sv = this.saved3d; if (sv) this.fly(sv.t.clone(), sv.p.clone()); else this.look('fit'); }
+    this.frame();
   }
   /** north's direction on the screen, worked out from where the camera looks */
   private compass() {
@@ -403,6 +521,7 @@ export class ProView {
       this.updateNear();
       this.draw(false);
       for (const f of this.frameHooks) f();
+      this.placeDot();
       if (moving && this.piped) this.watch.tick(performance.now()); else this.watch.rest();
       // (on the high tier, once the camera rests, the settled image: supersampled)
       clearTimeout(this.restT);
@@ -429,6 +548,8 @@ export class ProView {
     clearTimeout(this.restT); this.pipe.dispose(); this.skyL.dispose(); this.lib.dispose(); this.perf?.dispose();
     setMaterialResolver(null);
     this.wire.dispose(); this.controls.dispose(); this.renderer.dispose();
+    removeEventListener('pointermove', this.onMove); removeEventListener('pointerup', this.onUp); removeEventListener('pointercancel', this.onUp);
+    this.canvas.parentElement?.removeEventListener('wheel', this.onWheel, { capture: true }); this.dot.remove();
   }
 
   /** The formed buildings' level of detail: each one's fins and patterns drawn in full when it's big on screen,
@@ -475,14 +596,90 @@ export class ProView {
   /** the plot's middle, its size and the tallest building: for the camera and the sun */
   box = { cx: 0, cz: 0, s: 30, h: 30 };
   /** move the camera: the whole site, down at a pedestrian's height from the front road, or straight down */
-  look(kind: CameraView) {
-    const { cx, cz, s, h } = this.box, c = this.controls;
-    if (this.plan) { if (kind !== 'top' && kind !== 'fit') this.setPlan(false); else { this.orthoH = s * 0.75; this.ortho.zoom = 1; this.fitOrtho(); c.target.set(cx, 0, cz); this.ortho.position.set(cx, 800, cz); c.update(); this.frame(); return; } }
-    // (far enough back for the plot or the building, whichever is bigger, with room under the result bar)
-    if (kind === 'fit') { const R = Math.max(s, h * 0.95); c.target.set(cx, h * 0.38, cz); this.camera.position.set(cx - R * 1.2, h * 0.38 + R * 1.05, cz - R * 1.75); }
-    if (kind === 'street') { c.target.set(cx, Math.min(h * 0.45, 40), cz); this.camera.position.set(cx - s * 0.35, 1.7, cz - s * 0.9 - 12); }
-    if (kind === 'top') { c.target.set(cx, 0, cz); this.camera.position.set(cx, Math.max(s * 2.2, h * 1.6), cz + 0.01); }
-    c.update(); this.frame();
+  look(kind: CameraView, jump = false) {
+    const { cx, cz, s, h } = this.box;
+    this.controls.maxDistance = 12 * Math.max(s, h);
+    if (this.plan) {
+      if (kind === 'top' || kind === 'fit') { const [t, p] = this.aim(new THREE.Vector3(cx, 0, cz), new THREE.Vector3(cx, 800, cz), 1); this.fly(t, p, { zoom: 1, jump }); return; }
+      this.setPlan(false, false);
+    }
+    if (this.toPlan) { this.toPlan = false; this.stopFly(); this.onPlan?.(false); }
+    let t: THREE.Vector3, p: THREE.Vector3;
+    // (far enough back for the plot or the building, whichever is bigger)
+    if (kind === 'fit') { const R = Math.max(s, h * 0.95); t = new THREE.Vector3(cx, h * 0.38, cz); p = new THREE.Vector3(cx - R * 1.2, h * 0.38 + R * 1.05, cz - R * 1.75); }
+    else if (kind === 'street') { t = new THREE.Vector3(cx, Math.min(h * 0.45, 40), cz); p = new THREE.Vector3(cx - s * 0.35, 1.7, cz - s * 0.9 - 12); }
+    else { t = new THREE.Vector3(cx, 0, cz); p = new THREE.Vector3(cx, Math.max(s * 2.2, h * 1.6), cz + 0.01); }
+    const [ta, pa] = this.aim(t, p, undefined, kind === 'street');
+    this.fly(ta, pa, { jump });
+  }
+
+  // ---------- orbiting about what's under the pointer ----------
+  /** the pivot, marked while orbiting */
+  private dot = document.createElement('div');
+  private orb: { id: number; x: number; y: number; P: THREE.Vector3; on: boolean } | null = null;
+  private downs = new Set<number>();
+  /** what's under the pointer: a building's surface, else the ground (null: the sky) */
+  private surfaceAt(px: number, py: number): THREE.Vector3 | null {
+    this.ray.setFromCamera(this.ndc(px, py), this.cam);
+    const hit = this.ray.intersectObjects(this.wire.masses.children, false)[0];
+    if (hit) return hit.point.clone();
+    const g = this.groundAt(px, py);
+    return g ? new THREE.Vector3(g[0], 0, g[1]) : null;
+  }
+  /** the controls' target moved along the line of sight to this point's depth: nothing on screen moves, but the wheel
+   *  now slows and stops near it and a pan keeps it under the pointer */
+  private anchor(P: THREE.Vector3 | null) {
+    if (this.plan || !P) return;
+    const c = this.controls, cam = this.camera, f = new THREE.Vector3(); cam.getWorldDirection(f);
+    const d = THREE.MathUtils.clamp(P.clone().sub(cam.position).dot(f), c.minDistance, c.maxDistance);
+    c.target.copy(cam.position).addScaledVector(f, d);
+  }
+  private onDown = (e: PointerEvent) => {
+    this.stopFly();
+    this.downs.add(e.pointerId);
+    if (this.downs.size > 1) { this.endOrbit(); return; }
+    if (!this.controls.enabled || this.plan) return;
+    const P = this.surfaceAt(e.clientX, e.clientY);
+    this.anchor(P);
+    const rot = e.pointerType === 'touch' || (e.button === 0 && !e.shiftKey && !e.ctrlKey && !e.metaKey);
+    if (rot) this.orb = { id: e.pointerId, x: e.clientX, y: e.clientY, P: P ?? this.controls.target.clone(), on: false };
+  };
+  private onMove = (e: PointerEvent) => {
+    const o = this.orb; if (!o || e.pointerId !== o.id) return;
+    if (!this.controls.enabled || this.plan) { this.endOrbit(); return; }
+    const dx = e.clientX - o.x, dy = e.clientY - o.y;
+    if (!o.on && Math.hypot(dx, dy) < 5) return;
+    o.on = true; o.x = e.clientX; o.y = e.clientY;
+    const k = ((2 * Math.PI) / (this.canvas.clientHeight || 800)) * this.controls.rotateSpeed;
+    this.dot.hidden = false;
+    this.orbit(o.P, -dx * k, -dy * k);
+  };
+  private onUp = (e: PointerEvent) => { this.downs.delete(e.pointerId); if (this.orb?.id === e.pointerId) this.endOrbit(); };
+  private onWheel = (e: WheelEvent) => {
+    if (e.target !== this.canvas) return;
+    this.stopFly();
+    if (this.controls.enabled && !this.plan) this.anchor(this.surfaceAt(e.clientX, e.clientY));
+  };
+  private endOrbit() { this.orb = null; this.dot.hidden = true; }
+  /** turn the camera and its target together round P: about the vertical, then about the screen's horizontal (not past
+   *  straight down, nor below the horizon) */
+  private orbit(P: THREE.Vector3, yaw: number, pitch: number) {
+    const c = this.controls, cam = this.camera;
+    const turn = (v: THREE.Vector3, q: THREE.Quaternion) => v.clone().sub(P).applyQuaternion(q).add(P);
+    const qy = new THREE.Quaternion().setFromAxisAngle(UP, yaw);
+    let p = turn(cam.position, qy), t = turn(c.target, qy);
+    const r = new THREE.Vector3().crossVectors(t.clone().sub(p), UP);
+    if (r.lengthSq() > 1e-10) {
+      const qp = new THREE.Quaternion().setFromAxisAngle(r.normalize(), pitch), p2 = turn(p, qp), t2 = turn(t, qp), off = p2.clone().sub(t2);
+      const phi = Math.acos(THREE.MathUtils.clamp(off.y / Math.max(1e-6, off.length()), -1, 1));
+      if (phi > 0.03 && phi < c.maxPolarAngle && p2.y > 0.5) { p = p2; t = t2; }
+    }
+    cam.position.copy(p); c.target.copy(t); c.update(); this.frame();
+  }
+  private placeDot() {
+    const o = this.orb; if (!o || this.dot.hidden) return;
+    const [x, y] = this.toScreen(o.P.x, o.P.y, o.P.z);
+    this.dot.style.transform = `translate(${x}px,${y}px)`;
   }
   /** the sun from this direction (x east, y up, z south; null: the default afternoon light) */
   setSun(dir: [number, number, number] | null) {
@@ -1337,7 +1534,7 @@ export class ProView {
     if (key !== this.fitted) {
       this.fitted = key;
       const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2, s = Math.max(maxX - minX, maxZ - minZ, 30), h = d.height || 30;
-      this.look('fit');
+      this.look('fit', true);
       this.sun.target.position.set(cx, 0, cz);
       const sc = this.sun.shadow.camera as THREE.OrthographicCamera, R = s * 1.2 + h * 0.6;
       sc.left = -R; sc.right = R; sc.top = R; sc.bottom = -R; sc.near = 1; sc.far = 800; sc.updateProjectionMatrix();

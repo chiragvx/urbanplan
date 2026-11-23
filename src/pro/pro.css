@@ -1076,3 +1076,7 @@ details.chk .show { display: inline-flex; align-items: center; gap: 5px; margin:
 .task-b { display: flex; align-items: center; gap: 8px; width: 100%; padding: 3px 2px; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .task-b:hover { background: var(--up-surface-2); }
 .tasks li.done .task-b { text-decoration: line-through; }
+
+/* the orbit's pivot, while dragging (docs/plans/pro-camera.md) */
+.pv-pivot { position: absolute; left: 0; top: 0; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; background: var(--up-accent, #2f6fed); box-shadow: 0 0 0 2px #fff, 0 1px 4px rgba(0, 0, 0, 0.35); pointer-events: none; z-index: 3; }
+.pv-pivot[hidden] { display: none; }
