@@ -247,7 +247,7 @@ function CashChart({ flow, cum, months }: { flow: number[]; cum: number[]; month
 }
 
 // ================================================================ approval
-const STATUS_ICON: Record<CheckStatus, string> = { pass: 'check', fail: 'x', warn: 'warn', info: 'info' };
+const STATUS_ICON: Record<CheckStatus, string> = { pass: 'check', fail: 'x', warn: 'warn', info: 'info', unchecked: 'minus' };
 /** The drawing set and report as a PDF: drawn off screen and saved, with how many sheets it holds. */
 export function PdfButton({ p, e, checks, rooms, toast, big }: { p: ProProject; e: Evaluated; checks: Check[]; rooms: FlatRooms[][]; toast: (s: string) => void; big?: boolean }) {
   const [busy, setBusy] = useState(false);
@@ -277,30 +277,39 @@ export function ApproveStep({ p, e, up, checks, rooms, openDrawings, toast, show
   const kind = permissionOf(e, ex.kind);
   const list = nocs(e, ex), docs = documents(e, kind), fs = fees(e), steps = stages(e, kind);
   const groups = [...new Set(checks.map((c) => c.group))];
-  const shown = (c: Check) => only === 'all' || c.status === 'fail' || c.status === 'warn';
+  const shown = (c: Check) => only === 'all' || c.status === 'fail' || c.status === 'warn' || c.status === 'unchecked';
+  const unchecked = checks.filter((c) => c.status === 'unchecked');
   return (
     <>
 
       <Section title="Scrutiny" sub="Advisory: the authority's check is the one that counts.">
-        {sum.fail + sum.warn > 0 && <div class="score">
+        {sum.fail + sum.warn + sum.unchecked > 0 && <div class="score">
           <span class="s-pass"><Icon n="check" size={14} />{sum.pass} pass</span>
           {sum.fail > 0 && <span class="s-fail on"><Icon n="x" size={14} />{sum.fail} fail</span>}
           {sum.warn > 0 && <span class="s-warn on"><Icon n="warn" size={14} />{sum.warn} to check</span>}
+          {sum.unchecked > 0 && <span class="s-unchecked on"><Icon n="minus" size={14} />{sum.unchecked} not checked</span>}
         </div>}
-        {(sum.fail + sum.warn > 0 || only === 'all') && <Seg<'all' | 'issues'> small value={only} set={setOnly} options={[{ value: 'issues', label: 'Issues' }, { value: 'all', label: 'Everything' }]} />}
+        {unchecked.length > 0 && <div class="cgroup"><h4>Not checked for its use</h4>{unchecked.map((c) => (
+          <details class="chk unchecked">
+            <summary><Icon n="minus" size={15} /><span>{c.rule}</span><em>{c.proposed}</em></summary>
+            <Lines rows={[...(c.applies ? [['Applies to', c.applies] as [string, string]] : []), ['Required', c.required], ['Clause', c.clause]]} />
+            {c.note && <Note>{c.note}</Note>}
+          </details>
+        ))}</div>}
+        {(sum.fail + sum.warn + sum.unchecked > 0 || only === 'all') && <Seg<'all' | 'issues'> small value={only} set={setOnly} options={[{ value: 'issues', label: 'Issues' }, { value: 'all', label: 'Everything' }]} />}
         {groups.map((g) => {
-          const cs = checks.filter((c) => c.group === g && shown(c));
+          const cs = checks.filter((c) => c.group === g && shown(c) && c.status !== 'unchecked');
           if (!cs.length) return null;
           return <div class="cgroup"><h4>{g}</h4>{cs.map((c) => (
             <details class={`chk ${c.status}`}>
               <summary><Icon n={STATUS_ICON[c.status]} size={15} /><span>{c.rule}</span><em>{c.proposed}</em></summary>
-              <Lines rows={[['Required', c.required], ['Proposed', c.proposed], ['Clause', c.clause]]} />
+              <Lines rows={[...(c.applies ? [['Applies to', c.applies] as [string, string]] : []), ['Required', c.required], ['Proposed', c.proposed], ['Clause', c.clause]]} />
               {c.note && <Note>{c.note}</Note>}
               {(() => { const b = e.d.buildings[checkBuilding(c.key) ?? -1]; return b && <button type="button" class="linkbtn show" onClick={() => show(b.b.id)}><Icon n="fit" size={14} />Show {e.d.buildings.length > 1 ? `building ${String.fromCharCode(65 + e.d.buildings.indexOf(b))}` : 'the building'}</button>; })()}
             </details>
           ))}</div>;
         })}
-        {only === 'issues' && !sum.fail && !sum.warn && <p class="hint-line"><Icon n="check" size={14} />All {sum.pass} checks pass. <button type="button" class="linkbtn" onClick={() => setOnly('all')}>Show them</button></p>}
+        {only === 'issues' && !sum.fail && !sum.warn && !sum.unchecked && <p class="hint-line"><Icon n="check" size={14} />All {sum.pass} checks pass. <button type="button" class="linkbtn" onClick={() => setOnly('all')}>Show them</button></p>}
       </Section>
 
       <Section title="Permission" fold open={false} aside={<span class="sec-meta">{PERMISSION_LABEL[kind]}</span>} sub={PERMISSION_HINT[kind]}>

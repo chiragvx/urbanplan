@@ -25,7 +25,7 @@ export const VIEW_STEPS: { key: ViewStep; label: string; icon: string; title: st
 /** where an editing step's link lands on a phone (a result bar figure, a check) */
 export const VIEW_OF: Record<string, ViewStep> = { brief: 'overview', design: 'overview', numbers: 'money', approve: 'rules' };
 
-export const STATUS_ICON: Record<CheckStatus, string> = { pass: 'check', fail: 'x', warn: 'warn', info: 'info' };
+export const STATUS_ICON: Record<CheckStatus, string> = { pass: 'check', fail: 'x', warn: 'warn', info: 'info', unchecked: 'minus' };
 const m = (v: number) => `${nf(v, v < 10 ? 1 : 0)} m`;
 const letter = (i: number) => String.fromCharCode(65 + i);
 
@@ -34,7 +34,7 @@ export const buildingName = (p: ProProject, e: Evaluated, i: number) =>
   (p.scheme?.buildings.find((b) => b.id === e.d.buildings[i]?.b.id) as { name?: string } | undefined)?.name ?? `Building ${letter(i)}`;
 
 /** the building a check is about, from its key (height:2, margins:0 …), or null for the whole scheme's */
-export const checkBuilding = (key: string): number | null => { const x = /^(height|margins|transfers|cantilever|mixed|fire-access):(\d+)$/.exec(key); return x ? +x[2] : null; };
+export const checkBuilding = (key: string): number | null => { const x = /^(height|margins|transfers|cantilever|mixed|fire-access|travel|exit-width|stair-min|unchecked-[a-z]+):(\d+)$/.exec(key); return x ? +x[2] : null; };
 
 export function Overview({ p, e }: { p: ProProject; e: Evaluated }) {
   const { r, d } = e, city = CITIES.find((c) => c.value === p.city);
@@ -92,8 +92,8 @@ export function MoneyView({ e, deal }: { e: Evaluated; deal: DealResult }) {
 
 export function RulesView({ e, checks, show }: { e: Evaluated; checks: Check[]; show: (id: string) => void }) {
   const sum = scrutinySummary(checks);
-  const [only, setOnly] = useState<'issues' | 'all'>(sum.fail + sum.warn ? 'issues' : 'all');
-  const shown = checks.filter((c) => only === 'all' || c.status === 'fail' || c.status === 'warn');
+  const [only, setOnly] = useState<'issues' | 'all'>(sum.fail + sum.warn + sum.unchecked ? 'issues' : 'all');
+  const shown = checks.filter((c) => only === 'all' || c.status === 'fail' || c.status === 'warn' || c.status === 'unchecked').sort((a, b) => +(b.status === 'unchecked') - +(a.status === 'unchecked'));
   const groups = [...new Set(shown.map((c) => c.group))];
   return (
     <Section title="Scrutiny" sub="Advisory: the authority's check is the one that counts.">
@@ -101,13 +101,14 @@ export function RulesView({ e, checks, show }: { e: Evaluated; checks: Check[]; 
         <span class="s-pass"><Icon n="check" size={14} />{sum.pass} pass</span>
         {sum.fail > 0 && <span class="s-fail on"><Icon n="x" size={14} />{sum.fail} fail</span>}
         {sum.warn > 0 && <span class="s-warn on"><Icon n="warn" size={14} />{sum.warn} to check</span>}
+        {sum.unchecked > 0 && <span class="s-unchecked on"><Icon n="minus" size={14} />{sum.unchecked} not checked</span>}
       </div>
       <Seg<'all' | 'issues'> small value={only} set={setOnly} options={[{ value: 'issues', label: 'Issues' }, { value: 'all', label: 'Everything' }]} />
       {groups.map((g) => <div class="cgroup"><h4>{g}</h4>{shown.filter((c) => c.group === g).map((c) => {
         const b = e.d.buildings[checkBuilding(c.key) ?? -1];
         return <details class={`chk ${c.status}`}>
           <summary><Icon n={STATUS_ICON[c.status]} size={15} /><span>{c.rule}</span><em>{c.proposed}</em></summary>
-          <Lines rows={[['Required', c.required], ['Proposed', c.proposed], ['Clause', c.clause]]} />
+          <Lines rows={[...(c.applies ? [['Applies to', c.applies] as [string, string]] : []), ['Required', c.required], ['Proposed', c.proposed], ['Clause', c.clause]]} />
           {c.note && <p class="note">{c.note}</p>}
           {b && <button type="button" class="linkbtn show" onClick={() => show(b.b.id)}><Icon n="fit" size={14} />Show {e.d.buildings.length > 1 ? `building ${letter(e.d.buildings.indexOf(b))}` : 'the building'}</button>}
         </details>;

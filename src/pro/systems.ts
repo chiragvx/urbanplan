@@ -12,7 +12,8 @@
 //   rainwater harvesting, the fire and domestic pump room, the yard hydrants, EV charging. `systemsOf` sizes the plant
 //   for the building as if it stood alone (those lines and spaces carry `site: true`, and `plantCost` says how much of
 //   `cost` is plant); `siteSystems` sizes it once for every building together.
-import { buaOf, floorKind, type BuildingReport, type FloorUse } from '../doc/site';
+import { buaOf, floorKind, shared, type BuildingReport, type FloorUse } from '../doc/site';
+import { EGRESS, groupOf, stairFor, stairMinOf, UNIT_W } from '../doc/egress';
 import { FLOOR_USES, USE_TABLE } from '../doc/uses';
 
 export type Code = 'udcpr' | 'dcpr-island' | 'dcpr-suburbs';
@@ -108,6 +109,8 @@ export interface SystemsResult {
   /** ₹ of `cost` that is site plant (sized for this building alone in `systemsOf`) */
   plantCost: number;
   checks: SystemsCheck[];
+  /** a building's own stairs as set or worked out: how many and their clear width (m) */
+  stair?: { n: number; w: number };
   /** the figures the controls show as "auto" (what each setting works out to when unset) */
   auto: Auto;
 }
@@ -142,9 +145,9 @@ export const LIFT_H = 15, TWO_LIFTS_H = 24, FIRE_LIFT_H = 15, REFUGE_H = 24, REF
 /** NBC 2016 Part 4: two staircases above 15 m */
 const TWO_STAIRS_H = 15;
 /** UDCPR Table 9G residential stair width (same as scrutiny.ts) */
-export const stairFor = (h: number) => (h <= 15 ? 1.0 : h <= 24 ? 1.2 : 1.5);
+export { stairFor };
 /** NBC 2016 Part 4 Tables 21 / 22: residential occupant load 12.5 m² per person; 25 persons per 0.5 m unit of stair width */
-const OCC_M2 = 12.5, PER_UNIT = 25, UNIT_W = 0.5;
+const OCC_M2 = 12.5, PER_UNIT = 25;
 /** riser 0.175 m, tread 0.25 m (UDCPR 9.x: riser ≤ 0.19 m, tread ≥ 0.25 m residential) */
 export const RISER = 0.175, TREAD = 0.25, WALL = 0.23;
 /** lift traffic (CIBSE Guide D, residential): 5% of the population in 5 minutes, an interval of 90 s at most;
@@ -283,7 +286,13 @@ interface Demand {
   /** a formed building's uses: the people the lifts carry in 5 minutes and the longest wait its strictest use
    *  allows; the most people on one floor (for the stairs); its fire band, the strictest of its occupancies' */
   hcPop?: number; interval?: number; floorOcc?: number; fire?: Band & { classes: string[] };
+  /** a formed building's busiest floor in units of stair width (each use's people over its group's people a unit,
+   *  ../doc/egress.ts), and the uses it has (for the narrowest stair) */
+  floorUnits?: number; kinds?: FloorUse[];
 }
+
+/** the people on an area of a use (its occupant load; flats at 12.5 m² a person) */
+const exitPeople = (k: FloorUse, area: number) => area / (k === 'residential' ? OCC_M2 : USE_LOAD[k].occ);
 
 function demandOf(b: BuildingReport, o: SystemsOpts, s: SystemsSettings, a: Pick<Auto, 'flatKW' | 'officeW' | 'persons' | 'lpcd'>, commonKW: number): Demand {
   const flats: [number, number, number] = [b.perFloor[0] * b.floors, b.perFloor[1] * b.floors, b.perFloor[2] * b.floors];
@@ -293,15 +302,19 @@ function demandOf(b: BuildingReport, o: SystemsOpts, s: SystemsSettings, a: Pick
   const pp = [0, 1, 2].map((t) => pick(Pl.persons?.[t as 0 | 1 | 2], a.persons[t]));
   const lpcd = pick(Pl.lpcd, a.lpcd);
   // a formed building floor by floor, each by its own use (USE_LOAD); its offices' W/m² as set, if set
-  let other: { pop: number; water: number; kW: number; tr: number; hcPop: number; interval: number; floorOcc: number; fire: Demand['fire'] } | null = null;
+  let other: { pop: number; water: number; kW: number; tr: number; hcPop: number; interval: number; floorOcc: number; floorUnits: number; kinds: FloorUse[]; fire: Demand['fire'] } | null = null;
   if (b.laid) {
     flats.fill(0); officeCarpet = 0;
-    const o2 = { pop: 0, water: 0, kW: 0, tr: 0, hcPop: 0, interval: INTERVAL, floorOcc: 0, fire: undefined as Demand['fire'] };
+    const o2 = { pop: 0, water: 0, kW: 0, tr: 0, hcPop: 0, interval: INTERVAL, floorOcc: 0, floorUnits: 0, kinds: [] as FloorUse[], fire: undefined as Demand['fire'] };
     const kinds = new Set<FloorUse>();
     let biggestRetail = 0;
     for (const f of b.laid.floors) {
       const k = floorKind(f, b.use), U = USE_LOAD[k];
       kinds.add(k);
+      // (the floor's people by each of its uses, in units of stair width by that use's group)
+      let units = 0;
+      for (const g of shared(f, b.use)) { if (g.kind === 'parking') continue; kinds.add(g.kind); units += exitPeople(g.kind, g.area) / EGRESS[groupOf(g.kind) ?? 'A'].perUnit; }
+      o2.floorUnits = Math.max(o2.floorUnits, units);
       if (k === 'residential') {
         for (const u of f.units) if (u.t < 3) flats[u.t as 0 | 1 | 2]++;
         o2.floorOcc = Math.max(o2.floorOcc, f.area / OCC_M2);
@@ -319,6 +332,7 @@ function demandOf(b: BuildingReport, o: SystemsOpts, s: SystemsSettings, a: Pick
       if (k === 'retail') biggestRetail = Math.max(biggestRetail, f.area);
     }
     o2.fire = bandFor(kinds, b.height, biggestRetail);
+    o2.kinds = [...kinds];
     other = o2;
   }
   const nFlats = flats[0] + flats[1] + flats[2];
@@ -335,7 +349,7 @@ function demandOf(b: BuildingReport, o: SystemsOpts, s: SystemsSettings, a: Pick
   const tr = flats.reduce((x, n, t) => x + n * FLAT_TR[t], 0) + (other ? other.tr : officeCarpet / OFFICE_M2_TR);
   const basementArea = o.basementArea ?? b.plate * (o.basements ?? 0);
   const roof = b.laid ? b.laid.floors[b.laid.floors.length - 1].area : b.plate;
-  const extra = other ? { hcPop: flatPop * HC5 + other.hcPop, interval: other.interval, floorOcc: other.floorOcc, fire: other.fire } : {};
+  const extra = other ? { hcPop: flatPop * HC5 + other.hcPop, interval: other.interval, floorOcc: other.floorOcc, floorUnits: other.floorUnits, kinds: other.kinds, fire: other.fire } : {};
   return { flats, nFlats, officeCarpet, bua, plate: b.plate, floors: b.floors, height: b.height, roof, basementArea, pop, perFloorPop: pop / Math.max(1, b.floors), flatKW, commonKW, mdKVA, commonKVA, water, tr, ...extra };
 }
 
@@ -459,7 +473,7 @@ function plant({ d, code, settings: s, bays, dgAuto, fireH }: PlantIn): PlantOut
 }
 
 // ---------------------------------------------------------------- per building
-interface BuildingOut { d: Demand; lines: SystemsLine[]; spaces: SystemsSpace[]; cost: Record<SystemsGroup, number>; checks: SystemsCheck[]; auto: Omit<Auto, keyof PlantOut['auto']>; dgAuto: DgBackup }
+interface BuildingOut { stair: { n: number; w: number }; d: Demand; lines: SystemsLine[]; spaces: SystemsSpace[]; cost: Record<SystemsGroup, number>; checks: SystemsCheck[]; auto: Omit<Auto, keyof PlantOut['auto']>; dgAuto: DgBackup }
 
 function building(b: BuildingReport, o: SystemsOpts): BuildingOut {
   const s = o.settings ?? {}, Co = s.cores ?? {}, E = s.electrical ?? {}, Pl = s.plumbing ?? {}, F = s.fire ?? {}, Hv = s.hvac ?? {};
@@ -518,8 +532,9 @@ function building(b: BuildingReport, o: SystemsOpts): BuildingOut {
   const stairsMin = H > TWO_STAIRS_H ? 2 : 1;
   const stairsAuto = Math.max(stairsMin, cores);
   const stairs = pick(Co.stairs, stairsAuto);
-  const wReq = stairFor(H);
-  const occ = d0.floorOcc ?? b.plate / OCC_M2, wCap = (Math.ceil(occ / PER_UNIT - 1e-9) * UNIT_W);
+  // (the narrowest stair the strictest of its uses needs; the width its busiest floor needs, each use by its group)
+  const wReq = d0.kinds?.length ? Math.max(...d0.kinds.map((k) => stairMinOf(k, H))) : stairFor(H);
+  const occ = d0.floorOcc ?? b.plate / OCC_M2, wCap = Math.ceil((d0.floorUnits ?? occ / PER_UNIT) - 1e-9) * UNIT_W;
   const stairWAuto = Math.max(wReq, up(wCap / Math.max(1, stairs), 0.05));
   const stairW = pick(Co.stairW, stairWAuto);
   const typeAuto: StairType = H > 45 && cores === 1 ? 'scissor' : 'dog-leg';
@@ -619,7 +634,7 @@ function building(b: BuildingReport, o: SystemsOpts): BuildingOut {
   if (o.code !== 'udcpr') for (const g of SYSTEMS_GROUPS) cost[g] *= 1.1;
   const dgAuto: DgBackup = liftsNeeded || H > FIRE_LIFT_H ? 'common' : 'none';
   return {
-    d, lines, spaces, cost, checks, dgAuto,
+    d, lines, spaces, cost, checks, dgAuto, stair: { n: stairs, w: stairW },
     auto: {
       stairs: stairsAuto, stairW: stairWAuto, stairType: typeAuto, lifts: liftsAuto, liftCap: capAuto, liftSpeed: speedAuto, serviceLift: serviceAuto, fireLift: fireLiftAuto, lobby: lobbyAuto,
       plumbingShafts: true, electricalShaft: true, chute: chuteAuto, refuges: refugesAuto,
@@ -652,7 +667,7 @@ export function systemsOf(b: BuildingReport, opts: SystemsOpts): SystemsResult {
   const bo = building(b, opts);
   const pl = plant({ d: [bo.d], code: opts.code, settings: opts.settings ?? {}, bays: opts.bays ?? bays0([bo.d]), dgAuto: bo.dgAuto, fireH: b.height });
   const plantCost = SYSTEMS_GROUPS.reduce((t, g) => t + pl.cost[g], 0);
-  return finish([bo, pl], plantCost, bo.d.bua, { ...bo.auto, ...pl.auto });
+  return { ...finish([bo, pl], plantCost, bo.d.bua, { ...bo.auto, ...pl.auto }), stair: bo.stair };
 }
 
 /** Every building's systems with the plant (substation, DG, underground tanks, STP, RWH, pump room, hydrants, EV) sized
@@ -666,7 +681,7 @@ export function siteSystems(list: { b: BuildingReport; settings?: SystemsSetting
   const plantCost = SYSTEMS_GROUPS.reduce((t, g) => t + pl.cost[g], 0);
   const bua = bos.reduce((t, x) => t + x.d.bua, 0);
   const autoOf = (x: BuildingOut): Auto => ({ ...x.auto, ...pl.auto });
-  const buildings = bos.map((x) => finish([x], 0, x.d.bua, autoOf(x)));
+  const buildings = bos.map((x) => ({ ...finish([x], 0, x.d.bua, autoOf(x)), stair: x.stair }));
   const named = bos.map((x, i) => (bos.length > 1 ? { ...x, checks: x.checks.map((c) => ({ ...c, key: `${c.key}:${i}`, rule: `${c.rule} · building ${String.fromCharCode(65 + i)}` })) } : x));
   return { ...finish([...named, pl], plantCost, bua, bos[0] ? autoOf(bos[0]) : ({} as Auto)), buildings };
 }

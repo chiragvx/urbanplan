@@ -4,6 +4,51 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-23 · Checks as rows, by each use's NBC group (docs/plans/pro-design-freedom.md, step 7, first part)
+
+**Why:** the scrutiny checked every building as if it held flats. A building of offices, a hall or a clinic got the flats' stair widths and a travel-distance line that always said "cores spaced for it". Uses we have no figures for looked as clean as housing.
+
+**What changed:**
+- **Exits by occupancy group** (src/doc/egress.ts): each use's NBC 2016 Part 4 group, the people a 0.5 m unit of stair width takes, the longest travel to a stair and the narrowest stair. Groups A, B, D, E and F are worked through; the rest are marked not covered.
+- **Checks as rows** (src/pro/checkRows.ts). Each row has:
+  - what it applies to (groups, uses, buildings over a height);
+  - what it measures;
+  - its limit;
+  - its clause.
+  
+  The rows run over each building's uses, floor by floor, with each space counted by its own use. The first four rows are:
+  - **fire tender access**, moved from code;
+  - **travel to a stair:** the farthest corner of any floor from the nearest core, in a straight line, against the limit for each group present. Over the limit fails. Over 80 % warns, since the walk along a corridor is longer. A one-floor building and houses with their own stairs pass;
+  - **stair width for the busiest floor's people**, each use by its own group. Offices take 50 people a unit, homes 25;
+  - **the narrowest stair:** flats by UDCPR Table 9G, other uses by NBC, hotels 1.5 m.
+- **The stairs are sized the same way** (src/pro/systems.ts): their width covers each use's people by its group and the strictest use's narrowest stair. The systems' own stair-width checks give way to the rows in the scrutiny.
+- **"Not checked" is a status.** A use in a group not worked through (a clinic is C), or floors with no use yet, gets a line saying so, with a note to ask the fire consultant. It is never a pass. The Approval step lists these first under "Not checked for its use", the score shows "n not checked", and the PDF cover counts them and lists them first under "Needs attention".
+- A check from a row shows "Applies to" in its detail.
+
+**How it was checked:**
+- **Figures:** the `evaluate()` snapshot on the nine sample projects is identical, apart from the checks list.
+  - In the checks, the long slabs now warn on travel (29.7 m in a straight line against 30 m), and so does one building in the other-uses sample.
+  - Everything else passes.
+- **Tests** in tools/dev/test-parts.ts:
+  - groups by use;
+  - homes get the four rows and nothing unchecked;
+  - the systems' stair checks give way to the rows;
+  - a clinic space is not checked, and the summary counts it;
+  - floors with no use yet are not checked;
+  - offices' busiest floor in units at 50 people a unit;
+  - the farthest-corner distance.
+- `npx tsc` clean, `npm test` ALL OK (8 suites), `npm run build` OK.
+- **In the browser** (localStorage backed up and restored): a box tower with a clinic on two floors showed "13 pass, 3 fail, 1 not checked", with the clinic's line first and "Applies to: group C (institutional)".
+
+**Left or known:**
+- The NBC figures are a summary of Tables 21 and 22 and 4.4.2.4.3, marked "as assumed"; they need reading against the text.
+- Travel is a straight line to a core's middle, not a walk along corridors.
+- Light and ventilation, room sizes, lifts and refuge floors are still code, not rows.
+- The zone's allowed uses (§7.3) are not checked yet.
+- The scorecard by main use (step 6) is still to do.
+
+---
+
 ## 2026-11-23 · Draw, curves on drawn lines and areas, roads that join the road outside
 
 **Why:** the shelf called its drawing tools "Grounds", which said where, not what. An internal road stopped at the compound wall, short of the road it was meant to reach, and drawn lines could only have corners.

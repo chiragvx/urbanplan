@@ -4,6 +4,9 @@ import { boxForm, layForm, type Carve, type Form } from '../../src/pro/form';
 import { newPart, pushEdge, tOfFloor, floorOfT } from '../../src/pro/parts';
 import { DEFAULT_PROJECT, type ProProject } from '../../src/pro/project';
 import { evaluate } from '../../src/pro/evaluate';
+import { scrutiny, scrutinySummary } from '../../src/pro/scrutiny';
+import { subjectsOf, farthestFromStair } from '../../src/pro/checkRows';
+import { groupOf } from '../../src/doc/egress';
 import { sampleBez, smoothHandles, moveHandle } from '../../src/doc/curves';
 import { withNodes, nodesOf, trimAtFront, joinOf, type SiteElement } from '../../src/doc/site';
 
@@ -127,6 +130,31 @@ ok(tgt.d.parking.want === Math.ceil(e0.d.parking.need * 1.5), `a target of 150%:
   for (let i = 0; i < j.length; i += 2) { zMin = Math.min(zMin, j[i + 1]); xMin = Math.min(xMin, j[i]); xMax = Math.max(xMax, j[i]); }
   ok(zMin < -3 && zMin > -4, `its join runs across the 3 m widening to the road (to z ${zMin})`);
   ok(xMax - xMin > 6 + 2, `and flares at the kerb: ${(xMax - xMin).toFixed(1)} m across for a 6 m road`);
+}
+
+// checks as rows (step 7): by each use's NBC group; a group not worked through, or no use yet, is "not checked"
+{
+  ok(groupOf('residential') === 'A' && groupOf('office') === 'E' && groupOf('clinic') === 'C' && groupOf('parking') === null && groupOf('none') === null, 'NBC groups by use: homes A, offices E, a clinic C, parking and no use none');
+  const sc = (q: ProProject) => scrutiny(evaluate(q));
+  const homes = sc(proj(base));
+  const keys = homes.map((c) => c.key);
+  ok(['travel:0', 'exit-width:0', 'stair-min:0'].every((k) => keys.includes(k)), `homes get the rows: ${homes.filter((c) => c.applies).map((c) => `${c.key} ${c.status}`).join(', ')}`);
+  ok(!homes.some((c) => c.status === 'unchecked'), 'and nothing unchecked');
+  ok(!keys.some((k) => /^stair-(w|cap)/.test(k)), "the systems' own stair checks give way to the rows");
+  const clinic = sc(proj({ ...base, spaces: [{ id: 'c', use: 'clinic', ring: rect(-16, -11, 16, 11), lo: 1, hi: 2 }] }));
+  const u = clinic.find((c) => c.key === 'unchecked-clinic:0');
+  ok(!!u && u.status === 'unchecked' && /group C/.test(u.clause), `a clinic's floors: not checked (${u?.proposed})`);
+  ok(scrutinySummary(clinic).unchecked === 1, 'and the summary counts it');
+  const none = sc(proj({ ...base, uses: [{ use: 'none', floors: 10 }] } as Form));
+  ok(none.some((c) => c.key === 'unchecked-none:0'), 'floors with no use yet: not checked, until they have one');
+  // (offices: 50 people a 0.5 m unit, homes 25; so a floor of offices needs fewer units than its people suggest)
+  const eo = evaluate(proj({ ...base, uses: [{ use: 'office', floors: 10 }] } as Form));
+  const so = subjectsOf(eo.d.buildings[0]);
+  ok(so.subjects[0]?.use === 'office' && near(so.units, (eo.d.buildings[0].laid!.floors[0].area / 10) / 50, 0.01), `offices' busiest floor: ${so.units.toFixed(2)} units of stair width (${Math.round(eo.d.buildings[0].laid!.floors[0].area)} m² at 10 m² a person, 50 a unit)`);
+  const far = farthestFromStair({ cores: [[0, 0, 2, 0, 2, 2, 0, 2]], quads: [[0, 0, 61, 0, 61, 10, 0, 10]] } as never)!;
+  ok(near(far, Math.hypot(60, 9), 0.01), `travel: the farthest corner from the stair, in a straight line (${far.toFixed(1)} m)`);
+  const slab = sc({ ...proj(base), scheme: { buildings: [{ id: 'b', spine: [0, 25, 1, 25], depth: 20, floors: 10, form: boxForm(90, 14, 10) }], elements: [] } } as ProProject).find((c) => c.key === 'travel:0');
+  ok(!!slab, `a 90 m slab's travel: ${slab?.status}, ${slab?.proposed}`);
 }
 
 console.log(bad ? `${bad} FAILED` : 'ALL OK');

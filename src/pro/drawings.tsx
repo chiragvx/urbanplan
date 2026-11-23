@@ -313,7 +313,7 @@ const tableH = (b: Block, w: number) => (b.sub ? 10 : 7) + 5 + b.rows.reduce((s,
 
 // ---------------- what the sheets say ----------------
 
-const STATUS: Record<CheckStatus, { t: string; c: string }> = { pass: { t: 'PASS', c: '#2a7a3e' }, fail: { t: 'FAIL', c: '#c62828' }, warn: { t: 'CHECK', c: '#b26a00' }, info: { t: 'NOTE', c: '#555' } };
+const STATUS: Record<CheckStatus, { t: string; c: string }> = { pass: { t: 'PASS', c: '#2a7a3e' }, fail: { t: 'FAIL', c: '#c62828' }, warn: { t: 'CHECK', c: '#b26a00' }, info: { t: 'NOTE', c: '#555' }, unchecked: { t: 'NOT CHECKED', c: '#6a4c93' } };
 
 /** the plot's edges after the DP road widening: each one's length, whether it faces a road, the margin it needs and
  *  the nearest a building comes to it (with where, to dimension it) */
@@ -366,9 +366,10 @@ function keyFigures(e: Evaluated): Block {
 }
 
 function Cover({ e, checks, titles, no, total }: { e: Evaluated; checks: Check[]; titles: string[]; no: number; total: number }) {
-  const s = { pass: 0, fail: 0, warn: 0, info: 0 };
+  const s = { pass: 0, fail: 0, warn: 0, info: 0, unchecked: 0 };
   for (const c of checks) s[c.status]++;
-  const issues = checks.filter((c) => c.status === 'fail' || c.status === 'warn');
+  // (what isn't checked for its use first: a scheme we can't check mustn't read as clean)
+  const issues = [...checks.filter((c) => c.status === 'unchecked'), ...checks.filter((c) => c.status === 'fail' || c.status === 'warn')];
   const kind = permissionOf(e, e.p.approval?.kind);
   const blocks: Block[] = [
     keyFigures(e),
@@ -376,7 +377,7 @@ function Cover({ e, checks, titles, no, total }: { e: Evaluated; checks: Check[]
     {
       title: 'Scrutiny', sub: 'Advisory: the authority’s own scrutiny has the last word.',
       cols: [{ h: 'Result', w: 0.7 }, { h: 'Rules', w: 0.3, end: true }],
-      rows: [[{ t: 'Pass', c: STATUS.pass.c }, `${s.pass}`], [{ t: 'Fail', c: STATUS.fail.c }, `${s.fail}`], [{ t: 'To check', c: STATUS.warn.c }, `${s.warn}`], [{ t: 'Notes (a step it triggers)', c: STATUS.info.c }, `${s.info}`]],
+      rows: [[{ t: 'Pass', c: STATUS.pass.c }, `${s.pass}`], [{ t: 'Fail', c: STATUS.fail.c }, `${s.fail}`], [{ t: 'To check', c: STATUS.warn.c }, `${s.warn}`], [{ t: 'Notes (a step it triggers)', c: STATUS.info.c }, `${s.info}`], ...(s.unchecked ? [[{ t: 'Not checked for its use', c: STATUS.unchecked.c }, `${s.unchecked}`] as Cell[]] : [])],
     },
     ...(issues.length ? [{
       title: 'Needs attention', cols: [{ h: '', w: 0.17 }, { h: 'Rule', w: 0.38 }, { h: 'Proposed', w: 0.45 }],

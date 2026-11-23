@@ -3,14 +3,18 @@
 // requires, what the project proposes and the clause, the way an authority's scrutiny report reads, so an architect
 // can see at a glance what will come back. It is advisory: the values are UDCPR 2020 / DCPR 2034 and NBC 2016 as
 // assumed here (see each clause), and the authority's own scrutiny has the last word. Check with your architect.
-import { FIRE_H, FIRE_W, floorKind, RG_FROM, RG_SHARE, SQFT, UNIT_LABEL } from '../doc/site';
+import { FIRE_H, floorKind, RG_FROM, RG_SHARE, SQFT, UNIT_LABEL } from '../doc/site';
 import { shopFloorsAllowed } from './mixed';
 import { sideMargin } from '../doc/plot';
 import type { Evaluated } from './evaluate';
+import { runRows } from './checkRows';
 
-export type CheckStatus = 'pass' | 'fail' | 'warn' | 'info';
+/** `unchecked`: a rule that would apply, but whose figures for this use haven't been worked through (./checkRows.ts) */
+export type CheckStatus = 'pass' | 'fail' | 'warn' | 'info' | 'unchecked';
 export type CheckGroup = 'Planning' | 'Building' | 'Fire & safety' | 'Parking & open space' | 'Flats & rooms';
-export interface Check { key: string; group: CheckGroup; rule: string; clause: string; required: string; proposed: string; status: CheckStatus; note?: string }
+export interface Check { key: string; group: CheckGroup; rule: string; clause: string; required: string; proposed: string; status: CheckStatus; note?: string;
+  /** what it applies to, for a check from a row (./checkRows.ts): "every use in groups A, B, D, E and F" */
+  applies?: string }
 
 /** the rooms of each flat of the typical floor, per building (from ./rooms.ts; only what's read here) */
 export type RoomsLike = { unit: number; t: number; rooms: { kind: string; name: string; area: number; minArea: number; width: number; minWidth: number; ok: boolean }[]; ok: boolean }[][];
@@ -86,20 +90,18 @@ export function scrutiny(e: Evaluated, rooms?: RoomsLike): Check[] {
   // ---- fire and safety ----
   const H = d.height;
   if (hasBuildings) {
-    d.buildings.forEach((b, i) => {
-      if (b.height <= FIRE_H) return;
-      add({ key: `fire-access:${i}`, group: 'Fire & safety', rule: `Fire tender access${name(i)}`, clause: 'NBC 2016 Part 4', required: `${FIRE_W} m clear round it above ${FIRE_H} m`, proposed: b.fireOk ? 'clear way round' : 'way round blocked', status: b.fireOk ? 'pass' : 'fail' });
-    });
+    // (the checks by use, as rows: fire access, travel to a stair, stair widths by group, and what isn't checked)
+    for (const c of runRows(e)) add(c);
     add({ key: 'fire-noc', group: 'Fire & safety', rule: 'Fire NOC', clause: 'Maharashtra Fire Prevention Act 2006; NBC 2016 Part 4', required: `needed over ${FIRE_H} m`, proposed: m(H), status: H > FIRE_H ? 'info' : 'pass', note: H > FIRE_H ? 'Provisional fire NOC with the plans, final before occupation.' : undefined });
     // (lifts, stairs, refuge floors, fire systems, water and power: as the building systems size them, ./systems.ts)
-    for (const c of e.sys.checks) add({ key: `sys:${c.key}`, group: c.group === 'Cores' || c.group === 'Fire' ? 'Fire & safety' : 'Building', rule: c.rule, clause: c.clause, required: c.required, proposed: c.proposed, status: c.status });
+    // (stair widths come from the rows above, by each use's group)
+    for (const c of e.sys.checks) if (!/^stair-(w|cap)(:\d+)?$/.test(c.key)) add({ key: `sys:${c.key}`, group: c.group === 'Cores' || c.group === 'Fire' ? 'Fire & safety' : 'Building', rule: c.rule, clause: c.clause, required: c.required, proposed: c.proposed, status: c.status });
     const cores = d.buildings.reduce((s, b) => s + b.cores.length, 0);
     if (!e.sys.checks.length) add({ key: 'lift', group: 'Fire & safety', rule: 'Lifts', clause: 'UDCPR 2020 9.27.1, 9.29.8', required: H > TWO_LIFTS_H ? 'two lifts (over 24 m), one a fire lift (from 15 m)' : H >= FIRE_LIFT_H ? 'a lift, which is a fire lift (from 15 m)' : 'none up to 15 m', proposed: H > LIFT_H ? `${cores} core${cores > 1 ? 's' : ''}, each with ${H > TWO_LIFTS_H ? 'two lifts' : 'a lift'}, one a fire lift (as laid)` : 'not needed', status: 'pass', note: 'Each core is laid out with a stair and its lifts.' });
     const refuges = H > REFUGE_H ? Math.floor((H - REFUGE_H) / REFUGE_EVERY) + 1 : 0;
     if (!e.sys.checks.length) add({ key: 'refuge', group: 'Fire & safety', rule: 'Refuge areas', clause: 'UDCPR 2020 9.29.6 (the floor above 24 m, above 39 m, then every 15 m)', required: H > REFUGE_H ? `${refuges} refuge level${refuges > 1 ? 's' : ''}` : `none up to ${REFUGE_H} m`, proposed: H > REFUGE_H ? 'not laid out yet' : m(H), status: H > REFUGE_H ? 'warn' : 'pass', note: H > REFUGE_H ? 'Each 15 m² or 0.3 m² per person of two floors, whichever is more, open on one side; free of FSI. Not laid out yet.' : undefined });
     const stair = stairFor(H);
     if (!e.sys.checks.length) add({ key: 'stair', group: 'Fire & safety', rule: 'Staircase width', clause: 'UDCPR 2020 Table 9G', required: `at least ${m(stair)} clear`, proposed: `cores sized for ${m(stair)}`, status: 'pass', note: 'From the core size, until stairs are drawn.' });
-    add({ key: 'travel', group: 'Fire & safety', rule: 'Travel distance to a stair', clause: 'NBC 2016 Part 4 (as assumed: 30 m)', required: 'at most 30 m along the corridor', proposed: 'cores spaced for it', status: 'pass' });
   }
 
   // ---- parking and open space ----
@@ -148,8 +150,8 @@ function levelsText(levels: { kind: string; bays: number[][] }[]): string {
   return parts.length ? ` on ${parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0]}` : '';
 }
 
-export function scrutinySummary(c: Check[]): { pass: number; fail: number; warn: number; info: number } {
-  const s = { pass: 0, fail: 0, warn: 0, info: 0 };
+export function scrutinySummary(c: Check[]): { pass: number; fail: number; warn: number; info: number; unchecked: number } {
+  const s = { pass: 0, fail: 0, warn: 0, info: 0, unchecked: 0 };
   for (const x of c) s[x.status]++;
   return s;
 }
