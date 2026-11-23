@@ -54,24 +54,29 @@ export function EmptyState({ p, ways }: { p: ProProject; ways: StartWays }) {
 // ---------------- the help corner ----------------
 
 const TASKS = 'urbanplan:pro:tasks';
-type Flag = 'numbers' | 'share';
+type Flag = 'numbers' | 'share' | 'moved' | 'picked' | 'pickhint';
 const flags = (): Partial<Record<Flag, boolean>> => { try { return JSON.parse(localStorage.getItem(TASKS) ?? '{}'); } catch { return {}; } };
-/** tick a task that can't be read off the project (Numbers looked at, something shared) */
+/** tick a task that can't be read off the project (Numbers looked at, a building changed in the view, something
+ *  shared), or a hint seen (the first pick's) */
+export const ticked = (f: Flag) => !!flags()[f];
 export const tick = (f: Flag) => { const x = flags(); if (x[f]) return; try { localStorage.setItem(TASKS, JSON.stringify({ ...x, [f]: true })); } catch { /* */ } };
 
-export function taskList(p: ProProject): { label: string; done: boolean }[] {
+export type Task = 'plot' | 'building' | 'moved' | 'numbers' | 'option' | 'share';
+export function taskList(p: ProProject): { k: Task; label: string; done: boolean }[] {
   const f = flags();
   const plotSet = !p.blank && (!!p.at || p.shape === 'poly' || p.width !== 40 || p.depth !== 50 || p.road !== 12);
   return [
-    { label: 'Set the plot', done: plotSet },
-    { label: 'Add a building', done: (p.scheme?.buildings.length ?? 0) > 0 },
-    { label: 'Look at the numbers', done: !!f.numbers },
-    { label: 'Make a second option', done: optionsOf(p).length > 1 },
-    { label: 'Share it', done: !!f.share },
+    { k: 'plot', label: 'Set the plot', done: plotSet },
+    { k: 'building', label: 'Put a building on it', done: (p.scheme?.buildings.length ?? 0) > 0 },
+    { k: 'moved', label: 'Change its height or move it in 3D', done: !!f.moved },
+    { k: 'numbers', label: 'Look at the numbers', done: !!f.numbers },
+    { k: 'option', label: 'Make a second option', done: optionsOf(p).length > 1 },
+    { k: 'share', label: 'Share it', done: !!f.share },
   ];
 }
 
-export function HelpCorner({ p, keys, search }: { p: ProProject; keys: () => void; search: () => void }) {
+/** `act`: do a task (arm the tool, open the report…) */
+export function HelpCorner({ p, keys, search, act }: { p: ProProject; keys: () => void; search: () => void; act: (t: Task) => void }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -90,7 +95,7 @@ export function HelpCorner({ p, keys, search }: { p: ProProject; keys: () => voi
       {open && (
         <div class="help-pop" role="dialog" aria-label="Help">
           <b>Getting started</b>
-          <ul class="tasks">{ts.map((t) => <li class={t.done ? 'done' : ''}><Icon n={t.done ? 'check' : 'circle'} size={14} />{t.label}</li>)}</ul>
+          <ul class="tasks">{ts.map((t) => <li class={t.done ? 'done' : ''}><button type="button" class="task-b" onClick={() => { setOpen(false); act(t.k); }}><Icon n={t.done ? 'check' : 'circle'} size={14} />{t.label}</button></li>)}</ul>
           {!left && <p class="muted small">All done. The rest is in the guides.</p>}
           <hr />
           <button type="button" class="help-l" onClick={() => { setOpen(false); search(); }}><Icon n="cursor" size={15} />Search everything<kbd>Ctrl K</kbd></button>

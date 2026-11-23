@@ -200,6 +200,7 @@ Smallest and most telling first, so the first two can be shown to users within d
 5. **Reports (medium).** Numbers and Approval as bottom panels from the scorecard; remove the rail and `places.tsx`; N and A keys; map old links.
    - **Status (2026-11-23): built; the rail goes on a wide screen (kept on narrow and phone), places.tsx stays as the bodies.** See docs/plans/pro-global-ux-log.md.
 6. **First-run guidance (small).** Hover affordance, the HUD hint, the new checklist.
+   - **Status (2026-11-23): built (cursor and name tag on hover, the first pick's hint, a checklist whose tasks do themselves); no 3D highlight yet.** See docs/plans/pro-global-ux-log.md.
 7. **The stage on the dashboard (small).** Show and set it on the card and in Sites.
 
 Phase 8's outline and comment pins carry on as planned. Its focus mode can wait until after step 5.

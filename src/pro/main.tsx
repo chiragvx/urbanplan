@@ -28,7 +28,7 @@ import { addMember, anchorsOff, EMAIL, joinProject, members as listMembers, NotS
 import { clearLocalNotes, cloudNotes, countsByThing, localNotes, mine as mineNote, threads, useNotes, type Note } from './comments';
 import { CommentLayer, CommentList } from './commentPins';
 import { Outline } from './outline';
-import { EmptyState, HelpCorner, tick } from './start';
+import { EmptyState, HelpCorner, tick, ticked, type Task } from './start';
 import { authReady, explain, peekSession, session, signOut, startAuth } from '../auth/auth';
 import type { Project } from '../app/cloud';
 import { evaluate, dsOfBuilding } from './evaluate';
@@ -99,7 +99,7 @@ function App() {
   const tx: Tx & { once(o: Partial<ProProject>): void } = {
     begin: () => { if (txOpen.current || roRef.current) return; past.current = [...past.current.slice(-80), pRef.current]; future.current = []; txOpen.current = true; setBusy(true); },
     live: (o) => up(o),
-    commit: () => { txOpen.current = false; lastPush.current = 0; setBusy(false); },
+    commit: () => { txOpen.current = false; lastPush.current = 0; setBusy(false); tick('moved'); },
     /** a change of its own (a key, a button): one undo step */
     once: (o) => { tx.begin(); up(o); tx.commit(); },
     cancel: () => { if (!txOpen.current) return; txOpen.current = false; const x = past.current.pop(); if (x) { store.set(KEY, x); setP(x); } setBusy(false); },
@@ -308,6 +308,26 @@ function App() {
   const openNotes = noteThreads.filter((t) => !t.root.resolved).length;
   const canResolve = !ref || ref.role !== 'viewer';
 
+  // ---------- first-run guidance (docs/plans/pro-ia-rethink.md §2.6) ----------
+  /** the first pick of a building ever: a one-line hint on what to drag, gone for good once used or dismissed */
+  const [firstPick, setFirstPick] = useState(false);
+  useEffect(() => {
+    if (picked?.k !== 'building') return;
+    if (!ticked('picked')) tick('picked');
+    if (!ticked('pickhint') && !locked && !phone) setFirstPick(true);
+  }, [picked?.k === 'building' ? picked.id : '']);
+  // (the hint goes once a building has been changed in the view, or nothing's picked)
+  useEffect(() => { if (firstPick && (ticked('moved') || picked?.k !== 'building')) { if (ticked('moved')) tick('pickhint'); setFirstPick(false); } }, [p.scheme, picked]);
+  /** a checklist task, done for you as far as it can be: the tool armed, the report opened */
+  const doTask = (t: Task) => {
+    if (t === 'plot') { setPicked({ k: 'plot' }); toast('The plot is picked: drag its corners, or set its size and roads in the inspector.'); return; }
+    if (t === 'building') { setTool({ k: 'building', shape: 'tower' } as Tool); toast('Click on the plot where the tower goes.'); return; }
+    if (t === 'moved') { const b = e.d.buildings[0]; if (b) { showBuilding(b.b.id); toast('Drag the arrow on its top for floors, or its middle to move it.'); } else { setTool({ k: 'building', shape: 'tower' } as Tool); toast('Put a building on the plot first: click where it goes.'); } return; }
+    if (t === 'numbers') { go('numbers'); return; }
+    if (t === 'option') { dispatchEvent(new Event('urbanplan:generate')); return; }
+    setDialog('share');
+  };
+
   // ---------- generated or yours (docs/plans/pro-ia-rethink.md §2.5) ----------
   // (no scheme: the generator lays it out from the brief, and brief changes move it. A scheme: the buildings are the
   // user's, and the generator's settings wait for a regenerate)
@@ -328,6 +348,9 @@ function App() {
   const canvas = useRef<HTMLCanvasElement>(null), view = useRef<ProView | null>(null);
   const [xray, setXray] = useState<number | null>(null);
   const [hover, setHover] = useState<Picked | null>(null);
+  /** the building under the pointer (select tool): the cursor says it can be picked, and a tag names it until the first pick */
+  const [hb, setHb] = useState<{ id: string; x: number; y: number } | null>(null);
+  const hbFrame = useRef(0);
   const [sun, setSun] = useState<{ on: boolean; month: number; hour: number }>({ on: false, month: 12, hour: 15 });
   // wireframe by default; shaded is one button away (and the sun needs it)
   const [mode, setModeState] = useState<RenderMode>(() => store.get<RenderMode>('urbanplan:pro:render', 'wire'));
@@ -687,7 +710,17 @@ function App() {
       </Sheet>}
 
       <main class="stage">
-        <canvas ref={canvas} onPointerMove={(ev) => setHover(view.current?.pick(ev.clientX, ev.clientY) ?? null)} onPointerLeave={() => setHover(null)} />
+        <canvas ref={canvas} onPointerMove={(ev) => {
+          setHover(view.current?.pick(ev.clientX, ev.clientY) ?? null);
+          if (tool.k !== 'select' || cmode || ev.buttons) return;
+          const cx = ev.clientX, cy = ev.clientY, el = ev.currentTarget as HTMLCanvasElement;
+          cancelAnimationFrame(hbFrame.current);
+          hbFrame.current = requestAnimationFrame(() => {
+            const id = view.current?.buildingHit(cx, cy)?.id ?? null, r = el.getBoundingClientRect(), mine = picked?.k === 'building' && picked.id === id;
+            el.style.cursor = id ? (mine && !locked ? 'move' : 'pointer') : '';
+            setHb(id && !mine ? { id, x: cx - r.left, y: cy - r.top } : null);
+          });
+        }} onPointerLeave={() => { setHover(null); setHb(null); cancelAnimationFrame(hbFrame.current); }} />
         <ResultBar e={e} deal={deal} sum={sum} go={(s) => { if (!narrow && (s === 'numbers' || s === 'approve') && report === s) setReport(null); else go(s); }} statement={() => { if (narrow) { setDialog('area'); return; } if (report === 'numbers') { setReport(null); return; } go('numbers'); findIn('Area statement'); }} vs={vsBase ? { on: vsOn, set: setVsOn, name: vsBase.name, fig: vsFig } : null} />
         {!locked && <Shelf tool={tool} setTool={setTool} outline={!narrow && !phone ? { on: olOn, toggle: () => setOlOpen(!olOpen) } : undefined} generate={p.blank ? undefined : (close) => <Generate p={p} e={e} up={up} toast={toast} done={close} />} hint={hint ? <div class="drawhint" role="status"><span>{hint}</span><button type="button" class="linkbtn" onClick={() => setTool(SELECT)}>Done</button></div> : null} />}
         {!phone && !p.blank && e.d.buildings.length > 0 && <LayoutChip own={ownLayout} locked={locked} brief={() => { go('design'); findIn('Generated from'); }} asOption={regenAsOption} here={regenHere} />}
@@ -771,9 +804,11 @@ function App() {
               <span ref={needle} class="needle"><Icon n="north" size={22} /><b>N</b></span>
             </button>;
           })()}
-          {!phone && <HelpCorner p={p} keys={() => setDialog('keys')} search={() => setSearch(true)} />}
+          {!phone && <HelpCorner p={p} keys={() => setDialog('keys')} search={() => setSearch(true)} act={doTask} />}
         </div>
         {xr !== null && <div class="legend floating">{[0, 1, 2].map((t) => <span><i style={`background:${UNIT_COLOR[t]}`} />{UNIT_LABEL[t]}</span>)}{(['living', 'bed', 'kitchen', 'toilet'] as const).map((k) => <span><i style={`background:${ROOM_COLOR[k]}`} />{k === 'bed' ? 'bedroom' : k}</span>)}</div>}
+        {hb && !hover && !ticked('picked') && (() => { const i = e.d.buildings.findIndex((b) => b.b.id === hb.id); return i >= 0 && <div class="tip htag" style={`left:${hb.x + 14}px;top:${hb.y + 14}px`}><b>{buildingName(p, e, i)}</b><span>Click to pick it, then drag</span></div>; })()}
+        {firstPick && <div class="pickhint" role="status"><Icon n="cursor" size={15} /><span>Drag the arrow on top for floors, the middle to move it, the side handles for its size. Or type in the inspector.</span><button type="button" class="linkbtn" onClick={() => { tick('pickhint'); setFirstPick(false); }}>Got it</button></div>}
         {hover && <div class="tip" style={`left:${hover.x + 14}px;top:${hover.y + 14}px`}><b>{hover.label}</b><span>{hover.size}</span><span>Floor {hover.floor}</span></div>}
       </main>
 

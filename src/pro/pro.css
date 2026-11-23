@@ -1062,3 +1062,17 @@ details.chk .show { display: inline-flex; align-items: center; gap: 5px; margin:
 .report-b > fieldset > * { min-width: 0; margin: 0; }
 /* (the report sits between the outline and the inspector: both keep their full height) */
 .pro.norail .outline { bottom: 12px; }
+
+/* the outline opens beside the toolbar, which stays put; only as tall as its list (2026-11-23) */
+.shelf { left: calc(12px + var(--cover-s, 0px)); }
+.pro.norail .outline { left: calc(84px + var(--cover-s, 0px)); top: 80px; bottom: auto; max-height: calc(100% - 92px - var(--cover-b)); width: 236px; }
+.pro.norail .outline .ol-b { flex: 0 1 auto; }
+.pro.norail .results { left: calc(12px + var(--cover-s, 0px)); }
+
+/* first-run guidance (docs/plans/pro-ia-rethink.md step 6) */
+.htag { z-index: 4; }
+.pickhint { position: absolute; left: calc(50% + (var(--cover) - var(--cover-r)) / 2); bottom: calc(70px + var(--cover-b)); transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: 10px; max-width: min(560px, calc(100% - 32px - var(--cover) - var(--cover-r))); padding: 9px 14px; border-radius: 10px; background: var(--up-night); color: var(--up-on-night); font-size: 13px; box-shadow: var(--up-shadow); animation: fade .2s ease-out; }
+.pickhint .linkbtn { color: var(--up-on-night); font-weight: 600; text-decoration: underline; white-space: nowrap; }
+.task-b { display: flex; align-items: center; gap: 8px; width: 100%; padding: 3px 2px; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.task-b:hover { background: var(--up-surface-2); }
+.tasks li.done .task-b { text-decoration: line-through; }

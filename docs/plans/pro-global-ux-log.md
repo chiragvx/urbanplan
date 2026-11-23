@@ -4,6 +4,27 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-23 · Rethink step 6: first-run guidance, and the outline beside the tools
+
+**What changed (first-run guidance):**
+- **Hover says a building can be picked.** With the select tool, the cursor turns to a pointer over a building (a move cursor over the one picked). Until you've picked one for the first time, a tag beside the pointer names it and says "Click to pick it, then drag".
+- **The first pick gets a one-line hint** above the view tools: drag the arrow on top for floors, the middle to move it, the side handles for its size, or type in the inspector. It goes with "Got it", once a building has been changed in the view, or when nothing's picked, and doesn't come back.
+- **The checklist** (help corner) is Set the plot, Put a building on it, **Change its height or move it in 3D** (new: ticked by a drag in the view), Look at the numbers, Make a second option, Share it. **Clicking a task does it** as far as it can: picks the plot, arms the tower tool, picks a building and frames it, opens the Numbers report, opens Generate, opens Share.
+
+**What changed (the outline):**
+- The outline docks beside the toolbar instead of pushing it sideways, starts below the top bar, and is only as tall as what's in it (it scrolls past the report's top). The figures move over with it.
+
+**How it was checked:**
+- Browser at 1440×860, with your storage backed up and restored exactly: hovering a building showed the tag "Building A / Click to pick it, then drag"; picking it showed the hint above the view tools; the checklist listed the six tasks and "Look at the numbers" opened the Numbers report and ticked itself.
+- `npm test` ALL OK; `npm run build` OK.
+
+**Left or known:**
+- The hover is the cursor and the tag; the building doesn't light up in 3D.
+- The plot's edges get no hover line.
+- The tag shows only until the first pick; after that, the cursor alone says it.
+
+---
+
 ## 2026-11-23 · Rethink step 5: reports, and no rail
 
 **What changed:**

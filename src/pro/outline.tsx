@@ -109,7 +109,6 @@ export function Outline({ p, e, checks, picked, pick, show, frame, hidden, locke
           })}</ul>
         </>}
       </div>
-      {reorder && e.d.buildings.length > 1 && <p class="ol-hint">Drag a building (or Alt+↑↓) to change its letter.</p>}
     </aside>
   );
 }
