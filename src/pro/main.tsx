@@ -22,7 +22,7 @@ import { buildingCores } from './coreDetail';
 import { TIERS, type Tier } from './render/quality';
 import * as designLibrary from './designLibrary';
 import { presetOf } from './design';
-import { DEFAULT_PROJECT, outline, roadLines, STAGE_LABEL, STAGE_SUB, stageOf, targetOf, type ProProject, type Stage } from './project';
+import { DEFAULT_PROJECT, outline, roadLines, targetOf, type ProProject } from './project';
 import { listPro, listSharedPro, openPro, savePro, toText, type CloudRef } from './cloud';
 import { addMember, anchorsOff, EMAIL, joinProject, members as listMembers, NotSetUp, projectLink, removeMember, sendInvite, type Member } from './team';
 import { clearLocalNotes, cloudNotes, countsByThing, localNotes, mine as mineNote, threads, useNotes, type Note } from './comments';
@@ -72,8 +72,6 @@ import { pole } from './form/curve';
 import { Btn, cr, Dialog, download, Icon, Menu, nf, Num, pct, Range, Seg, Select, sqft, TooltipLayer, type MenuItem } from './ui';
 
 const KEY = 'urbanplan:pro:project', REF = 'urbanplan:pro:cloud', SEEN = 'urbanplan:pro:seen';
-/** the place a project's stage opens on: Looking on Brief, Designing on Design, Applying on Approval */
-const placeOf = (st: Stage): Step => (st === 'looking' ? 'brief' : st === 'applying' ? 'approve' : 'design');
 const store = {
   get<T>(k: string, d: T): T { try { const v = JSON.parse(localStorage.getItem(k) || 'null'); return v ?? d; } catch { return d; } },
   set(k: string, v: unknown) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* not kept */ } },
@@ -118,12 +116,12 @@ function App() {
   const undo = () => { if (roRef.current) return; const x = past.current.pop(); if (!x) return; future.current.push(p); store.set(KEY, x); setP(x); };
   const redo = () => { if (roRef.current) return; const x = future.current.pop(); if (!x) return; past.current.push(p); store.set(KEY, x); setP(x); };
 
-  // (the place: Brief, Design, Numbers or Approval; a project opens on its stage's place, and the six steps before
-  // map to the places that took them in)
-  const [step, setStep] = useState<Step>(() => { const s = store.get<string>('urbanplan:pro:step', ''); return isStep(s) ? s : OLD_STEP[s] ?? placeOf(stageOf(store.get<ProProject>(KEY, DEFAULT_PROJECT))); });
+  // (the place: Brief, Design, Numbers or Approval, kept for when the sheet opens; the six steps before map to the
+  // places that took them in. A project opens on the view, never on a sheet: docs/plans/pro-ia-rethink.md)
+  const [step, setStep] = useState<Step>(() => { const s = store.get<string>('urbanplan:pro:step', ''); return isStep(s) ? s : OLD_STEP[s] ?? 'design'; });
   const oldStep = useRef(!!OLD_STEP[store.get<string>('urbanplan:pro:step', '')] && !isStep(store.get<string>('urbanplan:pro:step', '')));
   // the step's sheet: open or not, pinned beside the view (a wide screen), its height (a phone)
-  const [panel, setPanel] = useState(true);
+  const [panel, setPanel] = useState(() => isPhone());
   /** a narrow screen (the sheet's layout), and a phone (nothing changes on it) */
   const narrow = useNarrow(), phone = usePhone();
   const [pinned, setPinnedS] = useState<boolean>(() => store.get<boolean>('urbanplan:pro:pin', false));
@@ -138,6 +136,8 @@ function App() {
   const setVstep = (v: ViewStep) => { setVstepS(v); store.set('urbanplan:pro:vstep', v); };
   const goView = (v: ViewStep) => { setVstep(v); setPicked(null); openSheet(); };
   /** go to a place: the pick stays, so a building picked in Design is the one in focus in Numbers and Approval */
+  /** a place to come back to, without opening its sheet: a project or a site lands in the view */
+  const land = (s: Step) => { setStep(s); store.set('urbanplan:pro:step', s); };
   const go = (s: Step) => { if (isPhone()) { goView(VIEW_OF[s] ?? 'overview'); return; } setStep(s); openSheet(); store.set('urbanplan:pro:step', s); setToolS(SELECT); edit.current?.setTool(SELECT); };
   // ---------- the map's tool and what's picked on it ----------
   const [tool, setToolS] = useState<Tool>(SELECT), [picked, setPicked] = useState<EditPicked>(null), [hint, setHint] = useState<string | null>(null);
@@ -200,7 +200,7 @@ function App() {
       setCloud({ s: 'saving', msg: 'Opening…' });
       const o = await openPro(id);
       lastSaved.current = toText(o.p);
-      replace(o.p); setRef(o.ref); setDialog(null); setPicked(null); go(placeOf(stageOf(o.p)));
+      replace(o.p); setRef(o.ref); setDialog(null); setPicked(null); setPanel(false); land('design'); fitSoon();
       if (o.ref?.role && o.ref.role !== 'owner') void joinProject(id);
       history.replaceState(null, '', `?p=${id}`);
       setCloud({ s: 'saved', msg: `Opened ${hhmm()}` });
@@ -222,18 +222,18 @@ function App() {
       const n: ProProject = { ...DEFAULT_PROJECT, city }, e0 = evaluate(n), [x, z] = pole([e0.r.footprint]);
       const bs = placeTemplate(start.slice(9), [x, z], e0);
       fresh(bs.length ? { ...n, scheme: { ...own(n, e0), buildings: bs } } : n);
-      go('design');
+      land('design');
       return;
     }
-    // (a site from the dashboard's Sites: its plot and road under the firm's prices, at the Looking stage, in Brief)
+    // (a site from the dashboard's Sites: its plot and road under the firm's prices, at the Looking stage, on the view)
     if (start.startsWith('site:')) {
       const site = siteById(start.slice(5));
-      if (site) { fresh(projectOf(site, sitePrices())); go('brief'); return; }
+      if (site) { fresh(projectOf(site, sitePrices())); land('brief'); fitSoon(); return; }
     }
     // (a design system from the builder: the sample in it, on its Design step)
     const dsId = new URLSearchParams(location.search).get('ds');
     if (dsId) {
-      void designLibrary.get(dsId).then((s) => { fresh({ ...DEFAULT_PROJECT, city, ...(s ? { custom: s.ds, style: presetOf(s.ds.id).id } : {}) }); go('design'); setDialog('look'); });
+      void designLibrary.get(dsId).then((s) => { fresh({ ...DEFAULT_PROJECT, city, ...(s ? { custom: s.ds, style: presetOf(s.ds.id).id } : {}) }); land('design'); setDialog('look'); });
       return;
     }
     fresh({ ...DEFAULT_PROJECT, city, ...(start === 'blank' ? { blank: true } : {}) });
@@ -350,6 +350,8 @@ function App() {
   };
   useEffect(applySun, [sun, p.city, p.north]);
   const cam = (k: CameraView) => view.current?.look(k);
+  /** frame the whole site once a new plot is drawn */
+  const fitSoon = () => setTimeout(() => cam('fit'), 60);
   // (the 3D's quality tier, and rendering an image of the view: ./render)
   const [tier, setTierS] = useState<Exclude<Tier, 'still'>>('standard');
   useEffect(() => { const v = view.current; if (v) { setTierS(v.tier); v.onTier = (t) => { setTierS(t); toast(`The 3D stepped down to ${t} quality to keep it smooth.`); }; } }, []);
@@ -506,7 +508,6 @@ function App() {
     compare: () => setDialog('compare'),
     choose: (id: string) => { up({ chosen: id }); toast(`${optionsOf(p).find((o) => o.id === id)?.name} is the one chosen to take forward.`); },
   };
-  const setStage = (st: Stage) => { up({ stage: st }); go(placeOf(st)); toast(`Stage: ${STAGE_LABEL[st]}. It opens on ${STEPS.find((x) => x.key === placeOf(st))!.title}.`); };
   /** everything search reaches: actions, the buildings, every setting */
   const commands = (): { all: Cmd[]; first: Cmd[] } => {
     const A = (label: string, icon: string, run: () => void, o: Partial<Cmd> = {}): Cmd => ({ label, icon, kind: 'Action', run, ...o });
@@ -527,7 +528,6 @@ function App() {
     const project: Cmd[] = [
       ...(!locked ? [A('Undo', 'undo', undo, { keys: 'Ctrl Z' }), A('Redo', 'redo', redo, { keys: 'Ctrl Shift Z' })] : []),
       ...(!locked ? [A('Rename the project', 'edit', () => (document.querySelector('.pname input') as HTMLInputElement | null)?.select(), { kind: 'Project', words: 'name title' })] : []),
-      ...(!locked ? (Object.keys(STAGE_LABEL) as Stage[]).map((st) => A(`Stage: ${STAGE_LABEL[st]}`, 'check', () => setStage(st), { kind: 'Project', sub: STAGE_SUB[st], words: 'stage status phase' })) : []),
       ...(!phone ? [A('New project', 'plus', () => fresh(), { kind: 'Project', words: 'start blank' })] : []),
       ...(!locked && !phone ? [A('Duplicate this option', 'copy', optionActs.duplicate, { kind: 'Project', words: 'option variant alternative copy scheme' })] : []),
       ...(optionsOf(p).length > 1 ? [A('Compare options', 'layers', optionActs.compare, { kind: 'Project', words: 'compare options side by side' }), ...optionsOf(p).filter((o) => o.id !== p.option).map((o) => A(`Open ${o.name}`, 'layers', () => optionActs.open(o.id), { kind: 'Project', words: 'option switch' }))] : []),
@@ -585,7 +585,7 @@ function App() {
         <a class="logo" href={`${BASE}dashboard/`} aria-label="Your dashboard"><Dither field="mark" cell={2} class="mark" />UrbanPlan</a>
         <b class="chip">Pro</b>
         <label class="pname"><input value={p.name} aria-label="Project name" readOnly={locked} onChange={(ev) => up({ name: (ev.target as HTMLInputElement).value.trim() || 'Untitled project' })} /><Icon n="edit" size={14} /></label>
-        <ProjectMenu stage={stageOf(p)} setStage={locked ? undefined : setStage} user={!!user} current={ref?.id ?? null} open={(id) => void openId(id)} fresh={phone ? undefined : () => fresh()} />
+        <ProjectMenu user={!!user} current={ref?.id ?? null} open={(id) => void openId(id)} fresh={phone ? undefined : () => fresh()} />
         {!phone && <OptionMenu p={p} acts={locked ? null : optionActs} />}
         <SaveState cloud={cloud} user={!!user} readOnly={readOnly} />
         {(still || pdf) && <span class="job" role="status">{still ? <>{still.kind === 'path' ? 'Path tracing' : 'Rendering'} {Math.round(still.f * 100)}%<i class="bar"><i style={`width:${Math.round(still.f * 100)}%`} /></i>{still.kind === 'path' && <button type="button" class="linkbtn" onClick={() => still.stop.abort()}>Cancel</button>}</> : <>Making the PDF…<Dither class="dz" cell={2} /></>}</span>}
@@ -647,14 +647,14 @@ function App() {
 
       <main class="stage">
         <canvas ref={canvas} onPointerMove={(ev) => setHover(view.current?.pick(ev.clientX, ev.clientY) ?? null)} onPointerLeave={() => setHover(null)} />
-        <ResultBar e={e} deal={deal} sum={sum} go={go} statement={() => setDialog('area')} stage={stageOf(p)} vs={vsBase ? { on: vsOn, set: setVsOn, name: vsBase.name, fig: vsFig } : null} />
+        <ResultBar e={e} deal={deal} sum={sum} go={go} statement={() => setDialog('area')} vs={vsBase ? { on: vsOn, set: setVsOn, name: vsBase.name, fig: vsFig } : null} />
         {!locked && <Shelf tool={tool} setTool={setTool} hint={hint ? <div class="drawhint" role="status"><span>{hint}</span><button type="button" class="linkbtn" onClick={() => setTool(SELECT)}>Done</button></div> : null} />}
         {olOn && <Outline p={p} e={e} checks={checks} picked={picked} pick={(x) => { setToolS(SELECT); edit.current?.setTool(SELECT); setPicked(x); }} show={showBuilding} frame={frameRing} hidden={hidden} locked={lockedIds} toggle={toggleOl} reorder={reorder} notes={countsByThing(noteThreads)} close={() => setOlOpen(false)} />}
         {p.blank && !locked && tool.k === 'select' && !cmode && <EmptyState p={p} ways={{
           find: () => { up({ blank: undefined }); openWay('survey'); },
           draw: () => { up({ blank: undefined }); setTool({ k: 'plot' }); },
           importIt: () => { up({ blank: undefined }); openWay('import'); },
-          size: (x) => { up({ ...x, shape: 'rect', corner: false, blank: undefined }); go('brief'); },
+          size: (x) => { up({ ...x, shape: 'rect', corner: false, blank: undefined }); fitSoon(); toast(`The plot: ${x.width} × ${x.depth} m on a ${x.road} m road. Add a building from the toolbar, or pick the plot to change it.`); },
           skip: () => up({ blank: undefined }),
         }} />}
         <div class="readout" ref={readout} hidden aria-live="polite"><b /><span /></div>
@@ -747,7 +747,7 @@ function App() {
 /** The answer, always in view: what the plot builds, sells and makes, and whether it passes. Each figure flashes
  *  by how much the last change moved it. */
 type VsFig = { name: string; bua: number; flats: number; profit: number; irr: number };
-function ResultBar({ e, deal, sum, go, statement, stage, vs }: { e: ReturnType<typeof evaluate>; deal: ReturnType<typeof applyDeal>; sum: ReturnType<typeof scrutinySummary>; go: (s: Step) => void; statement: () => void; stage: Stage; vs: null | { on: boolean; set: (on: boolean) => void; name: string; fig: VsFig | null } }) {
+function ResultBar({ e, deal, sum, go, statement, vs }: { e: ReturnType<typeof evaluate>; deal: ReturnType<typeof applyDeal>; sum: ReturnType<typeof scrutinySummary>; go: (s: Step) => void; statement: () => void; vs: null | { on: boolean; set: (on: boolean) => void; name: string; fig: VsFig | null } }) {
   const { r, d, shops } = e;
   const k = { bua: d.bua, flats: d.flats + (shops?.count ?? 0), profit: deal.profit, irr: deal.irr ?? 0 };
   const prev = useRef(k), [delta, setDelta] = useState<Partial<Record<keyof typeof k, number>>>({});
@@ -778,50 +778,7 @@ function ResultBar({ e, deal, sum, go, statement, stage, vs }: { e: ReturnType<t
       <small>{sum.pass} pass{sum.fail && sum.warn ? ` · ${sum.warn} to check` : ''}</small>
     </button>
   );
-  // (Looking: what the plot could give, and what to pay for it)
-  if (stage === 'looking') return (
-    <div class="results" role="region" aria-label="Result">
-      <button type="button" class="kpi" onClick={() => go('brief')} title="The FSI ladder (Brief)">
-        <span>Potential</span><b>{sqft(r.bua)}</b>
-        <small>{nf(r.area)} m² plot · FSI {nf(r.area > 0 ? r.bua / r.area : 0, 2)} taken</small>
-      </button>
-      <button type="button" class="kpi" onClick={statement} title="The area statement">
-        <span>Saleable</span><b>{sqft(d.carpet)}{D('bua', (v) => `${nf(v * 10.7639)}`)}</b>
-        <small>carpet · {d.flats} homes as laid out</small>
-      </button>
-      <LandKpi e={e} go={go} />
-      <button type="button" class="kpi" onClick={() => go('numbers')}>
-        <span>Profit</span><b class={deal.profit < 0 ? 'bad' : ''}>{cr(deal.profit)}{D('profit', (v) => `${nf(v / 1e7, 2)} cr`)}</b>
-        <small>{pct(deal.margin)} margin{e.p.land ? '' : ' · land not priced'}</small>
-      </button>
-      {rules}
-    </div>
-  );
-  // (Applying: what's built, whether it passes, what it costs to file)
-  if (stage === 'applying') {
-    const fs = fees(e), docs = documents(e, permissionOf(e, e.p.approval?.kind));
-    return (
-      <div class="results" role="region" aria-label="Result">
-        <button type="button" class="kpi" onClick={statement} title="The area statement">
-          <span>Built-up</span><b>{sqft(d.bua)}{D('bua', (v) => `${nf(v * 10.7639)}`)}</b>
-          <small><i class="meter"><i style={`width:${Math.min(100, used * 100)}%`} /></i>{nf(used * 100)}% of {nf(r.bua * 10.7639 / 1000)}k allowed</small>
-        </button>
-        <button type="button" class="kpi" onClick={() => go('design')}>
-          <span>Homes</span><b>{d.flats}{D('flats', (v) => nf(v))}</b>
-          <small>{d.buildings.length} bldg · {nf(d.height)} m</small>
-        </button>
-        {rules}
-        <button type="button" class="kpi" onClick={() => { go('approve'); findIn('Fees and charges'); }}>
-          <span>Fees</span><b>{cr(fs.reduce((a, f) => a + f.amount, 0))}</b>
-          <small>scrutiny, development, premium</small>
-        </button>
-        <button type="button" class="kpi" onClick={() => { go('approve'); findIn('Documents to file'); }}>
-          <span>Documents</span><b>{docs.length}</b>
-          <small>to file · {docs.filter((x) => x.from === 'us').length} from us</small>
-        </button>
-      </div>
-    );
-  }
+  // (one set of figures whatever the project's stage: the stage is the dashboard's, not Pro's)
   return (
     <div class="results" role="region" aria-label="Result">
       <button type="button" class="kpi" onClick={statement} title="The area statement">
@@ -879,8 +836,6 @@ function SaveState({ cloud, user, readOnly }: { cloud: { s: string; msg?: string
   return <span class={`save ${cloud.s}`} title={cloud.msg} role="status">{cloud.s === 'saving' ? <Dither class="dz" cell={2} /> : <i />}{t}</span>;
 }
 
-/** The project's stage and the projects round it: recent ones (yours and shared with you), all of them on the
- *  dashboard, a new one. Loads the list as it opens. */
 /** The option open, and the others: open one, duplicate this one, rename or delete it, compare them, choose one. */
 function OptionMenu({ p, acts }: { p: ProProject; acts: null | { open: (id: string) => void; duplicate: () => void; rename: () => void; remove: () => void; compare: () => void; choose: (id: string) => void } }) {
   const os = optionsOf(p), cur = p.option;
@@ -899,19 +854,19 @@ function OptionMenu({ p, acts }: { p: ProProject; acts: null | { open: (id: stri
   return <Menu text label={optionName(p)} icon="chevron" class="left pmenu omenu" items={items} />;
 }
 
-function ProjectMenu({ stage, setStage, user, current, open, fresh }: { stage: Stage; setStage?: (s: Stage) => void; user: boolean; current: string | null; open: (id: string) => void; fresh?: () => void }) {
+/** The projects round this one: recent ones (yours and shared with you), all of them on the dashboard, a new one.
+ *  Loads the list as it opens. (The stage is set on the dashboard and in Sites.) */
+function ProjectMenu({ user, current, open, fresh }: { user: boolean; current: string | null; open: (id: string) => void; fresh?: () => void }) {
   const [list, setList] = useState<Project[] | null>(null);
   const load = () => { if (!user) return; void Promise.all([listPro(), listSharedPro()]).then(([a, b]) => setList([...a, ...b].sort((x, y) => y.updated_at.localeCompare(x.updated_at))), () => setList([])); };
   const recent = (list ?? []).filter((x) => x.id !== current).slice(0, 5);
   const items: MenuItem[] = [
-    { heading: 'Stage' },
-    ...(Object.keys(STAGE_LABEL) as Stage[]).map((s) => ({ label: STAGE_LABEL[s], sub: STAGE_SUB[s], checked: s === stage, disabled: !setStage, onSelect: () => setStage?.(s) })),
     ...(user ? [{ heading: 'Recent' } as MenuItem, ...(list === null ? [{ label: 'Loading…', disabled: true }] : recent.length ? recent.map((x) => ({ label: x.name, icon: 'folder', sub: ago(x.updated_at), onSelect: () => open(x.id) })) : [{ label: 'None yet', disabled: true }])] : []),
     { heading: 'Projects' },
     { label: 'All your projects', icon: 'folder', href: `${BASE}dashboard/` },
     ...(fresh ? [{ label: 'New project', icon: 'plus', onSelect: fresh }] : []),
   ];
-  return <Menu text label={STAGE_LABEL[stage]} icon="chevron" class="left pmenu" items={items} onOpen={load} />;
+  return <Menu label="Projects" icon="folder" class="left pmenu" items={items} onOpen={load} />;
 }
 
 /** The account: search, the shortcuts, the dashboard, the simple editor, signing out. */

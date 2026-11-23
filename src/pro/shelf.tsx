@@ -1,7 +1,8 @@
 // The tool shelf on the view's left edge: what's drawn on the map is picked here, not in the panel.
 // Select (V); Building ▸ (the template gallery and the basic shapes); Grounds ▸ (gardens, parking, roads, gates,
 // walls…); Site ▸ (what's there already: trees, structures, power lines, water, no-build zones); Plot (draw its
-// outline again); Measure (M). A ▸ opens a flyout beside the shelf; picking a tool closes it.
+// outline again); Measure (M). A ▸ opens a flyout beside the shelf; picking a tool closes it. Each has its word under
+// its icon: the tools are the main way in (docs/plans/pro-ia-rethink.md §2.3).
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { ELEMENT_TOOLS, SELECT, type Tool } from './edit';
 import { FEATURES } from './siteObjects';
@@ -34,20 +35,20 @@ export function Shelf({ tool, setTool: set, hint }: { tool: Tool; setTool: (t: T
   }, [fly]);
   const on = (f: Exclude<Fly, null>) =>
     fly === f || (f === 'building' && (tool.k === 'building' || tool.k === 'template')) || (f === 'grounds' && tool.k === 'element') || (f === 'site' && tool.k === 'feature');
-  const btn = (f: Exclude<Fly, null>, icon: string, label: string) => (
+  const btn = (f: Exclude<Fly, null>, icon: string, label: string, word: string) => (
     <button type="button" class={on(f) ? 'on' : ''} aria-haspopup="true" aria-expanded={fly === f} aria-label={label} data-tip={fly ? undefined : label} onClick={() => setFly(fly === f ? null : f)}>
-      <Icon n={icon} size={18} /><i class="more" aria-hidden="true" />
+      <Icon n={icon} size={18} /><span aria-hidden="true">{word}</span><i class="more" aria-hidden="true" />
     </button>
   );
   return (
     <div class="shelf" ref={root}>
       <div class="shelf-bar" role="toolbar" aria-label="Draw on the map" aria-orientation="vertical">
-        <button type="button" class={tool.k === 'select' ? 'on' : ''} aria-pressed={tool.k === 'select'} aria-label="Select and move" aria-keyshortcuts="V" data-tip="Select and move (V)" onClick={() => setTool(SELECT)}><Icon n="cursor" size={18} /></button>
-        {btn('building', 'tower', 'Add a building')}
-        {btn('grounds', 'leaf', 'Add to the grounds: gardens, parking, roads, gates, walls')}
-        {btn('site', 'tree', 'What’s on the site: trees, structures, power lines, water, no-build zones')}
-        <button type="button" class={tool.k === 'plot' ? 'on' : ''} aria-pressed={tool.k === 'plot'} aria-label="Draw the plot again" data-tip="Draw the plot’s outline again" onClick={() => setTool(tool.k === 'plot' ? SELECT : { k: 'plot' })}><Icon n="plan" size={18} /></button>
-        <button type="button" class={tool.k === 'measure' ? 'on' : ''} aria-pressed={tool.k === 'measure'} aria-label="Measure" aria-keyshortcuts="M" data-tip="Measure (M)" onClick={() => setTool(tool.k === 'measure' ? SELECT : { k: 'measure' })}><Icon n="ruler" size={18} /></button>
+        <button type="button" class={tool.k === 'select' ? 'on' : ''} aria-pressed={tool.k === 'select'} aria-label="Select and move" aria-keyshortcuts="V" data-tip="Select and move (V)" onClick={() => setTool(SELECT)}><Icon n="cursor" size={18} /><span aria-hidden="true">Select</span></button>
+        {btn('building', 'tower', 'Add a building', 'Building')}
+        {btn('grounds', 'leaf', 'Add to the grounds: gardens, parking, roads, gates, walls', 'Grounds')}
+        {btn('site', 'tree', 'What’s on the site: trees, structures, power lines, water, no-build zones', 'Site')}
+        <button type="button" class={tool.k === 'plot' ? 'on' : ''} aria-pressed={tool.k === 'plot'} aria-label="Draw the plot again" data-tip="Draw the plot’s outline again" onClick={() => setTool(tool.k === 'plot' ? SELECT : { k: 'plot' })}><Icon n="plan" size={18} /><span aria-hidden="true">Plot</span></button>
+        <button type="button" class={tool.k === 'measure' ? 'on' : ''} aria-pressed={tool.k === 'measure'} aria-label="Measure" aria-keyshortcuts="M" data-tip="Measure (M)" onClick={() => setTool(tool.k === 'measure' ? SELECT : { k: 'measure' })}><Icon n="ruler" size={18} /><span aria-hidden="true">Measure</span></button>
       </div>
       {fly && (
         <div class="flyout" role="dialog" aria-label={fly === 'building' ? 'Add a building' : fly === 'grounds' ? 'Add to the grounds' : 'What’s on the site'}>

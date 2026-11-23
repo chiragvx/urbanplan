@@ -1002,3 +1002,8 @@ details.chk .show { display: inline-flex; align-items: center; gap: 5px; margin:
 .help-l:hover { background: var(--up-surface-2); }
 .help-l kbd { margin-left: auto; font-size: 11px; color: var(--up-muted); }
 .shelf > .drawhint { position: static; transform: none; align-self: flex-start; max-width: 300px; }
+
+/* ---------- view first (docs/plans/pro-ia-rethink.md, step 1): the tools labelled ---------- */
+.shelf-bar button { width: 58px; height: auto; min-height: 50px; padding: 7px 2px 5px; gap: 3px; grid-template-rows: auto auto; align-content: center; }
+.shelf-bar button > span { font-size: 10.5px; font-weight: 500; line-height: 1; letter-spacing: .01em; }
+@media (max-width: 600px) { .shelf-bar button { width: 46px; min-height: 42px; } .shelf-bar button > span { font-size: 9.5px; } }

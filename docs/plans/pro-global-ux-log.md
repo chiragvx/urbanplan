@@ -4,6 +4,24 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-23 · Rethink step 1: view first (docs/plans/pro-ia-rethink.md)
+
+**What changed:**
+- **Pro opens on the view.** The sheet starts closed; opening a project, a site from Sites or a template lands in the view with the plot framed. The rail still opens the four places' sheets until step 5.
+- **"Type its size" stays in the view:** it sets the plot, frames it and says what to do next, instead of going to Brief.
+- **The tools are labelled:** Select, Building, Grounds, Site, Plot, Measure under their icons.
+- **The stage leaves Pro.** The project menu is now Projects (recent, all, new); stage items are gone from search; the scorecard has one set of figures (built-up with its % of allowed, homes, profit, land worth while no land price is put in, IRR, rules). `stage` stays on the project as data for the dashboard and Sites.
+
+**How it was checked:**
+- Browser at 1440×860, with your storage backed up and restored exactly: the view opens full width with the outline and the labelled tools; Projects has no stage; `?new=blank` › Type its size › Work it out framed a 40 × 50 m plot with the toast, no sheet; no new console errors.
+- `npm test` ALL OK; `npm run build` OK.
+
+**Left or known:**
+- The stage isn't yet shown or set on the dashboard card (step 7).
+- The rail still says Brief is the current place while its sheet is closed.
+
+---
+
 ## 2026-11-23 · Phase 8: the outline, comments on the view, the empty state
 
 **What changed:**
