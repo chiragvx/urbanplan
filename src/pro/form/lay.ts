@@ -9,7 +9,7 @@ import { mpOf, outerOf, ringsOf } from './shape';
 import { coreNeed, edgeColumns, gridColumns, overhang, placeCores } from './skeleton';
 import { CORRIDOR, planUnits, type Unit } from './units';
 import { CARPET } from '../../doc/site';
-import { opOf, type BuildingUse, type Form, type FormContext, type FormFloor, type FormIssue, type FormLayout, type Pt } from './types';
+import { handPlanAt, opOf, type BuildingUse, type Form, type FormContext, type FormFloor, type FormIssue, type FormLayout, type Pt } from './types';
 
 /** a floor standing out past the one below by more than this (m) is a deep cantilever */
 const CANTILEVER = 6;
@@ -214,10 +214,44 @@ export function lay(b: SiteBuilding & { form?: Form }, ctx: FormContext): FormLa
   for (let i = 0; i < N; i++) {
     const f = L[i];
     if (f.void) { unitsOf.push([]); continue; }
-    if (f.same && L[i - 1].use === f.use && !L[i - 1].void && f.ssig === L[i - 1].ssig) {
+    const hp = handPlanAt(form, i + 1);
+    if (f.same && L[i - 1].use === f.use && !L[i - 1].void && f.ssig === L[i - 1].ssig && handPlanAt(form, i) === hp) {
       const u = unitsOf[i - 1];
       for (const x of u) if (x.t < 3) placedT[x.t]++;
       unitsOf.push(u);
+      continue;
+    }
+    // (past floors planned by hand, a floor like the last one laid out has its units: a plan on one floor leaves the
+    //  floors above it as they were)
+    if (!hp && f.same) {
+      let j = i - 1;
+      while (j > 0 && handPlanAt(form, j + 1) && L[j].same) j--;
+      if (j < i - 1 && !handPlanAt(form, j + 1) && !L[j].void && L[j].use === f.use && L[j].ssig === f.ssig && L.slice(j + 1, i + 1).every((g) => g.same && !g.void)) {
+        const u = unitsOf[j];
+        for (const x of u) if (x.t < 3) placedT[x.t]++;
+        unitsOf.push(u);
+        continue;
+      }
+    }
+    // (planned by hand: its units as drawn, cut to the floor and clear of the cores; where two overlap, the one first
+    //  in the list keeps the overlap, so no floor area counts twice)
+    if (hp) {
+      const us: Unit[] = [];
+      let taken: MP = [];
+      for (const h of hp.units) {
+        const use = h.use ?? f.use;
+        if (use === 'none' || use === 'parking' || h.ring.length < 6) continue;
+        let net = inter(mpOf(h.ring), f.shape);
+        if (placed.cores.length) net = diff(net, ...placed.cores.map(mpOf));
+        if (taken.length) net = diff(net, taken);
+        const A = area(net), r = ringsOf(net).sort((a, b) => ringArea(b) - ringArea(a))[0];
+        if (A < 1 || !r) continue;
+        const t = h.t ?? (use === 'residential' ? (A * CARPET >= ctx.sizes[2] * 0.9 ? 2 : A * CARPET >= ctx.sizes[1] * 0.9 ? 1 : 0) : 3);
+        us.push({ t, ring: r, carpet: A * CARPET, ...(use !== f.use ? { kind: use } : {}), hand: h.id });
+        taken = taken.length ? union(taken, net) : net;
+        if (t < 3) placedT[t]++;
+      }
+      unitsOf.push(us);
       continue;
     }
     if (!f.spaces?.length) { unitsOf.push(planUnits(f.shape, f.use, placed.cores, corridor, placed.centres, ctx, placedT, houses, f.outer)); continue; }
@@ -287,7 +321,7 @@ export function lay(b: SiteBuilding & { form?: Form }, ctx: FormContext): FormLa
   const floors: FormFloor[] = [];
   for (let i = 0; i < N; i++) {
     const f = L[i], prev = floors[i - 1];
-    const units = unitsOf[i].map((u) => (u.kind ? { t: u.t, ring: W(u.ring), carpet: u.carpet, kind: u.kind } : { t: u.t, ring: W(u.ring), carpet: u.carpet }));
+    const units = unitsOf[i].map((u) => ({ t: u.t, ring: W(u.ring), carpet: u.carpet, ...(u.kind ? { kind: u.kind } : {}), ...(u.hand ? { hand: u.hand } : {}) }));
     const shared = f.same && prev;
     floors.push({
       level: i, y: f.y, h: f.h, use: f.use, ...(f.void ? { void: true } : {}),

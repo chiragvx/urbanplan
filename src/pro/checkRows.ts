@@ -8,12 +8,16 @@
 // step lists first, so a scheme of uses we can't check never looks falsely clean.
 //
 // The checks about the plot (FSI, margins, the ladder of premiums, parking, open space) stay as code in ./scrutiny.ts:
-// they are about the plot, not about uses. Rows join them there.
-import { buaOf, FIRE_H, FIRE_W, shared, type BuildingReport } from '../doc/site';
+// they are about the plot, not about uses. Rows join them there. The rows: fire tender access, travel to a stair, stair
+// width and the narrowest stair, lifts, refuge floors, light and ventilation, room sizes, and what the DP zone allows.
+import { buaOf, FIRE_H, FIRE_W, shared, UNIT_LABEL, type BuildingReport } from '../doc/site';
+import { zoneAllows, zoneLabel, type Allowed } from '../doc/zones';
+import { USES, type PlotUse } from '../doc/plot';
+import type { CoreOut } from './systems';
 import { COVERED, EGRESS, GROUP_NAME, groupOf, stairMinOf, UNIT_W, type NbcGroup } from '../doc/egress';
 import { floorUseOf, USE_TABLE, type FloorUse } from '../doc/uses';
 import type { Evaluated } from './evaluate';
-import type { Check, CheckGroup } from './scrutiny';
+import type { Check, CheckGroup, RoomsLike } from './scrutiny';
 
 /** what a row applies to: uses in these groups, these uses, buildings over this height; `label` says it in words */
 export interface Applies { groups?: NbcGroup[]; uses?: FloorUse[]; over?: number; label: string }
@@ -25,8 +29,10 @@ export interface RowCtx {
   e: Evaluated; i: number; b: BuildingReport;
   /** the building's uses the row applies to */
   subjects: Subject[];
-  /** the building's stairs (how many, clear width), as its systems have them */
-  stair?: { n: number; w: number };
+  /** the building's core (stairs, their width, lifts, refuge floors), as its systems have them */
+  core?: CoreOut;
+  /** the rooms of each flat of its typical floor, when they're laid out (./rooms.ts) */
+  rooms?: RoomsLike[number];
 }
 
 export interface CheckRow {
@@ -115,21 +121,95 @@ export const ROWS: CheckRow[] = [
     key: 'exit-width', group: 'Fire & safety', rule: 'Stair width for the people on a floor',
     applies: { groups: COVERED, label: 'every use in groups A, B, D, E and F' }, measures: 'the stairs\' clear width, all together, against the busiest floor\'s people', limit: 'a 0.5 m unit for so many people, by group (Table 21)',
     clause: 'NBC 2016 Part 4 Table 21 (as assumed)', byGroup: true,
-    run: ({ b, subjects, stair }) => {
-      const gs = groupsIn(subjects); if (!gs.length || !stair || b.floors <= 1) return null;
-      const need = Math.ceil(subjectsOf(b).units - 1e-9) * UNIT_W, have = stair.n * stair.w;
-      return { required: `${m(need, 1)} in all (${gs.map((g) => `${EGRESS[g].perUnit} people a 0.5 m unit in ${g}`).join(', ')})`, proposed: `${stair.n} × ${m(stair.w, 2)} = ${m(have, 2)}`, status: have + 1e-6 < need ? 'fail' : 'pass' };
+    run: ({ b, subjects, core }) => {
+      const gs = groupsIn(subjects); if (!gs.length || !core || b.floors <= 1) return null;
+      const need = Math.ceil(subjectsOf(b).units - 1e-9) * UNIT_W, have = core.stairs * core.stairW;
+      return { required: `${m(need, 1)} in all (${gs.map((g) => `${EGRESS[g].perUnit} people a 0.5 m unit in ${g}`).join(', ')})`, proposed: `${core.stairs} × ${m(core.stairW, 2)} = ${m(have, 2)}`, status: have + 1e-6 < need ? 'fail' : 'pass' };
     },
   },
   {
     key: 'stair-min', group: 'Fire & safety', rule: 'Narrowest stair',
     applies: { groups: COVERED, label: 'every use in groups A, B, D, E and F' }, measures: 'each stair\'s clear width', limit: 'flats by height (UDCPR Table 9G); other uses by group (NBC 4.4.2.4.3)',
     clause: 'UDCPR 2020 Table 9G; NBC 2016 Part 4 4.4.2.4.3 (as assumed)', byGroup: true,
-    run: ({ b, subjects, stair }) => {
-      if (!subjects.length || !stair || b.floors <= 1) return null;
+    run: ({ b, subjects, core }) => {
+      if (!subjects.length || !core || b.floors <= 1) return null;
       const worst = subjects.reduce((a, s) => (stairMinOf(s.use, b.height) > stairMinOf(a.use, b.height) ? s : a));
       const need = stairMinOf(worst.use, b.height);
-      return { required: `at least ${m(need, 2)} clear (${USE_TABLE[worst.use].label.toLowerCase()}${worst.use === 'residential' ? ` at ${m(b.height)}` : ''})`, proposed: m(stair.w, 2), status: stair.w + 1e-6 < need ? 'fail' : 'pass' };
+      return { required: `at least ${m(need, 2)} clear (${USE_TABLE[worst.use].label.toLowerCase()}${worst.use === 'residential' ? ` at ${m(b.height)}` : ''})`, proposed: m(core.stairW, 2), status: core.stairW + 1e-6 < need ? 'fail' : 'pass' };
+    },
+  },
+  {
+    key: 'lifts', group: 'Fire & safety', rule: 'Lifts',
+    applies: { label: 'buildings over 15 m; buildings the public uses, above the ground floor' }, measures: 'passenger lifts', limit: 'one over 15 m, two over 24 m; one for a public use on an upper floor',
+    clause: 'UDCPR 2020 9.27.1; NBC 2016 Part 3 and the Harmonised Guidelines 2021 for public buildings (as assumed)',
+    run: ({ b, subjects, core }) => {
+      if (!core) return null;
+      const H = b.height, pub = b.floors > 1 && subjects.some((s) => s.group && s.group !== 'A');
+      const need = H > 24 ? 2 : H > 15 ? 1 : pub ? 1 : 0;
+      if (!need) return null;
+      const why = H > 24 ? 'over 24 m' : H > 15 ? 'over 15 m' : 'a public use above the ground floor';
+      return { required: `${need} (${why})`, proposed: `${core.lifts}`, status: core.lifts < need ? 'fail' : 'pass' };
+    },
+  },
+  {
+    key: 'refuge', group: 'Fire & safety', rule: 'Refuge floors',
+    applies: { over: 24, label: 'buildings over 24 m' }, measures: 'refuge floors', limit: 'the floor above 24 m, above 39 m, then every 15 m',
+    clause: 'UDCPR 2020 9.29.6',
+    run: ({ b, core }) => {
+      if (!core) return null;
+      const need = Math.floor((b.height - 24) / 15) + 1;
+      return { required: `${need}`, proposed: `${core.refuges}`, status: core.refuges < need ? 'fail' : 'pass', note: 'Each 15 m² or 0.3 m² a person of two floors, whichever is more, open on one side; free of FSI.' };
+    },
+  },
+  {
+    key: 'light', group: 'Flats & rooms', rule: 'Light and ventilation',
+    applies: { uses: ['residential'], label: 'flats' }, measures: "each flat's windows against its habitable floor", limit: 'UDCPR: a tenth of the floor, half of it opening; DCPR: a sixth',
+    clause: 'UDCPR 2020 Chapter 9 (windows 1/10 of the habitable floor, half of it opening; as assumed); DCPR 2034 Reg. 40(1) (1/6)',
+    run: ({ e, i, b }) => {
+      const flats = (e.plans[i]?.checks ?? []).filter((c) => c.t !== 3);
+      if (!flats.length) return null;
+      const floors = b.repeats ?? b.floors, all = flats.length * floors, ok = flats.filter((c) => c.light && c.air).length * floors;
+      return { required: 'every flat', proposed: `${ok} of ${all} flats`, status: ok === all ? 'pass' : 'fail' };
+    },
+  },
+  {
+    key: 'rooms', group: 'Flats & rooms', rule: 'Room sizes',
+    applies: { uses: ['residential'], label: 'flats' }, measures: "each room's area and width", limit: "the code's minimum for its kind",
+    clause: "UDCPR 2020 9.4.1 (rooms and kitchens at the owner's choice; bath 1.0 × 1.2 m, bath and WC 1.5 m² and 1.0 m wide); DCPR 2034 Reg. 37(2) Table 14",
+    run: ({ e, i, b, rooms }) => {
+      const flats = (e.plans[i]?.checks ?? []).filter((c) => c.t !== 3);
+      if (!rooms) return flats.length ? { required: 'every room at its minimum size and width', proposed: 'rooms not laid out', status: 'warn', note: 'Checked by flat until rooms are laid out.' } : null;
+      const floors = b.repeats ?? b.floors;
+      let n = 0, bad = 0, worst = '';
+      const kinds = new Set<string>();
+      for (const f of rooms) for (const x of f.rooms) {
+        if (!(x.minArea > 0 || x.minWidth > 0)) continue; // (no legal minimum for this room)
+        n += floors;
+        if (!x.ok) { bad += floors; kinds.add(x.kind); if (!worst) worst = `${x.name} in a ${UNIT_LABEL[f.t] ?? 'flat'}: ${(Math.round(x.area * 10) / 10).toFixed(1)} m², ${m(x.width)} wide`; }
+      }
+      if (!n) return null;
+      return { required: 'every room at its minimum size and width', proposed: bad ? `${n - bad} of ${n} rooms meet it` : `all ${n}`, status: bad ? 'fail' : 'pass', note: bad ? `Short: ${[...kinds].join(', ')}. ${worst}.` : undefined };
+    },
+  },
+  {
+    key: 'zone', group: 'Planning', rule: 'Uses the zone allows',
+    applies: { label: 'every use' }, measures: "each use's plot use against the DP zone", limit: "the zone's permissible uses",
+    clause: 'UDCPR 2020 Chapter 4, permissible uses by zone (as summarised; as assumed)',
+    run: ({ e, b, subjects }) => {
+      const z = e.p.zone;
+      if (!z) return null;
+      // (a plain building by its plot use; a formed one by each of its uses')
+      const plots: { label: string; plot: PlotUse }[] = b.laid ? subjects.filter((s) => s.use !== 'none').map((s) => ({ label: USE_TABLE[s.use].label.toLowerCase(), plot: USE_TABLE[s.use].plot })) : [{ label: (USES.find((x) => x.value === b.use)?.label ?? b.use).toLowerCase(), plot: b.use }];
+      if (!plots.length) return null;
+      const rank: Record<Allowed, number> = { yes: 0, some: 1, no: 2 };
+      const said = plots.map((x) => ({ ...x, a: zoneAllows(z, x.plot) }));
+      const worst = said.reduce((a, x) => (rank[x.a] > rank[a.a] ? x : a));
+      const word = (a: Allowed) => (a === 'yes' ? 'allowed' : a === 'some' ? 'with conditions' : 'not allowed');
+      return {
+        required: `the uses ${zoneLabel(z)} allows`, proposed: said.map((x) => `${x.label}: ${word(x.a)}`).join('; '),
+        status: worst.a === 'no' ? 'fail' : worst.a === 'some' ? 'warn' : 'pass',
+        note: worst.a === 'no' ? "A use the zone doesn't allow needs a change of zone or a special permission: check the DP." : worst.a === 'some' ? 'Allowed with conditions (a road width, a size, a list of trades): check them in the DP and the regulations.' : undefined,
+      };
     },
   },
 ];
@@ -139,17 +219,17 @@ const matches = (a: Applies, s: Subject) => (!a.groups || (!!s.group && a.groups
 
 /** The rows run on every building: a check per row and building, and a "not checked" line for each use the rows can't
  *  check (a group not worked through, or no use yet). Keys end in the building's index (`travel:0`). */
-export function runRows(e: Evaluated, rows: CheckRow[] = ROWS): Check[] {
+export function runRows(e: Evaluated, rooms?: RoomsLike, rows: CheckRow[] = ROWS): Check[] {
   const out: Check[] = [], many = e.d.buildings.length > 1;
   e.d.buildings.forEach((b, i) => {
     const name = many ? ` · building ${String.fromCharCode(65 + i)}` : '';
     const all = subjectsOf(b).subjects.filter((s) => s.use !== 'parking' && s.area > 0.5);
-    const stair = e.sys.buildings[i]?.stair;
+    const core = e.sys.buildings[i]?.core, rm = rooms?.[i];
     for (const r of rows) {
       if (r.applies.over !== undefined && b.height <= r.applies.over) continue;
       const subjects = r.applies.groups || r.applies.uses ? all.filter((s) => matches(r.applies, s)) : all;
       if ((r.applies.groups || r.applies.uses) && !subjects.length) continue;
-      const c = r.run({ e, i, b, subjects, stair });
+      const c = r.run({ e, i, b, subjects, core, rooms: rm });
       if (c) out.push({ key: `${r.key}:${i}`, group: r.group, rule: `${r.rule}${name}`, clause: r.clause, applies: r.applies.label, ...c });
     }
     // (the uses the group rows can't check)

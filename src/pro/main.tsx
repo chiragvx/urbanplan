@@ -58,6 +58,7 @@ import { ObjectHud } from './objHud';
 import { Shelf } from './shelf';
 import { PlotHud } from './plotHud';
 import { FormHud } from './formHud';
+import { FloorHud } from './floorHud';
 import { Sheet, useNarrow, type Detent } from './sheet';
 import { isPhone, usePhone } from '../device';
 import { Frame as InspFrame, Inspector } from './inspector';
@@ -764,6 +765,7 @@ function App() {
           openWay={openWay} northFree={northFree} setNorthFree={setNorthFree} />}
         {tool.k === 'select' && (picked?.k === 'element' || picked?.k === 'feature') && <ObjectHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} pick={setPicked} tx={tx} snap={snap} readOnly={locked} toast={toast} />}
         {tool.k === 'select' && picked?.k === 'building' && <FormHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} tx={tx} live={mode === 'wire' && xr === null} readOnly={locked} xray={xr} setXray={setXray} toast={toast} />}
+        {tool.k === 'select' && picked?.k === 'building' && xr !== null && <FloorHud view={view.current} edit={edit.current} p={p} e={e} picked={picked} tx={tx} readOnly={locked} xray={xr} toast={toast} />}
         {tool.k === 'select' && picked?.k === 'building' && <Hud view={view.current} p={p} e={e} picked={picked} pick={setPicked} up={up} tx={tx} snap={snap} live={mode === 'wire' && xr === null} readOnly={locked} toast={toast}
           inspect={() => setInsp(true)} inspecting={inspOn} />}
         {listOn && <CommentList notes={N.notes} err={N.err} where={noteStore!.where} open={(t) => openThread(t.root.id)} close={() => setCmode(false)} showDone={showDone} setShowDone={setShowDone} offNote={anchorsOff ? 'Comments are being saved without their pins: the site’s owner turns pins on by running supabase/migrations/0007_comment_anchors.sql once.' : undefined} />}

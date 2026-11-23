@@ -29,6 +29,8 @@ export type Rwh = 'none' | 'pit' | 'tank';
 export type PerFlat = Partial<Record<0 | 1 | 2, number>>;
 
 /** Everything optional: unset is "auto". */
+/** a building's core as set or worked out (what the checks by use read: ./checkRows.ts) */
+export interface CoreOut { stairs: number; stairW: number; lifts: number; refuges: number }
 export interface SystemsSettings {
   cores?: {
     /** staircases (each a fire escape), clear width (m), and dog-leg or scissor (two stairs in one enclosure) */
@@ -109,8 +111,8 @@ export interface SystemsResult {
   /** ₹ of `cost` that is site plant (sized for this building alone in `systemsOf`) */
   plantCost: number;
   checks: SystemsCheck[];
-  /** a building's own stairs as set or worked out: how many and their clear width (m) */
-  stair?: { n: number; w: number };
+  /** a building's own core as set or worked out: its stairs and their clear width (m), lifts and refuge floors */
+  core?: CoreOut;
   /** the figures the controls show as "auto" (what each setting works out to when unset) */
   auto: Auto;
 }
@@ -473,7 +475,7 @@ function plant({ d, code, settings: s, bays, dgAuto, fireH }: PlantIn): PlantOut
 }
 
 // ---------------------------------------------------------------- per building
-interface BuildingOut { stair: { n: number; w: number }; d: Demand; lines: SystemsLine[]; spaces: SystemsSpace[]; cost: Record<SystemsGroup, number>; checks: SystemsCheck[]; auto: Omit<Auto, keyof PlantOut['auto']>; dgAuto: DgBackup }
+interface BuildingOut { core: CoreOut; d: Demand; lines: SystemsLine[]; spaces: SystemsSpace[]; cost: Record<SystemsGroup, number>; checks: SystemsCheck[]; auto: Omit<Auto, keyof PlantOut['auto']>; dgAuto: DgBackup }
 
 function building(b: BuildingReport, o: SystemsOpts): BuildingOut {
   const s = o.settings ?? {}, Co = s.cores ?? {}, E = s.electrical ?? {}, Pl = s.plumbing ?? {}, F = s.fire ?? {}, Hv = s.hvac ?? {};
@@ -634,7 +636,7 @@ function building(b: BuildingReport, o: SystemsOpts): BuildingOut {
   if (o.code !== 'udcpr') for (const g of SYSTEMS_GROUPS) cost[g] *= 1.1;
   const dgAuto: DgBackup = liftsNeeded || H > FIRE_LIFT_H ? 'common' : 'none';
   return {
-    d, lines, spaces, cost, checks, dgAuto, stair: { n: stairs, w: stairW },
+    d, lines, spaces, cost, checks, dgAuto, core: { stairs, stairW, lifts, refuges },
     auto: {
       stairs: stairsAuto, stairW: stairWAuto, stairType: typeAuto, lifts: liftsAuto, liftCap: capAuto, liftSpeed: speedAuto, serviceLift: serviceAuto, fireLift: fireLiftAuto, lobby: lobbyAuto,
       plumbingShafts: true, electricalShaft: true, chute: chuteAuto, refuges: refugesAuto,
@@ -667,7 +669,7 @@ export function systemsOf(b: BuildingReport, opts: SystemsOpts): SystemsResult {
   const bo = building(b, opts);
   const pl = plant({ d: [bo.d], code: opts.code, settings: opts.settings ?? {}, bays: opts.bays ?? bays0([bo.d]), dgAuto: bo.dgAuto, fireH: b.height });
   const plantCost = SYSTEMS_GROUPS.reduce((t, g) => t + pl.cost[g], 0);
-  return { ...finish([bo, pl], plantCost, bo.d.bua, { ...bo.auto, ...pl.auto }), stair: bo.stair };
+  return { ...finish([bo, pl], plantCost, bo.d.bua, { ...bo.auto, ...pl.auto }), core: bo.core };
 }
 
 /** Every building's systems with the plant (substation, DG, underground tanks, STP, RWH, pump room, hydrants, EV) sized
@@ -681,7 +683,7 @@ export function siteSystems(list: { b: BuildingReport; settings?: SystemsSetting
   const plantCost = SYSTEMS_GROUPS.reduce((t, g) => t + pl.cost[g], 0);
   const bua = bos.reduce((t, x) => t + x.d.bua, 0);
   const autoOf = (x: BuildingOut): Auto => ({ ...x.auto, ...pl.auto });
-  const buildings = bos.map((x) => ({ ...finish([x], 0, x.d.bua, autoOf(x)), stair: x.stair }));
+  const buildings = bos.map((x) => ({ ...finish([x], 0, x.d.bua, autoOf(x)), core: x.core }));
   const named = bos.map((x, i) => (bos.length > 1 ? { ...x, checks: x.checks.map((c) => ({ ...c, key: `${c.key}:${i}`, rule: `${c.rule} · building ${String.fromCharCode(65 + i)}` })) } : x));
   return { ...finish([...named, pl], plantCost, bua, bos[0] ? autoOf(bos[0]) : ({} as Auto)), buildings };
 }

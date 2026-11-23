@@ -5,6 +5,7 @@
 // edge, its levels and north on the map (./plotHud.tsx); here its survey number or an import, and what's on the site (obstructions and no-build zones).
 // Scheme: "Fill the plot" (how much, what, the green, the play area, the roads, the parking), then the buildings
 // and the site's things, each the user's to place, shape and set: floors, mix, design system, its systems.
+import { DP_ZONES, type DpZone } from '../doc/zones';
 import { useEffect, useState } from 'preact/hooks';
 import { SQFT, UNIT_LABEL } from '../doc/site';
 import { sizesOf } from './floor';
@@ -47,6 +48,7 @@ export function SiteStep2({ p, e, up, toast, tool, picked, pick, openStatement, 
       </Section>}
       {B && <Section title="Rules">
         <Select label="Planning authority" hint={city.note} value={p.city} onChange={(v) => up({ city: v })} options={CITIES.map((c) => ({ value: c.value, label: c.label }))} />
+        <Select<string> label="DP zone" hint={DP_ZONES.find((z) => z.value === p.zone)?.note ?? 'From the Development Plan sheet: each use is checked against it.'} value={p.zone ?? ''} onChange={(v) => up({ zone: (v || undefined) as DpZone | undefined })} options={[{ value: '', label: 'Not said' }, ...DP_ZONES.map((z) => ({ value: z.value, label: z.label }))]} />
       </Section>}
 
       {D && <Section title="Plot" aside={<span class="sec-meta">{nf(r.area)} m² · {sqft(r.area)}</span>}>

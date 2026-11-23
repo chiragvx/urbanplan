@@ -4,6 +4,112 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-24 · Edit this floor: a floor's units by hand (docs/plans/pro-design-freedom.md §4.3)
+
+**Why:** a floor's units came only from the planner. A designer could steer them (use, flat sizes, spaces) but not say where a wall goes, which is the first thing asked of a floor plan.
+
+**What changed:**
+- **On a formed building's X-ray floor**, a bar under the floor says how it's laid out and offers **Edit this floor**. That copies the floor's units onto the run of floors that share them (`Form.floorPlans`), and nothing changes until something is edited.
+- **Each unit has a chip** with its type and the area it counts. Pick one and:
+  - drag its corners (snapping to other corners and 10 cm; Alt: free; a corner another unit shares moves for both);
+  - push its walls (10 cm steps);
+  - set its type (By size, 1, 2 or 3 BHK) and its use (as the floor, or offices, shops and the rest);
+  - Split, Merge (then pick the unit next to it), Remove.
+- Handles show only at real corners (a turn over 25°, or a corner another unit shares) and on walls 1.5 m or longer, so a curved edge doesn't pile them up.
+- **The plan's floors:** all the floors alike, Only floor N, or And the floors above; Lay out again gives them back.
+- **The engine** (src/pro/form/lay.ts):
+  - hand units are cut to the floor and kept clear of the cores;
+  - where two overlap, the first keeps the overlap;
+  - each laid unit names the hand unit it comes from (`Unit.hand`);
+  - floors above a hand-planned floor keep the units of the last floor laid out, rather than being planned afresh.
+- New files: src/pro/floorEdit.ts (the edits, pure), src/pro/floorHud.tsx (the bar, chips and handles), tools/dev/test-handplan.ts (17 checks, in `npm test`).
+
+**How it was checked:**
+- `npx tsc` clean, `npm test` passes, `npm run build` OK.
+- The `evaluate()` snapshot on the sample projects is byte-identical.
+- **In the browser,** on a 10-floor box tower (60 homes):
+  - Edit this floor gave 6 units on floors 1–10;
+  - Split gave 70 homes, and Merge gave 60 back;
+  - a type set to 3 BHK stuck;
+  - in Plan view a shared wall dragged moved both flats;
+  - Only floor 5 left the other floors at 6 units each (it had re-planned them to 7 before the fix);
+  - Lay out again cleared the plan;
+  - the local project was restored afterwards.
+
+**Left or known:**
+- No drawing a new unit yet, and no moving cores or corridors.
+- At a distance in 3D the handles of a small unit sit close together: Plan view, or zooming in, is better for it.
+- A unit with no outside wall, or a sliver, isn't flagged.
+
+---
+
+## 2026-11-23 · Site folded into Draw, in tabs by category
+
+**Why:** drawing on the plot was split across two shelf buttons, Draw and Site, by whether a thing is new or already there. A power line, a pole, a well or a drain is a utility either way, and someone looking for one shouldn't have to guess which button holds it.
+
+**What changed:**
+- The shelf's Site button is gone. Draw holds everything drawn on the plot, in five tabs:
+  - **Access:** road, roundabout, gate, wall;
+  - **Parking:** car lot, parking tower;
+  - **Landscape:** garden, play area, trees;
+  - **Utilities:** water tank, power line, pole or transformer, well, drain or water;
+  - **Existing:** an existing tree, an existing structure, a no-build zone.
+- Each tab has its own hint. Draw opens on the tab of the tool in hand, or the last tab opened (kept for the browser session). Draw is highlighted while any of its tools is in hand.
+- Nothing about the things themselves changed: an existing power line is still a site feature with its clearance, and a water tank is still an element.
+
+**How it was checked:**
+- `npx tsc` clean, `npm run build` OK.
+- **In the browser:**
+  - the shelf reads Select, Building, Draw, Plot, Measure, Outline;
+  - the five tabs fit on one row of a 350 px flyout;
+  - picking Power line from Utilities closes the flyout and lights Draw.
+
+**Left or known:** the outline still lists drawn elements and site features in separate groups.
+
+---
+
+## 2026-11-23 · Checks as rows, the rest: lifts, refuge floors, light, rooms and the DP zone (docs/plans/pro-design-freedom.md, step 7)
+
+**Why:** after the first part, light and ventilation and room sizes were still checked once for the whole project, so a failing building couldn't be told from a passing one. Lifts and refuge floors came from the building systems' own lines. Nothing checked whether the plot's zone allows its uses (the plan's §7.3).
+
+**What changed:**
+- **More checks as rows** (src/pro/checkRows.ts), building by building:
+  - **lifts:** one over 15 m, two over 24 m, and one for a public use above the ground floor (groups other than A; NBC Part 3 and the Harmonised Guidelines 2021, as assumed). It is measured against the lifts as set or worked out;
+  - **refuge floors:** over 24 m, the floor above 24 m, above 39 m, then every 15 m;
+  - **light and ventilation:** for flats, each building's own count;
+  - **room sizes:** for flats, each building's rooms against their minimums, naming the kinds that fall short and the worst one. "Rooms not laid out" warns when there are none.
+
+  The systems' own lift and refuge lines give way to these in the scrutiny; the systems panel keeps them.
+- **What the DP zone allows** (src/doc/zones.ts):
+  - The project panel's Rules section has a **DP zone** setting: R1, R2, commercial, industrial, public and semi-public, green.
+  - Each use's plot use is checked against it: allowed, with conditions (a warning), or not allowed (a fail, never a block).
+  - With no zone set, the scrutiny gives an info line saying so.
+  - The table is UDCPR 2020 Chapter 4 as summarised, marked "as assumed".
+- Each building's core (stairs, their width, lifts, refuge floors) comes out of the systems as `core` (src/pro/systems.ts), for the rows to read.
+- Any check whose key ends in a building's index now links to that building (`checkBuilding`, src/pro/viewer.tsx).
+
+**How it was checked:**
+- **Figures:** the `evaluate()` snapshot on the nine sample projects is identical apart from the checks list. Each building's light count adds up to the old project-wide line on every sample (for example, the Mumbai sample: 84 of 178 flats). The new lines are the per-building "rooms not laid out" warnings and the "zone not said" note.
+- **Tests** in tools/dev/test-parts.ts:
+  - a 48 m tower gets two lifts and two refuge floors, both passing;
+  - the systems' lift and refuge lines give way to the rows;
+  - homes fail in an industrial zone and pass in R2;
+  - offices warn in R1;
+  - no zone gives the info line and no row;
+  - light and rooms come per building, and rooms warn when none are laid out.
+- `npx tsc` clean, `npm test` ALL OK (8 suites), `npm run build` OK.
+- **In the browser** (a separate preview server on port 5174; its localStorage backed up and restored):
+  - setting the sample plot's DP zone to Industrial turned the rules chip to "1 fail";
+  - Approval showed "Uses the zone allows: homes: not allowed", with "Applies to: every use";
+  - lifts, refuge floors, light and room sizes showed as rows and passed (150 rooms).
+
+**Left or known:**
+- NBC's tables (exits, travel, stair widths) and UDCPR Chapter 4's permissible uses are summaries, marked "as assumed"; they need reading clause by clause.
+- Travel is still a straight line to a core's middle, not a walk along corridors.
+- The zone's conditions (road widths, sizes, trades) aren't checked, only flagged as conditions.
+
+---
+
 ## 2026-11-23 · Checks as rows, by each use's NBC group (docs/plans/pro-design-freedom.md, step 7, first part)
 
 **Why:** the scrutiny checked every building as if it held flats. A building of offices, a hall or a clinic got the flats' stair widths and a travel-distance line that always said "cores spaced for it". Uses we have no figures for looked as clean as housing.

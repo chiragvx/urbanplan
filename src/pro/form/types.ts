@@ -199,7 +199,22 @@ export interface Form {
   /** low-rise homes side by side (row houses, a villa): the plan cut across local x into this many houses, each its
    *  own stair and one home a floor, so no shared core or corridor */
   houses?: number;
+  /** floors planned by hand: on each run of floors, its units as drawn in place of the ones laid out (the first plan
+   *  that covers a floor wins); see `FloorPlanEdit` */
+  floorPlans?: FloorPlanEdit[];
 }
+
+/** A run of floors planned by hand ("Edit this floor"): its units as the designer drew them, in the building's own
+ *  frame, used on floors `lo` to `hi` (1 up from the ground, as the floors are numbered) in place of the units the
+ *  floor would be laid out with. Each is cut to the floor as it stands (a part changed since takes its share) and
+ *  clear of the cores; one left off the floor is dropped. */
+export interface FloorPlanEdit { id: string; lo: number; hi: number; units: HandUnit[] }
+/** A unit drawn by hand: its outline (x, z, … in the building's frame), and its use and type when they're set (unset:
+ *  the floor's use, and for homes the type its size makes it) */
+export interface HandUnit { id: string; ring: number[]; use?: BuildingUse; t?: 0 | 1 | 2 | 3 }
+
+/** the hand plan on floor n (1 up from the ground), if one covers it */
+export const handPlanAt = (form: Form, n: number): FloorPlanEdit | undefined => form.floorPlans?.find((p) => n >= p.lo && n <= p.hi);
 
 // ---------------- what the procedure makes of a form ----------------
 
@@ -220,7 +235,7 @@ export interface FormFloor {
   cuts: { ring: number[]; face: 'glass' | 'open' }[];
   /** flats (t 0..2 = 1/2/3 BHK) or other units (t 3: an office, a shop, a hotel room cluster, a public room) */
   /** `kind`: a unit in a space of its own use (unset: the floor's) */
-  units: { t: 0 | 1 | 2 | 3; ring: number[]; carpet: number; kind?: BuildingUse }[];
+  units: { t: 0 | 1 | 2 | 3; ring: number[]; carpet: number; kind?: BuildingUse; hand?: string }[];
   carpet: number;
   /** the spaces on this floor, as they fall on it (world rings, after the floor's shape) */
   spaces?: { id: string; use: BuildingUse; rings: number[][]; area: number }[];

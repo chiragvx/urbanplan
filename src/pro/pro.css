@@ -1095,3 +1095,21 @@ details.chk .show { display: inline-flex; align-items: center; gap: 5px; margin:
 .score .s-unchecked.on { box-shadow: inset 0 0 0 1.5px var(--up-muted); color: var(--up-ink-2); }
 details.chk.unchecked { border: 1.5px dotted var(--up-muted); }
 details.chk.unchecked summary .ico { color: var(--up-muted); }
+.flyout .draw-tabs { margin: 2px 0 6px; }
+.flyout:has(.draw-tabs) { width: 350px; max-width: calc(100vw - 96px); }
+.flyout .draw-tabs .seg.small { width: auto; }
+.flyout .draw-tabs .seg.small button { flex: 1 1 auto; padding: 4px 6px; }
+/* a floor planned by hand (./floorHud.tsx): a chip on each unit, the floor's bar */
+.hunit { position: absolute; left: 0; top: 0; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--up-line); background: color-mix(in srgb, var(--up-surface) 92%, transparent); color: var(--up-ink-2); font-size: 11px; font-weight: 500; white-space: nowrap; pointer-events: auto; }
+.hunit:hover { color: var(--up-ink); border-color: var(--up-ink-2); }
+.hunit.on { background: var(--up-ink); color: var(--up-paper); border-color: var(--up-ink); }
+.hunit.target { border-style: dashed; border-color: #0969da; color: #0969da; }
+.hbar.hfloor { position: absolute; left: 0; top: 0; visibility: visible; pointer-events: auto; flex-wrap: wrap; max-width: 400px; justify-content: center; }
+.hbar.hfloor .sel { max-width: 150px; }
+.hbar.hfloor .hmeta { padding: 0 8px; font-size: 12px; color: var(--up-muted); white-space: nowrap; }
+.hbar.hfloor .hprimary { background: var(--up-ink); color: var(--up-paper); }
+.hbar.hfloor .hprimary:hover { background: var(--up-ink); color: var(--up-paper); opacity: .9; }
+.hbar.hfloor > button.on { background: var(--up-ink); color: var(--up-paper); }
+.hseg { display: inline-flex; gap: 1px; padding: 2px; border-radius: 8px; background: var(--up-surface-2); }
+.hseg button { border: 0; background: none; border-radius: 6px; padding: 3px 7px; font-size: 12px; color: var(--up-ink-2); }
+.hseg button[aria-checked="true"] { background: var(--up-ink); color: var(--up-paper); }

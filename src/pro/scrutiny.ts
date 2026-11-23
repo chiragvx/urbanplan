@@ -52,6 +52,8 @@ export function scrutiny(e: Evaluated, rooms?: RoomsLike): Check[] {
   if (shops) add({ key: 'shops', group: 'Planning', rule: 'Shops by road width', clause: `${code} mixed use (as summarised: 9 m G, 18 m G+1, 24 m G+2, 30 m all)`, required: shops.allowed === 0 ? 'no shops on this road' : shops.allowed >= 99 ? 'any floor' : `${shops.allowed} floor${shops.allowed > 1 ? 's' : ''}`, proposed: `${shops.floors} floor${shops.floors > 1 ? 's' : ''} of shops`, status: shops.over ? 'fail' : 'pass', note: 'Also depends on the zone in the DP: check the zone permits commercial use.' });
   if (r.area >= AMENITY_FROM) add({ key: 'amenity', group: 'Planning', rule: 'Amenity space', clause: `${code} 3.5 (as assumed)`, required: `${Math.round(AMENITY_SHARE * 100)}% of the plot: ${m2(r.area * AMENITY_SHARE)}`, proposed: 'not set aside in this scheme', status: 'warn', note: 'Not modelled yet: set it aside on the site plan before submission.' });
   if (r.area >= IH_FROM) add({ key: 'inclusive', group: 'Planning', rule: 'Inclusive housing (EWS / LIG)', clause: `${code} 3.8 (cities over 1 million, as assumed)`, required: `${Math.round(IH_SHARE * 100)}% of the basic FSI as tenements: ${m2(r.parts.basic * IH_SHARE)}`, proposed: 'not set aside in this scheme', status: 'warn', note: 'Not modelled yet. Check whether the authority applies it here.' });
+  // (the uses the DP zone allows: a row once the zone is said, ./checkRows.ts)
+  if (!e.p.zone && hasBuildings) add({ key: 'zone', group: 'Planning', rule: 'Uses the zone allows', clause: 'UDCPR 2020 Chapter 4 (as assumed)', required: "the plot's DP zone", proposed: 'zone not said', status: 'info', note: "Say the plot's zone in the project panel's Rules, and each use is checked against it." });
   if (d.bua >= EC_FROM) add({ key: 'ec', group: 'Planning', rule: 'Environment clearance', clause: 'EIA Notification 2006, item 8(a)', required: `needed from ${m2(EC_FROM)} of built-up area`, proposed: m2(d.bua), status: 'info', note: 'SEIAA clearance before construction starts.' });
 
   // ---- building: height, margins ----
@@ -91,11 +93,11 @@ export function scrutiny(e: Evaluated, rooms?: RoomsLike): Check[] {
   const H = d.height;
   if (hasBuildings) {
     // (the checks by use, as rows: fire access, travel to a stair, stair widths by group, and what isn't checked)
-    for (const c of runRows(e)) add(c);
+    for (const c of runRows(e, rooms)) add(c);
     add({ key: 'fire-noc', group: 'Fire & safety', rule: 'Fire NOC', clause: 'Maharashtra Fire Prevention Act 2006; NBC 2016 Part 4', required: `needed over ${FIRE_H} m`, proposed: m(H), status: H > FIRE_H ? 'info' : 'pass', note: H > FIRE_H ? 'Provisional fire NOC with the plans, final before occupation.' : undefined });
     // (lifts, stairs, refuge floors, fire systems, water and power: as the building systems size them, ./systems.ts)
-    // (stair widths come from the rows above, by each use's group)
-    for (const c of e.sys.checks) if (!/^stair-(w|cap)(:\d+)?$/.test(c.key)) add({ key: `sys:${c.key}`, group: c.group === 'Cores' || c.group === 'Fire' ? 'Fire & safety' : 'Building', rule: c.rule, clause: c.clause, required: c.required, proposed: c.proposed, status: c.status });
+    // (stair widths, lifts and refuge floors come from the rows above)
+    for (const c of e.sys.checks) if (!/^(stair-(w|cap)|lifts|refuge)(:\d+)?$/.test(c.key)) add({ key: `sys:${c.key}`, group: c.group === 'Cores' || c.group === 'Fire' ? 'Fire & safety' : 'Building', rule: c.rule, clause: c.clause, required: c.required, proposed: c.proposed, status: c.status });
     const cores = d.buildings.reduce((s, b) => s + b.cores.length, 0);
     if (!e.sys.checks.length) add({ key: 'lift', group: 'Fire & safety', rule: 'Lifts', clause: 'UDCPR 2020 9.27.1, 9.29.8', required: H > TWO_LIFTS_H ? 'two lifts (over 24 m), one a fire lift (from 15 m)' : H >= FIRE_LIFT_H ? 'a lift, which is a fire lift (from 15 m)' : 'none up to 15 m', proposed: H > LIFT_H ? `${cores} core${cores > 1 ? 's' : ''}, each with ${H > TWO_LIFTS_H ? 'two lifts' : 'a lift'}, one a fire lift (as laid)` : 'not needed', status: 'pass', note: 'Each core is laid out with a stair and its lifts.' });
     const refuges = H > REFUGE_H ? Math.floor((H - REFUGE_H) / REFUGE_EVERY) + 1 : 0;
@@ -114,30 +116,7 @@ export function scrutiny(e: Evaluated, rooms?: RoomsLike): Check[] {
   if (r.area >= RG_FROM) add({ key: 'open', group: 'Parking & open space', rule: 'Recreational open space', clause: `${code} 3.5.1`, required: `${Math.round(RG_SHARE * 100)}% of the plot: ${m2(d.open.need)}`, proposed: m2(d.open.have), status: d.over.open ? 'fail' : 'pass' });
   else add({ key: 'open', group: 'Parking & open space', rule: 'Recreational open space', clause: `${code} 3.5.1`, required: `none under ${m2(RG_FROM)}`, proposed: m2(r.area), status: 'pass' });
 
-  // ---- flats and rooms ----
-  const flats = e.checks.filter((c) => c.t !== 3);
-  if (flats.length) {
-    const all = flats.reduce((s, c) => s + c.floors, 0), ok = flats.filter((c) => c.light && c.air).reduce((s, c) => s + c.floors, 0);
-    add({ key: 'light', group: 'Flats & rooms', rule: 'Light and ventilation', clause: r.code === 'udcpr' ? `${code} Chapter 9 (windows 1/10 of the habitable floor, half of it opening; as assumed)` : 'DCPR 2034 Reg. 40(1) (windows 1/6 of the habitable floor)', required: 'every flat', proposed: `${ok} of ${all} flats`, status: ok === all ? 'pass' : 'fail' });
-  }
-  if (rooms) {
-    const by = new Map<string, { n: number; bad: number; min: string; worst: string }>();
-    rooms.forEach((bl, bi) => bl.forEach((f) => {
-      const floors = d.buildings[bi]?.floors ?? 1;
-      for (const x of f.rooms) {
-        const k = x.kind, cur = by.get(k) ?? { n: 0, bad: 0, min: [x.minArea > 0 ? `${x.minArea.toLocaleString('en-IN')} m²` : '', x.minWidth > 0 ? `${m(x.minWidth)} wide` : ''].filter(Boolean).join(', '), worst: '' };
-        cur.n += floors;
-        if (!x.ok) { cur.bad += floors; if (!cur.worst) cur.worst = `${x.name} in a ${UNIT_LABEL[f.t] ?? 'flat'}: ${(Math.round(x.area * 10) / 10).toFixed(1)} m², ${m(x.width)} wide`; }
-        by.set(k, cur);
-      }
-    }));
-    for (const [k, v] of by) {
-      if (!v.min) continue; // (no legal minimum for this room)
-      add({ key: `room:${k}`, group: 'Flats & rooms', rule: `Room size: ${k}`, clause: r.code === 'udcpr' ? 'UDCPR 2020 9.4.1 (rooms and kitchens at the owner’s choice; bath 1.0 × 1.2 m, bath and WC 1.5 m² and 1.0 m wide)' : 'DCPR 2034 Reg. 37(2) Table 14 (habitable 2.4 m wide, kitchen 1.8 m, bath 1.5 m² / 1.1 m, bath and WC 2.2 m²)', required: `at least ${v.min}`, proposed: v.bad ? `${v.n - v.bad} of ${v.n} meet it` : `all ${v.n}`, status: v.bad ? 'fail' : 'pass', note: v.worst || undefined });
-    }
-  } else if (flats.length) {
-    add({ key: 'rooms', group: 'Flats & rooms', rule: 'Room sizes', clause: `${code} Chapter 9`, required: 'every room at its minimum size and width', proposed: 'rooms not laid out', status: 'warn', note: 'Checked by flat until rooms are modelled.' });
-  }
+  // ---- flats and rooms: light, ventilation and room sizes are rows (./checkRows.ts), building by building ----
   add({ key: 'carpet', group: 'Flats & rooms', rule: 'Carpet area (RERA)', clause: 'RERA 2016 s.2(k)', required: 'declared per flat', proposed: `${Math.round(d.carpet * SQFT).toLocaleString('en-IN')} sq ft over ${d.count[0] + d.count[1] + d.count[2]} flats${d.count[3] ? ` and ${d.count[3]} other units` : ''}`, status: 'info' });
   return out;
 }

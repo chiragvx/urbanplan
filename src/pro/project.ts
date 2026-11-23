@@ -88,6 +88,8 @@ export interface ProProject {
   /** the site's own limits: a height cap (airport clearance, fire, a heritage zone: m, 0 none), and a transit
    *  zone (near a metro station: the FSI goes up to `todFsi` with premium) */
   limits?: { maxH: number; tod: boolean; todFsi: number };
+  /** the plot's zone in the Development Plan, which says which uses it allows (../doc/zones.ts); unset: not said */
+  zone?: import('../doc/zones').DpZone;
   /** the deal on the land (./deal.ts): outright purchase, a joint development, a society's redevelopment */
   deal?: import('./deal').Deal;
   /** a building's own design system (a preset id, by building index): the layer under the project's style */

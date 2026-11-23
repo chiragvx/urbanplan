@@ -155,6 +155,23 @@ ok(tgt.d.parking.want === Math.ceil(e0.d.parking.need * 1.5), `a target of 150%:
   ok(near(far, Math.hypot(60, 9), 0.01), `travel: the farthest corner from the stair, in a straight line (${far.toFixed(1)} m)`);
   const slab = sc({ ...proj(base), scheme: { buildings: [{ id: 'b', spine: [0, 25, 1, 25], depth: 20, floors: 10, form: boxForm(90, 14, 10) }], elements: [] } } as ProProject).find((c) => c.key === 'travel:0');
   ok(!!slab, `a 90 m slab's travel: ${slab?.status}, ${slab?.proposed}`);
+  // the rest of the rows: lifts and refuge floors by height, light and rooms by building, and the DP zone
+  const tall = sc({ ...proj(base), scheme: { buildings: [{ id: 'b', spine: [0, 25, 1, 25], depth: 20, floors: 16, form: boxForm(30, 20, 16) }], elements: [] } } as ProProject);
+  const lifts = tall.find((c) => c.key === 'lifts:0'), refuge = tall.find((c) => c.key === 'refuge:0');
+  ok(!!lifts && /^2 /.test(lifts.required) && lifts.status === 'pass', `a tall tower's lifts: ${lifts?.required}, ${lifts?.proposed} (${lifts?.status})`);
+  ok(!!refuge && refuge.status === 'pass', `and its refuge floors: ${refuge?.required} needed, ${refuge?.proposed} (${refuge?.status})`);
+  ok(!tall.some((c) => /^sys:(lifts|refuge)/.test(c.key)), "the systems' own lift and refuge checks give way to the rows");
+  const zoneOf = (q: ProProject) => sc(q).find((c) => c.key === 'zone:0');
+  const zi = zoneOf({ ...proj(base), zone: 'I' } as ProProject);
+  ok(zi?.status === 'fail', `homes in an industrial zone: ${zi?.status} (${zi?.proposed})`);
+  ok(zoneOf({ ...proj(base), zone: 'R2' } as ProProject)?.status === 'pass', 'homes in R2: pass');
+  const zo = zoneOf({ ...proj({ ...base, uses: [{ use: 'office', floors: 10 }] } as Form), zone: 'R1' } as ProProject);
+  ok(zo?.status === 'warn', `offices in R1: ${zo?.status} (${zo?.proposed})`);
+  const noZone = homes.find((c) => c.key === 'zone');
+  ok(noZone?.status === 'info' && !homes.some((c) => c.key === 'zone:0'), 'no zone said: an info line, no row');
+  const lt = homes.find((c) => c.key === 'light:0'), rm = homes.find((c) => c.key === 'rooms:0');
+  ok(!!lt && !homes.some((c) => c.key === 'light'), `light and ventilation by building: ${lt?.proposed} (${lt?.status})`);
+  ok(rm?.status === 'warn' && rm.proposed === 'rooms not laid out', 'room sizes by building: rooms not laid out, without rooms');
 }
 
 console.log(bad ? `${bad} FAILED` : 'ALL OK');

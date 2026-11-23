@@ -34,7 +34,7 @@ export const buildingName = (p: ProProject, e: Evaluated, i: number) =>
   (p.scheme?.buildings.find((b) => b.id === e.d.buildings[i]?.b.id) as { name?: string } | undefined)?.name ?? `Building ${letter(i)}`;
 
 /** the building a check is about, from its key (height:2, margins:0 …), or null for the whole scheme's */
-export const checkBuilding = (key: string): number | null => { const x = /^(height|margins|transfers|cantilever|mixed|fire-access|travel|exit-width|stair-min|unchecked-[a-z]+):(\d+)$/.exec(key); return x ? +x[2] : null; };
+export const checkBuilding = (key: string): number | null => { const x = /^([\w-]+(?::[\w-]+)*):(\d+)$/.exec(key); return x ? +x[2] : null; };
 
 export function Overview({ p, e }: { p: ProProject; e: Evaluated }) {
   const { r, d } = e, city = CITIES.find((c) => c.value === p.city);
