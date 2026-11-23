@@ -51,6 +51,8 @@ export interface Fill {
   parking: 'auto' | 'stilt' | 'basement' | 'podium' | 'surface';
   /** levels under the ground (unset: as many as the parking needs) */
   basements?: number;
+  /** parking wanted over the code's, as a multiple (1.5: half as much again, "ample parking"); unset: the code's */
+  parkTarget?: number;
 }
 export const DEFAULT_FILL: Fill = { amount: 1, buildings: 0, spacing: 0, access: 'perimeter', green: 0, play: true, parking: 'auto' };
 
@@ -313,7 +315,7 @@ export function generate(p: ProProject, r: PlotReport, specRate = 0, premium = 0
   const cost = { ...(p.costs ?? {}), ...(p.rents ?? {}), build: c.build + specRate, ...(p.land ? { land: p.land } : {}), sale: p.sale > 0 ? p.sale : Math.round((c.sale * (1 + premium)) / 50) * 50, ...(p.shops && p.shops.sale > 0 ? { retail: p.shops.sale } : {}) };
   const f = fillOf(p);
   const base: PlotSite = {
-    ...siteDefaults(use), ...parkingOf(f), mix: p.mix, ...(p.sizes ? { sizes: p.sizes } : {}), cost, keepOut: keepOutOf(p.features),
+    ...siteDefaults(use), ...parkingOf(f), ...(f.parkTarget && f.parkTarget > 1 ? { parkTarget: f.parkTarget } : {}), mix: p.mix, ...(p.sizes ? { sizes: p.sizes } : {}), cost, keepOut: keepOutOf(p.features),
     design: { ...DEFAULT_DESIGN, type: p.typology, maxFloors: p.maxFloors, maxBuildings: f.buildings, spacing: f.spacing, access: f.access, green: f.green, ...kit },
   };
   // the user's own buildings: as they stand, checked

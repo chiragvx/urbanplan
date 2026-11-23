@@ -85,5 +85,12 @@ export function areaStatement(e: Evaluated, runs: (e: Evaluated, bi: number) => 
   row('Car bays required', `${d.parking.need}`);
   d.parking.levels.filter((l) => l.bays.length).forEach((l, i) => row(`${l.kind[0].toUpperCase()}${l.kind.slice(1)}${l.kind === 'basement' ? ` ${i}` : ''}`, `${l.bays.length} bays`));
   tot('Car bays provided', `${d.parking.have}`, ok(d.parking.have >= d.parking.need));
+  if (d.parking.want) row('Car bays wanted (your target)', `${d.parking.want}`, d.parking.have >= d.parking.want ? 'ok' : 'bad');
+  // (by use: built-up, carpet, units and the people each holds by its occupant load)
+  if (d.money.uses.length > 1 || d.money.uses.some((x) => x.use !== 'residential')) {
+    h('By use');
+    for (const x of d.money.uses) row(USE_LABEL[x.use], `${m2(x.area)} built-up · ${m2(x.carpet)} carpet · ${x.units} unit${x.units === 1 ? '' : 's'}${x.people ? ` · ${x.people} people` : ''}`);
+  }
+  if (d.people) row('People (by occupant load, NBC 2016 Part 4)', `${d.people}`);
   return rows;
 }

@@ -8,6 +8,7 @@
 // Pure: a site and a plot report in, numbers and rings (tile metres x,z) out.
 import { clipHalf, inset, polyArea, sideMargin, useInfo, type PlotCode, type PlotReport, type PlotUse } from './plot';
 import { FLOOR_USES, KIND_OF_PLOT, PLOT_PARK_PER, USE_TABLE, type FloorUse } from './uses';
+import { sampleBez, type Handles } from './curves';
 import { anglesFor, area as mpArea, diff, fromFlat, fromFlats, inside as mpInside, inter, layBays, layGround, NO_GROUND, offset, outlines, shrink, triangles, union, type GroundMap } from './ground';
 
 /** flat types: 1, 2 and 3 BHK; commercial floors are one office per stretch of corridor */
@@ -105,6 +106,15 @@ export const FLOOR_USE: Record<FloorUse, { plot: PlotUse; park: number; earns: '
 export const floorKind = (f: LaidFloor, use: PlotUse): FloorUse => f.kind ?? KIND_OF_PLOT[f.use ?? use] ?? (use === 'residential' ? 'residential' : 'office');
 /** A laid floor counts in the built-up area (FSI) unless it's parking. */
 export const laidBua = (L: Laid, use: PlotUse = 'residential') => L.floors.reduce((s, f) => s + (floorKind(f, use) === 'parking' ? 0 : f.area), 0);
+/** A laid floor's area shared between its uses: its own, and any of its spaces' (by carpet). One use: the whole. */
+export function shared(f: LaidFloor, use: PlotUse): { kind: FloorUse; area: number }[] {
+  const fk = floorKind(f, use);
+  if (!f.units.some((u) => u.kind && u.kind !== fk)) return [{ kind: fk, area: f.area }];
+  const by = new Map<FloorUse, number>([[fk, 0]]);
+  let all = 0;
+  for (const u of f.units) { const k = u.kind ?? fk; by.set(k, (by.get(k) ?? 0) + u.carpet); all += u.carpet; }
+  return [...by].map(([kind, c]) => ({ kind, area: all > 0 ? (f.area * c) / all : kind === fk ? f.area : 0 }));
+}
 /** A building's built-up area: its floors' own when it's formed, else the plate on every floor. */
 export const buaOf = (b: Pick<BuildingReport, 'laid' | 'plate' | 'floors' | 'use'>) => (b.laid ? laidBua(b.laid, b.use) : b.plate * b.floors);
 
@@ -120,6 +130,20 @@ export interface SiteElement extends SiteBuilding {
   levels?: number;
   /** laid by the optimiser (its roads); replaced when it plans again */
   auto?: boolean;
+  /** drawn with curves (./curves.ts): its nodes as placed and each one's handles; `spine` or `ring` is then the curve
+   *  sampled. Unset: its points are its nodes, all corners. */
+  nodes?: number[];
+  bez?: Handles[];
+}
+/** what's drawn of an element: its nodes, the corners of its line or ring when it has no curves */
+export const nodesOf = (x: SiteElement): number[] => x.nodes ?? (isArea(x) ? ringOf(x) : x.spine);
+/** an element with its nodes (and handles) as drawn: its line or ring the curve through them */
+export function withNodes(x: SiteElement, nodes: number[], bez?: Handles[]): SiteElement {
+  const area = isArea(x), curved = !!bez?.some(Boolean);
+  const pts = curved ? sampleBez(nodes, bez, area) : nodes;
+  const { nodes: _n, bez: _b, ...rest } = x;
+  void _n; void _b;
+  return { ...rest, ...(area ? { ring: pts } : { spine: pts }), ...(curved ? { nodes, bez } : {}) };
 }
 export const ELEMENTS: { value: ElementKind; label: string; title: string; len: number; depth: number }[] = [
   { value: 'parking', label: 'Multi-storey car park', title: 'Levels of bays on ramps (not counted in FSI): drag out its area', len: 40, depth: 32 },
@@ -192,6 +216,8 @@ export interface PlotSite {
   stilt: boolean; podium: number; basements: number; surface?: boolean;
   /** surface bays as asked for (unset: the optimiser's call) */
   surfacePick?: boolean;
+  /** parking wanted over what the code asks, as a multiple ("ample parking": 1.5); unset or 1: the code's */
+  parkTarget?: number;
   cost: Partial<Costs & UseRates>;
   /** what the optimiser is asked for; the buildings are its until they're shaped by hand (`manual`) */
   design?: import('./optimise').Design;
@@ -298,6 +324,8 @@ export interface BuildingReport {
 export interface UseLine {
   use: FloorUse; floors: number; area: number; carpet: number; units: number;
   earns: 'sale' | 'lease' | 'operate' | 'public';
+  /** people it holds: its area over the use's occupant load (NBC, m² a person); 0 where the use has none */
+  people?: number;
   /** ₹: sold, or the let or run building's value at its yield (0 for public uses) */
   value: number;
 }
@@ -323,6 +351,8 @@ export interface SiteReport {
   height: number;
   count: [number, number, number, number]; flats: number;
   carpet: number;
+  /** the people the buildings hold, by each use's occupant load (NBC 2016 Part 4, as the use table has it) */
+  people?: number;
   /** built-up area used, FSI used (with ancillary), what's left of the permissible built-up area (negative: over) */
   bua: number; fsi: number; left: number;
   coverage: number;
@@ -339,6 +369,8 @@ export interface SiteReport {
     cars: number; scooters: number; trucks: number;
     /** car bays needed (scooters four to a bay) and laid out */
     need: number; have: number;
+    /** the bays wanted, the code's need times the project's target, when it has one */
+    want?: number;
     levels: Level[];
   };
   money: {
@@ -364,6 +396,9 @@ export interface Ground {
   wall: number[][]; gates: number[][]; drive: number[][]; driveW: number; rg: number[] | null;
   /** internal roads (centre line and width) and roundabouts (x, z, radius) */
   roads: { pts: number[]; w: number }[]; circles: number[][];
+  /** where an internal road leaves the plot: its way on across the road widening to the road outside, flared at the
+   *  kerb (a bell mouth), as rings (x, z, …); empty when none does */
+  joins?: number[][];
   /** gardens, as the buildings leave them */
   gardens: number[][];
 }
@@ -587,6 +622,7 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
   cars = Math.ceil(cars * 1.05); scooters = Math.ceil(scooters * 1.05);
   trucks = Math.ceil(trucks);
   const need = cars + Math.ceil(scooters / 4) + trucks * 3;
+  const want = site.parkTarget && site.parkTarget > 1 ? Math.ceil(need * site.parkTarget) : need;
   const ground = groundOf(r, site, height > FIRE_H, buildings.map((b) => ({ quads: b.quads, tall: b.height > FIRE_H, cores: b.cores })));
   const playOrTrees = els.filter((e) => e.kind === 'play' || e.kind === 'trees').map(ringOf);
   // the ground laid out: what's left of each lot and garden, bays packed into the lots (and, asked for, the open
@@ -662,7 +698,8 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
   const tdr = Math.max(0, consumed - free - prem);
   const parkArea = levels.reduce((s, l) => s + (l.kind === 'surface' || l.kind === 'lot' ? 0 : l.area), 0);
   // (a formed building's floors are built at their own use's rate over the base)
-  const buildArea = buildings.reduce((s, b) => s + (b.laid ? b.laid.floors.reduce((a, f) => a + f.area * FLOOR_USE[floorKind(f, b.use)].build, 0) : buaOf(b)), 0);
+  // (a floor holding spaces of other uses shares its area between them by carpet, each at its own rate)
+  const buildArea = buildings.reduce((s, b) => s + (b.laid ? b.laid.floors.reduce((a, f) => a + shared(f, b.use).reduce((x, g) => x + g.area * FLOOR_USE[g.kind].build, 0), 0) : buaOf(b)), 0);
   const m = {
     land: r.area * SQFT * rate.land,
     premium: prem * SQFT * rate.asr * rate.premiumPct / 100,
@@ -701,6 +738,10 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
       }
     }
   }
+  // (the people each use's area holds, by its occupant load)
+  let people = 0;
+  for (const x of uses.values()) { const ld = USE_TABLE[x.use].load; x.people = ld > 0 ? Math.round(x.area / ld) : 0; people += x.people; }
+  for (const b of buildings) if (!b.laid) { const ld = USE_TABLE[KIND_OF_PLOT[b.use] ?? 'none'].load; if (ld > 0) people += Math.round(buaOf(b) / ld); }
   const revenue = sales + exit;
   const cash = cashflow(m.land + m.premium + m.tdr + m.ancillary, m.build + m.parking + m.soft, sales, rate, exit);
   const earnsAny = buildings.some((b) => (b.laid ? b.laid.floors.some((f) => FLOOR_USE[floorKind(f, b.use)].earns !== 'public') : sells(b)));
@@ -726,7 +767,8 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
     departures: [],
     open: { need: openNeed, have: openHave, green: Math.max(0, green) },
     ground,
-    parking: { cars, scooters, trucks, need, have, levels },
+    parking: { cars, scooters, trucks, need, have, levels, ...(want > need ? { want } : {}) },
+    people,
     money: { costs: rate, revenue, sales, exit, uses: [...uses.values()], earns: earnsAny, ...m, cost, profit: revenue - cost, margin: revenue ? (revenue - cost) / revenue : 0, ...cash },
   };
   out.departures = departuresOf(r, out);
@@ -782,7 +824,7 @@ export function departuresOf(r: PlotReport, d: SiteReport): Departure[] {
 export function basementsToFit(r: PlotReport, site: PlotSite, use: PlotUse, max = 4): number {
   for (let b = 0; b <= max; b++) {
     const x = solveSite(r, { ...site, basements: b }, use);
-    if (x.parking.have >= x.parking.need) return b;
+    if (x.parking.have >= (x.parking.want ?? x.parking.need)) return b;
   }
   return max;
 }
@@ -994,7 +1036,8 @@ function hull(r: number[]): number[] {
 function groundOf(r: PlotReport, site: PlotSite, tall: boolean, built: { quads: number[][]; tall: boolean; cores?: number[][] }[] = []): Ground {
   const N = r.net, n = N.length / 2;
   const els = site.elements ?? [];
-  const roads = els.filter((e) => e.kind === 'road' && e.spine.length >= 4).map((e) => ({ pts: e.spine, w: e.depth }));
+  // (a road drawn out across a road side ends there: the rest of the way is its join to the road outside)
+  const roads = els.filter((e) => e.kind === 'road' && e.spine.length >= 4).map((e) => ({ pts: trimAtFront(e.spine, N, r.edges), w: e.depth }));
   const circles = els.filter((e) => e.kind === 'roundabout' && e.spine.length >= 4).map((e) => [...spineCentreOf(e.spine), e.depth / 2]);
   const gardens: number[][] = [];
   const empty: Ground = { map: NO_GROUND, wall: [], gates: [], drive: [], driveW: Math.max(FIRE_W, site.design?.roadW ?? FIRE_W), rg: site.rg ?? null, roads, circles, gardens };
@@ -1187,13 +1230,19 @@ function groundOf(r: PlotReport, site: PlotSite, tall: boolean, built: { quads: 
     for (let i = 0; i < n; i++) { const [px, pz] = at(i, along(i, x, z)), dd = Math.hypot(px - x, pz - z); if (dd < bd) { bd = dd; k = i; } }
     if (k >= 0 && bd < Math.max(4, w)) gate(k, along(k, x, z), Math.min(w, len(k)));
   }
-  // a gate wherever an internal road meets a road side (as wide as the road)
+  // a gate wherever an internal road meets a road side (as wide as the road), and its join to the road outside
+  const joins: number[][] = [];
   for (const R of roads) for (const e of [0, R.pts.length - 2]) {
     const x = R.pts[e], z = R.pts[e + 1];
     for (let k = 0; k < n; k++) {
       if (!front[k]) continue;
       const [ax, az, bx, bz] = E(k), s = along(k, x, z), [px, pz] = at(k, s);
-      if (Math.hypot(px - x, pz - z) < Math.max(2.5, R.w) && s > 0 && s < len(k) && Math.hypot(bx - ax, bz - az) > R.w) { gate(k, s, R.w); break; }
+      if (Math.hypot(px - x, pz - z) < Math.max(2.5, R.w) && s > 0 && s < len(k) && Math.hypot(bx - ax, bz - az) > R.w) {
+        gate(k, s, R.w);
+        const j = joinOf(N, r.lostRings, [ax, az, bx, bz], px, pz, x, z, R.w);
+        if (j) joins.push(j);
+        break;
+      }
     }
   }
   // the roads asked to have a gate (every road on a large plot) that have none yet: one in the middle of its longest side
@@ -1220,7 +1269,75 @@ function groundOf(r: PlotReport, site: PlotSite, tall: boolean, built: { quads: 
     for (const x of g) { if (x.s0 - s > 0.2) wall.push([...at(k, s), ...at(k, x.s0)]); s = x.s1; }
     if (len(k) - s > 0.2) wall.push([...at(k, s), ...at(k, len(k))]);
   }
-  return { map: NO_GROUND, wall, gates: gates.map((x) => [...at(x.k, x.s0), ...at(x.k, x.s1)]), drive, driveW, rg: site.rg ?? null, roads, circles, gardens };
+  return { map: NO_GROUND, wall, gates: gates.map((x) => [...at(x.k, x.s0), ...at(x.k, x.s1)]), drive, driveW, rg: site.rg ?? null, roads, circles, gardens, ...(joins.length ? { joins } : {}) };
+}
+
+/** A road's line cut back where an end runs out across a road side of the plot (net ring N, `front` per edge): the end
+ *  is then the crossing. Inside the plot, it's as it was. */
+export function trimAtFront(pts: number[], N: number[], front: boolean[]): number[] {
+  const n = N.length / 2;
+  if (n < 3 || pts.length < 4 || !front.some(Boolean)) return pts;
+  const out = pts.slice();
+  const cut = (end: 0 | 1) => {
+    // (walk in from the end while points are off the plot; the stretch that crosses back in is cut at the edge)
+    const m = out.length / 2, idx = (k: number) => (end === 0 ? k : m - 1 - k);
+    let k = 0;
+    while (k < m - 1 && !pointIn(N, out[idx(k) * 2], out[idx(k) * 2 + 1])) k++;
+    if (k === 0 || k >= m - 1 && !pointIn(N, out[idx(k) * 2], out[idx(k) * 2 + 1])) return;
+    const ox = out[idx(k - 1) * 2], oz = out[idx(k - 1) * 2 + 1], ix = out[idx(k) * 2], iz = out[idx(k) * 2 + 1];
+    for (let e = 0; e < n; e++) {
+      if (!front[e]) continue;
+      const i = e * 2, j = ((e + 1) % n) * 2;
+      const hit = segHit(ix, iz, ox, oz, N[i], N[i + 1], N[j], N[j + 1]);
+      if (!hit) continue;
+      // (the points outside go; the crossing is the new end)
+      const keep = end === 0 ? out.slice(k * 2) : out.slice(0, (m - k) * 2);
+      const hx = Math.round(hit[0] * 100) / 100, hz = Math.round(hit[1] * 100) / 100;
+      out.length = 0;
+      if (end === 0) out.push(hx, hz, ...keep); else out.push(...keep, hx, hz);
+      return;
+    }
+  };
+  cut(0); cut(1);
+  return out;
+}
+/** where segment a→b crosses segment c→d, if it does */
+function segHit(ax: number, az: number, bx: number, bz: number, cx: number, cz: number, dx: number, dz: number): [number, number] | null {
+  const rx = bx - ax, rz = bz - az, sx = dx - cx, sz = dz - cz, den = rx * sz - rz * sx;
+  if (Math.abs(den) < 1e-9) return null;
+  const t = ((cx - ax) * sz - (cz - az) * sx) / den, u = ((cx - ax) * rz - (cz - az) * rx) / den;
+  return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? [ax + rx * t, az + rz * t] : null;
+}
+
+/** An internal road's join to the road outside: from its end (ex, ez) to the plot's edge at (px, pz) on edge
+ *  [ax, az, bx, bz], straight out across the road widening (`lost`, the DP road's take) to the kerb of the road as it is,
+ *  as wide as the road and flared there into a bell mouth (corner radius up to 4.5 m, as an access road's). */
+export function joinOf(N: number[], lost: number[][], edge: number[], px: number, pz: number, ex: number, ez: number, w: number): number[] | null {
+  const [ax, az, bx, bz] = edge, L = Math.hypot(bx - ax, bz - az);
+  if (L < 0.01) return null;
+  const ux = (bx - ax) / L, uz = (bz - az) / L;
+  // (outward: the side of the edge off the plot)
+  let tx = uz, tz = -ux;
+  if (pointIn(N, px + tx * 0.5, pz + tz * 0.5)) { tx = -tx; tz = -tz; }
+  // (out until off the plot and the widening; a little into the road)
+  let D = 0;
+  while (D < 40 && (pointIn(N, px + tx * (D + 0.1), pz + tz * (D + 0.1)) || lost.some((l) => pointIn(l, px + tx * (D + 0.1), pz + tz * (D + 0.1))))) D += 0.25;
+  D += 0.3;
+  // (back from the edge to the road's end, if it stops short)
+  const back = Math.max(0, -((ex - px) * tx + (ez - pz) * tz));
+  const h = w / 2, rr = Math.max(1, Math.min(4.5, w * 0.6, D + back - 0.5));
+  const P = (u: number, t: number) => [Math.round((px + ux * u + tx * t) * 100) / 100, Math.round((pz + uz * u + tz * t) * 100) / 100];
+  const ring: number[] = [...P(-h, -back)];
+  // (the bell mouth: a quarter circle each side, from the road's edge out to the kerb)
+  const arc = (side: 1 | -1) => {
+    const pts: number[][] = [];
+    for (let i = 0; i <= 6; i++) { const a = (i / 6) * (Math.PI / 2); pts.push(P(side * (h + rr - rr * Math.cos(a)), D - rr + rr * Math.sin(a))); }
+    return pts;
+  };
+  for (const q of arc(-1)) ring.push(...q);
+  for (const q of arc(1).reverse()) ring.push(...q);
+  ring.push(...P(h, -back));
+  return ring;
 }
 
 /** The drive and the internal roads as a quad per stretch (their width either side of the centre line), and the

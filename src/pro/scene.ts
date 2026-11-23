@@ -915,7 +915,10 @@ export class ProView {
     const G = d.ground.map, flatMP = (m: MP, y: number, mt: THREE.Material) => { for (const t of triangles(m)) if (t.length >= 6) { const a = groundGeos.get(mt) ?? []; a.push(flat(t, y)); groundGeos.set(mt, a); } };
     // (the internal roads in the site kit's surface)
     const KIT = siteKitOf(ds);
-    flatMP(G.road, 0.05, mat(SURFACE_COLOUR[KIT.road.surface], { roughness: KIT.road.surface === 'asphalt' ? 0.95 : 0.85 })); flatMP(G.lot, 0.05, mat('#8b8e95', { roughness: 0.95 })); flatMP(G.path, 0.06, M.paving);
+    const roadMat = mat(SURFACE_COLOUR[KIT.road.surface], { roughness: KIT.road.surface === 'asphalt' ? 0.95 : 0.85 });
+    flatMP(G.road, 0.05, roadMat);
+    // (where an internal road leaves the plot: on across the widening to the road outside, flared at its kerb)
+    for (const j of d.ground.joins ?? []) mesh(flat(j, 0.045), roadMat, false); flatMP(G.lot, 0.05, mat('#8b8e95', { roughness: 0.95 })); flatMP(G.path, 0.06, M.paving);
     flatMP(G.lawn, 0.06, mat('#9fb889')); flatMP(G.bed, 0.07, mat('#6f8f5a'));
     // (the planting as its species: ./render/entourage.ts)
     const trunks = new Boxes(), trees: Tree[] = [];

@@ -106,6 +106,8 @@ export function scrutiny(e: Evaluated, rooms?: RoomsLike): Check[] {
   if (hasBuildings) {
     const short = d.parking.need - d.parking.have;
     add({ key: 'parking', group: 'Parking & open space', rule: 'Parking', clause: `${code} Table 8-B`, required: `${d.parking.need} car bays${shops ? ` (incl. ${shops.cars} for the shops)` : ''}`, proposed: `${d.parking.have} bays${levelsText(d.parking.levels)}`, status: short > 0 ? 'fail' : 'pass' });
+    // (a target over the code's: met or not, never a fail, since the code is met)
+    if (d.parking.want && short <= 0) add({ key: 'parkTarget', group: 'Parking & open space', rule: 'Parking wanted', clause: 'Your target', required: `${d.parking.want} car bays (${Math.round((d.parking.want / Math.max(1, d.parking.need)) * 100)}% of the code's)`, proposed: `${d.parking.have} bays`, status: d.parking.have >= d.parking.want ? 'pass' : 'warn' });
   }
   if (r.area >= RG_FROM) add({ key: 'open', group: 'Parking & open space', rule: 'Recreational open space', clause: `${code} 3.5.1`, required: `${Math.round(RG_SHARE * 100)}% of the plot: ${m2(d.open.need)}`, proposed: m2(d.open.have), status: d.over.open ? 'fail' : 'pass' });
   else add({ key: 'open', group: 'Parking & open space', rule: 'Recreational open space', clause: `${code} 3.5.1`, required: `none under ${m2(RG_FROM)}`, proposed: m2(r.area), status: 'pass' });

@@ -1090,3 +1090,5 @@ details.chk .show { display: inline-flex; align-items: center; gap: 5px; margin:
 .hh.op-keep { color: #8250df; }
 .hh.hh-space { color: #0969da; border-radius: 2px; }
 .part-h .sel { flex: none; max-width: 130px; }
+.hh.hh-bez { width: 11px; height: 11px; min-width: 0; padding: 0; border-radius: 50%; background: var(--up-paper); border: 1.5px solid #0969da; }
+.hh.hh-v.smooth { border-radius: 50%; }

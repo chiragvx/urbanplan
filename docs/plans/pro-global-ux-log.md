@@ -4,6 +4,69 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-23 · Draw, curves on drawn lines and areas, roads that join the road outside
+
+**Why:** the shelf called its drawing tools "Grounds", which said where, not what. An internal road stopped at the compound wall, short of the road it was meant to reach, and drawn lines could only have corners.
+
+**What changed:**
+- **Draw.** The shelf's Grounds is now Draw (a pen): its flyout, tooltips and the outline's "Drawn" list. The flyout says how to curve a line and how a road joins the road outside.
+- **Curves, as a vector drawing app does them** (src/doc/curves.ts), on roads, walls and areas:
+  - Alt-drag a point to pull out its handles; double-click it to make it smooth, or a corner again;
+  - drag a handle to bend the curve, and the other side turns to stay opposite; Alt breaks them apart for a sharp turn;
+  - Smooth and Corners in the bar do every point at once;
+  - adding a point between two, deleting one and moving the whole thing keep the handles.
+  - An element keeps its `nodes` and `bez`; its `spine` or `ring` is the curve sampled about every metre, so the ground, the engine and the 3D need know nothing of curves.
+- **Roads join the road outside.**
+  - A road run out across a road side ends on it (`trimAtFront`), with a gate there.
+  - From each road end on a road side, a join runs straight out across the DP widening to the road as it is, as wide as the road, flared at the kerb into a bell mouth (`joinOf`, `Ground.joins`; radius up to 4.5 m). The optimiser's roads get them too.
+  - The 3D draws the joins in the road's surface.
+- `urbanplan.pick` (the console hook) takes any pick, so a drawn element can be picked from the console.
+
+**How it was checked:**
+- **Figures:** the `evaluate()` snapshot on the nine sample projects is identical to step 6's.
+- **Tests** in tools/dev/test-parts.ts: a smooth point samples a curve and keeps its ends; a moved handle turns the other one, or doesn't with Alt; a curved road keeps its nodes and goes back to plain points; a road run out across a road side is cut on it, but not across a side with no road; the join crosses a 3 m widening and flares to 13 m for a 6 m road.
+- `npx tsc` clean, `npm test` ALL OK (8 suites), `npm run build` OK.
+- **In the browser** (localStorage backed up and restored): a road drawn out past the plot was cut at the edge with a gate; both roads ran with bell mouths across the widening into the road outside; Smooth gave a curved road with its handles on the view.
+
+**Left or known:**
+- Drawing a line doesn't yet make a smooth point on click-and-drag, as a pen tool does; curves come after drawing.
+- Kerbs and footpaths stop at the plot's edge; the join is bare road.
+- Building spines, spaces and parts' outlines are still straight-sided; the plan notes they should use the same model.
+
+---
+
+## 2026-11-23 · Numbers and parking by use (docs/plans/pro-design-freedom.md, step 6)
+
+**Why:** with spaces (step 5), a floor can hold more than one use, but the build cost still went by the floor's use. Nothing said how many people a scheme holds, and "ample parking" couldn't be asked for.
+
+**What changed:**
+- **Build cost by each space's use.** A floor holding spaces of other uses shares its area between them by carpet, and each share is built at its own use's rate. `shared()` in src/doc/site.ts does the split.
+- **People.** Each use line now carries the people it holds: its area divided by the use's occupant load (NBC 2016 Part 4, the use table's `load`). The report has a total (`d.people`); a plain building counts by its plot use.
+- **A parking target.** The project panel's Living section has "Parking wanted", as a % of the code's figure (100–400 %).
+  - The engine reports the bays wanted (`parking.want`), and the automatic basement count now sizes for the target.
+  - A new check, "Parking wanted", passes or warns. It never fails, since the code itself is met.
+- **The area statement** adds:
+  - "Car bays wanted (your target)";
+  - a **By use** block: built-up, carpet, units and people for each use, when the scheme has more than homes;
+  - the people total.
+- **Already true, so no change:** stilts are off by default for projects that aren't housing (`siteDefaults`, src/doc/optimise.ts). Money per space by how its use earns came with step 5.
+
+**How it was checked:**
+- **Figures:** the `evaluate()` snapshot on the nine sample projects is identical apart from the new `people` field (for example, the formed homes hold 2,441 people).
+- **Tests** in tools/dev/test-parts.ts:
+  - people by use;
+  - a hotel space raises the build cost from ₹19.70 cr to ₹22.70 cr;
+  - a 150 % target wants 69 bays for the code's 46.
+- `npx tsc` clean, `npm test` ALL OK (8 suites), `npm run build` OK.
+- Not tried in the browser: the work moved on to the Draw tool.
+
+**Left or known:**
+- The scorecard doesn't yet pick its figure by the main use (passengers for a terminal, parking against target for a shop). It still shows homes, or the money for other uses.
+- Occupant loads are the use table's figures; some are secondary-source placeholders (see the plan's N5).
+- The UDCPR Table 8-B parking ratio fix (step 1's follow-up) is still to do.
+
+---
+
 ## 2026-11-23 · Spaces on floors, first part (docs/plans/pro-design-freedom.md, step 5)
 
 **Why:** a floor had one use. Shops along the front of a floor of homes, a hall beside offices, or a terminal's departments couldn't be said.

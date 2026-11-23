@@ -120,6 +120,7 @@ export function SchemeStep({ p, e, up, toast, pick, part }: StepProps) {
         <Num label="More space between buildings" value={f.spacing} set={(v) => setFill({ spacing: v })} min={0} max={40} unit="m" hint="Over what the rules ask: light, privacy" />
         <Seg<Fill['parking']> value={f.parking} set={(v) => setFill({ parking: v })} label="Parking" options={PARKING} />
         <Num label="Basements" value={f.basements ?? d.site.basements} set={(v) => setFill({ basements: v })} min={0} max={12} hint={f.basements === undefined ? 'As many as the parking needs' : 'As set'} />
+        <Num label="Parking wanted" value={Math.round((f.parkTarget ?? 1) * 100)} set={(v) => setFill({ parkTarget: v > 100 ? v / 100 : undefined })} min={100} max={400} step={10} unit="% of the code" hint={d.parking.want ? `${d.parking.want} bays wanted, ${d.parking.need} by the code` : 'What the code asks; more for ample parking'} />
         {owned && <Note>The layout is yours: these apply when you fill again, except parking and basements, which apply now.</Note>}
       </Section>}
 

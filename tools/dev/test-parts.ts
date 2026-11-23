@@ -4,6 +4,8 @@ import { boxForm, layForm, type Carve, type Form } from '../../src/pro/form';
 import { newPart, pushEdge, tOfFloor, floorOfT } from '../../src/pro/parts';
 import { DEFAULT_PROJECT, type ProProject } from '../../src/pro/project';
 import { evaluate } from '../../src/pro/evaluate';
+import { sampleBez, smoothHandles, moveHandle } from '../../src/doc/curves';
+import { withNodes, nodesOf, trimAtFront, joinOf, type SiteElement } from '../../src/doc/site';
 
 let bad = 0;
 const ok = (c: boolean, s: string) => { if (!c) bad++; console.log(`${c ? 'ok  ' : 'FAIL'} ${s}`); };
@@ -88,6 +90,44 @@ const shopLine = U(e1).find((x) => x.use === 'retail');
 ok(!!shopLine && shopLine.units > 0 && shopLine.floors === 0, `the money counts the shops by their own use (${shopLine?.units} units, on no floor of their own)`);
 const e2 = evaluate(proj({ ...shopsFront, spaces: [{ ...shopsFront.spaces![0], use: 'community' }] }));
 ok(e2.d.parking.need > e1.d.parking.need, `and parks each by its own rule: shops ${e1.d.parking.need}, a hall in their place ${e2.d.parking.need} (homes alone ${e0.d.parking.need})`);
+
+// numbers by use (step 6): build cost and people by each space's use, a parking target
+ok((e1.d.people ?? 0) > 0 && U(e1).some((x) => x.use === 'retail' && (x as { people?: number }).people! > 0), `people by use: ${e1.d.people} in all`);
+const eHall = evaluate(proj({ ...base, spaces: [{ id: 'h', use: 'hotel', ring: rect(-16, -11, 16, 11), lo: 1, hi: 3 }] }));
+ok(eHall.d.money.build > e0.d.money.build, `a hotel space builds at the hotel's rate: ₹${(e0.d.money.build / 1e7).toFixed(2)} → ${(eHall.d.money.build / 1e7).toFixed(2)} cr`);
+const tgt = evaluate({ ...proj(base), fill: { parkTarget: 1.5 } } as ProProject);
+ok(tgt.d.parking.want === Math.ceil(e0.d.parking.need * 1.5), `a target of 150%: ${tgt.d.parking.want} bays wanted for ${tgt.d.parking.need} by the code`);
+
+// curves on drawn lines and areas: the line is the curve sampled, the nodes kept as drawn
+{
+  const nodes = [0, 0, 20, 0, 20, 20];
+  const sm = [null, smoothHandles(nodes, 1, false), null];
+  const pts = sampleBez(nodes, sm, false);
+  ok(pts.length > 10 && pts[0] === 0 && pts[pts.length - 2] === 20 && pts[pts.length - 1] === 20, `a smooth corner samples a curve through it (${pts.length / 2} points), ends as drawn`);
+  const mh = moveHandle([-3, 0, 3, 0], 1, 0, 5, false);
+  ok(!!mh && mh[0] === 0 && mh[1] === -3, `a handle moved turns the other to stay opposite, its length kept (${mh})`);
+  const mb = moveHandle([-3, 0, 3, 0], 1, 0, 5, true);
+  ok(!!mb && mb[0] === -3 && mb[1] === 0, 'Alt: the other stays put');
+  const rd = { id: 'r', kind: 'road', spine: nodes, depth: 6, floors: 0 } as unknown as SiteElement;
+  const c = withNodes(rd, nodes, sm);
+  ok(c.spine.length === pts.length && c.nodes === nodes && nodesOf(c) === nodes, 'a road with curves keeps its nodes; its line is the curve');
+  const back = withNodes(c, nodes, [null, null, null]);
+  ok(!back.nodes && !back.bez && back.spine.join() === nodes.join(), 'all corners again: just the points');
+}
+// a road drawn out of the plot across a road side: cut at the edge, a gate there and a join on to the road outside
+{
+  const N = [0, 0, 100, 0, 100, 80, 0, 80];
+  const t = trimAtFront([50, 40, 50, -6], N, [true, false, false, false]);
+  ok(t.length === 4 && t[3] === 0, `a road run out across the road side ends on it (${t})`);
+  const kept = trimAtFront([50, 40, 50, -6], N, [false, false, false, false]);
+  ok(kept[3] === -6, 'across a side with no road: left as drawn');
+  const lost = [[0, 0, 100, 0, 100, -3, 0, -3]];
+  const j = joinOf(N, lost, [0, 0, 100, 0], 50, 0, 50, 1, 6)!;
+  let zMin = Infinity, xMin = Infinity, xMax = -Infinity;
+  for (let i = 0; i < j.length; i += 2) { zMin = Math.min(zMin, j[i + 1]); xMin = Math.min(xMin, j[i]); xMax = Math.max(xMax, j[i]); }
+  ok(zMin < -3 && zMin > -4, `its join runs across the 3 m widening to the road (to z ${zMin})`);
+  ok(xMax - xMin > 6 + 2, `and flares at the kerb: ${(xMax - xMin).toFixed(1)} m across for a 6 m road`);
+}
 
 console.log(bad ? `${bad} FAILED` : 'ALL OK');
 if (bad) process.exitCode = 1;

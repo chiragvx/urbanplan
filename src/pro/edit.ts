@@ -862,7 +862,7 @@ export function moved(p: ProProject, e: Evaluated, what: Picked, dx: number, dz:
   if (what.k === 'feature') return { features: (p.features ?? []).map((f) => (f.id === what.id ? { ...f, pts: shift(f.pts, dx, dz) } : f)) };
   const s = own(p, e);
   if (what.k === 'building') return { scheme: { ...s, buildings: s.buildings.map((b) => (b.id === what.id ? { ...b, spine: shift(b.spine, dx, dz) } : b)) } };
-  return { scheme: { ...s, elements: s.elements.map((x) => (x.id === what.id ? { ...x, spine: shift(x.spine, dx, dz), ...(x.ring ? { ring: shift(x.ring, dx, dz) } : {}) } : x)) } };
+  return { scheme: { ...s, elements: s.elements.map((x) => (x.id === what.id ? { ...x, spine: shift(x.spine, dx, dz), ...(x.ring ? { ring: shift(x.ring, dx, dz) } : {}), ...(x.nodes ? { nodes: shift(x.nodes, dx, dz) } : {}) } : x)) } };
 }
 /** the project without it */
 export function removed(p: ProProject, e: Evaluated, what: Picked): Partial<ProProject> {

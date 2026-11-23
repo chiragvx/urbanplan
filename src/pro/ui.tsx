@@ -114,6 +114,9 @@ const P: Record<string, string> = {
   wave: 'M8 20c-2.5-4 2.5-5 0-8s2.5-5 0-8h8c-2.5 3 2.5 5 0 8s2.5 4 0 8M4 20h16',
   lean: 'M5 20l6-16h7l-6 16M3 20h18',
   curve: 'M9 4h6a5 5 0 015 5v6a5 5 0 01-5 5H9a5 5 0 01-5-5V9a5 5 0 015-5z',
+  pen: 'M4 20l4-1 11-11-3-3L5 16zM14 7l3 3',
+  smooth: 'M3 18c5 0 4-12 9-12s4 12 9 12',
+  corner: 'M3 18l9-12 9 12',
   slot: 'M6 3h12v18H6zM10 6l4 3-4 3 4 3-4 3',
   shell: 'M8 21V7h8v14M4 21V3M20 21V3M4 7h4M16 7h4',
 };

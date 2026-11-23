@@ -1,5 +1,5 @@
 // The tool shelf on the view's left edge: what's drawn on the map is picked here, not in the panel.
-// Select (V); Building ▸ (the template gallery and the basic shapes); Grounds ▸ (gardens, parking, roads, gates,
+// Select (V); Building ▸ (the template gallery and the basic shapes); Draw ▸ (gardens, parking, roads, gates,
 // walls…); Site ▸ (what's there already: trees, structures, power lines, water, no-build zones); Plot (draw its
 // outline again); Measure (M). A ▸ opens a flyout beside the shelf; picking a tool closes it. Each has its word under
 // its icon: the tools are the main way in (docs/plans/pro-ia-rethink.md §2.3).
@@ -47,17 +47,17 @@ export function Shelf({ tool, setTool: set, hint, outline }: { tool: Tool; setTo
       <div class="shelf-bar" role="toolbar" aria-label="Draw on the map" aria-orientation="vertical">
         <button type="button" class={tool.k === 'select' ? 'on' : ''} aria-pressed={tool.k === 'select'} aria-label="Select and move" aria-keyshortcuts="V" data-tip="Select and move (V)" onClick={() => setTool(SELECT)}><Icon n="cursor" size={18} /><span aria-hidden="true">Select</span></button>
         {btn('building', 'tower', 'Add a building', 'Building')}
-        {btn('grounds', 'leaf', 'Add to the grounds: gardens, parking, roads, gates, walls', 'Grounds')}
+        {btn('grounds', 'pen', 'Draw on the plot: roads, parking, gardens, gates, walls', 'Draw')}
         {btn('site', 'tree', 'What’s on the site: trees, structures, power lines, water, no-build zones', 'Site')}
         <button type="button" class={tool.k === 'plot' ? 'on' : ''} aria-pressed={tool.k === 'plot'} aria-label="Draw the plot again" data-tip="Draw the plot’s outline again" onClick={() => setTool(tool.k === 'plot' ? SELECT : { k: 'plot' })}><Icon n="plan" size={18} /><span aria-hidden="true">Plot</span></button>
         <button type="button" class={tool.k === 'measure' ? 'on' : ''} aria-pressed={tool.k === 'measure'} aria-label="Measure" aria-keyshortcuts="M" data-tip="Measure (M)" onClick={() => setTool(tool.k === 'measure' ? SELECT : { k: 'measure' })}><Icon n="ruler" size={18} /><span aria-hidden="true">Measure</span></button>
         {outline && <><i class="shelf-sep" aria-hidden="true" /><button type="button" class={outline.on ? 'on' : ''} aria-pressed={outline.on} aria-label="The outline: what's in the project" aria-keyshortcuts="O" data-tip="The outline: what's in the project (O)" onClick={outline.toggle}><Icon n="list" size={18} /><span aria-hidden="true">Outline</span></button></>}
       </div>
       {fly && (
-        <div class="flyout" role="dialog" aria-label={fly === 'building' ? 'Add a building' : fly === 'grounds' ? 'Add to the grounds' : 'What’s on the site'}>
+        <div class="flyout" role="dialog" aria-label={fly === 'building' ? 'Add a building' : fly === 'grounds' ? 'Draw on the plot' : 'What’s on the site'}>
           {fly === 'building' && <><h3>Add a building</h3><p>Pick one, then click the map.</p><Gallery tool={tool} setTool={setTool} /></>}
-          {fly === 'grounds' && <><h3>Add to the grounds</h3><p>Areas: drag them out, or click their corners. Lines: click along, Enter to finish. Type a length while drawing.</p>
-            <Grid label="On the grounds" tool={tool} setTool={setTool} items={ELEMENT_TOOLS.map((s) => ({ t: { k: 'element', kind: s.kind } as Tool, label: s.label, icon: s.icon }))} /></>}
+          {fly === 'grounds' && <><h3>Draw</h3><p>Areas: drag them out, or click their corners. Lines: click along, Enter to finish. Type a length while drawing. A road that ends on the plot's edge joins the road outside. Curves: Alt-drag a point, or double-click it.</p>
+            <Grid label="Draw" tool={tool} setTool={setTool} items={ELEMENT_TOOLS.map((s) => ({ t: { k: 'element', kind: s.kind } as Tool, label: s.label, icon: s.icon }))} /></>}
           {fly === 'site' && <><h3>What’s on the site</h3><p>What to build round: each keeps its clearance clear.</p>
             <Grid label="On the site" tool={tool} setTool={setTool} items={FEATURES.map((f) => ({ t: { k: 'feature', kind: f.kind } as Tool, label: f.label, icon: f.icon }))} /></>}
         </div>

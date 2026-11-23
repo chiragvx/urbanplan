@@ -85,8 +85,8 @@ export function Outline({ p, e, checks, picked, pick, show, frame, hidden, locke
           );
         })}</ul>
         {els.length > 0 && <>
-          <h4>On the grounds <small>{els.length}</small></h4>
-          <ul role="tree" aria-label="On the grounds">{els.map((x) => {
+          <h4>Drawn <small>{els.length}</small></h4>
+          <ul role="tree" aria-label="Drawn">{els.map((x) => {
             const label = elName(x.kind);
             return (
               <li role="treeitem" aria-selected={isOn('element', x.id)} class={`ol-i${isOn('element', x.id) ? ' on' : ''}${hidden.has(x.id) ? ' off' : ''}`} onClick={() => { if (!locked.has(x.id)) pick({ k: 'element', id: x.id }); }} onDblClick={() => frame(ringOfEl(x as never))}>

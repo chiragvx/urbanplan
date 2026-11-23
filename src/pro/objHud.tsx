@@ -3,6 +3,9 @@
 // a drain, a structure, a no-build zone).
 // - its points are handles: drag one (snapped as drawing is), click the + between two for a new point, focus one and
 //   press Delete to take it away;
+// - curves, as a vector drawing app does them (a road, a wall, an area): Alt-drag a point to pull out its handles,
+//   double-click it to make it smooth or a corner again, drag a handle to bend the curve (the other side follows;
+//   Alt breaks them apart for a cusp); Smooth or Corners in the bar for every point at once (src/doc/curves.ts);
 // - a point feature has a radius handle and a clearance handle on its rings;
 // - a selection bar with what it has to set: a road's width, a parking tower's levels, a roundabout's size, a gate's
 //   width, a feature's radius, clearance and note; remove, and deselect.
@@ -12,7 +15,8 @@ import type { ProView } from './scene';
 import type { Evaluated } from './evaluate';
 import type { ProProject } from './project';
 import { ELEMENT_TOOLS, own, removed, type CanvasEdit, type Picked } from './edit';
-import { ELEMENTS, isArea, ringOf, roadFrame, type SiteElement } from '../doc/site';
+import { ELEMENTS, isArea, nodesOf, roadFrame, withNodes, type SiteElement } from '../doc/site';
+import { moveHandle, smoothHandles, type Handles } from '../doc/curves';
 import { featureOf, INTERNAL_WIDTHS, type SiteFeature } from './siteObjects';
 import { usePins, type Tx } from './hud';
 import { Icon } from './ui';
@@ -43,7 +47,7 @@ function NumIn({ label, value, unit, min, max, step = 0.5, set }: { label: strin
 export function ObjectHud({ view, edit, p, e, picked, pick, tx, snap, readOnly, toast }: Props) {
   const { root, bar, at, box, ref } = usePins(view);
   const [dragging, setDragging] = useState<string | null>(null);
-  const drag = useRef<null | { key: string; base: ProProject; e: Evaluated; i: number; pts: number[]; c?: Pt; timer: number; pending: Partial<ProProject> | null; changed?: boolean }>(null);
+  const drag = useRef<null | { key: string; base: ProProject; e: Evaluated; i: number; pts: number[]; bez?: Handles[]; c?: Pt; timer: number; pending: Partial<ProProject> | null; changed?: boolean }>(null);
 
   const f: SiteFeature | undefined = picked?.k === 'feature' ? (p.features ?? []).find((x) => x.id === picked.id) : undefined;
   const elD = picked?.k === 'element' ? (e.d.site.elements ?? []).find((x) => x.id === picked.id) : undefined;
@@ -52,10 +56,14 @@ export function ObjectHud({ view, edit, p, e, picked, pick, tx, snap, readOnly, 
 
   // ---------- the rings round a point feature, drawn over the scene ----------
   const fr = f && F?.shape === 'point' && f.pts.length >= 2 ? { c: [f.pts[0], f.pts[1]] as Pt, r: f.r ?? F.r, clear: f.clear ?? F.clear } : null;
-  const decorKey = fr ? `${fr.c}|${fr.r}|${fr.clear}` : '';
+  // (a curved element's handles: a line from each point to its handles)
+  const hn = el?.bez && el.nodes ? el.nodes : null, hb = el?.bez ?? null;
+  const decorKey = fr ? `${fr.c}|${fr.r}|${fr.clear}` : hn ? JSON.stringify([hn, hb]) : '';
   useEffect(() => {
     if (!edit) return;
-    edit.decor = fr ? { lines: circle(fr.c, Math.max(0.2, fr.r)), dashed: fr.clear > 0 ? circle(fr.c, fr.r + fr.clear, 56) : [] } : null;
+    const hl: number[] = [];
+    if (hn && hb) hb.forEach((h, i) => { if (!h) return; const x = hn[i * 2], z = hn[i * 2 + 1]; hl.push(x + h[0], 0.15, z + h[1], x, 0.15, z, x, 0.15, z, x + h[2], 0.15, z + h[3]); });
+    edit.decor = fr ? { lines: circle(fr.c, Math.max(0.2, fr.r)), dashed: fr.clear > 0 ? circle(fr.c, fr.r + fr.clear, 56) : [] } : hl.length ? { lines: hl } : null;
     edit.draw();
     return () => { edit.decor = null; edit.draw(); };
   }, [decorKey, edit]);
@@ -77,12 +85,23 @@ export function ObjectHud({ view, edit, p, e, picked, pick, tx, snap, readOnly, 
     if (f) return (q.features ?? []).find((x) => x.id === f.id)?.pts ?? [];
     const x = (q.scheme?.elements.find((y) => y.id === el!.id) ?? (qe.d.site.elements ?? []).find((y) => y.id === el!.id)) as SiteElement | undefined;
     if (!x) return [];
-    return isArea(x) ? ringOf(x) : x.spine;
+    return nodesOf(x);
   };
-  const withPts = (q: ProProject, qe: Evaluated, pts: number[]): Partial<ProProject> => {
+  const bezOf = (q: ProProject, qe: Evaluated): Handles[] | undefined => {
+    if (f) return undefined;
+    const x = (q.scheme?.elements.find((y) => y.id === el!.id) ?? (qe.d.site.elements ?? []).find((y) => y.id === el!.id)) as SiteElement | undefined;
+    return x?.bez;
+  };
+  /** the project with its points (and, for an element, their handles) changed: unset handles keep the ones it has
+   *  when the points are as many, else none */
+  const withPts = (q: ProProject, qe: Evaluated, pts: number[], bez?: Handles[]): Partial<ProProject> => {
     if (f) return { features: (q.features ?? []).map((x) => (x.id === f.id ? { ...x, pts } : x)) };
     const s = own(q, qe);
-    return { scheme: { ...s, elements: s.elements.map((x) => (x.id === el!.id ? (isArea(x) ? { ...x, ring: pts } : { ...x, spine: pts }) : x)) } };
+    return { scheme: { ...s, elements: s.elements.map((x) => {
+      if (x.id !== el!.id) return x;
+      const b = bez ?? (x.bez && x.bez.length === pts.length / 2 ? x.bez : undefined);
+      return withNodes(x, pts, b);
+    }) } };
   };
   const setEl = (fn: (x: SiteElement) => SiteElement) => { const s = own(p, e); once({ scheme: { ...s, elements: s.elements.map((x) => (x.id === el!.id ? fn(x) : x)) } }); };
   const setF = (o: Partial<SiteFeature>) => once({ features: (p.features ?? []).map((x) => (x.id === f!.id ? { ...x, ...o } : x)) });
@@ -90,6 +109,8 @@ export function ObjectHud({ view, edit, p, e, picked, pick, tx, snap, readOnly, 
   const pts = ptsOf(p, e), P = pairs(pts);
   const editPts = area || line || kind === 'gate';
   const closed = area, minN = area ? 3 : 2;
+  const curves = !!el && (area || line);
+  const bez = bezOf(p, e);
 
   // ---------- anchors ----------
   const A: [string, [number, number, number]][] = [];
@@ -97,6 +118,7 @@ export function ObjectHud({ view, edit, p, e, picked, pick, tx, snap, readOnly, 
     P.forEach(([x, z], i) => A.push([`v${i}`, [x, 0.2, z]]));
     if (kind !== 'gate') P.forEach(([x, z], i) => { if (!closed && i === P.length - 1) return; const [bx, bz] = P[(i + 1) % P.length]; A.push([`m${i}`, [(x + bx) / 2, 0.2, (z + bz) / 2]]); });
   }
+  if (curves && bez) P.forEach(([x, z], i) => { const h = bez[i]; if (!h) return; A.push([`hi${i}`, [x + h[0], 0.2, z + h[1]]], [`ho${i}`, [x + h[2], 0.2, z + h[3]]]); });
   const U = (() => { const R = roadFrame(e.r); return [R.ux, R.uz] as Pt; })();
   if (fr) { A.push(['r', [fr.c[0] + U[0] * fr.r, 0.2, fr.c[1] + U[1] * fr.r]]); if (F!.clear > 0 || fr.clear > 0) A.push(['c', [fr.c[0] + U[0] * (fr.r + fr.clear), 0.2, fr.c[1] + U[1] * (fr.r + fr.clear)]]); }
   at.current = new Map(A);
@@ -116,6 +138,15 @@ export function ObjectHud({ view, edit, p, e, picked, pick, tx, snap, readOnly, 
       const o = d.key === 'r' ? { r: Math.max(0.2, Math.min(30, grid(dist, ev.altKey))) } : { clear: Math.max(0, Math.min(60, grid(dist - r0, ev.altKey))) };
       return { features: (d.base.features ?? []).map((x) => (x.id === f!.id ? { ...x, ...o } : x)) };
     }
+    // a handle, or (Alt on a point) both pulled out of it: its offset from the point, the other side opposite
+    if (d.key.startsWith('h') || d.key.startsWith('p')) {
+      const g = view.groundAt(ev.clientX, ev.clientY); if (!g) return null;
+      const nx = d.pts[d.i * 2], nz = d.pts[d.i * 2 + 1], ox = g[0] - nx, oz = g[1] - nz;
+      const B: Handles[] = Array.from({ length: d.pts.length / 2 }, (_, k) => d.bez?.[k] ?? null);
+      if (d.key.startsWith('p')) B[d.i] = Math.hypot(ox, oz) < 0.3 ? null : [r2(-ox), r2(-oz), r2(ox), r2(oz)];
+      else B[d.i] = moveHandle(B[d.i], d.key.startsWith('hi') ? 0 : 1, ox, oz, ev.altKey);
+      return withPts(d.base, d.e, d.pts, B);
+    }
     // a point: snapped as drawing is, to the plot, the margins, the buildings and its own other points
     const extra: number[] = []; pairs(d.pts).forEach(([x, z], i) => { if (i !== d.i) extra.push(x, z); });
     const g = edit?.snapAt(ev.clientX, ev.clientY, ev, { extra }) ?? view.groundAt(ev.clientX, ev.clientY);
@@ -126,7 +157,7 @@ export function ObjectHud({ view, edit, p, e, picked, pick, tx, snap, readOnly, 
   const flush = () => { const d = drag.current; if (d?.pending) { tx.live(d.pending); d.pending = null; d.changed = true; } };
   const start = (key: string, i: number, base: ProProject, ev: PointerEvent, c?: Pt) => {
     (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
-    drag.current = { key, base, e, i, pts: ptsOf(base, e), c, timer: 0, pending: null };
+    drag.current = { key, base, e, i, pts: ptsOf(base, e), bez: bezOf(base, e), c, timer: 0, pending: null };
     setDragging(key);
   };
   const down = (key: string, i: number) => (ev: PointerEvent) => {
@@ -134,16 +165,27 @@ export function ObjectHud({ view, edit, p, e, picked, pick, tx, snap, readOnly, 
     ev.preventDefault(); ev.stopPropagation();
     tx.begin();
     if (key.startsWith('m')) {
-      // (a new point between two: put in, then dragged)
+      // (a new point between two: put in, then dragged; the curves keep their handles)
       const [ax, az] = P[i], [bx2, bz2] = P[(i + 1) % P.length], np = [...pts];
       np.splice((i + 1) * 2, 0, r2((ax + bx2) / 2), r2((az + bz2) / 2));
-      const o = withPts(p, e, np); tx.live(o);
+      const nb = bez ? [...bez.slice(0, i + 1), null, ...bez.slice(i + 1)] : undefined;
+      const o = withPts(p, e, np, nb); tx.live(o);
       start(`v${i + 1}`, i + 1, { ...p, ...o }, ev);
       drag.current!.changed = true;
       return;
     }
+    // (Alt on a point of a line or an area: pull its handles out of it)
+    if (curves && ev.altKey && key.startsWith('v')) { start(`p${i}`, i, p, ev); return; }
     start(key, i, p, ev, fr?.c);
   };
+  /** a point made smooth (handles along its neighbours) or a corner again */
+  const toggleSmooth = (i: number) => {
+    if (!curves) return;
+    const B: Handles[] = P.map((_, k) => bez?.[k] ?? null);
+    B[i] = B[i] ? null : smoothHandles(pts, i, closed);
+    once(withPts(p, e, pts, B));
+  };
+  const allSmooth = (on: boolean) => once(withPts(p, e, pts, on ? P.map((_, k) => smoothHandles(pts, k, closed)) : P.map(() => null)));
   const move = (ev: PointerEvent) => {
     const d = drag.current; if (!d) return;
     const o = changeFor(d, ev); if (!o) return;
@@ -161,7 +203,7 @@ export function ObjectHud({ view, edit, p, e, picked, pick, tx, snap, readOnly, 
     if (ev.key !== 'Delete' && ev.key !== 'Backspace') return;
     ev.preventDefault(); ev.stopPropagation();
     if (P.length <= minN) { toast(`It needs at least ${minN} points.`); return; }
-    const np = [...pts]; np.splice(i * 2, 2); once(withPts(p, e, np));
+    const np = [...pts]; np.splice(i * 2, 2); once(withPts(p, e, np, bez ? bez.filter((_, k) => k !== i) : undefined));
   };
 
   const name = el ? (ELEMENT_TOOLS.find((x) => x.kind === el.kind)?.label ?? ELEMENTS.find((x) => x.value === el.kind)?.label ?? 'On the grounds') : F!.label;
@@ -170,9 +212,13 @@ export function ObjectHud({ view, edit, p, e, picked, pick, tx, snap, readOnly, 
   return (
     <div class={`hud${dragging ? ' dragging' : ''}`} ref={root}>
       {editPts && P.map((_, i) => (
-        <button type="button" ref={ref(`v${i}`)} class={`hh hh-v${dragging === `v${i}` ? ' on' : ''}`} aria-label={`Point ${i + 1}: drag it; Delete takes it away`} data-tip={dragging ? undefined : 'Drag · Delete removes it'}
-          onPointerDown={down(`v${i}`, i)} onPointerMove={move} onPointerUp={end} onPointerCancel={end} onKeyDown={vkeys(i)} />
+        <button type="button" ref={ref(`v${i}`)} class={`hh hh-v${dragging === `v${i}` || dragging === `p${i}` ? ' on' : ''}${bez?.[i] ? ' smooth' : ''}`} aria-label={`Point ${i + 1}: drag it; Delete takes it away${curves ? '; double-click for a smooth point or a corner, Alt-drag to pull out its handles' : ''}`} data-tip={dragging ? undefined : curves ? 'Drag · Alt-drag: curve it · double-click: smooth or corner' : 'Drag · Delete removes it'}
+          onPointerDown={down(`v${i}`, i)} onPointerMove={move} onPointerUp={end} onPointerCancel={end} onKeyDown={vkeys(i)} onDblClick={() => toggleSmooth(i)} />
       ))}
+      {curves && bez && P.map((_, i) => bez[i] && (['hi', 'ho'] as const).filter((w) => { const h = bez[i]!, o = w === 'hi' ? 0 : 2; return Math.hypot(h[o], h[o + 1]) > 0.05; }).map((w) => (
+        <button type="button" ref={ref(`${w}${i}`)} class={`hh hh-bez${dragging === `${w}${i}` ? ' on' : ''}`} aria-label={`Point ${i + 1}'s ${w === 'hi' ? 'in' : 'out'} handle: drag to bend the curve; Alt for a sharp turn`} data-tip={dragging ? undefined : 'Drag to bend · Alt: only this side'}
+          onPointerDown={(ev) => { if (ev.button !== 0) return; ev.preventDefault(); ev.stopPropagation(); tx.begin(); start(`${w}${i}`, i, p, ev); }} onPointerMove={move} onPointerUp={end} onPointerCancel={end} />
+      )))}
       {editPts && kind !== 'gate' && P.map((_, i) => (!closed && i === P.length - 1) ? null : (
         <button type="button" ref={ref(`m${i}`)} class="hh hh-mid" aria-label={`A new point between ${i + 1} and ${(i + 1) % P.length + 1}`} data-tip={dragging ? undefined : 'Drag for a new point'}
           onPointerDown={down(`m${i}`, i)} onPointerMove={move} onPointerUp={end} onPointerCancel={end}><Icon n="plus" size={10} stroke={2.4} /></button>
@@ -192,6 +238,10 @@ export function ObjectHud({ view, edit, p, e, picked, pick, tx, snap, readOnly, 
         {(el?.kind === 'roundabout' || el?.kind === 'tank') && <><span class="hsep" /><NumIn label="Across" value={el.depth} unit="m" min={2} max={60} set={(v) => setEl((x) => ({ ...x, depth: v }))} /></>}
         {el?.kind === 'gate' && <><span class="hsep" /><NumIn label="Width" value={gateW} unit="m" min={1} max={20} set={(v) => setEl((x) => { const s = x.spine, cx = (s[0] + s[2]) / 2, cz = (s[1] + s[3]) / 2, L = Math.hypot(s[2] - s[0], s[3] - s[1]) || 1, ux = (s[2] - s[0]) / L, uz = (s[3] - s[1]) / L; return { ...x, spine: [r2(cx - ux * v / 2), r2(cz - uz * v / 2), r2(cx + ux * v / 2), r2(cz + uz * v / 2)] }; })} /></>}
         {el?.kind === 'wall' && D && <span class="hmeta">{fmt(el.depth * 100)} cm thick</span>}
+        {curves && <><span class="hsep" />
+          <button type="button" aria-label="Smooth every point" data-tip="Smooth: curves through every point" aria-pressed={!!bez?.every(Boolean)} onClick={() => allSmooth(true)}><Icon n="smooth" size={15} /></button>
+          <button type="button" aria-label="Every point a corner" data-tip="Corners: straight between the points" aria-pressed={!bez?.some(Boolean)} onClick={() => allSmooth(false)}><Icon n="corner" size={15} /></button>
+        </>}
         {f && <><span class="hsep" />
           {fr && <NumIn label={f.kind === 'tree' ? 'Canopy' : 'Radius'} value={fr.r} unit="m" min={0.2} max={30} set={(v) => setF({ r: v })} />}
           <NumIn label="Clear" value={f.clear ?? F!.clear} unit="m" min={0} max={60} set={(v) => setF({ clear: v })} />

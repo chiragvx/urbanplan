@@ -502,8 +502,8 @@ function App() {
       get: () => structuredClone(pRef.current),
       /** change it (as a panel would: undoable) */
       set: (o: Partial<ProProject>) => up(o),
-      /** pick a building by its id, or nothing */
-      pick: (id: string | null) => setPicked(id ? { k: 'building', id } : null),
+      /** pick a building by its id, anything else as the view picks it ({ k: 'element', id }), or nothing */
+      pick: (id: string | EditPicked) => setPicked(typeof id === 'string' ? { k: 'building', id } : id),
       /** everything worked out from a project (this one unless given) */
       evaluate: (q?: ProProject) => evaluate(q ?? pRef.current),
       scrutiny: (q?: ProProject) => { const x = evaluate(q ?? pRef.current); return scrutiny(x, x.d.buildings.map((b, i) => fitRooms(b, x.plans[i], x.r.code))); },

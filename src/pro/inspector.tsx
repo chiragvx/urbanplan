@@ -248,7 +248,7 @@ function ObjectInspector({ p, e, up, picked, pick, toast, hide, readOnly }: Prop
   return (
     <Frame hide={hide} title={<b>{name}</b>} actions={!readOnly && <Btn kind="quiet" icon="trash" title="Remove (Delete)" onClick={del} />}>
       <fieldset disabled={readOnly}>
-        <p class="hint-line"><Icon n="edit" size={14} />Drag its points on the view.</p>
+        <p class="hint-line"><Icon n="edit" size={14} />Drag its points on the view.{el && el.kind !== 'gate' && el.kind !== 'roundabout' ? ' Alt-drag a point, or double-click it, to curve it.' : ''}{el?.kind === 'road' ? ' Run an end out over a road side and it joins the road outside.' : ''}</p>
         {el?.kind === 'road' && <Select<number> label="Width" value={el.depth} onChange={(v) => setEl((x) => ({ ...x, depth: v }))} options={INTERNAL_WIDTHS.map((w) => ({ value: w, label: `${w} m` }))} />}
         {el?.kind === 'parking' && <Num label="Levels" value={el.levels ?? 3} set={(v) => setEl((x) => ({ ...x, levels: Math.max(1, Math.min(12, v)) }))} min={1} max={12} />}
         {(el?.kind === 'roundabout' || el?.kind === 'tank') && <Num label="Across" value={el.depth} set={(v) => setEl((x) => ({ ...x, depth: Math.max(2, Math.min(60, v)) }))} min={2} max={60} step={0.5} unit="m" />}
