@@ -19,7 +19,7 @@ const STEPS = [
   { key: 'scheme', label: 'Scheme', title: 'Every building yours', body: 'Fill the plot to your settings, or place, turn and size each building. Its own flat mix, lifts, stairs and services.' },
   { key: 'money', label: 'Money', title: 'Is it worth it', body: 'Price, cost and the land deal. Profit, IRR and the cash, month by month.' },
   { key: 'approval', label: 'Approval', title: 'Ready for the authority', body: 'The scrutiny, NOCs, fees and documents. Drawings, IFC and a PreDCR DXF.' },
-  { key: 'explore', label: 'Explore', title: 'Every option', body: 'Many schemes at once, a written brief, plots screened side by side.' },
+  { key: 'explore', label: 'Options', title: 'Every option', body: 'Several schemes for one plot, each kept as an option, compared side by side.' },
 ];
 
 const FEATURES: { icon: keyof typeof Icon; title: string; body: string }[] = [

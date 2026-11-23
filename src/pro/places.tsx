@@ -1,7 +1,7 @@
 // The project's settings, and the places left on the rail. With nothing picked, the inspector on the view's right is
 // the project (docs/plans/pro-ia-rethink.md §2.4): the site, what you're building and the look. The plot, the
 // buildings and what's on the site are picked in the view or the outline, so they aren't listed here; laying a scheme
-// out from a brief is Generate's, on the toolbar (./generate.tsx). Numbers and Approval stay as places.
+// out is set in the project's Layout section (./sitePanels.tsx). Numbers and Approval stay as places.
 import type { ComponentChildren } from 'preact';
 import { SchemeStep, SiteStep2 } from './sitePanels';
 import { LadderBox } from './numbersUi';

@@ -272,17 +272,6 @@ details.chk.info summary .ico { color: var(--up-muted); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chips .chip { font: 500 11.5px/1.4 var(--up-font-body); padding: 3px 9px; border-radius: 999px; background: var(--up-surface-2); color: var(--up-ink); box-shadow: inset 0 0 0 1px var(--up-line-strong); }
 .chip.off { background: var(--up-surface-2); color: var(--up-muted); text-decoration: line-through; }
-.trace { margin: 0; padding-left: 18px; display: grid; gap: 3px; font-size: 12px; color: var(--up-ink-2); max-height: 180px; overflow-y: auto; }
-.trace .pick { color: var(--up-ink); font-weight: 600; }
-.trace .check { color: var(--up-muted); }
-.opts { display: grid; gap: 6px; }
-.opt { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--up-line); }
-.opt.best { border-color: var(--up-ink); box-shadow: inset 0 0 0 1px var(--up-ink); }
-.opt > div { display: grid; min-width: 0; } .opt b { font-size: 12.5px; } .opt small { color: var(--up-muted); font-size: 11.5px; }
-.opt-n { text-align: right; } .opt-n b { font-variant-numeric: tabular-nums; }
-.layout { width: 100%; height: auto; max-height: 300px; background: var(--up-surface-2); border-radius: 10px; }
-.l-site { fill: none; stroke: var(--up-ink); } .l-road { fill: var(--up-muted); } .l-open { fill: var(--up-line-strong); } .l-amen { fill: var(--up-line); stroke: var(--up-muted); stroke-dasharray: 2 2; }
-.l-plot { fill: var(--up-surface); stroke: var(--up-ink); }
 .drop { position: relative; display: flex; gap: 10px; align-items: center; padding: 12px; border-radius: 10px; border: 1.5px dashed var(--up-line-strong); cursor: pointer; color: var(--up-ink); }
 .drop:hover { border-color: var(--up-ink); }
 .drop span { display: grid; color: var(--up-ink); } .drop small { color: var(--up-muted); font-size: 11.5px; }
@@ -1009,27 +998,13 @@ details.chk .show { display: inline-flex; align-items: center; gap: 5px; margin:
 @media (max-width: 600px) { .shelf-bar button { width: 46px; min-height: 42px; } .shelf-bar button > span { font-size: 9.5px; } }
 
 /* generated or yours: a chip on the view, right of the tools (docs/plans/pro-ia-rethink.md §2.5) */
-.lchip { position: absolute; left: calc(88px + var(--cover)); top: 84px; z-index: 3; display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 6px 0 11px; border-radius: 16px; border: 1px solid var(--up-line); background: color-mix(in srgb, var(--up-surface) 90%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: var(--up-shadow-sm); color: var(--up-ink); font-size: 12.5px; font-weight: 500; white-space: nowrap; }
-.lchip.gen { padding-right: 12px; }
-.lchip.own { border-color: var(--up-ink); }
-.lchip .linkbtn { font-size: 12.5px; }
-.lchip-m > button, .lchip-m .btn { height: 24px; padding: 0 8px; font-size: 12px; }
-@media (max-width: 600px) { .lchip { left: calc(62px + var(--cover)); top: 72px; } }
 
 /* the project in the inspector (docs/plans/pro-ia-rethink.md step 3): three numbers a row don't fit its width */
 .insp .row.r3 { grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .insp .place-h { margin: 10px 0 0; }
 
-/* Generate on the toolbar (docs/plans/pro-ia-rethink.md step 4) */
+/* the toolbar's separator (before the outline) */
 .shelf-sep { display: block; height: 1px; margin: 3px 6px; background: var(--up-line); }
-.shelf-bar button.gen-b { color: var(--up-ink); }
-.flyout.wide { width: 360px; }
-.gen-pop { display: grid; gap: 10px; }
-.gen-pop .sec { margin: 0; }
-.gen-pop .opt { grid-template-columns: minmax(0, 1fr) auto auto; }
-.gen-more summary { cursor: pointer; font-size: 12.5px; color: var(--up-muted); margin: 4px 0; }
-@media (max-width: 600px) { .flyout.wide { width: min(340px, calc(100vw - 80px)); } }
-.shelf-bar button.gen-b.on { color: var(--up-paper); }
 .shelf:has(.flyout) { z-index: 6; }
 
 /* ---------- less on screen (2026-11-23): detail one hover or click away ---------- */

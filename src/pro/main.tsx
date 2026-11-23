@@ -42,8 +42,6 @@ import { applyDeal, DEFAULT_DEAL, landWorth } from './deal';
 import { AreaStatementBody } from './numbersUi';
 import { CITY_LATLON, indiaTime, sunDirection } from './sun';
 import { encodeShare, decodeShare } from './share';
-import { exploreOptions } from './options';
-import { parseBrief, runBrief } from './brief';
 import { downloadSet, Sheets, SHEET_CSS } from './drawings';
 import { buildModel, ifcLite, modelJson } from './model';
 import { FINDABLE } from './findable';
@@ -51,7 +49,6 @@ import { documents, fees, permissionOf } from './approvals';
 import { findIn, Search, type Cmd } from './search';
 import { ApproveStep, isStep, OLD_STEP, PdfButton, slug, STEPS, type Step, type StepProps } from './steps';
 import { NumbersPlace, ProjectBody } from './places';
-import { Generate } from './generate';
 import { Report, type ReportKind } from './report';
 import { DesignSystemStep } from './designStep';
 import { groundAt } from './terrain';
@@ -325,7 +322,7 @@ function App() {
     if (t === 'building') { setTool({ k: 'building', shape: 'tower' } as Tool); toast('Click on the plot where the tower goes.'); return; }
     if (t === 'moved') { const b = e.d.buildings[0]; if (b) { showBuilding(b.b.id); toast('Drag the arrow on its top for floors, or its middle to move it.'); } else { setTool({ k: 'building', shape: 'tower' } as Tool); toast('Put a building on the plot first: click where it goes.'); } return; }
     if (t === 'numbers') { go('numbers'); return; }
-    if (t === 'option') { dispatchEvent(new Event('urbanplan:generate')); return; }
+    if (t === 'option') { optionActs.duplicate(); return; }
     setDialog('share');
   };
 
@@ -334,15 +331,14 @@ function App() {
   // user's, and the generator's settings wait for a regenerate)
   const ownLayout = !!p.scheme;
   /** the brief's layout again, as a new option beside this one (nothing of this one lost) */
-  const regenAsOption = () => { const q = pRef.current, c = addedOption(q, { scheme: undefined }, 'brief'), name = c.options?.find((o) => o.id === c.option)?.name ?? 'a new option'; up(c); setPicked(null); toast(`Generated again from the brief, as ${name}. Your layout stays in the option menu.`, { undo: true }); };
+  const regenAsOption = () => { const q = pRef.current, c = addedOption(q, { scheme: undefined }, 'brief'), name = c.options?.find((o) => o.id === c.option)?.name ?? 'a new option'; up(c); setPicked(null); toast(`Laid out again from the settings, as ${name}. Your layout stays in the option menu.`, { undo: true }); };
   /** the brief's layout again, here (the hand edits go: one undo brings them back) */
-  const regenHere = () => { tx.once({ scheme: undefined }); setPicked(null); toast('Generated again from the brief: your edits to this layout are gone.', { undo: true }); };
   const regenRef = useRef(regenAsOption); regenRef.current = regenAsOption;
   const ownWas = useRef({ own: ownLayout, opt: p.option });
   useEffect(() => {
     const was = ownWas.current; ownWas.current = { own: ownLayout, opt: p.option };
     if (was.own || !ownLayout || was.opt !== p.option || Date.now() - swappedAt.current < 800 || locked) return;
-    toast('This layout is now yours: brief changes won’t move it.', { undo: true, act: { label: 'Regenerate as a new option', run: () => regenRef.current() } });
+    toast('This layout is now yours: the Layout settings won’t move it.', { undo: true, act: { label: 'Lay it out again as a new option', run: () => regenRef.current() } });
   }, [ownLayout, p.option]);
 
   // ---------- the 3D ----------
@@ -482,7 +478,6 @@ function App() {
       if (ev.key === 'p') setPlan(!plan);
       if (ev.key === 'v') setTool(SELECT);
       if (ev.key === 'm' && !locked) setTool(tool.k === 'measure' ? SELECT : { k: 'measure' });
-      if (ev.key === 'g' && !locked && !p.blank) { setTool(SELECT); dispatchEvent(new Event('urbanplan:generate')); }
       if (ev.key === 's') cam('street');
       if (ev.key === '|' || (ev.key === '\\' && ev.shiftKey)) { setFocus(!focus); toast(focus ? 'Focus mode off.' : 'Focus mode: the sheet and the outline are away. Shift+\\ brings them back.'); return; }
       if (ev.key === '\\') setPanel((v) => !v);
@@ -511,8 +506,6 @@ function App() {
       /** everything worked out from a project (this one unless given) */
       evaluate: (q?: ProProject) => evaluate(q ?? pRef.current),
       scrutiny: (q?: ProProject) => { const x = evaluate(q ?? pRef.current); return scrutiny(x, x.d.buildings.map((b, i) => fitRooms(b, x.plans[i], x.r.code))); },
-      options: (q?: ProProject) => exploreOptions(q ?? pRef.current),
-      brief: (text: string) => runBrief(pRef.current, parseBrief(text).brief),
       deal: (q?: ProProject) => { const x = evaluate(q ?? pRef.current); return applyDeal(x, x.p.deal ?? DEFAULT_DEAL); },
       /** the ground round a place, off the city's terrain */
       ground: (lat: number, lon: number, r?: number) => groundAt(lat, lon, r),
@@ -590,7 +583,6 @@ function App() {
       ...(!phone ? [A('New project', 'plus', () => fresh(), { kind: 'Project', words: 'start blank' })] : []),
       ...(!locked && !phone ? [A('Duplicate this option', 'copy', optionActs.duplicate, { kind: 'Project', words: 'option variant alternative copy scheme' })] : []),
       ...(optionsOf(p).length > 1 ? [A('Compare options', 'layers', optionActs.compare, { kind: 'Project', words: 'compare options side by side' }), ...optionsOf(p).filter((o) => o.id !== p.option).map((o) => A(`Open ${o.name}`, 'layers', () => optionActs.open(o.id), { kind: 'Project', words: 'option switch' }))] : []),
-      ...(!locked ? [A('Generate options', 'spark', () => dispatchEvent(new Event('urbanplan:generate')), { sub: 'From a written brief, or the type, floors and how much to build', words: 'brief explore options fill layout typology plotted generate make' })] : []),
       A('Your dashboard', 'folder', () => location.assign(`${BASE}dashboard/`), { kind: 'Project', words: 'projects all list home' }),
       A('Keyboard shortcuts', 'key', () => setDialog('keys'), { keys: '?' }),
       ...(!phone ? [A('The simple editor', 'site', () => location.assign(`${BASE}app/`), { words: 'map editor city' })] : []),
@@ -642,8 +634,11 @@ function App() {
   // (an option opened or made that leaves buildings out of the view says so, and doesn't fly there)
   const optSeen = useRef(p.option);
   useEffect(() => {
-    if (optSeen.current === p.option) return;
+    const was = optSeen.current;
+    if (was === p.option) return;
     optSeen.current = p.option;
+    // (only a switch between this project's options: not a project opening)
+    if (!was || !optionsOf(p).some((o) => o.id === was)) return;
     const v = view.current; if (!v) return;
     const n = v.outside(e.d.buildings.map((b) => boxOf({ k: 'building', id: b.b.id })).filter((q): q is Box => !!q));
     if (!n) return;
@@ -753,8 +748,7 @@ function App() {
           });
         }} onPointerLeave={() => { setHover(null); setHb(null); cancelAnimationFrame(hbFrame.current); }} />
         <ResultBar e={e} deal={deal} sum={sum} go={(s) => { if (!narrow && (s === 'numbers' || s === 'approve') && report === s) setReport(null); else go(s); }} statement={() => { if (narrow) { setDialog('area'); return; } if (report === 'numbers') { setReport(null); return; } go('numbers'); findIn('Area statement'); }} vs={vsBase ? { on: vsOn, set: setVsOn, name: vsBase.name, fig: vsFig } : null} />
-        {!locked && <Shelf tool={tool} setTool={setTool} outline={!narrow && !phone ? { on: olOn, toggle: () => setOlOpen(!olOpen) } : undefined} generate={p.blank ? undefined : (close) => <Generate p={p} e={e} up={up} toast={toast} done={close} />} hint={hint ? <div class="drawhint" role="status"><span>{hint}</span><button type="button" class="linkbtn" onClick={() => setTool(SELECT)}>Done</button></div> : null} />}
-        {!phone && !p.blank && e.d.buildings.length > 0 && <LayoutChip own={ownLayout} locked={locked} brief={() => { go('design'); findIn('Generated from'); }} asOption={regenAsOption} here={regenHere} />}
+        {!locked && <Shelf tool={tool} setTool={setTool} outline={!narrow && !phone ? { on: olOn, toggle: () => setOlOpen(!olOpen) } : undefined} hint={hint ? <div class="drawhint" role="status"><span>{hint}</span><button type="button" class="linkbtn" onClick={() => setTool(SELECT)}>Done</button></div> : null} />}
         {olOn && <Outline p={p} e={e} checks={checks} picked={picked} pick={(x) => { setToolS(SELECT); edit.current?.setTool(SELECT); setPicked(x); }} show={showBuilding} frame={frameRing} hidden={hidden} locked={lockedIds} toggle={toggleOl} reorder={reorder} notes={countsByThing(noteThreads)} close={() => setOlOpen(false)} />}
         {p.blank && !locked && tool.k === 'select' && !cmode && <EmptyState p={p} ways={{
           find: () => { up({ blank: undefined }); openWay('survey'); },
@@ -936,25 +930,6 @@ function ResultBar({ e, deal, sum, go, statement, vs }: { e: ReturnType<typeof e
 }
 
 /** Generated or yours, always on the view: who lays the buildings out, and the way back to the brief's layout. */
-function LayoutChip({ own, locked, brief, asOption, here }: { own: boolean; locked: boolean; brief: () => void; asOption: () => void; here: () => void }) {
-  if (!own) return (
-    <div class="lchip gen" role="status" data-tip="Brief changes move it. Drag or change a building and the layout becomes yours." data-tip-side="bottom">
-      <Icon n="spark" size={14} /><span>Generated from the brief</span>
-      {!locked && <button type="button" class="linkbtn" onClick={brief}>Brief</button>}
-    </div>
-  );
-  return (
-    <div class="lchip own" role="status">
-      <Icon n="cursor" size={14} /><span>Your layout</span>
-      {!locked && <Menu text label="Regenerate" icon="chevron" class="lchip-m" items={[
-        { heading: 'From the brief' },
-        { label: 'Regenerate as a new option', icon: 'plus', sub: 'This layout stays as it is', onSelect: asOption },
-        { label: 'Regenerate here', icon: 'spark', sub: 'Your edits go (Undo brings them back)', onSelect: here },
-      ]} />}
-    </div>
-  );
-}
-
 /** While the land's price isn't put in, what the land is worth for the target: the buyer's first question. */
 function LandKpi({ e, go }: { e: ReturnType<typeof evaluate>; go: (s: Step) => void }) {
   const T = targetOf(e.p), deal = e.p.deal ?? DEFAULT_DEAL;
@@ -1063,7 +1038,7 @@ function People({ pid, role, close }: { pid: string; role: 'owner' | 'editor' | 
 type Box = { x0: number; z0: number; x1: number; z1: number; h: number };
 
 function Keys({ close }: { close: () => void }) {
-  const rows: [string, string][] = [['Ctrl K', 'Search: actions, buildings, settings'], ['1 · N · A', 'The project’s settings · the Numbers report · the Approval report'], ['\\', 'Show or hide the sheet'], ['/', 'Pin the sheet beside the view, or float it'], ['F6 · Shift+F6', 'Move between the top bar, the steps, the sheet and the view'], ['R · Shift+R', 'Turn the picked building 15°'], ['+ −', 'A floor more or less on the picked building'], ['Ctrl+D', 'Duplicate the picked building'], ['M', 'Measure'], ['G', 'Generate options from a brief'], ['X', 'X-ray floor on or off'], ['[  ]', 'Floor down / up'], ['F', 'Frame what’s picked (nothing picked: the whole site)'], ['S · T', 'Camera: street, from above'], ['Drag · Right-drag · Wheel', 'Orbit about the point under the pointer · pan across the ground · zoom toward the pointer'], ['Double-click', 'Frame a building (on open ground: the whole site)'], ['P', 'The plan from above, or back to 3D'], ['V', 'Back to picking'], ['Enter · Esc · Backspace', 'Drawing: finish, cancel, take back a point'], ['Shift', 'Drawing: keep a line square to the road'], ['Alt', 'Hold while dragging: no snapping'], ['← → ↑ ↓', 'Nudge what’s picked a grid step (Shift: ×10)'], ['Delete', 'Remove what’s picked'], ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · redo'], ['↑ ↓ in a number', 'Step it (Shift: ×10)'], ['Esc', 'Close this; let go of what’s picked; close the sheet']];
+  const rows: [string, string][] = [['Ctrl K', 'Search: actions, buildings, settings'], ['1 · N · A', 'The project’s settings · the Numbers report · the Approval report'], ['\\', 'Show or hide the sheet'], ['/', 'Pin the sheet beside the view, or float it'], ['F6 · Shift+F6', 'Move between the top bar, the steps, the sheet and the view'], ['R · Shift+R', 'Turn the picked building 15°'], ['+ −', 'A floor more or less on the picked building'], ['Ctrl+D', 'Duplicate the picked building'], ['M', 'Measure'], ['X', 'X-ray floor on or off'], ['[  ]', 'Floor down / up'], ['F', 'Frame what’s picked (nothing picked: the whole site)'], ['S · T', 'Camera: street, from above'], ['Drag · Right-drag · Wheel', 'Orbit about the point under the pointer · pan across the ground · zoom toward the pointer'], ['Double-click', 'Frame a building (on open ground: the whole site)'], ['P', 'The plan from above, or back to 3D'], ['V', 'Back to picking'], ['Enter · Esc · Backspace', 'Drawing: finish, cancel, take back a point'], ['Shift', 'Drawing: keep a line square to the road'], ['Alt', 'Hold while dragging: no snapping'], ['← → ↑ ↓', 'Nudge what’s picked a grid step (Shift: ×10)'], ['Delete', 'Remove what’s picked'], ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · redo'], ['↑ ↓ in a number', 'Step it (Shift: ×10)'], ['Esc', 'Close this; let go of what’s picked; close the sheet']];
   return <Dialog title="Keyboard shortcuts" close={close}><dl class="lines keys">{rows.map(([a, b]) => <div><dt><kbd>{a}</kbd></dt><dd>{b}</dd></div>)}</dl></Dialog>;
 }
 

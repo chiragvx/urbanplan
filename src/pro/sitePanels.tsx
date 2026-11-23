@@ -16,6 +16,7 @@ import { shopFloorsAllowed } from './mixed';
 import { FindPlot, ImportBox, type StepProps } from './steps';
 import { Btn, Lines, Note, nf, Num, Row, Section, Seg, Select, Slider, sqft, Toggle } from './ui';
 import { LadderBox } from './numbersUi';
+import { added } from './variants';
 
 type PlotWay = 'view' | 'survey' | 'import';
 
@@ -86,9 +87,24 @@ export function SchemeStep({ p, e, up, toast, pick, part }: StepProps) {
   const sizes = sizesOf(p);
   return (
     <>
-      {B && <Section title="Generated from" aside={<span class="sec-meta">{owned ? 'yours now' : `${TYPOLOGIES.find((t) => t.value === p.typology)?.label ?? 'Auto'} · ${Math.round(f.amount * 100)}% of the FSI`}</span>}>
-        <Note>{owned ? 'The layout is yours: brief changes won’t move your buildings. Generate on the toolbar makes a new option from the brief.' : 'The brief lays the buildings out: the mix, sizes, living and parking below move them. Generate on the toolbar sets the type, floors and how much to build, as a new option.'}</Note>
-        <Row><Btn icon="spark" onClick={() => dispatchEvent(new Event('urbanplan:generate'))}>Generate…</Btn></Row>
+      {B && <Section title="Layout" aside={<span class="sec-meta">{owned ? 'yours now' : `${TYPOLOGIES.find((t) => t.value === p.typology)?.label ?? 'Auto'} · ${Math.round(f.amount * 100)}% of the FSI`}</span>}>
+        {owned
+          ? <>
+            <Note>The layout is yours: these settings won’t move your buildings. Lay it out again to fill the plot from them.</Note>
+            <Row>
+              <Btn icon="plus" title="This layout stays as it is, in the option menu" onClick={() => { up(added(p, { scheme: undefined }, 'by hand')); toast('Laid out again from the settings, as a new option. Your layout stays in the option menu.', { undo: true }); }}>As a new option</Btn>
+              <Btn icon="spark" title="Your edits go (Undo brings them back)" onClick={() => { up({ scheme: undefined }); toast('Laid out again from the settings: your edits to this layout are gone.', { undo: true }); }}>Here</Btn>
+            </Row>
+          </>
+          : <>
+            <Note>The plot is filled to these settings, and to the mix, sizes, living and parking below. To try another, duplicate the option first (the option menu).</Note>
+            <Seg label="Building type" value={p.typology} set={(v) => up({ typology: v })} options={TYPOLOGIES} />
+            <Row>
+              <Num label="Most floors" value={p.maxFloors} set={(v) => up({ maxFloors: v })} min={0} max={300} zero="Auto" />
+              <Num label="Most buildings" value={f.buildings} set={(v) => setFill({ buildings: v })} min={0} max={40} zero="Auto" />
+            </Row>
+            <Slider label="How much of the FSI to build" value={Math.round(f.amount * 100)} set={(v) => setFill({ amount: v / 100 })} min={30} max={100} step={5} fmt={(v) => (v >= 100 ? 'All the FSI taken' : `${v}% of the FSI taken`)} />
+          </>}
       </Section>}
 
       {D && <Section title="Living" sub="Green, play, roads inside, spacing and parking." fold open={false} aside={<span class="sec-meta">{f.green ? `${f.green}% green` : 'rules minimum'}</span>}>

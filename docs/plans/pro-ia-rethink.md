@@ -108,6 +108,7 @@ The left edge holds one column, the **toolbar**: Select, Building, Grounds, Site
   - **Make 1 / Make 3 options**.
   
   Results are always **new options** (phase 5's behaviour), never a hidden live layout (see 2.5).
+  - **Status (2026-11-23): removed.** It wasn't useful: wrong money figures, one layout three times, no preview. The type, floors, buildings and FSI amount moved to the project panel's Layout section. See docs/plans/pro-global-ux-log.md.
 - **Outline** (phase 8) opens as a list to the right of the toolbar. It's the only list of what's in the project. Design › Buildings, Design › On the site and the Approval list all go.
 - **Nothing else sits on the left.** No rail, and no sheet.
 

@@ -1,4 +1,4 @@
-// Options (the project's variants; ./options.ts is Explore's engine that finds many): a project's alternative schemes on the same plot, rules and prices. The project's own fields are always
+// Options (the project's variants): a project's alternative schemes on the same plot, rules and prices. The project's own fields are always
 // the current option's, so everything else in Pro reads and changes it as before; the list keeps each option's copy
 // of what varies between them (the scheme, the fill, the type and mix, shops, the look, the FSI ladder). Switching
 // keeps the current one's copy and lays the other's over the project. In the project's JSON: no new table.

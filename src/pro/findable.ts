@@ -45,7 +45,7 @@ export const FINDABLE: Findable[] = [
   ...S('look', 'Specification', 'spec finishes quality cost'),
   // the scheme (Brief and Design)
   ...S('design', 'Look', 'design system style facade materials builder look'),
-  ...S('brief', 'Generated from', 'generate layout typology fill regenerate'),
+  ...S('brief', 'Layout', 'layout typology type floors buildings fill fsi amount regenerate'),
   ...S('design', 'Living', 'green play spacing parking basements', ['Green', 'Play area', 'Roads inside', 'Parking', 'Basements']),
   ...S('brief', 'Flat mix', 'bhk 1bhk 2bhk 3bhk units'),
   ...S('brief', 'Flat sizes', 'carpet area size sq ft 1bhk 2bhk 3bhk flat size unit size'),

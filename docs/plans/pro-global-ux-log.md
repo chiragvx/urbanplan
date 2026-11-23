@@ -4,6 +4,43 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-23 · Generate removed
+
+**Why:** tried on the sample project, Generate wasn't useful.
+- Its cards ranked and priced options by profit before the land deal, but the top bar shows profit after it: the brief's best card said ₹4.91 cr and IRR 7.6%, and the option it made showed ₹4.13 cr and 6.2%.
+- Its search varied only slabs or towers, a height cap, the flat mix and shops on the ground. That's 72 tries, but only 9 different building layouts. "Make 3 options" gave the same two 4-floor slabs three times, with a different flat mix each time.
+- Its cards were text only, and their labels described the settings, not the result ("at most 6 floors" made 4 + 4 floors).
+
+**What changed:**
+- **Gone:**
+  - the toolbar's Generate button and its popover;
+  - the G key and the "Generate options" search action;
+  - the project panel's "Generate…" button;
+  - the written brief and the "Make 1 / Make 3 options" search;
+  - the plotted layout (the land divided into plots for sale), which sat in the same popover;
+  - the scripting API's `options` and `brief`.
+- **Deleted:** src/pro/generate.tsx, options.ts, brief.ts, layout.ts, and their CSS.
+- **Kept, moved:** the project panel's "Generated from" section is now **Layout**. It holds the building type, most floors, most buildings and how much of the FSI to build, which only Generate could set before. They change the open option directly, as the flat mix and sizes do. Once the layout is yours (moved by hand), they're replaced by a note.
+- **The checklist's "Make a second option"** now duplicates the open option.
+- **The chip over the view is gone** ("Generated from the brief · Brief", and "Your layout · Regenerate"). Laying a hand-moved layout out again from the settings is now two buttons in the Layout section: **As a new option** and **Here**.
+- **The home page's Explore step** is now "Options" (several schemes kept as options, compared side by side). Its screenshot, `pro-explore.webp`, still shows the old Explore and should be retaken.
+- **Fix:** the "A building is outside the view" note no longer fires when a project opens, only on a switch between its options. Its check now reads the camera's latest position.
+
+**How it was checked:**
+- Browser, sample project, with your storage backed up and restored exactly:
+  - no Generate on the toolbar;
+  - G does nothing;
+  - the Layout section shows the four controls;
+  - opening the project shows no false note.
+- Changing a Layout control in the browser wasn't tried: you were using the pane.
+- `npm test` ALL OK; `npm run build` OK.
+
+**Left or known:**
+- Options from the brief or from Explore in saved projects keep their names and contents; only the way to make new ones is gone.
+- Trying several layouts now means duplicating the option and changing its Layout settings by hand.
+
+---
+
 ## 2026-11-23 · The camera on interactions (docs/plans/pro-camera.md, all four steps)
 
 **What changed:**

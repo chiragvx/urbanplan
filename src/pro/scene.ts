@@ -394,6 +394,7 @@ export class ProView {
   /** a box (a picked building) on screen (px within the canvas), or null when some of it is behind the camera */
   private rectOf(x0: number, z0: number, x1: number, z1: number, h: number) {
     const v = new THREE.Vector3(), W = this.canvas.clientWidth || 1, H = this.canvas.clientHeight || 1;
+    this.cam.updateMatrixWorld();
     let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
     for (const x of [x0, x1]) for (const z of [z0, z1]) for (const y of [0, h]) {
       v.set(x, y, z).project(this.cam);
