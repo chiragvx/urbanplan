@@ -22,7 +22,8 @@ function Grid({ items, tool, setTool, label }: { items: { t: Tool; label: string
 
 /** `hint`: what the tool in hand wants next (click the corners…, Enter to finish), beside the shelf */
 /** `generate`: the Generate popover's body (./generate.tsx), given a way to close it */
-export function Shelf({ tool, setTool: set, hint, generate }: { tool: Tool; setTool: (t: Tool) => void; hint?: import('preact').ComponentChildren; generate?: (close: () => void) => import('preact').ComponentChildren }) {
+/** `outline`: the outline's toggle, at the toolbar's end */
+export function Shelf({ tool, setTool: set, hint, generate, outline }: { tool: Tool; setTool: (t: Tool) => void; hint?: import('preact').ComponentChildren; generate?: (close: () => void) => import('preact').ComponentChildren; outline?: { on: boolean; toggle: () => void } }) {
   const [fly, setFly] = useState<Fly>(null);
   useEffect(() => { const on = () => setFly('generate'); addEventListener('urbanplan:generate', on); return () => removeEventListener('urbanplan:generate', on); }, []);
   const root = useRef<HTMLDivElement>(null);
@@ -53,6 +54,7 @@ export function Shelf({ tool, setTool: set, hint, generate }: { tool: Tool; setT
         <button type="button" class={tool.k === 'plot' ? 'on' : ''} aria-pressed={tool.k === 'plot'} aria-label="Draw the plot again" data-tip="Draw the plot’s outline again" onClick={() => setTool(tool.k === 'plot' ? SELECT : { k: 'plot' })}><Icon n="plan" size={18} /><span aria-hidden="true">Plot</span></button>
         <button type="button" class={tool.k === 'measure' ? 'on' : ''} aria-pressed={tool.k === 'measure'} aria-label="Measure" aria-keyshortcuts="M" data-tip="Measure (M)" onClick={() => setTool(tool.k === 'measure' ? SELECT : { k: 'measure' })}><Icon n="ruler" size={18} /><span aria-hidden="true">Measure</span></button>
         {generate && <><i class="shelf-sep" aria-hidden="true" /><button type="button" class={`gen-b${fly === 'generate' ? ' on' : ''}`} aria-haspopup="dialog" aria-expanded={fly === 'generate'} aria-label="Generate: lay out options from a brief" aria-keyshortcuts="G" data-tip={fly ? undefined : 'Generate options from a brief (G)'} onClick={() => setFly(fly === 'generate' ? null : 'generate')}><Icon n="spark" size={18} /><span aria-hidden="true">Generate</span></button></>}
+        {outline && <><i class="shelf-sep" aria-hidden="true" /><button type="button" class={outline.on ? 'on' : ''} aria-pressed={outline.on} aria-label="The outline: what's in the project" aria-keyshortcuts="O" data-tip="The outline: what's in the project (O)" onClick={outline.toggle}><Icon n="list" size={18} /><span aria-hidden="true">Outline</span></button></>}
       </div>
       {fly && (
         <div class={`flyout${fly === 'generate' ? ' wide' : ''}`} role="dialog" aria-label={fly === 'generate' ? 'Generate' : fly === 'building' ? 'Add a building' : fly === 'grounds' ? 'Add to the grounds' : 'What’s on the site'}>

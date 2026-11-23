@@ -25,6 +25,7 @@ const P: Record<string, string> = {
   shade: 'M12 2l9 5v10l-9 5-9-5V7zM12 22V12M21 7l-9 5-9-5M12 12l9-5v10l-9 5z',
   plan: 'M3 3h18v18H3zM3 12h9M12 3v18M12 16h9',
   layers: 'M12 2l10 5-10 5L2 7zM2 12l10 5 10-5M2 17l10 5 10-5',
+  list: 'M9 6h12M9 12h12M9 18h12M4 6h0M4 12h0M4 18h0',
   sun: 'M12 8a4 4 0 100 8 4 4 0 000-8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
   fit: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5',
   plus: 'M12 5v14M5 12h14',

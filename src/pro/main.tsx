@@ -52,6 +52,7 @@ import { findIn, Search, type Cmd } from './search';
 import { ApproveStep, isStep, OLD_STEP, PdfButton, slug, STEPS, type Step, type StepProps } from './steps';
 import { NumbersPlace, ProjectBody } from './places';
 import { Generate } from './generate';
+import { Report, type ReportKind } from './report';
 import { DesignSystemStep } from './designStep';
 import { groundAt } from './terrain';
 import { CanvasEdit, duplicated, own, placeTemplate, SELECT, turned, type Picked as EditPicked, type Tool } from './edit';
@@ -125,6 +126,10 @@ function App() {
   const oldStep = useRef(!!OLD_STEP[store.get<string>('urbanplan:pro:step', '')] && !isStep(store.get<string>('urbanplan:pro:step', '')));
   // the step's sheet: open or not, pinned beside the view (a wide screen), its height (a phone)
   const [panel, setPanel] = useState(() => isPhone());
+  /** Numbers or Approval as a report over the view (a wide screen; a narrow one keeps their sheets) */
+  const [report, setReport] = useState<ReportKind | null>(null);
+  /** what the report covers of the view from the bottom (px) */
+  const [repH, setRepH] = useState(0);
   /** a narrow screen (the sheet's layout), and a phone (nothing changes on it) */
   const narrow = useNarrow(), phone = usePhone();
   const narrowRef = useRef(narrow); narrowRef.current = narrow;
@@ -147,6 +152,7 @@ function App() {
    *  Numbers and Approval are sheets */
   const go = (s0: Step) => { const s: Step = s0 === 'brief' ? 'design' : s0; if (isPhone()) { goView(VIEW_OF[s] ?? 'overview'); return; } setStep(s); store.set('urbanplan:pro:step', s); setToolS(SELECT); edit.current?.setTool(SELECT);
     if (s === 'design' && !narrowRef.current) { setPicked(null); setProjOpenRef.current(true); setPanel(false); return; }
+    if ((s === 'numbers' || s === 'approve') && !narrowRef.current) { setReport(s); setPanel(false); return; }
     openSheet(); };
   // ---------- the map's tool and what's picked on it ----------
   const [tool, setToolS] = useState<Tool>(SELECT), [picked, setPicked] = useState<EditPicked>(null), [hint, setHint] = useState<string | null>(null);
@@ -435,12 +441,14 @@ function App() {
       if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'd' && picked?.k === 'building' && !locked && !typing(ev.target)) { ev.preventDefault(); const s = own(p, e), src = s.buildings.find((b) => b.id === picked.id); if (!src) return; const c = duplicated(src); tx.once({ scheme: { ...s, buildings: [...s.buildings, c] } }); setPicked({ k: 'building', id: c.id }); return; }
       if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'y') { if (typing(ev.target)) return; ev.preventDefault(); redo(); return; }
       if (ev.ctrlKey || ev.metaKey || ev.altKey || typing(ev.target)) return;
-      if (ev.key === 'Escape') { if (dialog) setDialog(null); else if (cmode) setCmode(false); else if (picked && tool.k === 'select') setPicked(null); else if (panel && !pinned) setPanel(false); return; }
+      if (ev.key === 'Escape') { if (dialog) setDialog(null); else if (cmode) setCmode(false); else if (report && !narrow) setReport(null); else if (picked && tool.k === 'select') setPicked(null); else if (panel && !pinned) setPanel(false); return; }
       // (the picked building: R turns it, + and − its floors, Ctrl+D below)
       const pb = picked?.k === 'building' && !locked ? picked : null;
       if (pb && (ev.key === 'r' || ev.key === 'R')) { const s = own(p, e); tx.once({ scheme: { ...s, buildings: s.buildings.map((b) => (b.id === pb.id ? turned(b, ev.shiftKey ? -15 : 15) : b)) } }); return; }
       if (pb && (ev.key === '+' || ev.key === '=' || ev.key === '-')) { const s = own(p, e), br = e.d.buildings.find((x) => x.b.id === pb.id); if (!br) return; tx.once({ scheme: { ...s, buildings: s.buildings.map((b) => (b.id === pb.id ? withFloors(b, Math.max(1, br.floors + (ev.key === '-' ? -1 : 1))) : b)) } }); return; }
       const i = '1234'.indexOf(ev.key);
+      if (!narrow && (ev.key === 'n' || ev.key === 'a')) { const k: ReportKind = ev.key === 'n' ? 'numbers' : 'approve'; if (report === k) setReport(null); else go(k); return; }
+      if (!narrow && ev.key === '1') { if (inspOn && !picked) setProjOpen(false); else go('design'); return; }
       if (i >= 0 && STEPS[i]) { go(STEPS[i].key); return; }
       if (ev.key === 'x') setXray((v) => (v === null ? Math.max(1, Math.round(maxFloor / 2)) : null));
       if (ev.key === ']' ) setXray((v) => (v === null ? null : Math.min(maxFloor, v + 1)));
@@ -600,7 +608,8 @@ function App() {
   /** the outline: docked right of the sheet, and the view keeps clear of it */
   const olOn = olOpen && !focus && !phone && !narrow;
   const olW = olOn ? 248 : 0;
-  useEffect(() => { view.current?.setCover(cov[0] + olW, cov[1], covR); }, [covR, olW, cov[0], cov[1]]);
+  const repOn = report && !narrow && !phone ? repH : 0;
+  useEffect(() => { view.current?.setCover(cov[0] + olW, cov[1] + repOn, covR); }, [covR, olW, cov[0], cov[1], repOn]);
   useEffect(() => { if (step === 'numbers') tick('numbers'); }, [step]);
   const openWay = (w: 'survey' | 'import') => { try { sessionStorage.setItem('urbanplan:pro:way', w); } catch { /* */ } go('design'); setTimeout(() => { dispatchEvent(new CustomEvent('urbanplan:way', { detail: w })); findIn('Plot'); }, 40); };
   const frameRing = (ring: number[]) => { let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (let i = 0; i + 1 < ring.length; i += 2) { x0 = Math.min(x0, ring[i]); x1 = Math.max(x1, ring[i]); z0 = Math.min(z0, ring[i + 1]); z1 = Math.max(z1, ring[i + 1]); } if (Number.isFinite(x0)) view.current?.focus((x0 + x1) / 2, (z0 + z1) / 2, Math.max(8, x1 - x0, z1 - z0), 6); };
@@ -611,7 +620,7 @@ function App() {
   const Body = { brief: ProjectBody, design: ProjectBody, numbers: NumbersPlace, approve: ApproveStep }[step];
 
   return (
-    <div class={`pro${panel && pinned && !narrow ? ' docked' : ''}${locked ? ' ro' : ''}`} style={`--cover:${cov[0] + olW}px;--cover-s:${cov[0]}px;--cover-b:${cov[1]}px;--cover-r:${covR}px`}>
+    <div class={`pro${panel && pinned && !narrow ? ' docked' : ''}${locked ? ' ro' : ''}${!narrow && !phone ? ' norail' : ''}`} style={`--cover:${cov[0] + olW}px;--cover-s:${cov[0]}px;--cover-b:${cov[1] + repOn}px;--cover-r:${covR}px`}>
       <header class="top">
         <a class="logo" href={`${BASE}dashboard/`} aria-label="Your dashboard"><Dither field="mark" cell={2} class="mark" />UrbanPlan</a>
         <b class="chip">Pro</b>
@@ -621,6 +630,7 @@ function App() {
         <SaveState cloud={cloud} user={!!user} readOnly={readOnly} />
         {(still || pdf) && <span class="job" role="status">{still ? <>{still.kind === 'path' ? 'Path tracing' : 'Rendering'} {Math.round(still.f * 100)}%<i class="bar"><i style={`width:${Math.round(still.f * 100)}%`} /></i>{still.kind === 'path' && <button type="button" class="linkbtn" onClick={() => still.stop.abort()}>Cancel</button>}</> : <>Making the PDF…<Dither class="dz" cell={2} /></>}</span>}
         <span class="gap" />
+        {!phone && !narrow && <Btn kind={inspOn && !picked ? 'primary' : 'quiet'} icon="building" title="The project’s settings: the site, what you’re building, the look (1)" onClick={() => { if (inspOn && !picked) setProjOpen(false); else go('design'); }}>Project</Btn>}
         {!phone && <button type="button" class="btn quiet find" onClick={() => setSearch(true)} aria-keyshortcuts="Control+K"><Icon n="cursor" size={15} /><span>Search</span><kbd>Ctrl K</kbd></button>}
         {!locked && <span class="hist">
           <Btn kind="quiet" icon="undo" title="Undo (Ctrl+Z)" onClick={undo} disabled={!past.current.length} />
@@ -634,7 +644,7 @@ function App() {
         <Account email={user?.email ?? null} phone={phone} search={() => setSearch(true)} keys={() => setDialog('keys')} />
       </header>
 
-      <nav class="rail" aria-label="Steps">
+      {(narrow || phone) && <nav class="rail" aria-label="Steps">
         {phone && VIEW_STEPS.map((s) => (
           <button type="button" class="step" aria-current={vstep === s.key && !(picked?.k === 'building') ? 'step' : undefined} aria-expanded={vstep === s.key ? panel : undefined} onClick={() => { if (vstep !== s.key || picked) goView(s.key); else if (panel) setPanel(false); else openSheet(); }}>
             <Icon n={s.icon} size={20} />
@@ -652,7 +662,7 @@ function App() {
         <span class="gap" />
         {!phone && !narrow && <button type="button" class="step small" onClick={() => setOlOpen(!olOpen)} aria-label="Show or hide the outline" aria-pressed={olOn} data-tip="The outline: what's in the project (O)" data-tip-side="right"><Icon n="list" size={18} /></button>}
         <button type="button" class="step small" onClick={() => setPanel(!panel)} aria-label="Show or hide the sheet" aria-expanded={panel} data-tip="Show or hide the sheet (\) · pin it beside the view (/)" data-tip-side="right"><Icon n="panel" size={18} /></button>
-      </nav>
+      </nav>}
 
       {phone && <Sheet title={picked?.k === 'building' ? buildingName(p, e, e.d.buildings.findIndex((b) => b.b.id === picked.id)) : VIEW_STEPS.find((v) => v.key === vstep)!.title} open={panel} pinned={false} setPinned={() => {}} close={() => { setPanel(false); setPicked(null); }} phone={narrow} detent={detent} setDetent={setDetent} cover={cover}>
         <div class="panel-b" key={picked?.k === 'building' ? picked.id : vstep}>
@@ -678,9 +688,9 @@ function App() {
 
       <main class="stage">
         <canvas ref={canvas} onPointerMove={(ev) => setHover(view.current?.pick(ev.clientX, ev.clientY) ?? null)} onPointerLeave={() => setHover(null)} />
-        <ResultBar e={e} deal={deal} sum={sum} go={go} statement={() => setDialog('area')} vs={vsBase ? { on: vsOn, set: setVsOn, name: vsBase.name, fig: vsFig } : null} />
-        {!locked && <Shelf tool={tool} setTool={setTool} generate={p.blank ? undefined : (close) => <Generate p={p} e={e} up={up} toast={toast} done={close} />} hint={hint ? <div class="drawhint" role="status"><span>{hint}</span><button type="button" class="linkbtn" onClick={() => setTool(SELECT)}>Done</button></div> : null} />}
-        {!phone && !p.blank && e.d.buildings.length > 0 && <LayoutChip own={ownLayout} locked={locked} brief={() => { go('design'); findIn('Fill the plot'); }} asOption={regenAsOption} here={regenHere} />}
+        <ResultBar e={e} deal={deal} sum={sum} go={(s) => { if (!narrow && (s === 'numbers' || s === 'approve') && report === s) setReport(null); else go(s); }} statement={() => { if (narrow) { setDialog('area'); return; } if (report === 'numbers') { setReport(null); return; } go('numbers'); findIn('Area statement'); }} vs={vsBase ? { on: vsOn, set: setVsOn, name: vsBase.name, fig: vsFig } : null} />
+        {!locked && <Shelf tool={tool} setTool={setTool} outline={!narrow && !phone ? { on: olOn, toggle: () => setOlOpen(!olOpen) } : undefined} generate={p.blank ? undefined : (close) => <Generate p={p} e={e} up={up} toast={toast} done={close} />} hint={hint ? <div class="drawhint" role="status"><span>{hint}</span><button type="button" class="linkbtn" onClick={() => setTool(SELECT)}>Done</button></div> : null} />}
+        {!phone && !p.blank && e.d.buildings.length > 0 && <LayoutChip own={ownLayout} locked={locked} brief={() => { go('design'); findIn('Generated from'); }} asOption={regenAsOption} here={regenHere} />}
         {olOn && <Outline p={p} e={e} checks={checks} picked={picked} pick={(x) => { setToolS(SELECT); edit.current?.setTool(SELECT); setPicked(x); }} show={showBuilding} frame={frameRing} hidden={hidden} locked={lockedIds} toggle={toggleOl} reorder={reorder} notes={countsByThing(noteThreads)} close={() => setOlOpen(false)} />}
         {p.blank && !locked && tool.k === 'select' && !cmode && <EmptyState p={p} ways={{
           find: () => { up({ blank: undefined }); openWay('survey'); },
@@ -704,7 +714,10 @@ function App() {
           <fieldset disabled={locked}><ProjectBody {...props} /></fieldset>
         </InspFrame>}
         {inspOn && picked && <Inspector p={p} e={e} up={up} rooms={rooms} checks={checks} picked={picked} pick={setPicked} toast={toast} xray={setXray} hide={() => setInsp(false)} readOnly={locked} />}
-        {step === 'approve' && !phone && tool.k === 'select' && xr === null && <CheckPins view={view.current} e={e} checks={checks} show={showBuilding} />}
+        {(report === 'approve' || (narrow && panel && step === 'approve')) && !phone && tool.k === 'select' && xr === null && <CheckPins view={view.current} e={e} checks={checks} show={showBuilding} />}
+        {report && !narrow && !phone && <Report which={report} set={setReport} close={() => setReport(null)} cover={setRepH} fails={sum.fail + sum.warn}>
+          <fieldset disabled={locked}>{report === 'numbers' ? <NumbersPlace {...props} /> : <ApproveStep {...props} />}</fieldset>
+        </Report>}
         <div class="tools">
           <Seg<'3d' | 'plan'> class="tgroup" value={plan ? 'plan' : '3d'} set={(v) => setPlan(v === 'plan')} options={[
             { value: '3d', label: '3D', icon: 'cube', title: 'Orbit round it' },
@@ -982,7 +995,7 @@ function People({ pid, role, close }: { pid: string; role: 'owner' | 'editor' | 
 }
 
 function Keys({ close }: { close: () => void }) {
-  const rows: [string, string][] = [['Ctrl K', 'Search: actions, buildings, settings'], ['1 – 3', 'The project, Numbers, Approval'], ['\\', 'Show or hide the sheet'], ['/', 'Pin the sheet beside the view, or float it'], ['F6 · Shift+F6', 'Move between the top bar, the steps, the sheet and the view'], ['R · Shift+R', 'Turn the picked building 15°'], ['+ −', 'A floor more or less on the picked building'], ['Ctrl+D', 'Duplicate the picked building'], ['M', 'Measure'], ['G', 'Generate options from a brief'], ['X', 'X-ray floor on or off'], ['[  ]', 'Floor down / up'], ['F · S · T', 'Camera: whole site, street, from above'], ['P', 'The plan from above, or back to 3D'], ['V', 'Back to picking'], ['Enter · Esc · Backspace', 'Drawing: finish, cancel, take back a point'], ['Shift', 'Drawing: keep a line square to the road'], ['Alt', 'Hold while dragging: no snapping'], ['← → ↑ ↓', 'Nudge what’s picked a grid step (Shift: ×10)'], ['Delete', 'Remove what’s picked'], ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · redo'], ['↑ ↓ in a number', 'Step it (Shift: ×10)'], ['Esc', 'Close this; let go of what’s picked; close the sheet']];
+  const rows: [string, string][] = [['Ctrl K', 'Search: actions, buildings, settings'], ['1 · N · A', 'The project’s settings · the Numbers report · the Approval report'], ['\\', 'Show or hide the sheet'], ['/', 'Pin the sheet beside the view, or float it'], ['F6 · Shift+F6', 'Move between the top bar, the steps, the sheet and the view'], ['R · Shift+R', 'Turn the picked building 15°'], ['+ −', 'A floor more or less on the picked building'], ['Ctrl+D', 'Duplicate the picked building'], ['M', 'Measure'], ['G', 'Generate options from a brief'], ['X', 'X-ray floor on or off'], ['[  ]', 'Floor down / up'], ['F · S · T', 'Camera: whole site, street, from above'], ['P', 'The plan from above, or back to 3D'], ['V', 'Back to picking'], ['Enter · Esc · Backspace', 'Drawing: finish, cancel, take back a point'], ['Shift', 'Drawing: keep a line square to the road'], ['Alt', 'Hold while dragging: no snapping'], ['← → ↑ ↓', 'Nudge what’s picked a grid step (Shift: ×10)'], ['Delete', 'Remove what’s picked'], ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · redo'], ['↑ ↓ in a number', 'Step it (Shift: ×10)'], ['Esc', 'Close this; let go of what’s picked; close the sheet']];
   return <Dialog title="Keyboard shortcuts" close={close}><dl class="lines keys">{rows.map(([a, b]) => <div><dt><kbd>{a}</kbd></dt><dd>{b}</dd></div>)}</dl></Dialog>;
 }
 

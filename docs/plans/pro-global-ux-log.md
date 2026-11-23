@@ -4,6 +4,28 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-23 · Rethink step 5: reports, and no rail
+
+**What changed:**
+- **Numbers and Approval are a report** (src/pro/report.tsx) that rises from the bottom over the view, between the toolbar and the inspector, with Numbers | Approval tabs. The view, its tools and the pick stay above it; its sections sit in columns.
+  - **Ways in:** the scorecard (Built-up opens the area statement, Homes the project, Profit, IRR and Land worth Numbers, Rules Approval; the same figure again closes it), N and A, search, and any link that went to those places.
+  - **Esc closes it** back to the view. With Approval open, the check pins show on the view.
+- **No rail on a wide screen.** The project's settings are **Project** in the top bar (or 1); the outline is **Outline** at the toolbar's end (or O). A narrow screen and a phone keep their rail and sheets.
+- The outline button gets the list icon it never had.
+- Shortcuts list: 1 · N · A.
+
+**How it was checked:**
+- Browser at 1440×860, with your storage backed up and restored exactly: no rail; N opened Numbers (area statement, inventory, what the land is worth in three columns); Rules switched it to Approval (scrutiny, permission, drawings, NOCs, fees, documents); Esc closed it. At first the report covered the toolbar's Generate and Outline, and its sections ran full width: fixed.
+- `npm test` ALL OK; `npm run build` OK.
+
+**Left or known:**
+- Deal and prices stay in the Numbers report rather than the project's panel.
+- The report is a fixed height (46% of the window, at most 460 px); it can't be dragged taller.
+- The approval sections are folds in columns, not one tab each as the rethink sketched.
+- `places.tsx` stays (Numbers' body and the project's), so the rethink's "remove places.tsx" is only half done.
+
+---
+
 ## 2026-11-23 · Rethink step 4: Generate, and less on screen
 
 **What changed (Generate):**

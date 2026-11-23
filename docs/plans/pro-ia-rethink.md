@@ -198,6 +198,7 @@ Smallest and most telling first, so the first two can be shown to users within d
 4. **Generate (medium).** The popover on the toolbar takes in Fill the plot, the brief and Explore; results are options.
    - **Status (2026-11-23): built, with a pass for less on screen** (panels start closed, details behind hover or More). See docs/plans/pro-global-ux-log.md.
 5. **Reports (medium).** Numbers and Approval as bottom panels from the scorecard; remove the rail and `places.tsx`; N and A keys; map old links.
+   - **Status (2026-11-23): built; the rail goes on a wide screen (kept on narrow and phone), places.tsx stays as the bodies.** See docs/plans/pro-global-ux-log.md.
 6. **First-run guidance (small).** Hover affordance, the HUD hint, the new checklist.
 7. **The stage on the dashboard (small).** Show and set it on the card and in Sites.
 
