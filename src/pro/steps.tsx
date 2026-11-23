@@ -3,12 +3,11 @@
 // layouts). The Site and Scheme panels are in ./sitePanels.tsx, the Design system in ./designStep.tsx. Each panel
 // opens on what most people change; the rest folds away. Every figure here comes from the one evaluation in
 // main.tsx (./evaluate.ts), so a panel never shows a number another disagrees with.
-import { added, type Varying } from './variants';
 import { Dither } from '../theme/Dither';
 import { LandWorthBox } from './numbersUi';
 import { useMemo, useState } from 'preact/hooks';
 import { UNIT_LABEL } from '../doc/site';
-import { outline, type ProProject } from './project';
+import type { ProProject } from './project';
 import { fromMetres, importPlot } from './importPlot';
 import { utmToLatLon } from './terrain';
 import { useEffect } from 'preact/hooks';
@@ -19,10 +18,7 @@ import { documents, fees, nocs, permissionOf, stages, PERMISSION_LABEL, PERMISSI
 import { predcrDxf } from './dxf';
 import { downloadSet, sheetDefs } from './drawings';
 import { ROOM_COLOR, type FlatRooms } from './rooms';
-import { exploreOptions, type OptionRow } from './options';
-import { parseBrief, runBrief, type BriefResult } from './brief';
-import { layoutDefaults, plotLayout, type LayoutOpts } from './layout';
-import { Btn, cr, download, Icon, Lines, Note, nf, Num, pct, Row, Section, Seg, Select, sqft, Stat, Toggle } from './ui';
+import { Btn, cr, download, Icon, Lines, Note, nf, Num, pct, Row, Section, Seg, Select, sqft, Toggle } from './ui';
 import { checkBuilding } from './viewer';
 
 export type Step = 'brief' | 'design' | 'numbers' | 'approve';
@@ -339,110 +335,5 @@ export function ApproveStep({ p, e, up, checks, rooms, openDrawings, toast, show
         <ul class="docs">{docs.map((d) => <li><span class={`who ${d.from}`}>{d.from === 'us' ? 'UrbanPlan' : d.from}</span><span><b>{d.title}</b><small>{d.note}</small></span></li>)}</ul>
       </Section>
     </>
-  );
-}
-
-// ================================================================ explore
-export function ExploreStep({ p, e, up, toast }: StepProps) {
-  return (
-    <>
-      <BriefBox p={p} up={up} toast={toast} />
-      <OptionsBox p={p} up={up} toast={toast} />
-      <ScreenBox />
-      <LayoutBox p={p} e={e} />
-    </>
-  );
-}
-
-function BriefBox({ p, up, toast }: { p: ProProject; up: StepProps['up']; toast: StepProps['toast'] }) {
-  const [text, setText] = useState('Mostly 2BHK, under 45 m, shops on the ground floor, best profit');
-  const [res, setRes] = useState<(BriefResult & { understood: string[]; ignored: string[] }) | null>(null);
-  const run = () => { const b = parseBrief(text); setRes({ ...runBrief(p, b.brief), understood: b.understood, ignored: b.ignored }); };
-  return (
-    <Section title="Brief">
-      <textarea class="brief" rows={3} value={text} onInput={(ev) => setText((ev.target as HTMLTextAreaElement).value)} onKeyDown={(ev) => { if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) run(); }} />
-      <Row><Btn kind="primary" icon="play" onClick={run}>Plan it</Btn>{res?.best && <Btn icon="plus" onClick={() => addOpt(p, up, toast, res.patch, 'brief', `Brief: ${res.best!.label}`)}>Add the best as an option</Btn>}</Row>
-      {res && <>
-        {res.understood.length > 0 && <div class="chips">{res.understood.map((u) => <span class="chip">{u}</span>)}{res.ignored.map((u) => <span class="chip off" title="Not understood">{u}</span>)}</div>}
-        <ol class="trace">{res.steps.map((s) => <li class={s.kind}>{s.text}</li>)}</ol>
-        {[res.best, ...res.alternatives].filter(Boolean).map((o, i) => <OptionCard o={o!} best={i === 0} apply={() => addOpt(p, up, toast, o!.patch, 'brief', `Brief: ${o!.label}`)} />)}
-        {!res.met && <Note tone="warn">Nothing met the whole brief: the closest is shown.</Note>}
-      </>}
-    </Section>
-  );
-}
-
-/** a brief's or Explore's result as a new option (filled afresh), never over the one open; you're switched to it */
-function addOpt(p: ProProject, up: StepProps['up'], toast: StepProps['toast'], patch: Partial<ProProject>, made: 'brief' | 'explore', label: string) {
-  const c = added(p, { ...(patch as Partial<Varying>), scheme: undefined }, made, label);
-  up(c);
-  toast(`Added “${label}” as an option, and opened it. The option menu by the project’s name switches back.`, { undo: true });
-}
-
-function OptionCard({ o, best, apply }: { o: OptionRow; best?: boolean; apply: () => void }) {
-  return (
-    <div class={`opt${best ? ' best' : ''}`}>
-      <div><b>{o.label}</b><small>{o.buildings} bldg · {o.floors} floors · {nf(o.height, 1)} m · {o.flats} flats{o.shops ? ` · ${o.shops} shops` : ''}{o.departures ? ` · ${o.departures} departure${o.departures > 1 ? 's' : ''}` : ''}</small></div>
-      <div class="opt-n"><b class={o.profit < 0 ? 'bad' : ''}>{cr(o.profit)}</b><small>IRR {pct(o.irr)}</small></div>
-      <Btn kind="quiet" icon="plus" title="Add as an option" onClick={apply}>Add</Btn>
-    </div>
-  );
-}
-
-function OptionsBox({ p, up, toast }: { p: ProProject; up: StepProps['up']; toast: StepProps['toast'] }) {
-  const [rows, setRows] = useState<OptionRow[] | null>(null), [busy, setBusy] = useState(false);
-  const run = () => { setBusy(true); setTimeout(() => { setRows(exploreOptions(p, { limit: 12 })); setBusy(false); }, 30); };
-  return (
-    <Section title="Options">
-      <Row><Btn icon={busy ? undefined : 'layers'} onClick={run} disabled={busy}>{busy ? <><Dither class="dz" cell={2} />Working…</> : rows ? 'Run again' : 'Find options'}</Btn></Row>
-      {busy && <div class="working" role="status"><Dither class="working-art" cell={3} /><span>Working out every option…</span></div>}
-      {rows && <div class="opts">{rows.map((o, i) => <OptionCard o={o} best={i === 0} apply={() => addOpt(p, up, toast, o.patch, 'explore', o.label)} />)}</div>}
-    </Section>
-  );
-}
-
-/** Screening many plots moved to the dashboard's Sites: ranked there by what the land is worth, each with a status,
- *  and opened as a project from the list. */
-function ScreenBox() {
-  return (
-    <Section title="Screen many plots" fold open={false} sub="Plots from a broker’s list or a land bank, ranked by what their land is worth.">
-      <Note>Screening is now on the dashboard’s Sites: paste plots there, give each a status, and open the best as a project.</Note>
-      <Btn icon="open" href={`${import.meta.env.BASE_URL}dashboard/#/sites`}>Open Sites</Btn>
-    </Section>
-  );
-}
-
-function LayoutBox({ p, e }: { p: ProProject; e: Evaluated }) {
-  const o0 = layoutDefaults(e.r.area);
-  const [o, setO] = useState<LayoutOpts>(o0);
-  const { ring, roads } = outline(p);
-  const front = Math.max(0, roads.findIndex(Boolean));
-  const L = useMemo(() => plotLayout(ring, front, o), [JSON.stringify(ring), front, JSON.stringify(o)]);
-  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
-  for (let i = 0; i < ring.length; i += 2) { x0 = Math.min(x0, ring[i]); x1 = Math.max(x1, ring[i]); z0 = Math.min(z0, ring[i + 1]); z1 = Math.max(z1, ring[i + 1]); }
-  const pts = (r: number[]) => { const a = []; for (let i = 0; i < r.length; i += 2) a.push(`${r[i]},${r[i + 1]}`); return a.join(' '); };
-  const pad = 3, sw = Math.max(x1 - x0, z1 - z0) / 300;
-  return (
-    <Section title="Plotted layout" fold open={false} sub="The land divided into plots for sale instead: internal roads, open space and amenity space as layouts need.">
-      <Row n={3}>
-        <Num label="Plot width" value={o.plotW} set={(v) => setO({ ...o, plotW: v })} min={6} max={60} unit="m" />
-        <Num label="Plot depth" value={o.plotD} set={(v) => setO({ ...o, plotD: v })} min={8} max={80} unit="m" />
-        <Num label="Roads" value={o.roadW} set={(v) => setO({ ...o, roadW: v })} min={6} max={24} unit="m" />
-      </Row>
-      <Row><Num label="Open space" value={o.openPct} set={(v) => setO({ ...o, openPct: v })} max={40} unit="%" /><Num label="Amenity space" value={o.amenityPct} set={(v) => setO({ ...o, amenityPct: v })} max={20} unit="%" /></Row>
-      <svg class="layout" viewBox={`${x0 - pad} ${z0 - pad} ${x1 - x0 + 2 * pad} ${z1 - z0 + 2 * pad}`} role="img" aria-label="Plotted layout">
-        <polygon points={pts(ring)} class="l-site" stroke-width={sw * 2} />
-        {L.roads.map((r) => <polygon points={pts(r)} class="l-road" />)}
-        {L.open.map((r) => <polygon points={pts(r)} class="l-open" />)}
-        {L.amenity.map((r) => <polygon points={pts(r)} class="l-amen" />)}
-        {L.plots.map((r) => <polygon points={pts(r)} class="l-plot" stroke-width={sw} />)}
-      </svg>
-      <div class="stats">
-        <Stat label="Plots" value={nf(L.stats.plots)} sub={`${nf(L.stats.avgPlot)} m² on average`} />
-        <Stat label="Saleable" value={`${nf((L.stats.saleable / Math.max(1, L.stats.area)) * 100)}%`} sub={sqft(L.stats.saleable)} />
-        <Stat label="Roads" value={`${nf((L.stats.roads / Math.max(1, L.stats.area)) * 100)}%`} />
-        <Stat label="Open + amenity" value={`${nf(((L.stats.open + L.stats.amenity) / Math.max(1, L.stats.area)) * 100)}%`} />
-      </div>
-    </Section>
   );
 }

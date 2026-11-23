@@ -1,11 +1,11 @@
 // The project's settings, and the places left on the rail. With nothing picked, the inspector on the view's right is
-// the project (docs/plans/pro-ia-rethink.md §2.4): the site, what you're building, the look, and options from a brief
-// (Generate takes those in later). The plot, the buildings and what's on the site are picked in the view or the
-// outline, so they aren't listed here. Numbers (is it worth it?) and Approval (will it pass?) stay as places.
+// the project (docs/plans/pro-ia-rethink.md §2.4): the site, what you're building and the look. The plot, the
+// buildings and what's on the site are picked in the view or the outline, so they aren't listed here; laying a scheme
+// out from a brief is Generate's, on the toolbar (./generate.tsx). Numbers and Approval stay as places.
 import type { ComponentChildren } from 'preact';
 import { SchemeStep, SiteStep2 } from './sitePanels';
 import { LadderBox } from './numbersUi';
-import { ExploreStep, MoneyStep, type StepProps } from './steps';
+import { MoneyStep, type StepProps } from './steps';
 import { Elevation } from './designStep';
 import { AreaStatementBody } from './numbersUi';
 import { Btn, cr, nf, Section } from './ui';
@@ -31,8 +31,6 @@ export function ProjectBody(props: StepProps) {
         <figure class="dss-prev look"><Elevation ds={e.ds} /></figure>
         {openLook && <Btn icon="palette" onClick={openLook}>Open the design system</Btn>}
       </Section>
-      <Part>Make options from it</Part>
-      <ExploreStep {...props} />
     </>
   );
 }

@@ -1019,3 +1019,29 @@ details.chk .show { display: inline-flex; align-items: center; gap: 5px; margin:
 /* the project in the inspector (docs/plans/pro-ia-rethink.md step 3): three numbers a row don't fit its width */
 .insp .row.r3 { grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .insp .place-h { margin: 10px 0 0; }
+
+/* Generate on the toolbar (docs/plans/pro-ia-rethink.md step 4) */
+.shelf-sep { display: block; height: 1px; margin: 3px 6px; background: var(--up-line); }
+.shelf-bar button.gen-b { color: var(--up-ink); }
+.flyout.wide { width: 360px; }
+.gen-pop { display: grid; gap: 10px; }
+.gen-pop .sec { margin: 0; }
+.gen-pop .opt { grid-template-columns: minmax(0, 1fr) auto auto; }
+.gen-more summary { cursor: pointer; font-size: 12.5px; color: var(--up-muted); margin: 4px 0; }
+@media (max-width: 600px) { .flyout.wide { width: min(340px, calc(100vw - 80px)); } }
+.shelf-bar button.gen-b.on { color: var(--up-paper); }
+.shelf:has(.flyout) { z-index: 6; }
+
+/* ---------- less on screen (2026-11-23): detail one hover or click away ---------- */
+/* the figures: the number only; its line of detail on hover or focus */
+.results .kpi small { display: none; }
+.results:hover .kpi small, .results:focus-within .kpi small, .results .kpi small.vs { display: flex; }
+/* the building's bar hides while its inspector is open (the handles stay) */
+.hud.insp-on .hbar { display: none; }
+/* the project name's pencil only on hover */
+.pname > svg { opacity: 0; transition: opacity .12s; }
+.pname:hover > svg, .pname:focus-within > svg { opacity: 1; }
+/* More view tools opens upward from the bottom bar */
+.tmore { position: relative; display: inline-flex; }
+.tmore > .btn { height: 32px; width: 32px; padding: 0; border: 0; }
+.tools .tmore .menu { top: auto; bottom: calc(100% + 10px); right: auto; left: 50%; transform: translateX(-50%); }

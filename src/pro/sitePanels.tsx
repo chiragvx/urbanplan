@@ -8,7 +8,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { SQFT, UNIT_LABEL } from '../doc/site';
 import { sizesOf } from './floor';
-import { ACCESS, TYPOLOGIES, type Typology } from '../doc/optimise';
+import { ACCESS, TYPOLOGIES } from '../doc/optimise';
 import { CITIES, fillOf, type Fill } from './project';
 import { longestEdge } from './importPlot';
 import { readGround } from './plotOps';
@@ -86,18 +86,9 @@ export function SchemeStep({ p, e, up, toast, pick, part }: StepProps) {
   const sizes = sizesOf(p);
   return (
     <>
-      {B && <Section title="Fill the plot" aside={owned ? <span class="sec-meta">shaped by hand</span> : undefined}>
-        {owned
-          ? <><Note>The layout is yours, so these settings wait: brief changes won’t move your buildings. Fill again to lay them out from the brief (your edits go; Undo brings them back), or use Regenerate on the view to make it a new option.</Note>
-            <Row><Btn icon="spark" onClick={() => { up({ scheme: undefined }); pick(null); toast('Filled again from the settings.'); }}>Fill again</Btn></Row></>
-          : <>
-            <Slider label="How much of it to build" value={Math.round(f.amount * 100)} set={(v) => setFill({ amount: v / 100 })} min={30} max={100} step={5} fmt={(v) => (v >= 100 ? 'All the FSI taken' : `${v}% of the FSI taken`)} />
-            <Seg<Typology> value={p.typology} set={(v) => up({ typology: v })} label="Building type" options={TYPOLOGIES} />
-            <Row>
-              <Num label="Most floors" value={p.maxFloors} set={(v) => up({ maxFloors: v })} min={0} max={300} zero="Auto" />
-              <Num label="Most buildings" value={f.buildings} set={(v) => setFill({ buildings: v })} min={0} max={40} zero="Auto" />
-            </Row>
-          </>}
+      {B && <Section title="Generated from" aside={<span class="sec-meta">{owned ? 'yours now' : `${TYPOLOGIES.find((t) => t.value === p.typology)?.label ?? 'Auto'} · ${Math.round(f.amount * 100)}% of the FSI`}</span>}>
+        <Note>{owned ? 'The layout is yours: brief changes won’t move your buildings. Generate on the toolbar makes a new option from the brief.' : 'The brief lays the buildings out: the mix, sizes, living and parking below move them. Generate on the toolbar sets the type, floors and how much to build, as a new option.'}</Note>
+        <Row><Btn icon="spark" onClick={() => dispatchEvent(new Event('urbanplan:generate'))}>Generate…</Btn></Row>
       </Section>}
 
       {D && <Section title="Living" sub="Green, play, roads inside, spacing and parking." fold open={false} aside={<span class="sec-meta">{f.green ? `${f.green}% green` : 'rules minimum'}</span>}>

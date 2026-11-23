@@ -278,7 +278,7 @@ export function Hud({ view, p, e, picked, pick, up, tx, snap, live, readOnly, in
 
   const tipFloors = br.maxFloors ? `Floors · up to ${br.maxFloors} within the margins` : 'Floors';
   return (
-    <div class={`hud${dragging ? ' dragging' : ''}`} ref={root}>
+    <div class={`hud${dragging ? ' dragging' : ''}${inspecting ? ' insp-on' : ''}`} ref={root}>
       {handle('height', 'updown', tipFloors, { now: br.floors, min: 1, max: 300, text: `${br.floors} floors` })}
       {handle('move', 'move', 'Move (drag, or the arrow keys)')}
       {handle('turn', 'rotate', 'Turn (15° steps; Alt for any angle)', { now: 0, min: -180, max: 180, text: 'turn' })}

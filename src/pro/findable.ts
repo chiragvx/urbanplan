@@ -45,7 +45,7 @@ export const FINDABLE: Findable[] = [
   ...S('look', 'Specification', 'spec finishes quality cost'),
   // the scheme (Brief and Design)
   ...S('design', 'Look', 'design system style facade materials builder look'),
-  ...S('brief', 'Fill the plot', 'generate layout typology', [['How much of it to build', 'amount share'], ['Building type', 'typology tower slab'], ['Most floors', 'height storeys'], 'Most buildings']),
+  ...S('brief', 'Generated from', 'generate layout typology fill regenerate'),
   ...S('design', 'Living', 'green play spacing parking basements', ['Green', 'Play area', 'Roads inside', 'Parking', 'Basements']),
   ...S('brief', 'Flat mix', 'bhk 1bhk 2bhk 3bhk units'),
   ...S('brief', 'Flat sizes', 'carpet area size sq ft 1bhk 2bhk 3bhk flat size unit size'),
@@ -68,9 +68,4 @@ export const FINDABLE: Findable[] = [
   ...S('approve', 'NOCs', 'no objection airport trees heritage fire', ['Near an airport', 'Trees on the plot', 'Heritage precinct']),
   ...S('approve', 'Fees and charges', 'fees scrutiny fee development charges'),
   ...S('approve', 'Documents to file', 'documents 7/12 title'),
-  // options (Brief)
-  ...S('brief', 'Brief', 'written brief ask'),
-  ...S('brief', 'Options', 'alternatives explore compare'),
-  ...S('brief', 'Screen many plots', 'screening many plots compare land'),
-  ...S('brief', 'Plotted layout', 'plots subdivision plotted development', ['Plot width', 'Plot depth']),
 ];

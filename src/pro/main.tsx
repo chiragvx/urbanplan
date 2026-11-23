@@ -51,6 +51,7 @@ import { documents, fees, permissionOf } from './approvals';
 import { findIn, Search, type Cmd } from './search';
 import { ApproveStep, isStep, OLD_STEP, PdfButton, slug, STEPS, type Step, type StepProps } from './steps';
 import { NumbersPlace, ProjectBody } from './places';
+import { Generate } from './generate';
 import { DesignSystemStep } from './designStep';
 import { groundAt } from './terrain';
 import { CanvasEdit, duplicated, own, placeTemplate, SELECT, turned, type Picked as EditPicked, type Tool } from './edit';
@@ -127,6 +128,7 @@ function App() {
   /** a narrow screen (the sheet's layout), and a phone (nothing changes on it) */
   const narrow = useNarrow(), phone = usePhone();
   const narrowRef = useRef(narrow); narrowRef.current = narrow;
+  const setProjOpenRef = useRef<(v: boolean) => void>(() => {});
   const [pinned, setPinnedS] = useState<boolean>(() => store.get<boolean>('urbanplan:pro:pin', false));
   const setPinned = (on: boolean) => { setPinnedS(on); store.set('urbanplan:pro:pin', on); };
   const [detent, setDetent] = useState<Detent>('half');
@@ -144,7 +146,7 @@ function App() {
   /** a place: the project (Brief and Design before) is the inspector with nothing picked, on a screen wide enough;
    *  Numbers and Approval are sheets */
   const go = (s0: Step) => { const s: Step = s0 === 'brief' ? 'design' : s0; if (isPhone()) { goView(VIEW_OF[s] ?? 'overview'); return; } setStep(s); store.set('urbanplan:pro:step', s); setToolS(SELECT); edit.current?.setTool(SELECT);
-    if (s === 'design' && !narrowRef.current) { setPicked(null); setInsp(true); setPanel(false); return; }
+    if (s === 'design' && !narrowRef.current) { setPicked(null); setProjOpenRef.current(true); setPanel(false); return; }
     openSheet(); };
   // ---------- the map's tool and what's picked on it ----------
   const [tool, setToolS] = useState<Tool>(SELECT), [picked, setPicked] = useState<EditPicked>(null), [hint, setHint] = useState<string | null>(null);
@@ -275,8 +277,8 @@ function App() {
 
   // ---------- the outline, focus mode, comments ----------
   /** the outline beside the sheet: open by default on a wide screen, remembered */
-  const [olOpen, setOlOpenS] = useState<boolean>(() => store.get<boolean>('urbanplan:pro:outline', typeof innerWidth !== 'undefined' && innerWidth >= 1440));
-  const setOlOpen = (v: boolean) => { setOlOpenS(v); store.set('urbanplan:pro:outline', v); };
+  const [olOpen, setOlOpenS] = useState<boolean>(() => store.get<boolean>('urbanplan:pro:outline2', false));
+  const setOlOpen = (v: boolean) => { setOlOpenS(v); store.set('urbanplan:pro:outline2', v); };
   /** focus mode (Shift+\): the sheet and the outline away; the view, its tools and the scorecard kept */
   const [focus, setFocusS] = useState(false);
   const setFocus = (on: boolean) => { setFocusS(on); setPanel(!on); };
@@ -448,6 +450,7 @@ function App() {
       if (ev.key === 'p') setPlan(!plan);
       if (ev.key === 'v') setTool(SELECT);
       if (ev.key === 'm' && !locked) setTool(tool.k === 'measure' ? SELECT : { k: 'measure' });
+      if (ev.key === 'g' && !locked && !p.blank) { setTool(SELECT); dispatchEvent(new Event('urbanplan:generate')); }
       if (ev.key === 's') cam('street');
       if (ev.key === '|' || (ev.key === '\\' && ev.shiftKey)) { setFocus(!focus); toast(focus ? 'Focus mode off.' : 'Focus mode: the sheet and the outline are away. Shift+\\ brings them back.'); return; }
       if (ev.key === '\\') setPanel((v) => !v);
@@ -554,6 +557,7 @@ function App() {
       ...(!phone ? [A('New project', 'plus', () => fresh(), { kind: 'Project', words: 'start blank' })] : []),
       ...(!locked && !phone ? [A('Duplicate this option', 'copy', optionActs.duplicate, { kind: 'Project', words: 'option variant alternative copy scheme' })] : []),
       ...(optionsOf(p).length > 1 ? [A('Compare options', 'layers', optionActs.compare, { kind: 'Project', words: 'compare options side by side' }), ...optionsOf(p).filter((o) => o.id !== p.option).map((o) => A(`Open ${o.name}`, 'layers', () => optionActs.open(o.id), { kind: 'Project', words: 'option switch' }))] : []),
+      ...(!locked ? [A('Generate options', 'spark', () => dispatchEvent(new Event('urbanplan:generate')), { sub: 'From a written brief, or the type, floors and how much to build', words: 'brief explore options fill layout typology plotted generate make' })] : []),
       A('Your dashboard', 'folder', () => location.assign(`${BASE}dashboard/`), { kind: 'Project', words: 'projects all list home' }),
       A('Keyboard shortcuts', 'key', () => setDialog('keys'), { keys: '?' }),
       ...(!phone ? [A('The simple editor', 'site', () => location.assign(`${BASE}app/`), { words: 'map editor city' })] : []),
@@ -586,7 +590,11 @@ function App() {
   const [insp, setInsp] = useState(true);
   const pickKey = picked ? `${picked.k}:${'id' in picked ? picked.id : ''}` : '';
   useEffect(() => { if (pickKey) setInsp(true); }, [pickKey]);
-  const inspOn = insp && !narrow && !phone && tool.k === 'select' && !cmode && (!!picked || !p.blank);
+  /** the project's panel (nothing picked): closed until asked for, then remembered */
+  const [projOpen, setProjOpenS] = useState<boolean>(() => store.get<boolean>('urbanplan:pro:project-open', false));
+  const setProjOpen = (v: boolean) => { setProjOpenS(v); store.set('urbanplan:pro:project-open', v); };
+  setProjOpenRef.current = setProjOpen;
+  const inspOn = !narrow && !phone && tool.k === 'select' && !cmode && (picked ? insp : projOpen && !p.blank);
   const listOn = cmode && !!noteStore && !narrow;
   const covR = inspOn || listOn ? 344 : 0;
   /** the outline: docked right of the sheet, and the view keeps clear of it */
@@ -635,7 +643,7 @@ function App() {
           </button>
         ))}
         {!phone && STEPS.map((s, i) => (
-          <button type="button" class="step" aria-current={(s.key === 'design' && !narrow ? inspOn && !picked : step === s.key && panel) ? 'step' : undefined} aria-expanded={s.key === 'design' && !narrow ? inspOn && !picked : step === s.key ? panel : undefined} onClick={() => { if (s.key === 'design' && !narrow) { if (inspOn && !picked) setInsp(false); else go('design'); } else if (step !== s.key) go(s.key); else if (panel) setPanel(false); else openSheet(); }} data-tip={`${s.title} (${i + 1})`} data-tip-side="right">
+          <button type="button" class="step" aria-current={(s.key === 'design' && !narrow ? inspOn && !picked : step === s.key && panel) ? 'step' : undefined} aria-expanded={s.key === 'design' && !narrow ? inspOn && !picked : step === s.key ? panel : undefined} onClick={() => { if (s.key === 'design' && !narrow) { if (inspOn && !picked) setProjOpen(false); else go('design'); } else if (step !== s.key) go(s.key); else if (panel) setPanel(false); else openSheet(); }} data-tip={`${s.title} (${i + 1})`} data-tip-side="right">
             <Icon n={s.icon} size={20} />
             <span>{s.label}</span>
             {s.key === 'approve' && sum.fail + sum.warn > 0 && <i class={`dot ${sum.fail ? 'bad' : 'warn'}`} />}
@@ -671,7 +679,7 @@ function App() {
       <main class="stage">
         <canvas ref={canvas} onPointerMove={(ev) => setHover(view.current?.pick(ev.clientX, ev.clientY) ?? null)} onPointerLeave={() => setHover(null)} />
         <ResultBar e={e} deal={deal} sum={sum} go={go} statement={() => setDialog('area')} vs={vsBase ? { on: vsOn, set: setVsOn, name: vsBase.name, fig: vsFig } : null} />
-        {!locked && <Shelf tool={tool} setTool={setTool} hint={hint ? <div class="drawhint" role="status"><span>{hint}</span><button type="button" class="linkbtn" onClick={() => setTool(SELECT)}>Done</button></div> : null} />}
+        {!locked && <Shelf tool={tool} setTool={setTool} generate={p.blank ? undefined : (close) => <Generate p={p} e={e} up={up} toast={toast} done={close} />} hint={hint ? <div class="drawhint" role="status"><span>{hint}</span><button type="button" class="linkbtn" onClick={() => setTool(SELECT)}>Done</button></div> : null} />}
         {!phone && !p.blank && e.d.buildings.length > 0 && <LayoutChip own={ownLayout} locked={locked} brief={() => { go('design'); findIn('Fill the plot'); }} asOption={regenAsOption} here={regenHere} />}
         {olOn && <Outline p={p} e={e} checks={checks} picked={picked} pick={(x) => { setToolS(SELECT); edit.current?.setTool(SELECT); setPicked(x); }} show={showBuilding} frame={frameRing} hidden={hidden} locked={lockedIds} toggle={toggleOl} reorder={reorder} notes={countsByThing(noteThreads)} close={() => setOlOpen(false)} />}
         {p.blank && !locked && tool.k === 'select' && !cmode && <EmptyState p={p} ways={{
@@ -692,7 +700,7 @@ function App() {
         {noteStore && N.notes && xr === null && <CommentLayer view={view.current} e={e} notes={N.notes} mode={cmode} setMode={setCmode} openId={openNote} setOpenId={setOpenNote} option={p.option}
           add={(body, anchor) => void N.run(() => noteStore.add(body, step, anchor))} resolve={(n, v) => void N.run(() => noteStore.resolve(n.id, v))} remove={(n) => void N.run(() => noteStore.remove(n.id))}
           canResolve={canResolve} canDelete={(n) => mineNote(n) || ref?.role === 'owner' || !ref} />}
-        {inspOn && !picked && <InspFrame hide={() => setInsp(false)} title={<b>{p.name}</b>} meta={<>{nf(e.r.area)} m² · {CITIES.find((c) => c.value === p.city)?.label ?? p.city}</>}>
+        {inspOn && !picked && <InspFrame hide={() => setProjOpen(false)} title={<b>{p.name}</b>} meta={<>{nf(e.r.area)} m² · {CITIES.find((c) => c.value === p.city)?.label ?? p.city}</>}>
           <fieldset disabled={locked}><ProjectBody {...props} /></fieldset>
         </InspFrame>}
         {inspOn && picked && <Inspector p={p} e={e} up={up} rooms={rooms} checks={checks} picked={picked} pick={setPicked} toast={toast} xray={setXray} hide={() => setInsp(false)} readOnly={locked} />}
@@ -713,10 +721,15 @@ function App() {
           </div>}
           <div class="tgroup">
             <button type="button" aria-label="Whole site" aria-keyshortcuts="F" data-tip="Whole site (F)" onClick={() => cam('fit')}><Icon n="fit" size={16} /></button>
-            <button type="button" aria-label="From the street" aria-keyshortcuts="S" data-tip="From the street (S)" onClick={() => cam('street')}><Icon n="street" size={16} /></button>
-            <button type="button" aria-label="From above" aria-keyshortcuts="T" data-tip="From above (T)" onClick={() => cam('top')}><Icon n="top" size={16} /></button>
-            <button type="button" aria-label="X-ray, a floor at a time" data-tip="X-ray: a floor at a time" aria-pressed={xr !== null} onClick={() => setXray(xr === null ? Math.max(1, Math.round(maxFloor / 2)) : null)}><Icon n="layers" size={16} /></button>
-            {!locked && <button type="button" aria-label="Snapping" data-tip={snap ? 'Snapping on (hold Alt to move freely)' : 'Snapping off'} aria-pressed={snap} onClick={() => setSnap(!snap)}><Icon n="magnet" size={16} /></button>}
+            {/* (the rest behind one click: they're used now and then, not all the time) */}
+            <Menu label="More view tools" class="tmore" items={[
+              { heading: 'Look from' },
+              { label: 'The street', icon: 'street', sub: 'S', onSelect: () => cam('street') },
+              { label: 'Above', icon: 'top', sub: 'T', onSelect: () => cam('top') },
+              { heading: 'Show' },
+              { label: 'X-ray, a floor at a time', checked: xr !== null, sub: 'X', onSelect: () => setXray(xr === null ? Math.max(1, Math.round(maxFloor / 2)) : null) },
+              ...(!locked ? [{ label: 'Snapping', checked: snap, sub: snap ? 'Hold Alt to move freely' : 'Off', onSelect: () => setSnap(!snap) }] : []),
+            ]} />
           </div>
           <div class={`tgroup sun${sun.on ? ' on' : ''}`}>
             <button type="button" aria-label="Sun" data-tip="Sun and shadows on a date and time" aria-pressed={sun.on} onClick={() => { if (!sun.on && mode === 'wire') setMode('shaded'); setSun({ ...sun, on: !sun.on }); }}><Icon n="sun" size={16} />{sun.on ? '' : 'Sun'}</button>
@@ -878,7 +891,7 @@ function LandKpi({ e, go }: { e: ReturnType<typeof evaluate>; go: (s: Step) => v
 
 function SaveState({ cloud, user, readOnly }: { cloud: { s: string; msg?: string }; user: boolean; readOnly: boolean }) {
   if (readOnly) return <span class="save ro"><Icon n="link" size={13} />Shared view</span>;
-  if (!user) return <span class="save" title="Kept in this browser. Sign in to keep it in your account.">Saved in this browser</span>;
+  if (!user) return <span class="save" title="Kept in this browser. Sign in to keep it in your account." role="status"><i />Saved</span>;
   const t = cloud.s === 'saving' ? (cloud.msg ?? 'Saving…') : cloud.s === 'saved' ? (cloud.msg ?? 'Saved') : cloud.s === 'error' ? 'Not saved' : 'Saved';
   return <span class={`save ${cloud.s}`} title={cloud.msg} role="status">{cloud.s === 'saving' ? <Dither class="dz" cell={2} /> : <i />}{t}</span>;
 }
@@ -969,7 +982,7 @@ function People({ pid, role, close }: { pid: string; role: 'owner' | 'editor' | 
 }
 
 function Keys({ close }: { close: () => void }) {
-  const rows: [string, string][] = [['Ctrl K', 'Search: actions, buildings, settings'], ['1 – 3', 'The project, Numbers, Approval'], ['\\', 'Show or hide the sheet'], ['/', 'Pin the sheet beside the view, or float it'], ['F6 · Shift+F6', 'Move between the top bar, the steps, the sheet and the view'], ['R · Shift+R', 'Turn the picked building 15°'], ['+ −', 'A floor more or less on the picked building'], ['Ctrl+D', 'Duplicate the picked building'], ['M', 'Measure'], ['X', 'X-ray floor on or off'], ['[  ]', 'Floor down / up'], ['F · S · T', 'Camera: whole site, street, from above'], ['P', 'The plan from above, or back to 3D'], ['V', 'Back to picking'], ['Enter · Esc · Backspace', 'Drawing: finish, cancel, take back a point'], ['Shift', 'Drawing: keep a line square to the road'], ['Alt', 'Hold while dragging: no snapping'], ['← → ↑ ↓', 'Nudge what’s picked a grid step (Shift: ×10)'], ['Delete', 'Remove what’s picked'], ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · redo'], ['↑ ↓ in a number', 'Step it (Shift: ×10)'], ['Esc', 'Close this; let go of what’s picked; close the sheet']];
+  const rows: [string, string][] = [['Ctrl K', 'Search: actions, buildings, settings'], ['1 – 3', 'The project, Numbers, Approval'], ['\\', 'Show or hide the sheet'], ['/', 'Pin the sheet beside the view, or float it'], ['F6 · Shift+F6', 'Move between the top bar, the steps, the sheet and the view'], ['R · Shift+R', 'Turn the picked building 15°'], ['+ −', 'A floor more or less on the picked building'], ['Ctrl+D', 'Duplicate the picked building'], ['M', 'Measure'], ['G', 'Generate options from a brief'], ['X', 'X-ray floor on or off'], ['[  ]', 'Floor down / up'], ['F · S · T', 'Camera: whole site, street, from above'], ['P', 'The plan from above, or back to 3D'], ['V', 'Back to picking'], ['Enter · Esc · Backspace', 'Drawing: finish, cancel, take back a point'], ['Shift', 'Drawing: keep a line square to the road'], ['Alt', 'Hold while dragging: no snapping'], ['← → ↑ ↓', 'Nudge what’s picked a grid step (Shift: ×10)'], ['Delete', 'Remove what’s picked'], ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · redo'], ['↑ ↓ in a number', 'Step it (Shift: ×10)'], ['Esc', 'Close this; let go of what’s picked; close the sheet']];
   return <Dialog title="Keyboard shortcuts" close={close}><dl class="lines keys">{rows.map(([a, b]) => <div><dt><kbd>{a}</kbd></dt><dd>{b}</dd></div>)}</dl></Dialog>;
 }
 

@@ -4,6 +4,33 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-23 · Rethink step 4: Generate, and less on screen
+
+**What changed (Generate):**
+- **Generate on the toolbar** (src/pro/generate.tsx; G, or search "Generate options"), a popover beside the tools:
+  - **Describe it:** the written brief, Plan it, and its best and closest schemes, each with Make;
+  - **Or set it:** building type, most floors, most buildings, how much of the FSI to build; **Make 1 option** uses them, **Make 3 options** tries every type, height and mix and makes the three that earn most (in rank order, the best opened), with the rest it found folded under;
+  - **Plotted layout:** the subdivision preview, folded.
+- Whatever it makes is a new option; the one open stays in the option menu.
+- The project's panel loses Fill the plot and "Make options from it": a short "Generated from" section says who lays the buildings out and opens Generate. "Screen many plots" is gone from Pro (Sites has it).
+
+**What changed (less on screen, after "the UI is crowded"):**
+- The outline and the project's panel start closed: Pro opens on the view, the tools, the figures and the chip. The rail's Project and the outline button (O) open them, and they stay as you leave them.
+- The figures show their numbers only; each one's line of detail shows on hover or focus.
+- The building's bar hides while its inspector is open (the inspector has all of it); the handles stay on the building.
+- The view tools are 3D/Plan, the drawing, Whole site and More (from the street, from above, x-ray, snapping); Sun and help stay.
+- "Saved in this browser" is "Saved", with the where in its tip; the name's pencil shows on hover.
+
+**How it was checked:**
+- Browser at 1440×860, with your storage backed up and restored exactly: G opened Generate; Make 3 options made three options and opened the best with the toast and "vs Option A"; the menu listed them; at first the chip and the open Generate button drew wrong (a class clash and dark-on-dark), fixed. The calm screen, a pick (no bar, inspector, handles) and More (opens upward) looked right.
+- `npm test` ALL OK; `npm run build` OK.
+
+**Left or known:**
+- Make 1 option takes about a second with no working sign.
+- The figures' detail lines are hover-only, so a touch screen at desktop width won't see them.
+
+---
+
 ## 2026-11-23 · Rethink step 3: the project in the inspector
 
 **What changed:**
