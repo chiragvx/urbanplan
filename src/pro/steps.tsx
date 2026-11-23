@@ -20,7 +20,6 @@ import { predcrDxf } from './dxf';
 import { downloadSet, sheetDefs } from './drawings';
 import { ROOM_COLOR, type FlatRooms } from './rooms';
 import { exploreOptions, type OptionRow } from './options';
-import { parseScreen, screen, screenCsv, type ScreenResult } from './screen';
 import { parseBrief, runBrief, type BriefResult } from './brief';
 import { layoutDefaults, plotLayout, type LayoutOpts } from './layout';
 import { Btn, cr, download, Icon, Lines, Note, nf, Num, pct, Row, Section, Seg, Select, sqft, Stat, Toggle } from './ui';
@@ -350,7 +349,7 @@ export function ExploreStep({ p, e, up, toast }: StepProps) {
     <>
       <BriefBox p={p} up={up} toast={toast} />
       <OptionsBox p={p} up={up} toast={toast} />
-      <ScreenBox p={p} />
+      <ScreenBox />
       <LayoutBox p={p} e={e} />
     </>
   );
@@ -403,18 +402,13 @@ function OptionsBox({ p, up, toast }: { p: ProProject; up: StepProps['up']; toas
   );
 }
 
-function ScreenBox({ p }: { p: ProProject }) {
-  const [text, setText] = useState('Name, frontage, depth, road, DP road\nBaner corner, 40, 55, 18, 24\nWakad, 30, 45, 12, 18\nKothrud lane, 22, 30, 9, 12');
-  const [res, setRes] = useState<{ rows: ScreenResult[]; errors: string[] } | null>(null);
+/** Screening many plots moved to the dashboard's Sites: ranked there by what the land is worth, each with a status,
+ *  and opened as a project from the list. */
+function ScreenBox() {
   return (
-    <Section title="Screen many plots" fold open={false} sub="Paste plots, one a line (name, frontage, depth, road today, DP road; or name, area, road). Each gets its best scheme under these rules.">
-      <textarea rows={5} value={text} onInput={(ev) => setText((ev.target as HTMLTextAreaElement).value)} />
-      <Row><Btn kind="primary" onClick={() => { const x = parseScreen(text); setRes({ rows: screen(x.rows, p), errors: x.errors }); }}>Screen them</Btn>{res && res.rows.length > 0 && <Btn icon="down" onClick={() => download('screening.csv', screenCsv(res.rows), 'text/csv')}>CSV</Btn>}</Row>
-      {res && <>
-        {res.errors.map((x) => <Note tone="warn">{x}</Note>)}
-        <div class="tscroll"><table class="sched"><thead><tr><th>Plot</th><th>m²</th><th>Built-up</th><th>Flats</th><th>Profit</th><th>IRR</th></tr></thead>
-          <tbody>{res.rows.map((x) => <tr><td><b>{x.row.name}</b></td><td>{nf(x.area)}</td><td>{sqft(x.bua)}</td><td>{x.flats}</td><td class={x.profit < 0 ? 'bad' : ''}>{cr(x.profit)}</td><td>{pct(x.irr)}</td></tr>)}</tbody></table></div>
-      </>}
+    <Section title="Screen many plots" fold open={false} sub="Plots from a broker’s list or a land bank, ranked by what their land is worth.">
+      <Note>Screening is now on the dashboard’s Sites: paste plots there, give each a status, and open the best as a project.</Note>
+      <Btn icon="open" href={`${import.meta.env.BASE_URL}dashboard/#/sites`}>Open Sites</Btn>
     </Section>
   );
 }

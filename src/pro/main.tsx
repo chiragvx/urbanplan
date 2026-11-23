@@ -13,6 +13,7 @@
 //   nothing changes on it (../device.ts, docs/plans/mobile-view-only.md).
 // Every change can be undone (Ctrl+Z). The project is kept in this browser and, signed in, in the account a few
 // seconds behind (./cloud.ts); a share link carries the whole project in the URL and opens read-only.
+import { projectOf, siteById, sitePrices } from './sites';
 import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import '../theme/tokens.css';
@@ -214,6 +215,11 @@ function App() {
       fresh(bs.length ? { ...n, scheme: { ...own(n, e0), buildings: bs } } : n);
       go('design');
       return;
+    }
+    // (a site from the dashboard's Sites: its plot and road under the firm's prices, at the Looking stage, in Brief)
+    if (start.startsWith('site:')) {
+      const site = siteById(start.slice(5));
+      if (site) { fresh(projectOf(site, sitePrices())); go('brief'); return; }
     }
     // (a design system from the builder: the sample in it, on its Design step)
     const dsId = new URLSearchParams(location.search).get('ds');

@@ -620,6 +620,16 @@ Each phase ships on its own and leaves Pro working. The order puts the **IA's mi
 - Viewers see the ranked list.
 - It's local first, with Supabase later, as with design systems. "Screen many plots" leaves Explore.
 - **Done when:** twenty pasted plots are ranked by what the land is worth, and the best opens as a project with its plot and road set.
+- **Status (2026-11-23): built, without the map.**
+  - The dashboard has **Sites** (src/dash/sites.tsx, src/pro/sites.ts): paste plots or add one; each gets its potential, saleable carpet, homes, the most the land is worth outright (in all and per sq ft of plot) and the largest joint-development share, under the firm's default prices (rules, sale price, target margin or IRR).
+  - Ranked by what the land is worth; a status per site (lead, looking, offered, bought, dropped) with a filter; an asking price is underlined when it's over what the land is worth; CSV.
+  - "Open" starts a project on the plot, at the Looking stage, in Brief, and moves a lead to Looking.
+  - Explore's "Screen many plots" now points to Sites.
+  - **Not done yet:**
+    - adding a plot from the map;
+    - viewers seeing the list (it's kept in this browser: Supabase later, like design systems);
+    - plots other than a rectangle on one road (corner plots, drawn outlines).
+  - See docs/plans/pro-global-ux-log.md.
 
 ### Phase 8: The outline, comments in place, the empty state
 

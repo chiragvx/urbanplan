@@ -20,6 +20,8 @@ import { PRESETS } from '../pro/design';
 import * as Lib from '../pro/designLibrary';
 import { clone } from '../pro/design';
 import { Builder } from './builder';
+import { Sites } from './sites';
+import { listSites } from '../pro/sites';
 import { dropVersions } from '../pro/designVersions';
 import { CITIES } from '../pro/project';
 import { I } from './icons';
@@ -38,11 +40,11 @@ D.applyTheme(D.prefs.value.theme);
 
 // ---------------- routing ----------------
 
-type View = 'home' | 'projects' | 'designs' | 'team' | 'activity' | 'settings';
+type View = 'home' | 'projects' | 'sites' | 'designs' | 'team' | 'activity' | 'settings';
 type Tab = 'profile' | 'account' | 'preferences' | 'notifications' | 'plan' | 'data';
 const route = () => {
   const [v, t] = location.hash.replace(/^#\/?/, '').split('/');
-  const view = ((PHONE ? ['home', 'projects', 'activity', 'settings'] : ['home', 'projects', 'designs', 'team', 'activity', 'settings']).includes(v) ? v : 'home') as View;
+  const view = ((PHONE ? ['home', 'projects', 'sites', 'activity', 'settings'] : ['home', 'projects', 'sites', 'designs', 'team', 'activity', 'settings']).includes(v) ? v : 'home') as View;
   return { view, tab: (t || 'profile') as Tab };
 };
 const go = (h: string) => { location.hash = h; };
@@ -50,6 +52,7 @@ const go = (h: string) => { location.hash = h; };
 const NAV: { v: View; label: string; icon: string }[] = [
   { v: 'home', label: 'Home', icon: 'home' },
   { v: 'projects', label: 'Projects', icon: 'folder' },
+  { v: 'sites', label: 'Sites', icon: 'pin' },
   { v: 'designs', label: 'Design systems', icon: 'palette' },
   { v: 'team', label: 'Team', icon: 'team' },
   { v: 'activity', label: 'Activity', icon: 'clock' },
@@ -142,6 +145,7 @@ function App() {
         {s === undefined ? <p class="d-loading"><Dither class="dz" cell={2} />Loading…</p>
           : r.view === 'home' ? <Home data={data} name={name} signedIn={!!user} />
           : r.view === 'projects' ? <Projects data={data} signedIn={!!user} />
+          : r.view === 'sites' ? <Sites phone={PHONE} area={area} toast={toast} authority={(CITIES.some((c) => c.value === D.prefs.value.authority) ? D.prefs.value.authority : 'pune') as ProProject['city']} />
           : r.view === 'designs' ? <Designs sub={location.hash.replace(/^#\/?/, '').split('/')[1] ?? ''} />
           : r.view === 'team' ? <Team data={data} signedIn={!!user} />
           : r.view === 'activity' ? <Activity data={data} signedIn={!!user} />
@@ -781,7 +785,8 @@ function Palette({ data, close }: { data: Data; close: () => void }) {
       { label: 'Switch theme', icon: 'moon', run: () => void D.setPrefs({ theme: document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark' }) },
     ];
     const projects = [...(data.rows ?? []), ...(data.shared ?? [])].map((r) => ({ label: r.name, icon: 'folder', sub: r.summary?.city ?? ago(r.updated_at), run: () => location.assign(D.openUrl(r.id)) }));
-    const all = [...projects, ...acts];
+    const sites = listSites().map((x) => ({ label: x.name, icon: 'pin', sub: 'Site', run: () => go('#/sites') }));
+    const all = [...projects, ...acts, ...sites];
     const k = q.trim().toLowerCase();
     return (k ? all.filter((x) => x.label.toLowerCase().includes(k)) : [...projects.slice(0, 5), ...acts]).slice(0, 12);
   }, [q, data.rows, data.shared]);

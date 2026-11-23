@@ -4,6 +4,40 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-23 · Phase 7: Sites, above projects
+
+**What changed:**
+- **The dashboard has Sites** (src/dash/sites.tsx), between Projects and Design systems. It's kept in this browser for now (src/pro/sites.ts); Supabase later.
+  - **Paste plots** from a broker's list or a land bank, one a line: name, frontage, depth, road, DP road, and an asking price per sq ft if known; or name, area, road. Lines it can't read are listed back. **Add a plot** is a form for one; Edit and Delete are on each row's menu.
+  - **The firm's default prices** sit above the list: the rules (Pune, Mumbai…; first from your preferred authority), the sale price (blank: the city's), and the target (margin or IRR).
+  - **Each plot's quick figures:** area, road, potential (the built-up the FSI ladder allows), saleable carpet and homes from the best scheme, the most the land is worth outright (in all and per sq ft of plot), and the largest joint-development share. They're worked out one plot a tick after the page draws (about a tenth of a second each) and kept with the site until its plot or the prices change.
+  - **Ranked** by what the land is worth. An asking price over it is underlined.
+  - **A status per site:** Lead, Looking, Offered, Bought, Dropped, with a filter ("Open" hides bought and dropped). CSV of the list.
+  - **Open** starts a project on the plot at the Looking stage, in Brief, under the same prices and target, and moves a lead to Looking.
+- **Explore's "Screen many plots"** now points to Sites; its runner is gone and the paste reader (src/pro/screen.ts) is shared.
+- Dashboard search finds sites by name.
+- **tools/dev/test-sites.ts**, in `npm test`, checks that:
+  - 20 pasted lines give 19 plots and one line listed back; an asking price is kept;
+  - twenty plots are ranked by what the land is worth;
+  - no scheme builds past its potential;
+  - the best opens as a project with its plot and road, at the Looking stage, with the same area.
+
+**How it was checked:**
+- Browser at 1280×800, with your project and the dashboard's storage backed up first and restored exactly afterwards:
+  - twenty pasted plots worked out in about 2 s and ranked (NIBM first at ₹16.60 cr, ₹4,723/sq ft);
+  - Open took NIBM into Pro at Looking, in Brief, and the scorecard matched the row exactly (potential 1,36,584 sq ft, saleable 82,749 sq ft, worth ₹16.60 cr); the site moved to Looking;
+  - at phone width the page scrolled sideways (the header buttons and the status filter); fixed: they wrap and scroll in place.
+- `npm test` ALL OK; `npm run build` OK.
+
+**Left or known:**
+- No adding from the map yet.
+- The list is in this browser only, so viewers and teammates don't see it.
+- Every site is a rectangle on one road: no corner plots or drawn outlines.
+- Opening a site replaces the project in this browser, as New project does.
+- The figures use the default deal; a site's own deal or land price isn't modelled beyond its asking price.
+
+---
+
 ## 2026-11-23 · Phase 6: the architect's floor
 
 **What changed:**
