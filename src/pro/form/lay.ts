@@ -8,6 +8,7 @@ import { applyXf, floorsOf, Planner } from './slice';
 import { mpOf, outerOf, ringsOf } from './shape';
 import { coreNeed, edgeColumns, gridColumns, overhang, placeCores } from './skeleton';
 import { CORRIDOR, planUnits, type Unit } from './units';
+import { CARPET } from '../../doc/site';
 import { opOf, type BuildingUse, type Form, type FormContext, type FormFloor, type FormIssue, type FormLayout, type Pt } from './types';
 
 /** a floor standing out past the one below by more than this (m) is a deep cantilever */
@@ -16,7 +17,7 @@ const CANTILEVER = 6;
 const STEEP = 60, TALL_ROOF = 0.6;
 
 interface Local {
-  level: number; use: BuildingUse; y: number; h: number; t: number;
+  level: number; use: BuildingUse; y: number; h: number; t: number; void?: boolean;
   sig: string;
   outer: number[];
   /** the floor's masses before any cut: its outlines, for the volume and the edge columns (just `outer` unless a
@@ -29,6 +30,9 @@ interface Local {
   cuts: { ring: number[]; face: 'glass' | 'open' }[];
   rot: number;
   same: boolean;
+  /** the spaces on it, local, and which ones (so a floor like the one below with the same spaces shares its units) */
+  spaces?: { id: string; use: BuildingUse; fill: 'auto' | 'one'; shape: MP }[];
+  ssig?: string;
 }
 
 /** Whether rings `a` lie inside rings `b` (to within a few centimetres): every corner of a in b, and no corner of
@@ -64,13 +68,13 @@ export function lay(b: SiteBuilding & { form?: Form }, ctx: FormContext): FormLa
   let y = 0;
   const split: number[] = [], empty: number[] = [];
   for (let level = 0; level < N; level++) {
-    const t = N > 1 ? level / (N - 1) : 0, { use, h } = stack[level];
+    const t = N > 1 ? level / (N - 1) : 0, { use, h, void: vd } = stack[level];
     const { xf, plan, sig: psig } = P.at(t);
-    const carves = P.carvesAt(t, xf);
+    const carves = P.carvesAt(t, xf, level, N);
     const sig = psig + '#' + carves.map((c) => c.sig).join(',');
     const prev = L[level - 1];
     if (prev && prev.sig === sig) {
-      L.push({ ...prev, level, use, y, h, t, same: true });
+      L.push({ ...prev, level, use, y, h, t, void: vd, same: true });
       y += h;
       continue;
     }
@@ -107,11 +111,33 @@ export function lay(b: SiteBuilding & { form?: Form }, ctx: FormContext): FormLa
       else edges = [outer];
     }
     const A = area(shape);
-    if (A < 1) empty.push(level);
-    L.push({ level, use, y, h, t, sig, outer, body: body ?? mpOf(outer), edges, shape, rings: ringsOf(shape), area: A, cuts, rot: xf.rot, same: false });
+    if (A < 1 && !vd) empty.push(level);
+    L.push({ level, use, y, h, t, void: vd, sig, outer, body: body ?? mpOf(outer), edges, shape, rings: ringsOf(shape), area: A, cuts, rot: xf.rot, same: false });
     y += h;
   }
   const height = y;
+  // ---- the spaces on each floor: their rings moved as the floor is, cut to it, the first winning ----
+  const SP = (form.spaces ?? []).filter((s) => !s.off && s.ring.pts.length >= 3);
+  if (SP.length) {
+    let lastSig = '', last: Local['spaces'];
+    for (const f of L) {
+      const on = f.void ? [] : SP.filter((s) => f.level + 1 >= Math.min(s.lo, s.hi) && f.level + 1 <= Math.max(s.lo, s.hi));
+      if (!on.length) continue;
+      const ssig = f.sig + '@' + on.map((s) => s.id).join(',');
+      if (ssig === lastSig && last) { f.spaces = last; f.ssig = ssig; continue; }
+      const { xf } = P.at(f.t);
+      let rest = f.shape;
+      const out: NonNullable<Local['spaces']> = [];
+      for (const s of on) {
+        if (!rest.length) break;
+        const m = mpOf(ccw(applyXf(P.sample(s.ring), xf))), piece = inter(rest, m);
+        if (area(piece) < 1) continue;
+        out.push({ id: s.id, use: s.use, fill: s.fill ?? 'auto', shape: piece });
+        rest = diff(rest, m);
+      }
+      f.spaces = out; f.ssig = ssig; lastSig = ssig; last = out;
+    }
+  }
   if (split.length) issues.push({ key: 'split', tone: 'warn', text: `${span(split)}: the cut splits the floor in two.` });
   if (empty.length) issues.push({ key: 'empty', tone: 'fail', text: `${span(empty)}: nothing is left of the floor.` });
 
@@ -149,7 +175,7 @@ export function lay(b: SiteBuilding & { form?: Form }, ctx: FormContext): FormLa
 
   // ---- cores ----
   const houses = Math.max(0, Math.round(form.houses ?? 0));
-  const need = coreNeed(L.map((f) => ({ use: f.use, area: f.area })), height, houses > 0);
+  const need = coreNeed(L.map((f) => ({ use: f.use, area: f.void ? 0 : f.area })), height, houses > 0);
   const smallest = distinct.reduce((a, f) => (f.area < a.area ? f : a), distinct[0]);
   const placed = placeCores(commonIn, outlineLocal, need, offset(smallest.shape, -0.5));
   if (need.area && !placed.fit) issues.push({ key: 'core', tone: 'warn', text: 'No room for a core straight through every floor: it is drawn on the smallest floor.' });
@@ -187,13 +213,29 @@ export function lay(b: SiteBuilding & { form?: Form }, ctx: FormContext): FormLa
   const unitsOf: Unit[][] = [];
   for (let i = 0; i < N; i++) {
     const f = L[i];
-    if (f.same && L[i - 1].use === f.use) {
+    if (f.void) { unitsOf.push([]); continue; }
+    if (f.same && L[i - 1].use === f.use && !L[i - 1].void && f.ssig === L[i - 1].ssig) {
       const u = unitsOf[i - 1];
       for (const x of u) if (x.t < 3) placedT[x.t]++;
       unitsOf.push(u);
       continue;
     }
-    unitsOf.push(planUnits(f.shape, f.use, placed.cores, corridor, placed.centres, ctx, placedT, houses, f.outer));
+    if (!f.spaces?.length) { unitsOf.push(planUnits(f.shape, f.use, placed.cores, corridor, placed.centres, ctx, placedT, houses, f.outer)); continue; }
+    // (each space by its own use, then what's left by the floor's)
+    const us: Unit[] = [];
+    let rest = f.shape;
+    for (const s of f.spaces) {
+      rest = diff(rest, s.shape);
+      if (s.fill === 'one' || s.use === 'none') {
+        if (s.use === 'none' || s.use === 'parking') continue;
+        const net = placed.cores.length ? diff(s.shape, ...placed.cores.map(mpOf)) : s.shape, A = area(net), r = ringsOf(net)[0];
+        if (A > 2 && r) us.push({ t: s.use === 'residential' ? (A * CARPET >= ctx.sizes[2] * 0.9 ? 2 : A * CARPET >= ctx.sizes[1] * 0.9 ? 1 : 0) : 3, ring: r, carpet: A * CARPET, kind: s.use });
+        continue;
+      }
+      for (const u of planUnits(s.shape, s.use, placed.cores, corridor, placed.centres, ctx, placedT, 0, f.outer)) us.push({ ...u, kind: s.use });
+    }
+    if (area(rest) > 2) us.push(...planUnits(rest, f.use, placed.cores, corridor, placed.centres, ctx, placedT, houses, f.outer));
+    unitsOf.push(us);
   }
 
   // ---- the roof ----
@@ -245,15 +287,16 @@ export function lay(b: SiteBuilding & { form?: Form }, ctx: FormContext): FormLa
   const floors: FormFloor[] = [];
   for (let i = 0; i < N; i++) {
     const f = L[i], prev = floors[i - 1];
-    const units = unitsOf[i].map((u) => ({ t: u.t, ring: W(u.ring), carpet: u.carpet }));
+    const units = unitsOf[i].map((u) => (u.kind ? { t: u.t, ring: W(u.ring), carpet: u.carpet, kind: u.kind } : { t: u.t, ring: W(u.ring), carpet: u.carpet }));
     const shared = f.same && prev;
     floors.push({
-      level: i, y: f.y, h: f.h, use: f.use,
+      level: i, y: f.y, h: f.h, use: f.use, ...(f.void ? { void: true } : {}),
       outer: shared ? prev.outer : W(f.outer),
       rings: shared ? prev.rings : f.rings.map(W),
-      area: f.area,
+      area: f.void ? 0 : f.area,
       cuts: shared ? prev.cuts : f.cuts.map((c) => ({ ring: W(c.ring), face: c.face })),
       units, carpet: units.reduce((a, u) => a + u.carpet, 0),
+      ...(f.spaces?.length ? { spaces: f.spaces.map((s) => ({ id: s.id, use: s.use, rings: ringsOf(s.shape).map(W), area: area(s.shape) })) } : {}),
       over: over[i], terrace: terrace[i],
     });
   }

@@ -5,7 +5,7 @@
 // The preview here blends the key floors itself, so it draws at once from the form alone; the procedure in ./form
 // is what the 3D, the money and the rules read. Both read the same keys, so they agree on the shape.
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { opOf, sampleCurve, USE_INFO, type Carve, type Curve, type Form, type KeyFloor, type Pt } from './form';
+import { levelOf, opOf, partT, sampleCurve, USE_INFO, type Carve, type Curve, type Form, type KeyFloor, type Pt } from './form';
 
 // ---------------------------------------------------------------- the form, floor by floor (a preview)
 const ID: KeyFloor = { t: 0, sx: 1, sz: 1, dx: 0, dz: 0, rot: 0 };
@@ -51,7 +51,7 @@ export function previewFloors(f: Form): PreviewFloor[] {
   const n = Math.max(1, f.uses.reduce((s, u) => s + Math.max(0, u.floors), 0));
   let y = 0, k = 0;
   for (const u of f.uses) for (let j = 0; j < u.floors; j++, k++) {
-    const h = u.floorH ?? USE_INFO[u.use].floorH, t = n > 1 ? k / (n - 1) : 0;
+    const h = levelOf(f.levels, k + 1).h ?? u.floorH ?? USE_INFO[u.use].floorH, t = n > 1 ? k / (n - 1) : 0;
     out.push({ y, h, t, use: u.use, ring: keyed(plan, keyAt(f, t)) });
     y += h;
   }
@@ -172,7 +172,7 @@ export function SilhouetteEditor({ form, set }: { form: Form; set: (f: Form) => 
     const [x, y] = svgPt(svg.current, ev), f = withKeys(live.current), ks = f.keys.map((k) => ({ ...k }));
     if (drag.k === 'carve') {
       const t = Math.round(tOfY(fl, y) * 100) / 100;
-      push({ ...f, carves: f.carves.map((c) => (c.id === drag.id ? { ...c, [drag.end]: drag.end === 'from' ? Math.min(t, c.to - 0.02) : Math.max(t, c.from + 0.02) } : c)) });
+      push({ ...f, carves: f.carves.map((c) => (c.id === drag.id ? spanTo(c, drag.end, t, fl.length) : c)) });
       return;
     }
     const k = ks[drag.i]; if (!k) return;
@@ -204,7 +204,7 @@ export function SilhouetteEditor({ form, set }: { form: Form; set: (f: Form) => 
         <path d={path(el.outline, true)} class="sil-body" stroke-width={u * 1.5} onClick={addAt} />
         {fl.length < 120 && el.lines.slice(1).map((l) => <path d={path(l)} class="sil-floor" stroke-width={u * 0.6} />)}
         {el.roof.length > 0 && <path d={path(el.roof)} class="sil-roof" stroke-width={u * 1.5} />}
-        {form.carves.map((c) => { const y0 = yOfT(fl, c.from), y1 = yOfT(fl, c.to), x = el.x1 + 3 * u * 4; return <g class="sil-carve">
+        {form.carves.map((c) => { const [t0, t1] = partT(c, fl.length), y0 = yOfT(fl, t0), y1 = yOfT(fl, t1), x = el.x1 + 3 * u * 4; return <g class="sil-carve">
           <path d={`M${x} ${-y0}V${-y1}`} stroke-width={u * 1.2} />
           {(['from', 'to'] as const).map((end) => <circle cx={x} cy={-(end === 'from' ? y0 : y1)} r={u * 5} class="h" onPointerDown={(ev) => down(ev as PointerEvent, { k: 'carve', id: c.id, end })}><title>{end === 'from' ? 'Where the cut starts' : 'Where it ends'}</title></circle>)}
         </g>; })}
@@ -276,6 +276,16 @@ export function PlanEditor({ form, set }: { form: Form; set: (f: Form) => void }
       </svg>
     </div>
   );
+}
+
+/** a part's start or end moved to height t (of n floors): its share of the way up, and its floor when it keeps to
+ *  its floors */
+export function spanTo(c: Carve, end: 'from' | 'to', t: number, n: number): Carve {
+  const [a, b] = partT(c, n), tt = end === 'from' ? Math.min(t, b - 0.02) : Math.max(t, a + 0.02);
+  const o: Carve = { ...c, from: end === 'from' ? tt : a, to: end === 'to' ? tt : b };
+  if (c.lo === undefined && c.hi === undefined) return o;
+  const fl = (x: number) => (n <= 1 ? 1 : Math.round(Math.max(0, Math.min(1, x)) * (n - 1)) + 1);
+  return { ...o, lo: fl(o.from), hi: Math.max(fl(o.from), fl(o.to)) };
 }
 
 // ---------------------------------------------------------------- a slot

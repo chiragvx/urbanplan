@@ -339,6 +339,8 @@ Ordered so each step is useful alone, and the risky ones come after the cheap on
 - **Step 1, one use table (2026-11-23): built.** src/doc/uses.ts; the `evaluate()` snapshot on nine sample projects is byte-identical. The parking ratio fix from the official Table 8-B is still to do.
 - **Step 2, no use yet and the use set last (2026-11-23): built.** "No use yet" is a use; a plain building has its own use; Shape it keeps the use. Per-space use waits for step 5.
 - **Step 3, parts with plan booleans (2026-11-23): built.** Add, cut and keep prisms, in order, on the floors they span; old carves are cut parts, unchanged. The Parts list is in the inspector and on the bar, and parts' edges can be dragged on the view. The `evaluate()` snapshot is byte-identical. Heights are still a share of the floors until step 4.
+- **Step 4, levels and voids (2026-11-23): built.** Floor heights by range whatever the use; "no floor" voids that keep their height and walls but have no slab or area; parts keep to their floors (`lo`, `hi`). The `evaluate()` snapshot is byte-identical.
+- **Step 5, spaces on floors (2026-11-23): first part built.** Spaces with their own use, floors and fill (laid out or one unit); units carry their use, and parking and money count them by it; the Spaces section and edge handles. Still to do: drawing and splitting polygons in plan, the core and corridors as spaces, units as spaces, mixed.ts's strip as a generator.
 
 **The first three steps (1–3) deliver most of what was asked in form:** any shape that can be described as joined and cut prisms, and a use given afterwards. Steps 5–7 make the use honest. Step 9 is interiors. Steps 10–12 extend reach.
 

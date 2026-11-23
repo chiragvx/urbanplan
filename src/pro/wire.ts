@@ -283,7 +283,7 @@ function formed(L: FormLayout, b: { spine: number[] }, look: { skin: Skin; roof:
   };
   const dense = look && (look.skin.pattern === 'fins' || look.skin.pattern === 'curtain') ? 3 : 7.5;
   F.forEach((f, k) => {
-    const yT = f.y + f.h, slab = k === 0 || k % every === 0;
+    const yT = f.y + f.h, slab = (k === 0 || k % every === 0) && !f.void;
     C.floors[k].forEach((cr, i) => {
       if (slab) ring(cr.ring, f.y, kW(k === 0 ? 1 : 0.42));
       if (k === last) ring(cr.ring, yT, kW(1));

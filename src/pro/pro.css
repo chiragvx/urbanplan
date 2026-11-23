@@ -1088,3 +1088,5 @@ details.chk .show { display: inline-flex; align-items: center; gap: 5px; margin:
 .hh.hh-face { border-radius: 4px; }
 .hh.op-add { color: #1a7f37; }
 .hh.op-keep { color: #8250df; }
+.hh.hh-space { color: #0969da; border-radius: 2px; }
+.part-h .sel { flex: none; max-width: 130px; }

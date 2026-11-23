@@ -261,7 +261,8 @@ export const FIRE_GAP = 1.5, ROAD_CLEAR = 1.2;
 /** recreational open space: a share of the plot, on plots this big and more (UDCPR 3.5.1) */
 export const RG_FROM = 4000, RG_SHARE = 0.1;
 
-export interface Unit { t: UnitType; ring: number[]; carpet: number }
+/** `kind`: a unit of a use of its own, on a floor of another (a shop on a floor of homes); unset: its floor's */
+export interface Unit { t: UnitType; ring: number[]; carpet: number; kind?: FloorUse }
 export interface Level {
   kind: 'stilt' | 'podium' | 'basement' | 'surface' | 'structure' | 'lot'; bays: number[][]; ramp: number[] | null; area: number;
   /** a deck's columns, and its exit stairs and the cores coming down through it */
@@ -574,7 +575,8 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
   };
   for (const b of buildings) {
     if (b.laid) {
-      for (const f of b.laid.floors) { const k = floorKind(f, b.use); for (const u of f.units) parkUnit(u, 1, k === 'residential' ? PARK_PER.commercial! : FLOOR_USE[k].park); }
+      const per = (k: FloorUse) => (k === 'residential' ? PARK_PER.commercial! : FLOOR_USE[k].park);
+      for (const f of b.laid.floors) { const k = floorKind(f, b.use); for (const u of f.units) parkUnit(u, 1, per(u.kind ?? k)); }
       continue;
     }
     for (const u of b.units) {
@@ -681,14 +683,22 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
   for (const b of buildings) {
     if (!b.laid) { if (sells(b)) sales += b.units.reduce((a, u) => a + u.carpet, 0) * b.floors * SQFT * rate.sale; continue; }
     for (const f of b.laid.floors) {
-      const k = floorKind(f, b.use), earns = FLOOR_USE[k].earns, c = f.units.reduce((a, u) => a + u.carpet, 0) * SQFT;
-      const value = earns === 'sale' ? c * (k === 'retail' ? rate.retail ?? rate.sale * SHOP_RATE : rate.sale)
-        : earns === 'lease' ? (c * rate.officeRent * 12 * (1 - OFFICE_VOID)) / (rate.officeYield / 100)
-        : earns === 'operate' ? (c * rate.hotelNoi) / (rate.hotelYield / 100) : 0;
-      if (earns === 'sale') sales += value; else exit += value;
-      const line = uses.get(k) ?? { use: k, floors: 0, area: 0, carpet: 0, units: 0, earns, value: 0 };
-      line.floors++; line.area += f.area; line.carpet += c / SQFT; line.units += f.units.length; line.value += value;
-      uses.set(k, line);
+      // (by use: the floor's, and any of its spaces' own; a floor's area shared by carpet between them)
+      const fk = floorKind(f, b.use), groups = new Map<FloorUse, Unit[]>([[fk, []]]);
+      for (const u of f.units) { const g = groups.get(u.kind ?? fk); if (g) g.push(u); else groups.set(u.kind ?? fk, [u]); }
+      const all = groups.size > 1 ? f.units.reduce((a, u) => a + u.carpet, 0) : 0;
+      for (const [k, us] of groups) {
+        const earns = FLOOR_USE[k].earns, c = us.reduce((a, u) => a + u.carpet, 0) * SQFT;
+        const value = earns === 'sale' ? c * (k === 'retail' ? rate.retail ?? rate.sale * SHOP_RATE : rate.sale)
+          : earns === 'lease' ? (c * rate.officeRent * 12 * (1 - OFFICE_VOID)) / (rate.officeYield / 100)
+          : earns === 'operate' ? (c * rate.hotelNoi) / (rate.hotelYield / 100) : 0;
+        if (earns === 'sale') sales += value; else exit += value;
+        const line = uses.get(k) ?? { use: k, floors: 0, area: 0, carpet: 0, units: 0, earns, value: 0 };
+        if (k === fk) line.floors++;
+        line.area += groups.size === 1 ? f.area : all > 0 ? (f.area * c) / SQFT / all : k === fk ? f.area : 0;
+        line.carpet += c / SQFT; line.units += us.length; line.value += value;
+        uses.set(k, line);
+      }
     }
   }
   const revenue = sales + exit;
@@ -697,7 +707,7 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
 
   // open ground: the net plot less the buildings, the roads and the lots; green: the gardens as they're left
   const openHave = laid.map.openArea;
-  const homes = (b: BuildingReport) => b.use === 'residential' || !!b.laid?.floors.some((f) => floorKind(f, b.use) === 'residential');
+  const homes = (b: BuildingReport) => b.use === 'residential' || !!b.laid?.floors.some((f) => floorKind(f, b.use) === 'residential' || f.units.some((u) => u.kind === 'residential'));
   const openNeed = r.area >= RG_FROM && (buildings.some(homes) || (!buildings.length && use === 'residential')) ? r.area * RG_SHARE : 0;
   const green = laid.map.gardenArea;
 

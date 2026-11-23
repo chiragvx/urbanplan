@@ -13,7 +13,7 @@ import { ELEMENTS, SQFT, UNIT_LABEL, type SiteElement } from '../doc/site';
 import { featureOf, INTERNAL_WIDTHS, DEFAULT_LEVELS, PLINTH_MIN, roadWidths, type Levels, type SiteFeature } from './siteObjects';
 import { cap, DIRS, edgeFacing, withEdgeRoad } from './plotOps';
 import { ShapePanel, shapeIt, withFloors } from './shapePanel';
-import { MixBody, PartsBody, RoofBody, ShapeBody, SkinBody, StyleBody } from './formHud';
+import { LevelsBody, MixBody, PartsBody, SpacesBody, RoofBody, ShapeBody, SkinBody, StyleBody } from './formHud';
 import { SystemsPanel } from './systemsPanel';
 import { mergeSettings, splitSettings } from './systems';
 import { FlatPlan } from './steps';
@@ -115,6 +115,8 @@ function BuildingInspector({ p, e, up, rooms, checks, pick, toast, xray, hide, r
             <Section title="Shape"><ShapeBody {...bp} /></Section>
             <ShapePanel b={ownB} floors={br.floors} set={setB} />
             <Section title="Parts" aside={ownB.form.carves.length ? <span class="sec-meta">{ownB.form.carves.length}</span> : undefined}><PartsBody {...bp} /></Section>
+            <Section title="Spaces" fold open={!!ownB.form.spaces?.length} aside={ownB.form.spaces?.length ? <span class="sec-meta">{ownB.form.spaces.length}</span> : undefined}><SpacesBody {...bp} /></Section>
+            <Section title="Levels" fold open={!!ownB.form.levels?.length} aside={ownB.form.levels?.length ? <span class="sec-meta">{ownB.form.levels.length}</span> : undefined}><LevelsBody {...bp} /></Section>
             <Section title="Roof"><RoofBody {...bp} /></Section>
             <Section title="Skin"><SkinBody {...bp} /></Section>
           </>

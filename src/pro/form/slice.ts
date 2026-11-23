@@ -3,7 +3,7 @@
 // layout (./lay.ts) turns them to world metres at the very end, since a turn and a move change no area.
 import { sampleCurve } from './curve';
 import { USE_TABLE } from '../../doc/uses';
-import { USE_INFO, type BuildingUse, type Carve, type Curve, type Form, type FormContext, type KeyFloor } from './types';
+import { levelOf, partSpan, USE_INFO, type BuildingUse, type Carve, type Curve, type Form, type FormContext, type KeyFloor } from './types';
 
 /** how finely curves are sampled (m): fine enough to read as smooth in 3D, coarse enough to stay quick */
 export const STEP = 1.5;
@@ -11,7 +11,7 @@ export const STEP = 1.5;
 /** The floors from the ground up: each one's use and floor to floor. Homes take the design system's floor to
  *  floor; the other uses their own. `total` (the building's floors, when set) wins over the bands: the top band
  *  grows or loses floors to match, so the engine's floors and the form's always agree. */
-export function floorsOf(form: Form, total: number, ctx: FormContext): { use: BuildingUse; h: number }[] {
+export function floorsOf(form: Form, total: number, ctx: FormContext): { use: BuildingUse; h: number; void?: boolean }[] {
   const bands = form.uses.filter((u) => u.floors > 0).map((u) => ({ ...u, floors: Math.round(u.floors) }));
   if (!bands.length) bands.push({ use: 'residential', floors: Math.max(1, Math.round(total) || 1) });
   let sum = bands.reduce((s, u) => s + u.floors, 0);
@@ -25,11 +25,13 @@ export function floorsOf(form: Form, total: number, ctx: FormContext): { use: Bu
     if (bands.length) bands[bands.length - 1].floors += want - sum;
     else bands.push({ use: 'residential', floors: want });
   }
-  const out: { use: BuildingUse; h: number }[] = [];
+  const out: { use: BuildingUse; h: number; void?: boolean }[] = [];
   for (const u of bands) {
     const h = u.floorH && u.floorH > 1.8 ? u.floorH : USE_TABLE[u.use].dsFloor ? ctx.floorH || USE_INFO[u.use].floorH : USE_INFO[u.use].floorH;
     for (let i = 0; i < u.floors; i++) out.push({ use: u.use, h });
   }
+  // (the levels set by range: a height of their own, or no floor)
+  if (form.levels?.length) out.forEach((f, i) => { const l = levelOf(form.levels, i + 1); if (l.h) f.h = l.h; if (l.void) f.void = true; });
   return out;
 }
 
@@ -139,11 +141,18 @@ export class Planner {
   }
   /** the carves cutting a floor at height t: each one's ring, moved along its path and then by the floor's own
    *  transform, so a cut keeps its place on the facade as the floors taper, lean or twist */
-  carvesAt(t: number, xf: Xf): { c: Carve; ring: number[]; sig: string }[] {
+  carvesAt(t: number, xf: Xf, level = -1, n = 0): { c: Carve; ring: number[]; sig: string }[] {
     const out: { c: Carve; ring: number[]; sig: string }[] = [];
     for (const c of this.form.carves) {
-      const lo = Math.min(c.from, c.to), hi = Math.max(c.from, c.to);
-      if (c.off || t < lo - 1e-6 || t > hi + 1e-6 || c.ring.pts.length < 3) continue;
+      if (c.off || c.ring.pts.length < 3) continue;
+      if ((c.lo !== undefined || c.hi !== undefined) && level >= 0 && n > 0) {
+        // (a part on its own floors: on them whatever the building's height)
+        const [a, b] = partSpan(c, n);
+        if (level + 1 < a || level + 1 > b) continue;
+      } else {
+        const lo = Math.min(c.from, c.to), hi = Math.max(c.from, c.to);
+        if (t < lo - 1e-6 || t > hi + 1e-6) continue;
+      }
       const [ddx, ddz] = drift(c.path, t);
       const r = this.sample(c.ring).slice();
       for (let i = 0; i < r.length; i += 2) { r[i] += ddx; r[i + 1] += ddz; }

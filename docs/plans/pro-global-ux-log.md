@@ -4,6 +4,100 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-23 · Spaces on floors, first part (docs/plans/pro-design-freedom.md, step 5)
+
+**Why:** a floor had one use. Shops along the front of a floor of homes, a hall beside offices, or a terminal's departments couldn't be said.
+
+**What changed:**
+- **Spaces** (`Form.spaces`, src/pro/form/types.ts). A space is a plan ring on a range of floors, with:
+  - a name and a use of its own;
+  - a fill: laid out by its use's generator (flats by the mix, shops along the frontage, offices, rooms), or kept as one unit (a hall, a big shop, a lobby);
+  - an eye to switch it off.
+
+  What of a floor no space covers keeps its band's use. Spaces earlier in the list win where they overlap. A space moves with the floor's taper, lean and twist.
+- **The layout** (lay.ts) cuts each space to the floor and lays out its units by its own use, then the rest of the floor by the band's. A floor like the one below with the same spaces shares its units, as before. Each floor lists its spaces with their world rings and areas (`FormFloor.spaces`).
+- **The engine counts each unit by its own use.** A unit can carry a use (`Unit.kind`, src/doc/site.ts):
+  - parking goes by the unit's use: shops by the shop rule, a hall by its own;
+  - money and the "by use" lines group a floor's units by use, and share the floor's area between them by carpet;
+  - a building counts as having homes if any space on it is homes.
+- **The Spaces section** in the inspector (folded until a building has spaces). Each space has:
+  - an eye and an editable name;
+  - its use, from the use table;
+  - its floors, from and to;
+  - arrows to reorder, and remove;
+  - Laid out or One unit.
+
+  Quick adds: Shops along the front (floor 1, 8 m deep), A corner (offices, floors 1–2), The whole floor (offices, floors 1–3), A hall (one unit, floor 1).
+- **On the view:** a space's edges have blue square handles halfway up its floors. Drag one to push or pull that edge, or use the arrow keys.
+
+**How it was checked:**
+- **Figures:** the `evaluate()` snapshot on the nine sample projects is byte-identical to before.
+- **Tests** added to tools/dev/test-parts.ts:
+  - shops along the front of a floor of homes: floor 1 holds both, floor 2 homes only;
+  - the space is cut to the floor (180 m²);
+  - a hall kept as one unit;
+  - the money lists the shops by their own use;
+  - parking changes with the space's use (shops 46, a hall in their place 47).
+- **Browser**, on an 8-floor box of homes, with your storage backed up and restored exactly:
+  - "Shops along the front" gave 6 shop units and 2 flats on the ground floor;
+  - the inspector showed "Other units 6";
+  - four blue handles appeared;
+  - dragging one moved that edge out 2.5 m.
+- `npx tsc` clean, `npm test` ALL OK (8 suites), `npm run build` OK.
+
+**Left or known (the rest of step 5):**
+- **Spaces are rectangles you adjust.** Drawing a polygon on a floor in plan, splitting a floor with a line, and snapping to the core and to other spaces are still to do.
+- **The core and corridors aren't spaces yet,** and units are still the engine's units, carrying a use, not spaces of their own (plan §4.1's "units become spaces").
+- **mixed.ts's shop strip** on plain buildings is not yet a space generator.
+- **Build cost** still goes by the floor's use, not the space's; that belongs to step 6.
+- **Spaces aren't drawn on the view** apart from their handles; X-ray shows the units they make.
+
+---
+
+## 2026-11-23 · Levels you set, and voids (docs/plans/pro-design-freedom.md, step 4)
+
+**Why:** a floor's height came only from its use. A lobby, a hall or an atrium needs a taller floor or a space two floors high. And a part's floors were a share of the building's height, so a podium on floors 1–3 moved when floors were added.
+
+**What changed:**
+- **Levels by range** (`Form.levels`, src/pro/form/types.ts). A range of floors (1 is the ground floor) can have:
+  - a floor-to-floor height of its own, whatever its use;
+  - **no floor**: a void. The floor keeps its height and its walls, but has no slab, no area and no units, so the floor below rises through it. The ground floor always has a floor.
+- **The Levels section** in the inspector (folded unless the building has levels). Each range has:
+  - its floors, from and to;
+  - Floors or No floor;
+  - a height (blank means the use's own);
+  - remove.
+
+  Two quick adds: "A height" and "A double-height ground floor" (floor 2 left out).
+- **Parts keep to their floors.** A part now stores its first and last floor (`lo`, `hi`) as well as its share of the height, and the floors win. Every part made or edited since this step has them. Older parts keep their shares, so old projects lay out exactly as before.
+  - The Parts list, the handles up the face and the plan sketch all read and write floors.
+- **In 3D:** a void floor has no slab or slab edge, and the floor below has no lid under it. The wireframe draws no slab line there.
+- **Numbers:**
+  - a void floor counts no built-up and no units;
+  - it is never flagged as "nothing is left of the floor";
+  - the building's height and floor count include it, so the height rules see the true height.
+
+**How it was checked:**
+- **Figures:** the `evaluate()` snapshot on the nine sample projects is byte-identical to before.
+- **Tests** added to tools/dev/test-parts.ts:
+  - a 6 m ground floor;
+  - a void with no area or units, the same height and floor count, and no "empty" flag;
+  - the ground floor can't be a void;
+  - a podium kept to floors 1–3 stays there on 20 floors, while an older one by share grows.
+- **Browser**, on a 12-floor box with a 4.5 m ground floor, floor 2 left out and a podium on floors 1–3, with your storage backed up and restored exactly:
+  - areas 928, 0, 928, then 381;
+  - units 9, 0, 9;
+  - the Levels section showed both ranges;
+  - its "Floors" button put floor 2 back (928 m²).
+- `npx tsc` clean, `npm test` ALL OK (8 suites), `npm run build` OK.
+
+**Left or known:**
+- The use strip and the plan sketch still place floors by each use's own floor height, not the design system's. The view's handles can sit a little off on tall buildings, as before.
+- A void's windows are still drawn floor by floor; a double-height glazed wall would read better.
+- Voids are whole floors. A void over part of a floor (an atrium in the middle) is a space, which comes with step 5.
+
+---
+
 ## 2026-11-23 · Parts: plan booleans (docs/plans/pro-design-freedom.md, step 3)
 
 **Why:** a designer should be able to make any form by joining and cutting masses: a podium and a tower, two towers and a bridge, an L or U of different heights, a hall with a pier. Before this, a form could only be cut (slots and courts).

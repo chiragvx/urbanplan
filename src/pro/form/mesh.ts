@@ -566,9 +566,9 @@ export function buildForm(L: FormLayout, look: Look, o: BuildOpts): Built {
   for (let k = 0; k < shown; k++) {
     const f = F[k], y = f.y, h = f.h, cut = k === cutAt, fl = C.floors[k];
     const { p: pat, glass } = useSkin(f.use, skin.pattern, skin.glass);
-    // the slab, with its holes, its edge just proud of the wall
+    // the slab, with its holes, its edge just proud of the wall (none on a void)
     for (const cr of fl) {
-      if (cr.hole) continue;
+      if (cr.hole || f.void) continue;
       const holes = fl.filter((x) => x.hole && inside(x.ring[0], x.ring[1], cr.ring)).map((x) => x.ring);
       face(B.slab, cr.ring, holes, y, up); face(B.slab, cr.ring, holes, y - SLAB, down);
     }
@@ -576,7 +576,7 @@ export function buildForm(L: FormLayout, look: Look, o: BuildOpts): Built {
       const lp = cut || k === last ? { A: cr.ring, B: cr.ring, loft: false } : loftPair(C, k, i, h);
       const A = lp.A, Bt = lp.B, N = ringNormals(A, smoothCos), cum = cumOf(A), n = A.length / 2, P = cum[n];
       // (proud of a glazed skin as a slab line; tucked behind a solid one, which should read as one smooth surface)
-      strip(B.slab, cr.ring, cr.ring, y - SLAB, y, 0, 1, ringNormals(cr.ring, smoothCos), null, cumOf(cr.ring), skin.glass < 0.05 ? -0.03 : 0.03);
+      if (!f.void) strip(B.slab, cr.ring, cr.ring, y - SLAB, y, 0, 1, ringNormals(cr.ring, smoothCos), null, cumOf(cr.ring), skin.glass < 0.05 ? -0.03 : 0.03);
       // each edge: the skin, or a carve's cut face (glazed, or open)
       const cls = new Uint8Array(n);
       if (f.cuts.length) for (let e = 0; e < n; e++) {
@@ -597,7 +597,7 @@ export function buildForm(L: FormLayout, look: Look, o: BuildOpts): Built {
       if (cut) return;
       // (a floor that steps rather than lofts gets a lid: where the floor above doesn't cover it, a terrace or the top
       // of a cantilevered wing; where it does, the lid sits hidden just under that floor's slab)
-      if (!lp.loft && k < last && !cr.hole) face(B.slab, cr.ring, fl.filter((x) => x.hole && inside(x.ring[0], x.ring[1], cr.ring)).map((x) => x.ring), yB - 0.02, up);
+      if (!lp.loft && k < last && !cr.hole && !F[k + 1].void) face(B.slab, cr.ring, fl.filter((x) => x.hole && inside(x.ring[0], x.ring[1], cr.ring)).map((x) => x.ring), yB - 0.02, up);
       // the pattern, along the outline by arc length; fins and mullions keep their place up a chain of floors
       const count = (spc: number) => Math.max(3, Math.round((C.perim[cr.chain] || P) / spc));
       const along = (fr: number) => {
@@ -772,7 +772,7 @@ export function formMass(L: FormLayout): THREE.BufferGeometry {
 export function layoutHash(L: FormLayout): string {
   let h = 0, n = 0;
   const mix = (v: number) => { h = (h * 31 + Math.round(v * 100)) | 0; n++; };
-  for (const f of L.floors) { mix(f.y); mix(f.h); for (const r of f.rings) for (const v of r) mix(v); for (const c of f.cuts) for (const v of c.ring) mix(v); mix(f.units.length); }
+  for (const f of L.floors) { mix(f.y); mix(f.h); mix(f.void ? 1 : 0); for (const r of f.rings) for (const v of r) mix(v); for (const c of f.cuts) for (const v of c.ring) mix(v); mix(f.units.length); }
   for (const r of L.shell ?? []) for (const v of r) mix(v);
   mix(L.top);
   return `${n}:${h}`;

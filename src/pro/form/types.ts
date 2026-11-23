@@ -55,7 +55,11 @@ export interface Carve {
   /** switched off: kept in the list, but not acting */
   off?: boolean;
   ring: Curve;
+  /** how far up it starts and ends: 0 the lowest floor of the form, 1 its top floor */
   from: number; to: number;
+  /** its first and last floor (1 the ground floor), when set: these win over `from` and `to`, so a podium on
+   *  floors 1–3 stays on floors 1–3 when the building gets more or fewer floors (parts made since levels have them) */
+  lo?: number; hi?: number;
   path?: { t: number; dx: number; dz: number }[];
   /** what's left at a cut: glass (a slot, a glazed reveal) or open (a sky garden, a void through) */
   face: 'glass' | 'open';
@@ -64,6 +68,57 @@ export interface Carve {
 export type Part = Carve;
 /** what a part does, its op unset read as a cut */
 export const opOf = (c: Pick<Carve, 'op'>): PartOp => c.op ?? 'cut';
+/** a part's first and last floor (1 the ground floor) of `n`: its own when set, else read off its share of the way up */
+export function partSpan(c: Pick<Carve, 'from' | 'to' | 'lo' | 'hi'>, n: number): [number, number] {
+  const fl = (t: number) => (n <= 1 ? 1 : Math.round(Math.max(0, Math.min(1, t)) * (n - 1)) + 1);
+  const a = c.lo !== undefined ? c.lo : fl(Math.min(c.from, c.to)), b = c.hi !== undefined ? c.hi : fl(Math.max(c.from, c.to));
+  const lo = Math.max(1, Math.min(n, Math.round(Math.min(a, b)))), hi = Math.max(1, Math.min(n, Math.round(Math.max(a, b))));
+  return [lo, hi];
+}
+/** a part's start and end as shares of the way up `n` floors (its floors when set) */
+export function partT(c: Pick<Carve, 'from' | 'to' | 'lo' | 'hi'>, n: number): [number, number] {
+  if (c.lo === undefined && c.hi === undefined) return [Math.min(c.from, c.to), Math.max(c.from, c.to)];
+  const [lo, hi] = partSpan(c, n), t = (k: number) => (n <= 1 ? 0 : (k - 1) / (n - 1));
+  return [t(lo), t(hi)];
+}
+
+/** A space on the floors (docs/plans/pro-design-freedom.md §4.1): a plan ring on floors `lo` … `hi` (1 the ground
+ *  floor) with a use of its own, so one floor can hold shops along the front and homes behind, or a terminal its
+ *  check-in hall and its offices. What of a floor no space covers keeps its band's use. A space is filled by the
+ *  use's generator (flats by the mix, shops along the frontage, offices, rooms), or kept as one unit. Spaces earlier
+ *  in the list win where they overlap. Its ring moves with the floor's taper, lean and twist, as a part's does. */
+export interface Space {
+  id: string;
+  name?: string;
+  use: BuildingUse;
+  ring: Curve;
+  lo: number; hi: number;
+  /** auto: the use's generator lays it out; one: the whole space is one unit (a hall, a shop, a lobby) */
+  fill?: 'auto' | 'one';
+  /** a department or group it belongs to ("Check-in", "Airside") */
+  group?: string;
+  off?: boolean;
+}
+
+/** A range of floors set apart (1 the ground floor): its own floor to floor, whatever the use, or no floor at all.
+ *  A floor with no floor (a void) keeps its height and its walls, but has no slab and no area: the floor below
+ *  rises through it (a double-height lobby, an atrium, a hall). The ground floor always has a floor. */
+export interface Level {
+  from: number; to: number;
+  /** floor to floor (m); unset: the use's */
+  h?: number;
+  void?: boolean;
+}
+/** what the levels say of floor k (1 the ground floor): the last range holding it wins */
+export function levelOf(levels: Level[] | undefined, k: number): { h?: number; void: boolean } {
+  let h: number | undefined, v = false;
+  for (const l of levels ?? []) {
+    if (k < Math.min(l.from, l.to) || k > Math.max(l.from, l.to)) continue;
+    if (l.h && l.h > 1.8) h = l.h;
+    v = !!l.void && k > 1;
+  }
+  return { h, void: v };
+}
 
 /** A skin standing off the floors' edges: fins, a screen, a sculpted shell that rises past the roof. */
 export interface Shell {
@@ -133,6 +188,10 @@ export interface Form {
   roof: Roof;
   /** the uses from the ground up; their floors add up to the building's floors over the ground */
   uses: UseBand[];
+  /** floor heights by range, and floors left out (voids), over what the uses say */
+  levels?: Level[];
+  /** spaces with uses of their own, over the bands' (in order: the first wins where they overlap) */
+  spaces?: Space[];
   /** the skin over the design system's (unset: the design system's language speaks) */
   skin?: Partial<Skin>;
   /** how round its corners are, 0 sharp … 1 soft (unset: the design language's, FormContext.round) */
@@ -150,6 +209,8 @@ export interface FormFloor {
   /** its floor's height over the ground (m), and floor to floor */
   y: number; h: number;
   use: BuildingUse;
+  /** no floor here: the floor below rises through it (no slab, no area, no units; its walls and height stay) */
+  void?: boolean;
   /** the slab: the floor's outline before carves (one ring), and what's left after them (one or more rings) */
   outer: number[];
   rings: number[][];
@@ -158,8 +219,11 @@ export interface FormFloor {
   /** the carves' cut faces on this floor, to glaze or leave open (world rings) */
   cuts: { ring: number[]; face: 'glass' | 'open' }[];
   /** flats (t 0..2 = 1/2/3 BHK) or other units (t 3: an office, a shop, a hotel room cluster, a public room) */
-  units: { t: 0 | 1 | 2 | 3; ring: number[]; carpet: number }[];
+  /** `kind`: a unit in a space of its own use (unset: the floor's) */
+  units: { t: 0 | 1 | 2 | 3; ring: number[]; carpet: number; kind?: BuildingUse }[];
   carpet: number;
+  /** the spaces on this floor, as they fall on it (world rings, after the floor's shape) */
+  spaces?: { id: string; use: BuildingUse; rings: number[][]; area: number }[];
   /** the part of this floor standing past the floor below (a cantilever or balcony) and set back from it (a terrace) */
   over: number; terrace: number;
 }

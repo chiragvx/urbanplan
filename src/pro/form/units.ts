@@ -18,7 +18,7 @@ const DEEP = 14;
 /** public rooms: each floor is one unit */
 const PUBLIC = new Set<BuildingUse>(FLOOR_USES.filter((u) => USE_TABLE[u].room));
 
-export interface Unit { t: 0 | 1 | 2 | 3; ring: number[]; carpet: number }
+export interface Unit { t: 0 | 1 | 2 | 3; ring: number[]; carpet: number; kind?: BuildingUse }
 
 /** What to cut a band into: each unit's type and its share (by area, or for shops by frontage), or the whole
  *  floor as one, or nothing. `placed` (flats of each type so far, up the building) keeps the mix on track. */
