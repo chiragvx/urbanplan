@@ -192,6 +192,7 @@ Smallest and most telling first, so the first two can be shown to users within d
    That's enough to run checks 1 and 3 below.
    - **Status (2026-11-23): built.** See docs/plans/pro-global-ux-log.md.
 2. **The generated-or-yours chip and toast (small).** §2.5, without moving any sections yet.
+   - **Status (2026-11-23): built.** See docs/plans/pro-global-ux-log.md.
 3. **The project inspector (medium).** Move Brief's and Design's sections into the nothing-picked inspector; remove the duplicates (Design › Plot, Buildings, On the site). Search's registry follows.
 4. **Generate (medium).** The popover on the toolbar takes in Fill the plot, the brief and Explore; results are options.
 5. **Reports (medium).** Numbers and Approval as bottom panels from the scorecard; remove the rail and `places.tsx`; N and A keys; map old links.

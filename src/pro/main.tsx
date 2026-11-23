@@ -63,7 +63,7 @@ import { Sheet, useNarrow, type Detent } from './sheet';
 import { isPhone, usePhone } from '../device';
 import { Inspector } from './inspector';
 import { Compare } from './compare';
-import { asOption, currentOption, duplicated as duplicatedOption, optionName, optionsOf, removedOption, renamed, switchTo } from './variants';
+import { added as addedOption, asOption, currentOption, duplicated as duplicatedOption, optionName, optionsOf, removedOption, renamed, switchTo } from './variants';
 import { CheckPins } from './checkPins';
 import { BuildingInfo, buildingName, MoneyView, Overview, RulesView, VIEW_OF, VIEW_STEPS, type ViewStep } from './viewer';
 import { ShareBody } from './shareSheet';
@@ -112,9 +112,11 @@ function App() {
       const n = { ...x, ...o }; store.set(KEY, n); return n;
     });
   };
-  const replace = (n: ProProject) => { past.current = [...past.current.slice(-80), p]; future.current = []; store.set(KEY, n); setP(n); };
-  const undo = () => { if (roRef.current) return; const x = past.current.pop(); if (!x) return; future.current.push(p); store.set(KEY, x); setP(x); };
-  const redo = () => { if (roRef.current) return; const x = future.current.pop(); if (!x) return; past.current.push(p); store.set(KEY, x); setP(x); };
+  /** when the project was last swapped whole (opened, undone, redone): not an edit that makes a layout yours */
+  const swappedAt = useRef(0);
+  const replace = (n: ProProject) => { swappedAt.current = Date.now(); past.current = [...past.current.slice(-80), p]; future.current = []; store.set(KEY, n); setP(n); };
+  const undo = () => { if (roRef.current) return; swappedAt.current = Date.now(); const x = past.current.pop(); if (!x) return; future.current.push(p); store.set(KEY, x); setP(x); };
+  const redo = () => { if (roRef.current) return; swappedAt.current = Date.now(); const x = future.current.pop(); if (!x) return; past.current.push(p); store.set(KEY, x); setP(x); };
 
   // (the place: Brief, Design, Numbers or Approval, kept for when the sheet opens; the six steps before map to the
   // places that took them in. A project opens on the view, never on a sheet: docs/plans/pro-ia-rethink.md)
@@ -156,10 +158,10 @@ function App() {
   const dial = useRef<{ a0: number; n0: number; moved: boolean; x: number; y: number } | null>(null);
   // (the readout by the pointer while drawing: written straight to the DOM, as it changes with every move)
   const readout = useRef<HTMLDivElement>(null);
-  const [toastMsg, setToastMsg] = useState<{ s: string; undo?: boolean } | null>(null);
+  const [toastMsg, setToastMsg] = useState<{ s: string; undo?: boolean; act?: { label: string; run: () => void } } | null>(null);
   const toastT = useRef<number>();
   /** a line at the bottom for a few seconds; with `undo`, an Undo on it (for a change made away from the view) */
-  const toast = (s: string, o?: { undo?: boolean }) => { setToastMsg({ s, undo: o?.undo }); clearTimeout(toastT.current); toastT.current = window.setTimeout(() => setToastMsg(null), o?.undo ? 7000 : 4200); };
+  const toast = (s: string, o?: { undo?: boolean; act?: { label: string; run: () => void } }) => { setToastMsg({ s, undo: o?.undo, act: o?.act }); clearTimeout(toastT.current); toastT.current = window.setTimeout(() => setToastMsg(null), o?.undo ? 7000 : 4200); };
   const [search, setSearch] = useState(false);
   const [dialog, setDialog] = useState<null | 'share' | 'drawings' | 'keys' | 'people' | 'area' | 'look' | 'compare'>(null);
   // (a first visit with nothing kept here: the empty state on the view, not a dialog)
@@ -292,6 +294,22 @@ function App() {
   const noteThreads = useMemo(() => threads(N.notes ?? []), [N.notes]);
   const openNotes = noteThreads.filter((t) => !t.root.resolved).length;
   const canResolve = !ref || ref.role !== 'viewer';
+
+  // ---------- generated or yours (docs/plans/pro-ia-rethink.md §2.5) ----------
+  // (no scheme: the generator lays it out from the brief, and brief changes move it. A scheme: the buildings are the
+  // user's, and the generator's settings wait for a regenerate)
+  const ownLayout = !!p.scheme;
+  /** the brief's layout again, as a new option beside this one (nothing of this one lost) */
+  const regenAsOption = () => { const q = pRef.current, c = addedOption(q, { scheme: undefined }, 'brief'), name = c.options?.find((o) => o.id === c.option)?.name ?? 'a new option'; up(c); setPicked(null); toast(`Generated again from the brief, as ${name}. Your layout stays in the option menu.`, { undo: true }); };
+  /** the brief's layout again, here (the hand edits go: one undo brings them back) */
+  const regenHere = () => { tx.once({ scheme: undefined }); setPicked(null); toast('Generated again from the brief: your edits to this layout are gone.', { undo: true }); };
+  const regenRef = useRef(regenAsOption); regenRef.current = regenAsOption;
+  const ownWas = useRef({ own: ownLayout, opt: p.option });
+  useEffect(() => {
+    const was = ownWas.current; ownWas.current = { own: ownLayout, opt: p.option };
+    if (was.own || !ownLayout || was.opt !== p.option || Date.now() - swappedAt.current < 800 || locked) return;
+    toast('This layout is now yours: brief changes won’t move it.', { undo: true, act: { label: 'Regenerate as a new option', run: () => regenRef.current() } });
+  }, [ownLayout, p.option]);
 
   // ---------- the 3D ----------
   const canvas = useRef<HTMLCanvasElement>(null), view = useRef<ProView | null>(null);
@@ -649,6 +667,7 @@ function App() {
         <canvas ref={canvas} onPointerMove={(ev) => setHover(view.current?.pick(ev.clientX, ev.clientY) ?? null)} onPointerLeave={() => setHover(null)} />
         <ResultBar e={e} deal={deal} sum={sum} go={go} statement={() => setDialog('area')} vs={vsBase ? { on: vsOn, set: setVsOn, name: vsBase.name, fig: vsFig } : null} />
         {!locked && <Shelf tool={tool} setTool={setTool} hint={hint ? <div class="drawhint" role="status"><span>{hint}</span><button type="button" class="linkbtn" onClick={() => setTool(SELECT)}>Done</button></div> : null} />}
+        {!phone && !p.blank && e.d.buildings.length > 0 && <LayoutChip own={ownLayout} locked={locked} brief={() => go('brief')} asOption={regenAsOption} here={regenHere} />}
         {olOn && <Outline p={p} e={e} checks={checks} picked={picked} pick={(x) => { setToolS(SELECT); edit.current?.setTool(SELECT); setPicked(x); }} show={showBuilding} frame={frameRing} hidden={hidden} locked={lockedIds} toggle={toggleOl} reorder={reorder} notes={countsByThing(noteThreads)} close={() => setOlOpen(false)} />}
         {p.blank && !locked && tool.k === 'select' && !cmode && <EmptyState p={p} ways={{
           find: () => { up({ blank: undefined }); openWay('survey'); },
@@ -724,7 +743,7 @@ function App() {
         {hover && <div class="tip" style={`left:${hover.x + 14}px;top:${hover.y + 14}px`}><b>{hover.label}</b><span>{hover.size}</span><span>Floor {hover.floor}</span></div>}
       </main>
 
-      {toastMsg && <div class="toast" role="status">{toastMsg.s}{toastMsg.undo && <button type="button" class="linkbtn" onClick={() => { undo(); setToastMsg(null); }}>Undo</button>}</div>}
+      {toastMsg && <div class="toast" role="status">{toastMsg.s}{toastMsg.undo && <button type="button" class="linkbtn" onClick={() => { undo(); setToastMsg(null); }}>Undo</button>}{toastMsg.act && <button type="button" class="linkbtn" onClick={() => { toastMsg.act!.run(); setToastMsg(null); }}>{toastMsg.act.label}</button>}</div>}
       <TooltipLayer />
       {search && (() => { const c = commands(); return <Search cmds={c.all} first={c.first} close={() => setSearch(false)} />; })()}
       {dialog === 'people' && user && ref && <People pid={ref.id} role={ref.role ?? 'owner'} close={() => setDialog(null)} />}
@@ -812,6 +831,26 @@ function ResultBar({ e, deal, sum, go, statement, vs }: { e: ReturnType<typeof e
       </>}
       {rules}
       {vsBtn}
+    </div>
+  );
+}
+
+/** Generated or yours, always on the view: who lays the buildings out, and the way back to the brief's layout. */
+function LayoutChip({ own, locked, brief, asOption, here }: { own: boolean; locked: boolean; brief: () => void; asOption: () => void; here: () => void }) {
+  if (!own) return (
+    <div class="lchip gen" role="status" data-tip="Brief changes move it. Drag or change a building and the layout becomes yours." data-tip-side="bottom">
+      <Icon n="spark" size={14} /><span>Generated from the brief</span>
+      {!locked && <button type="button" class="linkbtn" onClick={brief}>Brief</button>}
+    </div>
+  );
+  return (
+    <div class="lchip own" role="status">
+      <Icon n="cursor" size={14} /><span>Your layout</span>
+      {!locked && <Menu text label="Regenerate" icon="chevron" class="lchip-m" items={[
+        { heading: 'From the brief' },
+        { label: 'Regenerate as a new option', icon: 'plus', sub: 'This layout stays as it is', onSelect: asOption },
+        { label: 'Regenerate here', icon: 'spark', sub: 'Your edits go (Undo brings them back)', onSelect: here },
+      ]} />}
     </div>
   );
 }

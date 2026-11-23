@@ -98,7 +98,7 @@ export function SchemeStep({ p, e, up, toast, picked, pick, show, part }: StepPr
     <>
       {B && <Section title="Fill the plot" aside={owned ? <span class="sec-meta">shaped by hand</span> : undefined}>
         {owned
-          ? <><Note>The buildings are yours: drag them on the map, set each one below. Filling again replaces them.</Note>
+          ? <><Note>The layout is yours, so these settings wait: brief changes won’t move your buildings. Fill again to lay them out from the brief (your edits go; Undo brings them back), or use Regenerate on the view to make it a new option.</Note>
             <Row><Btn icon="spark" onClick={() => { up({ scheme: undefined }); pick(null); toast('Filled again from the settings.'); }}>Fill again</Btn></Row></>
           : <>
             <Slider label="How much of it to build" value={Math.round(f.amount * 100)} set={(v) => setFill({ amount: v / 100 })} min={30} max={100} step={5} fmt={(v) => (v >= 100 ? 'All the FSI taken' : `${v}% of the FSI taken`)} />
@@ -117,7 +117,7 @@ export function SchemeStep({ p, e, up, toast, picked, pick, show, part }: StepPr
         <Num label="More space between buildings" value={f.spacing} set={(v) => setFill({ spacing: v })} min={0} max={40} unit="m" hint="Over what the rules ask: light, privacy" />
         <Seg<Fill['parking']> value={f.parking} set={(v) => setFill({ parking: v })} label="Parking" options={PARKING} />
         <Num label="Basements" value={f.basements ?? d.site.basements} set={(v) => setFill({ basements: v })} min={0} max={12} hint={f.basements === undefined ? 'As many as the parking needs' : 'As set'} />
-        {owned && <Note>These apply when you fill again; parking and basements apply now.</Note>}
+        {owned && <Note>The layout is yours: these apply when you fill again, except parking and basements, which apply now.</Note>}
       </Section>}
 
       {B && <Section title="Flat mix" fold open={false} aside={<span class="sec-meta">{d.flats} flats</span>} sub="Every building, unless one has its own.">

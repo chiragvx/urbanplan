@@ -4,6 +4,25 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-23 · Rethink step 2: generated or yours
+
+**What changed:**
+- **A chip on the view, right of the tools,** says who lays the buildings out:
+  - "Generated from the brief" (with a link to Brief) while brief changes move the layout;
+  - "Your layout" once a building has been placed, moved or changed by hand, with Regenerate ▾: **as a new option** (this layout stays as it is) or **here** (the hand edits go; Undo brings them back).
+- **The moment it turns, a toast says so:** "This layout is now yours: brief changes won't move it." with Undo and "Regenerate as a new option". Opening a project, undo, redo and switching options don't count as turning it.
+- Brief's Fill the plot and Living say why their settings wait while the layout is yours.
+
+**How it was checked:**
+- Browser at 1440×860, with your storage backed up and restored exactly: the sample showed "Generated from the brief"; a floor added on Building A turned the chip to "Your layout" with the toast; "Regenerate as a new option" made Option B, generated, with "vs Option A"; switching back to A showed no toast; Regenerate › here brought the brief's layout back with Undo.
+- `npm test` ALL OK; `npm run build` OK.
+
+**Left or known:**
+- A drag in the view wasn't tried in the browser (the pane's scaling missed the handle); it goes through the same scheme change as the floor button.
+- The settings still sit in Brief's sheet; they move to the project inspector in step 3.
+
+---
+
 ## 2026-11-23 · Rethink step 1: view first (docs/plans/pro-ia-rethink.md)
 
 **What changed:**

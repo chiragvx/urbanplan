@@ -1007,3 +1007,11 @@ details.chk .show { display: inline-flex; align-items: center; gap: 5px; margin:
 .shelf-bar button { width: 58px; height: auto; min-height: 50px; padding: 7px 2px 5px; gap: 3px; grid-template-rows: auto auto; align-content: center; }
 .shelf-bar button > span { font-size: 10.5px; font-weight: 500; line-height: 1; letter-spacing: .01em; }
 @media (max-width: 600px) { .shelf-bar button { width: 46px; min-height: 42px; } .shelf-bar button > span { font-size: 9.5px; } }
+
+/* generated or yours: a chip on the view, right of the tools (docs/plans/pro-ia-rethink.md §2.5) */
+.lchip { position: absolute; left: calc(88px + var(--cover)); top: 84px; z-index: 3; display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 6px 0 11px; border-radius: 16px; border: 1px solid var(--up-line); background: color-mix(in srgb, var(--up-surface) 90%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: var(--up-shadow-sm); color: var(--up-ink); font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+.lchip.gen { padding-right: 12px; }
+.lchip.own { border-color: var(--up-ink); }
+.lchip .linkbtn { font-size: 12.5px; }
+.lchip-m > button, .lchip-m .btn { height: 24px; padding: 0 8px; font-size: 12px; }
+@media (max-width: 600px) { .lchip { left: calc(62px + var(--cover)); top: 72px; } }
