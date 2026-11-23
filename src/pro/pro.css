@@ -611,6 +611,8 @@ li[aria-current="true"] > .bitem, li[aria-current="true"] > .fitem { border-colo
 .sil-roof { fill: none; stroke: var(--up-ink); stroke-linejoin: round; pointer-events: none; }
 .sil-top { fill: none; stroke: var(--up-muted); stroke-dasharray: 1.2 1; pointer-events: none; }
 .sil-cut { fill: color-mix(in srgb, var(--up-ink) 18%, transparent); stroke: var(--up-ink); stroke-dasharray: .8 .6; pointer-events: none; }
+.sil-cut.op-add { fill: color-mix(in srgb, #1a7f37 14%, transparent); stroke: #1a7f37; }
+.sil-cut.op-keep { fill: none; stroke: #8250df; }
 .sil-kline { stroke: var(--up-ink); stroke-dasharray: 1 .8; opacity: .6; pointer-events: none; }
 .sil-edge { stroke: transparent; cursor: copy; }
 .sil-carve path { stroke: var(--up-ink); }
@@ -1065,3 +1067,24 @@ details.chk .show { display: inline-flex; align-items: center; gap: 5px; margin:
 /* the orbit's pivot, while dragging (docs/plans/pro-camera.md) */
 .pv-pivot { position: absolute; left: 0; top: 0; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; background: var(--up-accent, #2f6fed); box-shadow: 0 0 0 2px #fff, 0 1px 4px rgba(0, 0, 0, 0.35); pointer-events: none; z-index: 3; }
 .pv-pivot[hidden] { display: none; }
+
+/* a form's parts (docs/plans/pro-design-freedom.md step 3) */
+.parts { display: grid; gap: 8px; }
+.parts > small { color: var(--up-muted); font-size: 12px; line-height: 1.4; }
+.part { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--up-line); border-radius: 9px; background: var(--up-surface); }
+.part.off { opacity: 0.6; }
+.part-h { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.part-h .seg { flex: none; }
+.part-eye { display: grid; place-items: center; width: 26px; height: 26px; flex: none; border: 0; border-radius: 7px; background: var(--up-surface-2); color: var(--up-ink); }
+.part-n { flex: 1; min-width: 0; height: 26px; padding: 0 6px; border: 1px solid transparent; border-radius: 6px; background: transparent; font: inherit; font-size: 13px; font-weight: 600; color: var(--up-ink); }
+.part-n:hover, .part-n:focus { border-color: var(--up-line-strong); background: var(--up-paper); }
+.part-b { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px; }
+.part-b .f { flex: 1 1 90px; min-width: 0; }
+.part-acts { display: inline-flex; gap: 3px; margin-left: auto; }
+.part-acts .hlink { width: 26px; justify-content: center; padding: 0; }
+.part-acts .hlink:disabled { opacity: 0.35; }
+.part-acts .up svg { transform: rotate(-90deg); }
+.part-acts .dn svg { transform: rotate(90deg); }
+.hh.hh-face { border-radius: 4px; }
+.hh.op-add { color: #1a7f37; }
+.hh.op-keep { color: #8250df; }

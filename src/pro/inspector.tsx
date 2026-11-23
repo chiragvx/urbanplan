@@ -13,7 +13,7 @@ import { ELEMENTS, SQFT, UNIT_LABEL, type SiteElement } from '../doc/site';
 import { featureOf, INTERNAL_WIDTHS, DEFAULT_LEVELS, PLINTH_MIN, roadWidths, type Levels, type SiteFeature } from './siteObjects';
 import { cap, DIRS, edgeFacing, withEdgeRoad } from './plotOps';
 import { ShapePanel, shapeIt, withFloors } from './shapePanel';
-import { MixBody, RoofBody, ShapeBody, SkinBody, StyleBody } from './formHud';
+import { MixBody, PartsBody, RoofBody, ShapeBody, SkinBody, StyleBody } from './formHud';
 import { SystemsPanel } from './systemsPanel';
 import { mergeSettings, splitSettings } from './systems';
 import { FlatPlan } from './steps';
@@ -114,6 +114,7 @@ function BuildingInspector({ p, e, up, rooms, checks, pick, toast, xray, hide, r
           ? <>
             <Section title="Shape"><ShapeBody {...bp} /></Section>
             <ShapePanel b={ownB} floors={br.floors} set={setB} />
+            <Section title="Parts" aside={ownB.form.carves.length ? <span class="sec-meta">{ownB.form.carves.length}</span> : undefined}><PartsBody {...bp} /></Section>
             <Section title="Roof"><RoofBody {...bp} /></Section>
             <Section title="Skin"><SkinBody {...bp} /></Section>
           </>

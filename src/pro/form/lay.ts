@@ -8,7 +8,7 @@ import { applyXf, floorsOf, Planner } from './slice';
 import { mpOf, outerOf, ringsOf } from './shape';
 import { coreNeed, edgeColumns, gridColumns, overhang, placeCores } from './skeleton';
 import { CORRIDOR, planUnits, type Unit } from './units';
-import type { BuildingUse, Form, FormContext, FormFloor, FormIssue, FormLayout, Pt } from './types';
+import { opOf, type BuildingUse, type Form, type FormContext, type FormFloor, type FormIssue, type FormLayout, type Pt } from './types';
 
 /** a floor standing out past the one below by more than this (m) is a deep cantilever */
 const CANTILEVER = 6;
@@ -19,6 +19,10 @@ interface Local {
   level: number; use: BuildingUse; y: number; h: number; t: number;
   sig: string;
   outer: number[];
+  /** the floor's masses before any cut: its outlines, for the volume and the edge columns (just `outer` unless a
+   *  part adds or keeps) */
+  body: MP;
+  edges: number[][];
   shape: MP;
   rings: number[][];
   area: number;
@@ -70,20 +74,41 @@ export function lay(b: SiteBuilding & { form?: Form }, ctx: FormContext): FormLa
       y += h;
       continue;
     }
-    const outer = ccw(applyXf(plan, xf));
+    let outer = ccw(applyXf(plan, xf));
     // (a plan drawn crossing itself is read as what it encloses, so everything after stays sane)
     let shape: MP = selfCrosses(outer) ? union(mpOf(outer)) : mpOf(outer);
     const cuts: Local['cuts'] = [];
-    if (carves.length) {
-      const holes = carves.map((c) => mpOf(ccw(c.ring)));
-      const before = shape;
-      shape = diff(shape, ...holes);
-      carves.forEach((c, i) => { for (const r of ringsOf(inter(before, holes[i]))) if (ringArea(r) > 0) cuts.push({ ring: r, face: c.c.face }); });
-      if (shape.length > before.length) split.push(level);
+    // the parts in order: a run of cuts in one go (as all a form's carves were cut before parts), an add unioned,
+    // a keep intersected
+    let body: MP | null = null, splits = false;
+    for (let i = 0; i < carves.length;) {
+      const op = opOf(carves[i].c);
+      if (op === 'cut') {
+        let j = i; while (j < carves.length && opOf(carves[j].c) === 'cut') j++;
+        const run = carves.slice(i, j), holes = run.map((c) => mpOf(ccw(c.ring)));
+        const before = shape;
+        shape = diff(shape, ...holes);
+        run.forEach((c, k) => { for (const r of ringsOf(inter(before, holes[k]))) if (ringArea(r) > 0) cuts.push({ ring: r, face: c.c.face }); });
+        if (shape.length > before.length) splits = true;
+        i = j;
+        continue;
+      }
+      const m = mpOf(ccw(carves[i].ring));
+      body = op === 'add' ? union(body ?? shape, m) : inter(body ?? shape, m);
+      shape = op === 'add' ? union(shape, m) : inter(shape, m);
+      i++;
+    }
+    if (splits) split.push(level);
+    let edges = [outer];
+    if (body) {
+      // (the floor's masses: its outline the biggest of them; every one's edge carries columns)
+      edges = ringsOf(body).filter((r) => ringArea(r) > 0);
+      if (edges.length) outer = ccw(outerOf(body));
+      else edges = [outer];
     }
     const A = area(shape);
     if (A < 1) empty.push(level);
-    L.push({ level, use, y, h, t, sig, outer, shape, rings: ringsOf(shape), area: A, cuts, rot: xf.rot, same: false });
+    L.push({ level, use, y, h, t, sig, outer, body: body ?? mpOf(outer), edges, shape, rings: ringsOf(shape), area: A, cuts, rot: xf.rot, same: false });
     y += h;
   }
   const height = y;
@@ -99,7 +124,7 @@ export function lay(b: SiteBuilding & { form?: Form }, ctx: FormContext): FormLa
   // sixty twisted floors that all cross each other is far slower)
   const kept: Local[] = [];
   for (const f of distinct.slice().sort((a, b) => b.area - a.area)) if (!kept.some((k) => within(f.rings, k.rings))) kept.push(f);
-  let parts: MP[] = kept.map((f) => mpOf(f.outer));
+  let parts: MP[] = kept.map((f) => f.body);
   while (parts.length > 1) {
     const next: MP[] = [];
     for (let i = 0; i < parts.length; i += 2) next.push(i + 1 < parts.length ? union(parts[i], parts[i + 1]) : parts[i]);
@@ -141,7 +166,7 @@ export function lay(b: SiteBuilding & { form?: Form }, ctx: FormContext): FormLa
   const grid = houses ? [] : gridColumns(commonIn, axisU, placed.centres[0] ?? [0, 0], placed.cores);
   // (along the outline as drawn and round any court, not along a slot's faces: a column there would jump about
   // with every zig of the slot)
-  const posts = edgeColumns(L.map((f) => ({ edge: [f.outer, ...f.rings.filter((r) => ringArea(r) < 0)], rings: f.rings, same: f.same })), grid);
+  const posts = edgeColumns(L.map((f) => ({ edge: [...f.edges, ...f.rings.filter((r) => ringArea(r) < 0)], rings: f.rings, same: f.same })), grid);
   const transfers = posts.filter((p) => p.transfer).length;
   if (transfers) issues.push({ key: 'transfer', tone: 'info', text: `${transfers} column${transfers > 1 ? 's' : ''} start${transfers > 1 ? '' : 's'} on a floor below, on transfer beams.` });
 

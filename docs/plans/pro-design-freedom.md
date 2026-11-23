@@ -338,6 +338,7 @@ Ordered so each step is useful alone, and the risky ones come after the cheap on
 - **Step F, framing (2026-11-23): built.** The project's use and who it's for are asked at the start and set in the project panel. The scorecard, panels, dashboard and landing copy follow them. Rent is left to step 6. See docs/plans/pro-global-ux-log.md.
 - **Step 1, one use table (2026-11-23): built.** src/doc/uses.ts; the `evaluate()` snapshot on nine sample projects is byte-identical. The parking ratio fix from the official Table 8-B is still to do.
 - **Step 2, no use yet and the use set last (2026-11-23): built.** "No use yet" is a use; a plain building has its own use; Shape it keeps the use. Per-space use waits for step 5.
+- **Step 3, parts with plan booleans (2026-11-23): built.** Add, cut and keep prisms, in order, on the floors they span; old carves are cut parts, unchanged. The Parts list is in the inspector and on the bar, and parts' edges can be dragged on the view. The `evaluate()` snapshot is byte-identical. Heights are still a share of the floors until step 4.
 
 **The first three steps (1–3) deliver most of what was asked in form:** any shape that can be described as joined and cut prisms, and a use given afterwards. Steps 5–7 make the use honest. Step 9 is interiors. Steps 10–12 extend reach.
 

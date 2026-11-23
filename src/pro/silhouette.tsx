@@ -5,7 +5,7 @@
 // The preview here blends the key floors itself, so it draws at once from the form alone; the procedure in ./form
 // is what the 3D, the money and the rules read. Both read the same keys, so they agree on the shape.
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { sampleCurve, USE_INFO, type Carve, type Curve, type Form, type KeyFloor, type Pt } from './form';
+import { opOf, sampleCurve, USE_INFO, type Carve, type Curve, type Form, type KeyFloor, type Pt } from './form';
 
 // ---------------------------------------------------------------- the form, floor by floor (a preview)
 const ID: KeyFloor = { t: 0, sx: 1, sz: 1, dx: 0, dz: 0, rot: 0 };
@@ -268,7 +268,7 @@ export function PlanEditor({ form, set }: { form: Form; set: (f: Form) => void }
         <path d={`M${-r - pad} ${r + pad * 0.6}H${r + pad}`} class="sil-ground" stroke-width={u * 3} />
         <path d={path(topRing, true)} class="sil-top" stroke-width={u} />
         <path d={path(ring, true)} class="sil-body" stroke-width={u * 1.5} />
-        {form.carves.map((cv) => <path d={path(sampleCurve(cv.ring, 1), true)} class="sil-cut" stroke-width={u} />)}
+        {form.carves.filter((cv) => !cv.off).map((cv) => <path d={path(sampleCurve(cv.ring, 1), true)} class={`sil-cut op-${opOf(cv)}`} stroke-width={u} />)}
         {pts.map((p, i) => { const q = pts[(i + 1) % n]; return <path d={`M${p[0]} ${-p[1]}L${q[0]} ${-q[1]}`} class="sil-edge" stroke-width={u * 12} onPointerDown={(ev) => insert(ev as PointerEvent, i)}><title>Click: a new point</title></path>; })}
         {pts.map((p, i) => sharpOf(i)
           ? <rect x={p[0] - u * 5} y={-p[1] - u * 5} width={u * 10} height={u * 10} class={`h${sel === i ? ' on' : ''}`} onPointerDown={(ev) => startDrag(ev as PointerEvent, i)} onDblClick={() => toggle(i)}><title>A corner. Double-click: smooth</title></rect>

@@ -4,6 +4,66 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-23 · Parts: plan booleans (docs/plans/pro-design-freedom.md, step 3)
+
+**Why:** a designer should be able to make any form by joining and cutting masses: a podium and a tower, two towers and a bridge, an L or U of different heights, a hall with a pier. Before this, a form could only be cut (slots and courts).
+
+**What changed:**
+- **A form's carves are now its parts.** Each part is a prism: a plan ring between two floors. It can:
+  - **add** to the floors it spans (union): a podium, a wing, a bridge;
+  - **cut** out of them (subtract): a slot, a notch, a void;
+  - **keep** only what lies inside it (intersect): trims the form to a footprint.
+- **Parts act in order** on the plan drawn (with its key floors). A cut placed after a podium cuts the podium too; placed before it, it doesn't. A part can be switched off and renamed.
+- **Old projects load unchanged.** A part with no op is a cut, so every older carve is a cut part and no data is converted. The form still stores them as `carves` (src/pro/form/types.ts).
+- **The Parts list** is in the inspector (a new Parts section) and on the building's bar (a Parts popover). For each part it shows:
+  - an eye to switch it off;
+  - its name, editable;
+  - Add, Cut or Keep;
+  - its floors, from and to;
+  - arrows to move it earlier or later in the list, and remove;
+  - for a cut, glazed or open.
+
+  Its Add buttons are: a podium, a wing, a cut, a slot, a trim (an oval keep). The Shape section's "A slot" and "The cuts" buttons moved here.
+- **On the view:**
+  - each part's plan edges have a handle halfway up it: drag one to push or pull that edge (0.5 m steps, Alt for 10 cm), or use the arrow keys;
+  - the up-the-face handles set its first and last floor and now say which floor;
+  - added parts' handles are green and keeps' purple; switched-off parts have no handles.
+- **The plan sketch** shows adds in green and keeps in purple.
+- **The layout** (src/pro/form/lay.ts):
+  - a run of cuts is still subtracted in one go, as before;
+  - an add is unioned and a keep intersected, per floor;
+  - the "same as the floor below" shortcut and the memo still apply;
+  - a floor with several masses gives edge columns round each, and the building's outline includes them all.
+- **New:** src/pro/parts.ts (names, floors ↔ heights, new parts, edge push), tools/dev/test-parts.ts (in `npm test`).
+
+**How it was checked:**
+- **Figures:** the `evaluate()` snapshot on the nine sample projects is byte-identical to before.
+- **New test** (tools/dev/test-parts.ts):
+  - a podium on floors 1–3;
+  - a cut with no op;
+  - the order of a cut and an add;
+  - a keep;
+  - a part switched off;
+  - two towers with a bridge on floors 8–9;
+  - each new part.
+- **Browser**, on a 12-floor box with a podium and a notch, with your storage backed up and restored exactly:
+  - the floors were 928 m² for 3 floors, then 381, then 318;
+  - the Parts list showed the right floors;
+  - "A wing" added a part;
+  - the eye switched the podium off;
+  - Ctrl+Z brought it back;
+  - dragging the podium's edge handle pushed that edge out 4 m, and the money updated.
+- `npx tsc` clean, `npm test` ALL OK (8 suites), `npm run build` OK.
+
+**Left or known:**
+- Part heights are stored as a share of the building's floors, as carves were. A part spanning floors 1–3 spans a different number of floors if the building's floor count changes. Levels the designer sets (plan §3.4, step 4) will fix this.
+- One Ctrl+Z undid both the wing and the eye clicked a second apart. The inspector groups quick edits to one building; that behaviour is older than this step.
+- With many parts, the edge handles crowd the view. Showing them only for a part picked in the list would help.
+- A roof sits on the top floor's largest mass only.
+- Sloped cuts, spheres and sweeps wait for true 3D solids (plan §3.3, stage 2).
+
+---
+
 ## 2026-11-23 · No use yet, and the use set last (docs/plans/pro-design-freedom.md, step 2)
 
 **Why:** designers want to make the form first and say what it's for afterwards. Shaping a building turned it into homes whatever the project was.

@@ -37,16 +37,33 @@ export interface KeyFloor {
   plan?: Curve;
 }
 
-/** A cut through the form: a slot, a notch, a sky garden. Its plan ring is cut out of every floor between `from`
- *  and `to`; `path` moves the ring with height, so a slot can zig-zag up a tower. */
+/** What a part does to the floors it spans: adds to them (union), cuts out of them (subtract), or keeps only
+ *  where it overlaps them (intersect). */
+export type PartOp = 'add' | 'cut' | 'keep';
+
+/** A part of the form (docs/plans/pro-design-freedom.md §3): a prism, its plan ring between two heights, that
+ *  adds to, cuts out of or trims every floor between `from` and `to`. The plan drawn (with its key floors) is the
+ *  first mass; the parts act on it in order. `path` moves the ring with height, so a slot can zig-zag up a tower,
+ *  and the floor's own taper, lean and twist move it too. A slot, a notch, a sky garden are cuts; a podium, a
+ *  wing or a bridge are adds; a keep trims the whole to a footprint. (Older forms' carves are cuts: `op` unset.) */
 export interface Carve {
   id: string;
+  /** what it does (unset: a cut, as every part was before parts) */
+  op?: PartOp;
+  /** its name in the Parts list (unset: one made from what it does) */
+  name?: string;
+  /** switched off: kept in the list, but not acting */
+  off?: boolean;
   ring: Curve;
   from: number; to: number;
   path?: { t: number; dx: number; dz: number }[];
-  /** what's left at the cut: glass (a slot, a glazed reveal) or open (a sky garden, a void through) */
+  /** what's left at a cut: glass (a slot, a glazed reveal) or open (a sky garden, a void through) */
   face: 'glass' | 'open';
 }
+/** a part of the form: the same thing as a carve, by its newer name */
+export type Part = Carve;
+/** what a part does, its op unset read as a cut */
+export const opOf = (c: Pick<Carve, 'op'>): PartOp => c.op ?? 'cut';
 
 /** A skin standing off the floors' edges: fins, a screen, a sculpted shell that rises past the roof. */
 export interface Shell {
@@ -110,6 +127,7 @@ export interface Form {
   keys: KeyFloor[];
   /** how floors blend between key floors */
   ease: 'linear' | 'smooth';
+  /** its parts, in order (the name is older than parts: cuts were all a form had) */
   carves: Carve[];
   shell?: Shell;
   roof: Roof;

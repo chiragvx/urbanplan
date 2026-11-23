@@ -4,6 +4,7 @@
 import type { SiteBuilding } from '../../doc/site';
 import { sampleCurve as sample } from './curve';
 import { layMemo } from './lay';
+export { drift } from './slice';
 import { TEMPLATES as GALLERY } from './templates';
 import type { BuildingUse, Curve, Form, FormContext, FormLayout, FormTemplate, Pt } from './types';
 

@@ -143,7 +143,7 @@ export class Planner {
     const out: { c: Carve; ring: number[]; sig: string }[] = [];
     for (const c of this.form.carves) {
       const lo = Math.min(c.from, c.to), hi = Math.max(c.from, c.to);
-      if (t < lo - 1e-6 || t > hi + 1e-6 || c.ring.pts.length < 3) continue;
+      if (c.off || t < lo - 1e-6 || t > hi + 1e-6 || c.ring.pts.length < 3) continue;
       const [ddx, ddz] = drift(c.path, t);
       const r = this.sample(c.ring).slice();
       for (let i = 0; i < r.length; i += 2) { r[i] += ddx; r[i + 1] += ddz; }
