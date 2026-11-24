@@ -63,8 +63,9 @@ export interface Carve {
    *  floors 1–3 stays on floors 1–3 when the building gets more or fewer floors (parts made since levels have them) */
   lo?: number; hi?: number;
   path?: { t: number; dx: number; dz: number }[];
-  /** what's left at a cut: glass (a slot, a glazed reveal) or open (a sky garden, a void through) */
-  face: 'glass' | 'open';
+  /** what's left at a cut: the building's own facade (skin: a boolean cut, a notch), glass (a slot, a glazed reveal)
+   *  or open (a sky garden, a void through, under floors) */
+  face: 'skin' | 'glass' | 'open';
 }
 /** a part of the form: the same thing as a carve, by its newer name */
 export type Part = Carve;

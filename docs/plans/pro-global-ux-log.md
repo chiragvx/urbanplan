@@ -4,6 +4,44 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-24 · Booleans hardened: cut faces, a stress test, many parts (docs/plans/pro-design-freedom.md §3.6)
+
+**Why:** the user found the shaded 3D broken after a boolean. They asked for the key use to be tested until it can't break, with radically different shapes and many cuts and booleans.
+
+**What was wrong:** a cut part made by Design or Combine had its face set to Open, which draws no wall on the cut's edges (meant for a sky garden under floors). A round cut through every floor, or a Combine Cut from a lower building, left the floors bare, slabs and no facade.
+
+**What changed:**
+- **A third cut face, Facade** (`face: 'skin'`, src/pro/form/types.ts): the cut's edges are the floor's own outline and take the building's skin. It is the default for cuts made in Design, from Parts' shapes, drawn, or by Combine (src/pro/parts.ts). Parts' face switch is now Facade · Glazed · Open.
+- **Open means open only under a floor** (src/pro/form/lay.ts): where nothing above roofs a cut, its open faces take the skin. A sky garden two floors high stays open on both; a notch out of the top floors, or a full-height cut, doesn't. Projects saved with an open full-height cut draw right without being changed.
+- **Many parts** (src/pro/formHud.tsx): with more than 4 parts, the view shows the handles and chip of one part only, the one pointed at in the Parts list, else the newest. All the outlines stay. The Parts list says so.
+- **Circles and smooth parts** get no edge push/pull handles; they bunched up on a 12-point circle.
+
+**How it was checked:**
+- `npx tsc` clean, `npm test` passes (now with test-booleans), `npm run build` OK. The `evaluate()` snapshot is unchanged.
+- tools/dev/test-design.ts, 9 new checks: a full-height cut leaves no open face; a glazed one stays glazed; a two-floor sky garden stays open on both floors and the floors it misses have no cut; a notch at the top takes the skin; a Design cut is faced with the facade, and stays so under floors above; add, intersect and exclude leave every floor whole.
+- **tools/dev/test-booleans.ts** (new, seeded):
+  - 10 base shapes: box, round, L, U, wedge, a 7-point star, a comb, a 90 × 9 m bar, a zigzag, an 80 × 36 m ellipse;
+  - each base with 12 cuts, 16 of all four booleans, 40 of all four, and 25 adds and cuts, three times over: 120 layouts;
+  - each part a random shape, size, turn, place (some off the half-metre grid), floor range and face, a few switched off;
+  - all 1,201 floors match an oracle that applies the same booleans in order, worst error 0.0 m²;
+  - every layout is built as the shaded view builds it, whole and X-rayed, across eight skin patterns: no throw, no NaN;
+  - about 9 s.
+- **In the app:**
+  - the user's Building A (11 floors, tapered, a round cut through all of it) now shows its facade on the cut;
+  - the same part switched to Add, Intersect, Exclude and a glazed Cut, each drawn whole;
+  - Wireframe and X-ray drawn;
+  - Combine Cut from a 6-floor building drawn with facade under the floors above;
+  - Parts' Round as Cut, Intersect and Exclude, each undone with Ctrl+Z;
+  - a Circle… drawn into the building;
+  - a 14-floor star with 30 mixed parts drawn with no console errors, its handles one part at a time, following the Parts list.
+  - Each test was taken back out; the project is as it was.
+
+**Known:**
+- The first Circle… drag in the app added nothing, and the second did. It didn't happen again, and the cause isn't known: possibly the drag began on a handle.
+- With many parts, all the outlines still show. They read as a tangle on 30 parts.
+
+---
+
 ## 2026-11-24 · CAD booleans: add, cut, intersect, exclude; Combine; parts as shapes (docs/plans/pro-design-freedom.md §3.6)
 
 **Why:** the user placed a Box and a Round that overlapped and asked how a designer cuts the cylinder out of the box without being confused. There was no way to: every Design shape made a new building, Parts offered only set pieces, and the overlap was only flagged as a fault. They asked for all the common CAD booleans and operations.

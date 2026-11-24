@@ -77,6 +77,9 @@ export function FormHud({ view, edit, p, e, picked, tx, live, readOnly, xray, se
   const [pv, setPv] = useState<Form | null>(null);
   const [usesPv, setUsesPv] = useState<Form['uses'] | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
+  // (the part whose handles show when there are many: the one pointed at in the Parts list, else the newest)
+  const [focusPart, setFocusPart] = useState<string | null>(null);
+  useEffect(() => { const on = (ev: Event) => setFocusPart((ev as CustomEvent<string>).detail); addEventListener('urbanplan:part', on); return () => removeEventListener('urbanplan:part', on); }, []);
   const drag = useRef<FDrag | null>(null);
   const strip = useRef<HTMLDivElement>(null);
   const { open, setOpen, pop, toggle } = usePop(root);
@@ -160,7 +163,7 @@ export function FormHud({ view, edit, p, e, picked, tx, live, readOnly, xray, se
       { const t = faceT(c, fl.length), k = keyAt(f, t), [ddx, ddz] = drift(c.path, t), [x, z] = through(k, cb.cx + ddx, cb.cz + ddz); A.push([`pm${c.id}`, W(x, z, yOfT(fl, t))]); }
       { const t = ts[1], k = keyAt(f, t), [ddx, ddz] = drift(c.path, t), [x, z] = through(k, cb.cx + ddx, cb.cz + ddz), top = fl[partSpan(c, fl.length)[1] - 1]; A.push([`pc${c.id}`, W(x, z, top ? top.y + top.h + 1.5 : yOfT(fl, t))]); }
       // (each edge's middle, halfway up the part: push or pull it)
-      if (c.ring.pts.length <= 12) {
+      if (pushable(c)) {
         const t = faceT(c, fl.length), k = keyAt(f, t), [ddx, ddz] = drift(c.path, t), P = c.ring.pts;
         P.forEach((a, i) => { const b = P[(i + 1) % P.length], [x, z] = through(k, (a[0] + b[0]) / 2 + ddx, (a[1] + b[1]) / 2 + ddz); A.push([`e${i}${c.id}`, W(x, z, yOfT(fl, t))]); });
       }
@@ -374,11 +377,11 @@ export function FormHud({ view, edit, p, e, picked, tx, live, readOnly, xray, se
         {hh(`l${i}`, 'hh-lean', 'move', `Lean at ${Math.round(k.t * 100)}% up · drag it, or the arrow keys`, down('l', i), keysFor('l', i), undefined, 10)}
         {i === keys.length - 1 && hh(`r${i}`, 'hh-twist', 'rotate', `Twist at the top: ${Math.round(k.rot)}° · drag round (5° steps; Alt for any)`, down('r', i), keysFor('r', i))}
       </>)}
-      {f && xray === null && f.carves.filter((c) => !c.off).map((c) => { const nm = partName(f, c), sp = partSpan(c, floorsOfForm(f)); return <>
+      {f && xray === null && handled(f.carves, focusPart).map((c) => { const nm = partName(f, c), sp = partSpan(c, floorsOfForm(f)); return <>
         {(['from', 'to'] as const).map((endK) => hh(`c${endK}${c.id}`, `hh-cut op-${opOf(c)}`, 'updown', `${nm} ${endK === 'from' ? 'starts at' : 'ends at'} floor ${sp[endK === 'from' ? 0 : 1]} · drag it`, downCut(c.id, endK), undefined, undefined, 11))}
         {hh(`pm${c.id}`, `hh-pmove op-${opOf(c)}`, 'move', `${nm}: drag to move it (Alt: 10 cm steps), or the arrow keys`, downMove(c), moveKeys(c), undefined, 12)}
         <span class={`hpart op-${opOf(c)}`} ref={ref(`pc${c.id}`)} aria-hidden="true">{nm.startsWith(OP_LABEL[opOf(c)]) ? nm : `${OP_LABEL[opOf(c)]} · ${nm}`}</span>
-        {c.ring.pts.length <= 12 && c.ring.pts.map((_, i) => hh(`e${i}${c.id}`, `hh-face op-${opOf(c)}`, 'sideways', `${nm}: an edge · drag to push or pull it (Alt: 10 cm steps), or the arrow keys`, downFace(c, i), faceKeys(c, i), undefined, 10))}
+        {pushable(c) && c.ring.pts.map((_, i) => hh(`e${i}${c.id}`, `hh-face op-${opOf(c)}`, 'sideways', `${nm}: an edge · drag to push or pull it (Alt: 10 cm steps), or the arrow keys`, downFace(c, i), faceKeys(c, i), undefined, 10))}
       </>; })}
       {f && xray === null && (f.spaces ?? []).filter((s) => !s.off && s.ring.pts.length <= 12).map((s) => s.ring.pts.map((_, i) => hh(`v${i}${s.id}`, 'hh-face hh-space', 'sideways', `${spaceName(s)} (a space): an edge · drag to push or pull it, or the arrow keys`, downSpace(s, i), spaceKeys(s, i), undefined, 10)))}
       {f && <div class="hstrip" ref={(el) => { span('strip')(el); strip.current = el as HTMLDivElement | null; }} role="group" aria-label={`${name}: what its floors are for, top first`}>
@@ -472,6 +475,18 @@ export function ShapeBody({ b, setB }: BodyProps) {
 
 /** A formed building's parts, in order: each adds to, cuts out of or trims the floors it spans. An eye switches
  *  one off; the arrows reorder (a cut after an add cuts it too; before, it doesn't). */
+/** the parts whose handles show on the view: all of a few; of more, only the one in focus (pointed at in the Parts
+ *  list), else the newest, so many parts don't bury the building in handles (their outlines all stay) */
+export const MANY_PARTS = 4;
+const handled = (cs: Carve[], focus: string | null) => {
+  const on = cs.filter((c) => !c.off); if (on.length <= MANY_PARTS) return on;
+  const f = on.find((c) => c.id === focus) ?? on[on.length - 1]; return [f];
+};
+const focusOn = (id: string) => dispatchEvent(new CustomEvent('urbanplan:part', { detail: id }));
+
+/** a part whose edges can be pushed and pulled: a few straight sides (not a circle or a smooth curve) */
+const pushable = (c: Carve) => c.ring.pts.length <= 12 && (!c.ring.sharp || c.ring.sharp.some(Boolean));
+
 export function PartsBody({ b, setB }: BodyProps) {
   const [op, setOp] = useState<PartOp>('cut');
   const f = b.form; if (!f) return null;
@@ -480,7 +495,8 @@ export function PartsBody({ b, setB }: BodyProps) {
   const swap = (i: number, j: number) => setF((x) => { const c = x.carves.slice(); [c[i], c[j]] = [c[j], c[i]]; return { ...x, carves: c }; });
   return <div class="parts">
     {!f.carves.length && <small>The plan drawn is the first mass. Parts add to it, cut out of it or keep only what lies inside them, on the floors they span: a podium, a wing, a bridge, a notch, a void.</small>}
-    {f.carves.map((c, i) => <div class={`part${c.off ? ' off' : ''}`} key={c.id}>
+    {f.carves.filter((c) => !c.off).length > MANY_PARTS && <p class="muted small parts-many">With this many parts, the view shows the handles of the one you point at here.</p>}
+    {f.carves.map((c, i) => <div class={`part${c.off ? ' off' : ''}`} key={c.id} onPointerEnter={() => focusOn(c.id)} onFocusIn={() => focusOn(c.id)}>
       <div class="part-h">
         <button type="button" class="part-eye" aria-pressed={!c.off} aria-label={c.off ? 'Switched off: switch it on' : 'Switch it off'} data-tip={c.off ? 'Off · switch it on' : 'Switch it off'} onClick={() => setC(c.id, (x) => ({ ...x, off: x.off ? undefined : true }))}><Icon n={c.off ? 'eyeoff' : 'eye'} size={14} /></button>
         <input class="part-n" aria-label="The part's name" value={partName(f, c)} onChange={(ev) => { const v = (ev.target as HTMLInputElement).value.trim(); setC(c.id, (x) => ({ ...x, name: v || undefined })); }} onKeyDown={(ev) => { ev.stopPropagation(); if (ev.key === 'Enter') (ev.target as HTMLInputElement).blur(); }} />
@@ -502,7 +518,7 @@ export function PartsBody({ b, setB }: BodyProps) {
         <button type="button" class="hlink" data-tip="A mirrored copy, front for back" onClick={() => setF((x) => ({ ...x, carves: [...x.carves, mirroredPart(x, c, 'z')] }))}><Icon n="updown" size={14} />Mirror</button>
         <button type="button" class="hlink" data-tip="A copy of it, a little along" onClick={() => setF((x) => ({ ...x, carves: [...x.carves, copiedPart(c)] }))}><Icon n="copy" size={14} />Copy</button>
       </div>
-      {opOf(c) === 'cut' && <Seg<Carve['face']> small ariaLabel="What's left at the cut" value={c.face} set={(v) => setC(c.id, (x) => ({ ...x, face: v }))} options={[{ value: 'glass', label: 'Glazed', title: 'The cut faces are glass' }, { value: 'open', label: 'Open', title: 'Left open: a terrace, a void through' }]} />}
+      {opOf(c) === 'cut' && <Seg<Carve['face']> small ariaLabel="What's left at the cut" value={c.face} set={(v) => setC(c.id, (x) => ({ ...x, face: v }))} options={[{ value: 'skin', label: 'Facade', title: "The cut faces are the building's own facade" }, { value: 'glass', label: 'Glazed', title: 'The cut faces are glass' }, { value: 'open', label: 'Open', title: 'Left open under the floors above: a sky garden, a void through' }]} />}
     </div>)}
     <div class="part-new" role="group" aria-label="Add a part">
       <Seg<PartOp> small ariaLabel="The new part" value={op} set={setOp} options={OPS.map((o) => ({ value: o, label: OP_LABEL[o], title: OP_TIP[o] }))} />

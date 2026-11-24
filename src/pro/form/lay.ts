@@ -92,7 +92,8 @@ export function lay(b: SiteBuilding & { form?: Form }, ctx: FormContext): FormLa
         const run = carves.slice(i, j), holes = run.map((c) => mpOf(ccw(c.ring)));
         const before = shape;
         shape = diff(shape, ...holes);
-        run.forEach((c, k) => { for (const r of ringsOf(inter(before, holes[k]))) if (ringArea(r) > 0) cuts.push({ ring: r, face: c.c.face }); });
+        // (a cut faced with the skin leaves no cut face: its edges are the floor's own outline)
+        run.forEach((c, k) => { const face = c.c.face; if (face === 'skin') return; for (const r of ringsOf(inter(before, holes[k]))) if (ringArea(r) > 0) cuts.push({ ring: r, face }); });
         if (shape.length > before.length) splits = true;
         i = j;
         continue;
@@ -118,6 +119,17 @@ export function lay(b: SiteBuilding & { form?: Form }, ctx: FormContext): FormLa
     y += h;
   }
   const height = y;
+  // an open cut is open only where a floor above roofs it over (a sky garden, a void through under floors); where
+  // the cut runs up to the sky (a notch, a round taken out of a building, a boolean cut all the way up) its faces are
+  // the building's new outline, and take its skin
+  for (let k = 0; k < L.length; k++) {
+    const f = L[k]; if (!f.cuts.some((c) => c.face === 'open')) continue;
+    // (any floor above it: the lower floor of a two-storey sky garden is roofed by the floor over the garden)
+    const above = L.slice(k + 1).filter((g, i, a) => !g.void && (i === 0 || g.sig !== a[i - 1].sig));
+    const roofed = (r: number[]) => { const m = mpOf(r), need = Math.max(1, Math.abs(ringArea(r)) * 0.25); return above.some((g) => area(inter(m, g.shape)) > need); };
+    const kept = f.cuts.filter((c) => c.face !== 'open' || roofed(c.ring));
+    if (kept.length !== f.cuts.length) L[k] = { ...f, cuts: kept };
+  }
   // ---- the spaces on each floor: their rings moved as the floor is, cut to it, the first winning ----
   const SP = (form.spaces ?? []).filter((s) => !s.off && s.ring.pts.length >= 3);
   if (SP.length) {
@@ -330,7 +342,7 @@ export function lay(b: SiteBuilding & { form?: Form }, ctx: FormContext): FormLa
       outer: shared ? prev.outer : W(f.outer),
       rings: shared ? prev.rings : f.rings.map(W),
       area: f.void ? 0 : f.area,
-      cuts: shared ? prev.cuts : f.cuts.map((c) => ({ ring: W(c.ring), face: c.face })),
+      cuts: shared && f.cuts === L[i - 1].cuts ? prev.cuts : f.cuts.map((c) => ({ ring: W(c.ring), face: c.face })),
       units, carpet: units.reduce((a, u) => a + u.carpet, 0),
       ...(f.spaces?.length ? { spaces: f.spaces.map((s) => ({ id: s.id, use: s.use, rings: ringsOf(s.shape).map(W), area: area(s.shape) })) } : {}),
       over: over[i], terrace: terrace[i],

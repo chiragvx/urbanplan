@@ -98,5 +98,28 @@ ok(floorsFor(45, 30, 10) === 15 && floorsFor(10, 30, 10) === 3, 'a height makes 
   ok(combine(A0 as never, twisted as never, 'cut')!.lost.length === 1, "what a part can't carry (a twist) is said");
 }
 
+// an open cut's faces: left open only where a floor above roofs it; a cut up to the sky takes the skin (the shaded
+// view drew no wall on a boolean cut through every floor, leaving the floors bare)
+{
+  const box = massForm(shapePlan('box').plan, [], 6, 'office');
+  const through = lay({ ...box, carves: [{ ...shapePart(box, 'round', 'cut', [12, 0]), face: 'open' }] });
+  ok(through.floors.every((f) => f.cuts.length === 0), 'a round cut up through every floor: its faces are the building’s skin, none left open');
+  const glazed = lay({ ...box, carves: [{ ...shapePart(box, 'round', 'cut', [12, 0]), face: 'glass' }] });
+  ok(glazed.floors.every((f) => f.cuts.length > 0 && f.cuts.every((c) => c.face === 'glass')), 'a glazed cut stays glazed all the way up');
+  const garden = lay({ ...box, carves: [{ ...shapePart(box, 'box', 'cut', [10, 6]), lo: 3, hi: 4, face: 'open' }] });
+  ok(garden.floors[2].cuts.some((c) => c.face === 'open') && garden.floors[3].cuts.some((c) => c.face === 'open'), 'a sky garden under floors stays open');
+  ok(garden.floors[0].cuts.length === 0 && garden.floors[5].cuts.length === 0, 'and the floors it misses have no cut');
+  const top = lay({ ...box, carves: [{ ...shapePart(box, 'box', 'cut', [10, 6]), lo: 5, hi: 6, face: 'open' }] });
+  ok(top.floors[4].cuts.length === 0 && top.floors[5].cuts.length === 0, 'a notch out of the top floors, open to the sky, takes the skin');
+  const made = shapePart(box, 'round', 'cut', [12, 0]);
+  ok(made.face === 'skin', 'a cut made in Design is faced with the building’s facade');
+  const under = lay({ ...box, carves: [{ ...made, lo: 1, hi: 3 }] });
+  ok(under.floors.every((f) => f.cuts.length === 0) && under.floors[0].area < under.floors[4].area, 'and stays so under floors above (a combine cut from a lower building): no bare floors');
+  for (const op of ['add', 'keep', 'xor'] as const) {
+    const L = lay({ ...box, carves: [shapePart(box, 'round', op, [12, 0])] });
+    ok(L.floors.every((f) => f.rings.length > 0 && f.area > 50 && f.cuts.length === 0), `${op}: every floor has its rings, none left open`);
+  }
+}
+
 console.log(bad ? `${bad} FAILED` : 'ALL OK');
 if (bad) process.exitCode = 1;

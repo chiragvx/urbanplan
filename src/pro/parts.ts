@@ -82,7 +82,7 @@ function shapedPart(f: Form, kind: NewPart): Carve {
 
 const ringBox = (r: Curve) => { let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (const [x, z] of r.pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); } return { x0, x1, z0, z1, cx: (x0 + x1) / 2, cz: (z0 + z1) / 2, w: x1 - x0, d: z1 - z0 }; };
 const mapRing = (r: Curve, fn: (p: Pt) => Pt): Curve => ({ ...r, pts: r.pts.map((p) => { const [x, z] = fn(p); return [r2(x), r2(z)] as Pt; }) });
-const allFloors = (n: number, op: PartOp, ring: Curve, name?: string): Carve => ({ id: id(), op, ...(name ? { name } : {}), ring, from: 0, to: 1, lo: 1, hi: n, face: op === 'cut' ? 'open' : 'glass' });
+const allFloors = (n: number, op: PartOp, ring: Curve, name?: string): Carve => ({ id: id(), op, ...(name ? { name } : {}), ring, from: 0, to: 1, lo: 1, hi: n, face: op === 'cut' ? 'skin' : 'glass' });
 
 /** a part of a shape (Box, Round, L, U, Wedge…), all the floors up: at a point of the plan (local), at its own size;
  *  else at the plan's middle, sized to it (a cut or an exclude half the plan's size, an intersect a little over it, so
