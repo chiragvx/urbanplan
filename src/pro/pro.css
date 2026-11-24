@@ -282,7 +282,7 @@ details.chk.info summary .ico { color: var(--up-muted); }
 .pbtn.primary { background: var(--up-ink); border-color: var(--up-ink); color: var(--up-paper); }
 
 /* ------------------------------------------------------------ stage */
-.stage { grid-area: stage; position: relative; min-width: 0; min-height: 0; background: var(--up-paper); overflow: hidden; }
+.stage { grid-area: stage; position: relative; min-width: 0; min-height: 0; background: var(--up-paper); overflow: hidden; overflow: clip; }
 .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
 .glass { background: color-mix(in srgb, var(--up-surface) 92%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
 
@@ -322,6 +322,11 @@ details.chk.info summary .ico { color: var(--up-muted); }
 .tgroup.floor small { color: var(--up-muted); font-weight: 400; }
 .tgroup.sun .range { width: 120px; margin: 0 4px; }
 .tgroup.sun .time { font: 600 12px var(--up-font-mono); min-width: 40px; padding-right: 6px; }
+/* (a menu opened from a toolbar group: its items are menu rows, not toolbar buttons) */
+.tgroup .menu > button { height: auto; min-width: 0; justify-content: flex-start; padding: 8px 10px; font-size: 13px; font-weight: 400; color: var(--up-ink); }
+.tgroup .menu > button:hover, .tgroup .menu > button:focus-visible { background: var(--up-surface-2); color: var(--up-ink); }
+.tgroup .menu > button[aria-checked="true"] { background: none; box-shadow: none; font-weight: 400; }
+.tgroup .menu > button[aria-checked="true"]:hover { background: var(--up-surface-2); }
 .legend.floating { position: absolute; left: calc(12px + var(--cover)); bottom: 66px; padding: 6px 10px; border-radius: 8px; background: color-mix(in srgb, var(--up-surface) 92%, transparent); max-width: 60%; }
 .tip { position: absolute; pointer-events: none; display: grid; gap: 1px; background: rgba(12, 12, 13, 0.92); color: #fafafa; padding: 8px 10px; border-radius: 8px; font-size: 12px; white-space: nowrap; z-index: 3; }
 
@@ -1021,7 +1026,7 @@ details.chk .show { display: inline-flex; align-items: center; gap: 5px; margin:
 @media (max-width: 640px) { .ways { grid-template-columns: 1fr; } }
 
 /* density: the compass at the view tools' end, the help corner after it, the drawing hint beside the shelf */
-.tools .compass { position: relative; right: auto; bottom: auto; width: 40px; height: 40px; flex: none; }
+.tools .compass { position: relative; top: auto; right: auto; bottom: auto; width: 40px; height: 40px; flex: none; }
 .tools .compass .needle { width: 34px; height: 34px; }
 .help-c { position: relative; }
 .help-c > button { position: relative; }

@@ -4,6 +4,53 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-24 · The ground cutaway and section steady
+
+**Why:** the user said the ground is glitchy in Shaded with Ground and Section on.
+
+**What changed:**
+- **Section** (src/pro/scene.ts):
+  - Before: the earth's slices are built already cut at the plot's middle, and the section's clipping plane sat exactly on that cut face. A face lying on its own clipping plane is kept or dropped pixel by pixel as the camera moves, so the face flickered, showing the block's insides through it.
+  - Now the plane sits 6 cm in front of the face, and the face draws solid.
+  - The red frame round the cut and the water's line on it are now drawn just in front of the face. Before, both were clipped away.
+- **Ground, see-through:** the soil layers are transparent slabs that used to sort themselves. They swapped order as the camera moved, and their colours flickered. They are now drawn deepest first, in a fixed order.
+- **The stage** (src/pro/pro.css):
+  - Below 900 px wide, the compass's narrow-screen position (`top: 84px`) also applied inside the bottom toolbar. It pushed the compass out below the stage, so the stage could scroll, shifting the 3D view up and leaving a black band.
+  - The compass in the toolbar now resets `top`, and the stage clips rather than scrolls (`overflow: clip`).
+
+**Checked:**
+- tsc passes, npm test is all OK and the build is OK.
+- In the app, in a separate tab with saving blocked, on the user's project at 1344 × 760 and at the pane's width: Ground and Section at Draft and High.
+- The cut face draws solid and steady. Comparing with the plane back on the face showed the old mixed, see-through face.
+- No band below the view, and no console errors.
+
+**Left or known to be off:** at Draft, layers with similar browns read close together on the cut face. The lines at each layer's top still separate them.
+
+---
+
+## 2026-11-24 · Kerbs and footpaths follow the road's edge; the view menu laid out as a menu
+
+**Why:** the user showed footpath slabs lying across the road where the drive meets the building's turning head, and asked to fix it. They then showed the view tools menu (⋯) with its items centred and an outline round Snapping.
+
+**What changed:**
+- **Kerbs and footpaths** (src/pro/scene.ts, the site kit):
+  - Before: 2 m boxes set out from each road's centre line, so at junctions and turning heads they landed on the other road's asphalt, and on curves they broke into separate tiles.
+  - Now they are drawn from the road surface as it is laid. The kerb is a 150 mm strip round its edge, with sides. The footpath is the next strip out.
+  - Both are cut back from the buildings, the lots, the roundabout islands and the plot's edge, so junctions stay open and curves are continuous.
+  - Each is one merged mesh.
+  - Poles are no longer placed on another road where roads meet.
+- **The view tools menu** (src/pro/pro.css): the toolbar's button style was also styling the menu's items. Menu items in a toolbar group are now reset: left aligned, their own height, no outline on the checked item.
+
+**Checked:**
+- tsc passes, npm test is all OK and the build is OK.
+- In the app, in a separate tab with saving blocked, on the user's project: the junctions and the turning head round the round tower have continuous kerbs with nothing over the asphalt.
+- The menu opens with its rows aligned.
+- No console errors.
+
+**Left or known to be off:** where a lot's paving runs right up to a road there is no footpath (the lot takes that strip).
+
+---
+
 ## 2026-11-24 · Pools as a site element
 
 **Why:** the user asked for pools as a site element.

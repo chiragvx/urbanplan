@@ -17,7 +17,7 @@ import { detailOf, loadScans } from './render/textures';
 import { FrameWatch, guessTier, saveTier, savedTier, SPEC, type Tier } from './render/quality';
 import { cutFace, flat, GeoBuf, prism, type Hole } from './render/geo';
 import { buildingOutline, crossings, endExt } from './render/outline';
-import { inside as inMP, union as unionMP, fromFlat as mpOf, offset as offsetMP, diff as diffMP } from '../doc/ground';
+import { inside as inMP, union as unionMP, fromFlat as mpOf, offset as offsetMP, diff as diffMP, inter as interMP } from '../doc/ground';
 import { GLASS, litShare, withRooms } from './render/glass';
 import { carMeshes, gridIn, loadModels, markings, modelMeshes, peopleMeshes, type ModelPart } from './render/entourage';
 import { surfaceMaterial, surfaceOfCover, surfaceOfRoad, treeMeshes, type Placed as Tree } from './render/landscape';
@@ -1089,8 +1089,19 @@ export class ProView {
         if (G0.cabin) { const [cx, cz] = at(-2.2, sb + 2.0); if (free(cx, cz)) { cabin.add(cx, 1.35, cz, ux, uz, 2.4, 2.7, 2.4); panes.add(cx + nx * 1.22, 1.6, cz + nz * 1.22, ux, uz, 1.8, 0.9, 0.04); slabs.add(cx, 2.78, cz, ux, uz, 3.0, 0.16, 3.0); } }
       }
       add(walls.mesh(wm, true)); add(metal.mesh(mat('#2b2b2e', { roughness: 0.5, metalness: 0.5 }), true)); add(cabin.mesh(mat('#e9e6df'), true));
-      // the internal roads: kerbs and footpaths along both sides, poles on one side, trees on the other
-      const R = KIT.road, kerbs = new Boxes(), paths = new Boxes(), poles = new Boxes();
+      // the internal roads: a kerb round the road surface as it is laid (joins, turning heads and roundabouts and all)
+      // and a footpath behind it, both cut back from the buildings, the lots and the plot's edge; poles along one side
+      const R = KIT.road, poles = new Boxes();
+      if (G.road.length && (R.kerb || R.footpath > 0.2)) {
+        const netMP = mpOf(N), bld = unionMP(...built.map(mpOf)), kerbOut = offsetMP(G.road, 0.15);
+        const kerb = R.kerb ? diffMP(interMP(kerbOut, netMP), G.road, bld) : [];
+        const foot = R.footpath > 0.2 ? diffMP(interMP(offsetMP(G.road, 0.15 + R.footpath), offsetMP(netMP, -0.3)), kerbOut, bld, G.lot, G.island) : [];
+        // (each merged into one mesh)
+        const one = (gs: THREE.BufferGeometry[], mt: THREE.Material, shadow: boolean) => { const g = gs.length ? mergeGeometries(gs) : null; gs.forEach((x) => x.dispose()); if (g) mesh(g, mt, shadow); };
+        const tops = (m: MP, y: number) => triangles(m).filter((t) => t.length >= 6).map((t) => flat(t, y));
+        if (kerb.length) one([...tops(kerb, 0.15), ...kerb.flatMap((poly) => poly.map((rg) => rg.flatMap((q) => q)).filter((f) => f.length >= 6).map((f) => prism(f, 0.04, 0.15, false)))], surfaceMaterial('kerb', tex, { side: THREE.DoubleSide }), true);
+        one(tops(foot, 0.08), surfaceMaterial('concrete', tex), false);
+      }
       const lines = [...d.ground.drive.map((pts) => ({ pts, w: d.ground.driveW })), ...d.ground.roads];
       for (const ln of lines) {
         let run = 0, nextPole = R.poles * 0.5;
@@ -1098,21 +1109,13 @@ export class ProView {
           const x0 = ln.pts[i], z0 = ln.pts[i + 1], x1 = ln.pts[i + 2], z1 = ln.pts[i + 3], L = Math.hypot(x1 - x0, z1 - z0);
           if (L < 0.5) continue;
           const ux = (x1 - x0) / L, uz = (z1 - z0) / L, nx = -uz, nz = ux, hw = ln.w / 2;
-          for (let t = 0; t < L; t += 2) {
-            const piece = Math.min(2, L - t), cx = x0 + ux * (t + piece / 2), cz = z0 + uz * (t + piece / 2);
-            for (const sgn of [-1, 1]) {
-              const kx = cx + nx * sgn * (hw + 0.075), kz = cz + nz * sgn * (hw + 0.075);
-              if (R.kerb && free(kx, kz)) kerbs.add(kx, 0.1, kz, ux, uz, piece, 0.15, 0.15);
-              const fx = cx + nx * sgn * (hw + 0.15 + R.footpath / 2), fz = cz + nz * sgn * (hw + 0.15 + R.footpath / 2);
-              if (R.footpath > 0.2 && free(fx, fz)) paths.add(fx, 0.08, fz, ux, uz, piece, 0.06, R.footpath);
-            }
-          }
           const side = hw + 0.4 + (R.footpath > 0.2 ? R.footpath : 0);
-          while (R.poles > 1 && nextPole <= run + L) { const t = nextPole - run, px = x0 + ux * t + nx * side, pz = z0 + uz * t + nz * side; if (free(px, pz)) { poles.add(px, 3.75, pz, ux, uz, 0.14, 7.5, 0.14); poles.add(px - nx * 0.5, 7.5, pz - nz * 0.5, nx, nz, 1.0, 0.08, 0.08); lamps.add(px - nx * 0.9, 7.42, pz - nz * 0.9, ux, uz, 0.25, 0.06, 0.4); } nextPole += R.poles; }
+          // (never on another road where roads meet)
+          while (R.poles > 1 && nextPole <= run + L) { const t = nextPole - run, px = x0 + ux * t + nx * side, pz = z0 + uz * t + nz * side; if (free(px, pz) && !inMP(G.road, px, pz)) { poles.add(px, 3.75, pz, ux, uz, 0.14, 7.5, 0.14); poles.add(px - nx * 0.5, 7.5, pz - nz * 0.5, nx, nz, 1.0, 0.08, 0.08); lamps.add(px - nx * 0.9, 7.42, pz - nz * 0.9, ux, uz, 0.25, 0.06, 0.4); } nextPole += R.poles; }
           run += L;
         }
       }
-      add(kerbs.mesh(surfaceMaterial('kerb', tex, { world: true }), true)); add(paths.mesh(surfaceMaterial('concrete', tex, { world: true }), false)); add(poles.mesh(mat('#3b3d42', { roughness: 0.5, metalness: 0.4 }), true));
+      add(poles.mesh(mat('#3b3d42', { roughness: 0.5, metalness: 0.4 }), true));
     }
     add(trunks.mesh(mat('#6b5440'), true, trunkGeo));
     for (const im of treeMeshes(trees, this.tier !== 'draft')) add(im);
@@ -1582,10 +1585,12 @@ export class ProView {
     if (v.ground?.cut) this.groundCut(v.ground.cut, r, d, add);
     // (the section: every material in the scheme clipped at a plane through the plot's middle, across the road's
     // line, the front half taken away; the materials are shared, so it's set, or cleared, on all of them each time)
-    const plane = v.ground?.cut?.section ? new THREE.Plane(new THREE.Vector3(0, 0, 1), -(minZ + maxZ) / 2) : null;
+    // (the plane a few cm in front of the cut face: the earth's slices are built cut, and a face lying on its own
+    // clipping plane flickers in and out as the camera moves)
+    const plane = v.ground?.cut?.section ? new THREE.Plane(new THREE.Vector3(0, 0, 1), -((minZ + maxZ) / 2 - 0.06)) : null;
     if (plane) {
-      // (the cut's edge drawn: a frame down the block's face, so the section reads as cut)
-      const z = (minZ + maxZ) / 2 + 0.02, F0 = v.ground!.cut!.floor, lp = [minX, 0.1, z, maxX, 0.1, z, maxX, 0.1, z, maxX, -F0, z, maxX, -F0, z, minX, -F0, z, minX, -F0, z, minX, 0.1, z];
+      // (the cut's edge drawn: a frame down the block's face, just in front of it, so the section reads as cut)
+      const z = (minZ + maxZ) / 2 - 0.03, F0 = v.ground!.cut!.floor, lp = [minX, 0.1, z, maxX, 0.1, z, maxX, 0.1, z, maxX, -F0, z, maxX, -F0, z, minX, -F0, z, minX, -F0, z, minX, 0.1, z];
       const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(lp, 3));
       add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: '#e5484d' })));
     }
@@ -1634,13 +1639,15 @@ export class ProView {
     const base = half(ring), around = C.dig && zc !== null ? diffMP(mpOf(base), mpOf(half(inner))).map((p) => p[0].flatMap((q) => [q[0], q[1]])).filter((q) => q.length >= 6) : [base];
     // (the layers, each a slab of the plot's outline: the top one under the surface, the last to the block's floor;
     // in section a solid slice, the basements' hole taken out above their floor)
-    for (const s of C.runs) {
-      const y1 = -s.top, y0 = -Math.min(s.bottom, C.floor); if (y1 - y0 <= 0.02) continue;
-      if (zc === null) { put(prism(ring, y0, y1 - 0.01, false), see(s.colour, 0.42), 1); continue; }
+    // (see-through, drawn deepest first in a fixed order: transparent slabs left to sort themselves swap as the camera
+    // moves, and the layers' colours flicker)
+    C.runs.forEach((s, k) => {
+      const y1 = -s.top, y0 = -Math.min(s.bottom, C.floor); if (y1 - y0 <= 0.02) return;
+      if (zc === null) { put(prism(ring, y0, y1 - 0.01, false), see(s.colour, 0.42), 1 + (C.runs.length - k) / 100); return; }
       const m = earth(s.colour, s.pattern ?? 'plain'), dg = C.dig ? -C.dig.depth : 0;
       if (C.dig && y1 > dg && y0 < dg) { for (const q of around) put(prism(q, dg, y1 - 0.01), m); put(prism(base, y0, dg - 0.01), m); }
       else for (const q of (C.dig && y0 >= dg ? around : [base])) put(prism(q, y0, y1 - 0.01), m);
-    }
+    });
     put(flat(base, -C.floor, true), zc === null ? see(C.runs[C.runs.length - 1]?.colour ?? '#555', 0.8) : earth(C.runs[C.runs.length - 1]?.colour ?? '#555', C.runs[C.runs.length - 1]?.pattern ?? 'plain'), 1);
     // (a line round each layer's top on the block's faces, so the layers read from any side)
     const pts: number[] = [];
