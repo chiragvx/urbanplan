@@ -815,7 +815,7 @@ function App() {
             <b>Floor {xr}<small> of {maxFloor}</small></b>
             <button type="button" onClick={() => setXray(Math.min(maxFloor, xr + 1))} aria-label="Floor up" data-tip="Floor up (])"><Icon n="plus" size={14} /></button>
           </div>}
-          <div class="tgroup">
+          <div class="tgroup push">
             <button type="button" aria-label="Whole site" data-tip="Whole site (F with nothing picked)" onClick={() => cam('fit')}><Icon n="fit" size={16} /></button>
             {/* (the rest behind one click: they're used now and then, not all the time) */}
             <Menu label="More view tools" class="tmore" items={[

@@ -4,6 +4,73 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-24 · Parking lots laid out to the rules: aisles you drive round, a way in, markings, cars in bays
+
+**Why:** the user said parking on an empty lot made no sense: it followed no guidelines and had no proper entrances, exits or lane markings. They asked for realism and modularity.
+
+**What changed:**
+- **The layout** (src/doc/ground.ts, `layBays` and `layGround`):
+  - **Bays and aisles:** 2.5 × 5 m bays at 90° on 6 m two-way aisles, as before (the usual NBC / DCPR sizes).
+  - **Cross aisles:** a lot given a way in now gets a spine aisle across its rows, through the way in and out to the lot's edge, with another every 48 m (`CROSS_EVERY`) along long rows. Every row aisle runs on to a cross aisle, so you drive in and round instead of into rows of dead ends.
+  - **Way in:** each separate piece of a lot finds the point of its edge nearest a road whose 6 m drive is clear of the buildings by a metre, trying the next nearest when one is blocked. A lot already on the road opens onto it there.
+  - **Planted edges:** the bays sit 1.2 m in from the lot's edge, and that margin is planted. Only the rows, aisles and drive are paved; before, the whole lot was paved.
+  - **Ground map:** it now carries the bays and the entries (`bays`, `entries`). Shade trees stand only on row-end islands, not on the margins.
+- **In the scene** (src/pro/scene.ts):
+  - Lots are paved in the road's surface, and islands and margins are grass with a kerb round them.
+  - Every bay has white side and back lines and a concrete wheel stop 0.75 m from its back.
+  - Accessible bays (one in fifty, at least one) are painted blue, nearest the buildings.
+  - Each drive has an arrow per lane (in on the left, as traffic keeps left) and a stop line at the road. The road's kerb and footpath break where a drive meets them.
+- **Cars park in the bays:** about three in four bays are taken, most nose in and some backed in, and some bays hold a pair of two-wheelers. Before, cars sat on a loose grid that ignored the bays.
+
+**Checked:**
+- tsc passes, npm test is all OK and the build is OK.
+- test-landscape adds a lot case with an internal road beside it: every bay is 2.5 × 5 m, none is on a road or outside the lot, there is a way in from the road, and the margin is planted.
+- In the app, in a separate tab with saving blocked, on the user's project: from above, close and at street level. The rows, cross aisles, entries with arrows and stop lines, kerbed islands and cars in bays all read right, with no console errors or failed requests.
+
+**Left or known to be off:**
+- The cross aisles and margins take bays. On the user's project the open ground now holds 128 bays, and the homes the parking allows fell from 86 to 83.
+- There are no angled (45° or 60°) one-way layouts, no separate two-wheeler bays (they share car bays), and no painted walkways yet.
+- A lot already touching a road gets a short drive. Its arrows point out from the lot's middle, which may not line up exactly with the spine.
+
+---
+
+## 2026-11-24 · Vehicles and people, low-poly and true to life; the view's toolbar as a rail
+
+**Why:**
+- The user asked for cars and bikes in low poly, "basic vehicles but realistic", and the same for these kinds of assets.
+- They also asked for a cleaner bottom toolbar, a fixed rail at the bottom.
+
+**What changed:**
+- **A vehicle kit** (new src/pro/render/vehicles.ts), replacing Kenney's toy racing and platformer models and the fallback box cars:
+  - Eight kinds at their real sizes: hatchback, sedan, SUV, van, auto-rickshaw, motorcycle, scooter and a small truck.
+  - Each is built from its side profile with chamfered edges. Cars have wheel arches, a glass cabin narrower than the body, a painted roof and B pillar, wheels with rims, a dark sill, head and tail lights, and number plates.
+  - Autos have the tub, screen and black canvas hood on three wheels. Two-wheelers have a tank or apron, seat, fork and bars. The truck has a cab and an open wooden bed.
+  - One instanced mesh per part.
+  - Paint is chosen per vehicle by a seeded hash, weighted the way cars on Indian streets run (white first, then silver and grey). Autos are yellow or green; trucks have their own colours.
+- **The mix:**
+  - In the lots, a quarter of the bays hold a pair of two-wheelers. The rest hold hatchbacks, sedans, SUVs and vans, and some are parked nose in.
+  - On the road, autos, two-wheelers and trucks appear among the cars.
+- **People:** a low-poly figure with legs, a body, arms, hands, neck, head and shoes. Clothes, trousers and skin are coloured per person.
+- **Removed:** the fetch of the CC0 model manifest, and the old box-car and capsule-people code in src/pro/render/entourage.ts.
+- **The view's toolbar** (src/pro/pro.css, src/pro/main.tsx):
+  - It is now one rail docked flush along the bottom of the view, between any side panels, with a hairline above.
+  - Its groups are split by thin dividers instead of separate pills. View controls are on the left; fit, more, sun, quality, compass and help are pushed right.
+  - The active state is a filled tile with a hairline instead of a white ring, and the compass is smaller to fit.
+  - The legend and the pick hint sit above the rail.
+
+**Checked:**
+- tsc passes, npm test is all OK and the build is OK.
+- test-landscape adds checks for every vehicle kind: finite, on the ground, its length and height within a few cm of real; instancing; the kind mix.
+- In the app, in a separate tab with saving blocked, on the user's project: top, close and street views at High. The cars read as cars, the wheels show under the arches, and the two-wheelers stand in pairs.
+- The rail was checked at 1344 and 820 wide.
+- No failed requests or errors in a clean load.
+
+**Left or known to be off:**
+- The Kenney model files are still in public/assets/render/models (with tools/render/models.mjs), but nothing loads them now. They can be deleted.
+- There are no buses or bicycles yet, and the vehicles aren't moving.
+
+---
+
 ## 2026-11-24 · The ground cutaway and section steady
 
 **Why:** the user said the ground is glitchy in Shaded with Ground and Section on.

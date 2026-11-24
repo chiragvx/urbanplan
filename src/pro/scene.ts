@@ -17,9 +17,10 @@ import { detailOf, loadScans } from './render/textures';
 import { FrameWatch, guessTier, saveTier, savedTier, SPEC, type Tier } from './render/quality';
 import { cutFace, flat, GeoBuf, prism, type Hole } from './render/geo';
 import { buildingOutline, crossings, endExt } from './render/outline';
-import { inside as inMP, union as unionMP, fromFlat as mpOf, offset as offsetMP, diff as diffMP, inter as interMP } from '../doc/ground';
+import { inside as inMP, union as unionMP, fromFlat as mpOf, offset as offsetMP, diff as diffMP, inter as interMP, stroke as strokeMP } from '../doc/ground';
 import { GLASS, litShare, withRooms } from './render/glass';
-import { carMeshes, gridIn, loadModels, markings, modelMeshes, peopleMeshes, type ModelPart } from './render/entourage';
+import { markings } from './render/entourage';
+import { kindAt, peopleMeshes, vehicleMeshes, type VehicleKind } from './render/vehicles';
 import { surfaceMaterial, surfaceOfCover, surfaceOfRoad, treeMeshes, type Placed as Tree } from './render/landscape';
 import { pathSky, pixelsToPng } from './render/still';
 import { neighbourMesh, neighbours } from './render/context';
@@ -222,8 +223,6 @@ export class ProView {
   /** the neighbouring buildings (kept across rebuilds; made again when the plot moves) */
   private ctx = new THREE.Group();
   private ctxKey = '';
-  /** the CC0 entourage models, once fetched (tools/render/models.mjs): motorcycles, trucks, people */
-  private models = new Map<string, ModelPart[]>();
 
   constructor(public canvas: HTMLCanvasElement) {
     // (the canvas keeps MSAA for the draft tier and the wireframe; the pipeline does its own anti-aliasing)
@@ -289,7 +288,6 @@ export class ProView {
     this.resize();
     this.setSun(null);
     // (the scanned textures, when the texture tool has fetched them: the materials made again with them)
-    void loadModels(import.meta.env.BASE_URL).then((m) => { if (m.size) { this.models = m; if (this.last) this.set(this.last); } });
     void loadScans(import.meta.env.BASE_URL, this.renderer).then((ok) => { if (ok && this.lib.tex) { this.lib.reset(); for (const e of this.formed.values()) disposeBuilt(e.built); this.formed.clear(); if (this.last) this.set(this.last); } });
   }
 
@@ -940,7 +938,7 @@ export class ProView {
     const tex = SPEC[this.tier].tex, roadMat = surfaceMaterial(surfaceOfRoad(KIT.road.surface), tex);
     flatMP(G.road, 0.05, roadMat);
     // (where an internal road leaves the plot: on across the widening to the road outside, flared at its kerb)
-    for (const j of d.ground.joins ?? []) mesh(flat(j, 0.045), roadMat, false); flatMP(G.lot, 0.05, surfaceMaterial(KIT.road.surface === 'pavers' ? 'concrete' : 'pavers', tex)); flatMP(G.path, 0.06, surfaceMaterial('tiles-path', tex));
+    for (const j of d.ground.joins ?? []) mesh(flat(j, 0.045), roadMat, false); flatMP(G.lot, 0.05, roadMat); flatMP(G.lotIsland, 0.065, surfaceMaterial('lawn', tex)); flatMP(G.path, 0.06, surfaceMaterial('tiles-path', tex));
     // (the open green the plan leaves is grassed; its lawns, beds and paths lie on it)
     flatMP(G.green, 0.055, surfaceMaterial('lawn', tex));
     flatMP(G.lawn, 0.06, surfaceMaterial('lawn', tex));
@@ -1094,8 +1092,10 @@ export class ProView {
       const R = KIT.road, poles = new Boxes();
       if (G.road.length && (R.kerb || R.footpath > 0.2)) {
         const netMP = mpOf(N), bld = unionMP(...built.map(mpOf)), kerbOut = offsetMP(G.road, 0.15);
-        const kerb = R.kerb ? diffMP(interMP(kerbOut, netMP), G.road, bld) : [];
-        const foot = R.footpath > 0.2 ? diffMP(interMP(offsetMP(G.road, 0.15 + R.footpath), offsetMP(netMP, -0.3)), kerbOut, bld, G.lot, G.island) : [];
+        // (broken where a lot's drive meets the road)
+        const mouths = unionMP(...G.entries.map((e) => strokeMP([e[0], e[1], e[2] + (e[2] - e[0]) * 0.1, e[3] + (e[3] - e[1]) * 0.1], 6.4, false, true)));
+        const kerb = R.kerb ? diffMP(interMP(kerbOut, netMP), G.road, bld, mouths) : [];
+        const foot = R.footpath > 0.2 ? diffMP(interMP(offsetMP(G.road, 0.15 + R.footpath), offsetMP(netMP, -0.3)), kerbOut, bld, G.lot, G.lotIsland, G.island, mouths) : [];
         // (each merged into one mesh)
         const one = (gs: THREE.BufferGeometry[], mt: THREE.Material, shadow: boolean) => { const g = gs.length ? mergeGeometries(gs) : null; gs.forEach((x) => x.dispose()); if (g) mesh(g, mt, shadow); };
         const tops = (m: MP, y: number) => triangles(m).filter((t) => t.length >= 6).map((t) => flat(t, y));
@@ -1116,6 +1116,40 @@ export class ProView {
         }
       }
       add(poles.mesh(mat('#3b3d42', { roughness: 0.5, metalness: 0.4 }), true));
+      // the lots' markings (docs: bays 2.5 × 5 m on 6 m two-way aisles): white bay lines, a wheel stop in each bay, the
+      // accessible bays nearest the buildings in blue, in and out arrows and a stop line on each drive; the planted
+      // islands and margins kerbed
+      {
+        const lines: THREE.BufferGeometry[] = [], blue: THREE.BufferGeometry[] = [], stops = new Boxes();
+        const strip = (ax: number, az: number, bx: number, bz: number, w: number, y: number, to = lines) => { const L = Math.hypot(bx - ax, bz - az); if (L < 0.05) return; const nx = -(bz - az) / L * w / 2, nz = (bx - ax) / L * w / 2; to.push(flat([ax + nx, az + nz, bx + nx, bz + nz, bx - nx, bz - nz, ax - nx, az - nz], y)); };
+        const Y = 0.056;
+        for (const q of G.bays) {
+          strip(q[2], q[3], q[4], q[5], 0.1, Y); strip(q[6], q[7], q[0], q[1], 0.1, Y); strip(q[0], q[1], q[2], q[3], 0.1, Y);
+          // (the stop 0.75 from the back, across the bay)
+          const bx = (q[0] + q[2]) / 2, bz = (q[1] + q[3]) / 2, mx = (q[4] + q[6]) / 2, mz = (q[5] + q[7]) / 2, L = Math.hypot(mx - bx, mz - bz) || 1;
+          stops.add(bx + (mx - bx) / L * 0.75, 0.11, bz + (mz - bz) / L * 0.75, q[2] - q[0], q[3] - q[1], 1.7, 0.12, 0.16);
+        }
+        // (accessible bays: one in fifty, at least one a lot, those nearest a building, in blue)
+        const centres = d.buildings.flatMap((b) => b.quads.map((q) => { let x = 0, z = 0; for (let i = 0; i < q.length; i += 2) { x += q[i]; z += q[i + 1]; } return [x / (q.length / 2), z / (q.length / 2)]; }));
+        if (G.bays.length && centres.length) {
+          const dist = (q: number[]) => Math.min(...centres.map(([x, z]) => Math.hypot((q[0] + q[4]) / 2 - x, (q[1] + q[5]) / 2 - z)));
+          for (const q of [...G.bays].sort((a, b) => dist(a) - dist(b)).slice(0, Math.max(1, Math.round(G.bays.length / 50)))) blue.push(flat(q, Y - 0.002));
+        }
+        // (the drives: an arrow in each lane, in on the left as traffic keeps left, and a stop line at the road)
+        for (const [x0, z0, x1, z1] of G.entries) {
+          const L = Math.hypot(x1 - x0, z1 - z0), ux = L > 0.01 ? (x1 - x0) / L : 0, uz = L > 0.01 ? (z1 - z0) / L : 1, lx = uz, lz = -ux;
+          const arrow = (cx: number, cz: number, dx: number, dz: number) => { const P = (a: number, b: number) => [cx + dx * a + dz * b, cz + dz * a - dx * b]; lines.push(flat([...P(-1.6, -0.12), ...P(0.3, -0.12), ...P(0.3, 0.12), ...P(-1.6, 0.12)], Y), flat([...P(0.3, -0.5), ...P(1.4, 0), ...P(0.3, 0.5)], Y)); };
+          const ax = x0 - ux * 4, az = z0 - uz * 4;
+          arrow(ax + lx * 1.5, az + lz * 1.5, ux, uz); arrow(ax - lx * 1.5, az - lz * 1.5, -ux, -uz);
+          const sx = x1 - ux * 0.6, sz = z1 - uz * 0.6; strip(sx, sz, sx + lx * 2.9, sz + lz * 2.9, 0.3, Y);
+        }
+        const one = (gs: THREE.BufferGeometry[], m: THREE.Material) => { const g = gs.length ? mergeGeometries(gs) : null; gs.forEach((x) => x.dispose()); if (g) mesh(g, m, false); };
+        one(lines, mat('#eeeee8', { roughness: 0.6 })); one(blue, mat('#2f63a8', { roughness: 0.7 }));
+        add(stops.mesh(surfaceMaterial('concrete', tex, { world: true }), true));
+        // (a kerb round each planted island and margin)
+        const ring = diffMP(G.lotIsland, offsetMP(G.lotIsland, -0.15)), km = surfaceMaterial('kerb', tex, { side: THREE.DoubleSide });
+        if (ring.length) { const gs = [...triangles(ring).filter((t) => t.length >= 6).map((t) => flat(t, 0.15)), ...ring.flatMap((poly) => poly.map((rg) => rg.flatMap((q) => q)).filter((f) => f.length >= 6).map((f) => prism(f, 0.04, 0.15, false)))]; const g = mergeGeometries(gs); gs.forEach((x) => x.dispose()); if (g) mesh(g, km, true); }
+      }
     }
     add(trunks.mesh(mat('#6b5440'), true, trunkGeo));
     for (const im of treeMeshes(trees, this.tier !== 'draft')) add(im);
@@ -1506,44 +1540,33 @@ export class ProView {
 
     // ---- people and cars (./render/entourage.ts): cars in the lots and along the road, people at the doors
     if (SPEC[this.tier].entourage && v.xray === null) {
-      const built = d.buildings.flatMap((b) => b.quads), inNet = (x: number, z: number) => r.net.length >= 6 && pointIn(r.net, x, z, 0) && !built.some((q) => pointIn(q, x, z, 0.8));
       const h01 = (x: number, z: number, k: number) => { const t = Math.sin(x * 12.9898 + z * 78.233 + k * 3.7) * 43758.5453; return t - Math.floor(t); };
-      const cars: [number, number, number][] = [], people: [number, number][] = [];
-      for (const poly of G.lot) {
-        const ring = poly[0]?.flatMap((p) => [p[0], p[1]]) ?? [];
-        if (ring.length < 6) continue;
-        for (const [x, z] of gridIn(ring, F.ux, F.uz, 2.6, 5.4, (x, z) => pointIn(ring, x, z, -1.2) && inNet(x, z))) if (h01(x, z, 1) < 0.7) cars.push([x, z, Math.atan2(F.vx, F.vz)]);
+      const cars: [number, number, number][] = [], onRoad: [number, number, number][] = [], people: [number, number][] = [];
+      // (in the lots, a car in about three bays in four, most nose in, some backed in)
+      for (const q of G.bays) {
+        const bx = (q[0] + q[2]) / 2, bz = (q[1] + q[3]) / 2, mx = (q[4] + q[6]) / 2, mz = (q[5] + q[7]) / 2, cx = (bx + mx) / 2, cz = (bz + mz) / 2;
+        if (h01(cx, cz, 1) < 0.75) cars.push([cx, cz, Math.atan2(bx - mx, bz - mz)]);
       }
       for (const rd of v.roads) {
         const [x0, z0, x1, z1] = rd.pts, L = Math.hypot(x1 - x0, z1 - z0), ux = (x1 - x0) / L, uz = (z1 - z0) / L;
         for (let t = 0; t < L; t += 9) {
           const px = x0 + ux * t, pz = z0 + uz * t;
           if (Math.hypot(px - this.box.cx, pz - this.box.cz) > this.box.s * 0.8 + 30) continue;
-          for (const sg2 of [-1, 1]) if (h01(px, pz, sg2) < 0.45) cars.push([px - uz * sg2 * (rd.today / 2 - 1.3), pz + ux * sg2 * (rd.today / 2 - 1.3), Math.atan2(ux, uz)]);
+          for (const sg2 of [-1, 1]) if (h01(px, pz, sg2) < 0.45) onRoad.push([px - uz * sg2 * (rd.today / 2 - 1.3), pz + ux * sg2 * (rd.today / 2 - 1.3), Math.atan2(ux, uz)]);
         }
       }
       for (const [x, z, nx, nz] of entrances) for (let k = 0; k < 3; k++) people.push([x + nx * (2.5 + k * 0.9) + -nz * (k - 1) * 1.1, z + nz * (2.5 + k * 0.9) + nx * (k - 1) * 1.1]);
       for (const ln of d.ground.roads) for (let i = 0; i + 3 < ln.pts.length; i += 2) { const mx = (ln.pts[i] + ln.pts[i + 2]) / 2, mz = (ln.pts[i + 1] + ln.pts[i + 3]) / 2; if (h01(mx, mz, 7) < 0.5) people.push([mx + 3.5, mz + 1]); }
-      // (with the CC0 models: about a third of the slots a pair of motorcycles, one in ten a truck)
-      const bikes: [number, number, number][] = [], trucks: [number, number, number][] = [];
-      if (this.models.has('motorcycle')) for (let i = cars.length - 1; i >= 0; i--) {
-        const [x, z, a] = cars[i], h = h01(x, z, 9);
-        if (h < 0.3) { cars.splice(i, 1); bikes.push([x - Math.cos(a) * 0.5, z + Math.sin(a) * 0.5, a], [x + Math.cos(a) * 0.5, z - Math.sin(a) * 0.5, a]); }
-        else if (h > 0.9 && this.models.has('truck-red')) { cars.splice(i, 1); trucks.push([x, z, a]); }
+      // (./render/vehicles.ts: in the lots about a quarter of the bays two-wheelers, a pair to a bay, the rest cars of
+      // the kinds parked at home; on the road autos and trucks among them; people in their own clothes)
+      const byKind = new Map<VehicleKind, [number, number, number][]>(), put = (k: VehicleKind, at: [number, number, number]) => { const l = byKind.get(k) ?? []; l.push(at); byKind.set(k, l); };
+      for (const [x, z, a] of cars.slice(0, 400)) {
+        if (h01(x, z, 9) < 0.25) { const k: VehicleKind = h01(z, x, 10) < 0.6 ? 'motorcycle' : 'scooter'; put(k, [x - Math.cos(a) * 0.45, z + Math.sin(a) * 0.45, a]); put(k, [x + Math.cos(a) * 0.45, z - Math.sin(a) * 0.45, a + (h01(x, z, 12) < 0.5 ? Math.PI : 0)]); }
+        else put(kindAt(x, z, false), [x, z, a + (h01(x, z, 13) < 0.3 ? Math.PI : 0)]);
       }
-      for (const im of modelMeshes(this.models.get('motorcycle') ?? [], bikes.slice(0, 300))) add(im);
-      const tk = ['truck-red', 'truck-yellow', 'truck-green'].filter((k) => this.models.has(k));
-      tk.forEach((k, j) => { for (const im of modelMeshes(this.models.get(k)!, trucks.filter((_, i) => i % tk.length === j))) add(im); });
-      // (the cars: Kenney's Car Kit models when fetched, a mix of sedans, SUVs, hatchbacks, taxis and vans; else our own)
-      const ck = ['car-sedan', 'car-suv', 'car-hatchback', 'car-taxi', 'car-van'].filter((k) => this.models.has(k)), parked = cars.slice(0, 400);
-      if (ck.length) {
-        const weight = (k: string) => (k === 'car-taxi' ? 0.12 : k === 'car-van' ? 0.1 : 1);
-        const total = ck.reduce((s2, k) => s2 + weight(k), 0);
-        const pickKey = (x: number, z: number) => { let t = h01(x, z, 11) * total; for (const k of ck) { t -= weight(k); if (t <= 0) return k; } return ck[0]; };
-        for (const k of ck) for (const im of modelMeshes(this.models.get(k)!, parked.filter(([x, z]) => pickKey(x, z) === k))) add(im);
-      } else for (const im of carMeshes(parked, this.lib.other('car', () => new THREE.MeshStandardMaterial({ roughness: 0.32, metalness: 0.55 })), this.lib.glass('#1c2430', { roughness: 0.08 }))) add(im);
-      if (this.models.has('person')) { for (const im of modelMeshes(this.models.get('person')!, people.slice(0, 200).map(([x, z]) => [x, z, h01(z, x, 4) * Math.PI * 2] as [number, number, number]))) add(im); }
-      else for (const im of peopleMeshes(people.slice(0, 200), this.lib.other('people', () => new THREE.MeshStandardMaterial({ roughness: 0.85 })), mat('#a77b5a'))) add(im);
+      for (const [x, z, a] of onRoad.slice(0, 200)) put(kindAt(x, z, true), [x, z, a]);
+      for (const [k, at] of byKind) for (const im of vehicleMeshes(k, at)) add(im);
+      for (const im of peopleMeshes(people.slice(0, 200))) add(im);
     }
 
     // the neighbours, when the plot is on the map (loaded once per place)

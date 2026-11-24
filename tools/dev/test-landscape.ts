@@ -3,6 +3,8 @@
 // details with real geometry, normalised to a canopy of 1, and places as instanced meshes.
 import { paintSurface, SURFACE_IDS, SURFACES, surfaceOfCover, surfaceOfRoad, SPECIES, VARIANTS, growTree, treeMeshes } from '../../src/pro/render/landscape';
 import { COVERS } from '../../src/pro/ground';
+import * as THREE from 'three';
+import { VEHICLE_KINDS, vehicleParts, vehicleMeshes, peopleMeshes, kindAt } from '../../src/pro/render/vehicles';
 import { evaluate } from '../../src/pro/evaluate';
 import { DEFAULT_PROJECT, type ProProject } from '../../src/pro/project';
 import { area, fromFlat, inter } from '../../src/doc/ground';
@@ -44,6 +46,33 @@ ok(ms.length >= 10 && ms.every((m) => m.count >= 1), `six trees placed as ${ms.l
   ok(over < 0.5 && planted === 0 && area(G.lawn) > 50, `nothing laid over the pool (${over.toFixed(2)} m² of lawn, path or bed, ${planted} plants), the garden round it is (${Math.round(area(G.lawn))} m² of lawn)`);
   const without = evaluate({ ...p, scheme: { buildings: [], elements: p.scheme!.elements.filter((x) => x.kind !== 'pool') } }).d.ground.map.openArea;
   ok(Math.abs(G.openArea - without) < 1, `the pool counts as open space (${Math.round(G.openArea)} m² open with it, ${Math.round(without)} without)`);
+}
+
+// vehicles and people (src/pro/render/vehicles.ts): every kind built, finite, standing on the ground at its real size
+{
+  const SIZE: Record<string, [number, number]> = { hatchback: [3.8, 1.5], sedan: [4.45, 1.5], suv: [4.45, 1.8], van: [4.3, 1.95], auto: [2.65, 1.75], motorcycle: [2.0, 1.1], scooter: [1.8, 1.1], truck: [6.0, 2.5] };
+  for (const k of VEHICLE_KINDS) {
+    const parts = vehicleParts(k), box = new THREE.Box3();
+    for (const p of parts) { p.geometry.computeBoundingBox(); box.union(p.geometry.boundingBox!); }
+    const fin = parts.every((p) => Array.from(p.geometry.attributes.position.array as Float32Array).every(Number.isFinite));
+    const L = box.max.z - box.min.z, H = box.max.y, [L0, H0] = SIZE[k];
+    ok(fin && parts.some((p) => p.role === 'paint') && parts.some((p) => p.role === 'trim') && Math.abs(box.min.y) < 0.02 && Math.abs(L - L0) < 0.35 && Math.abs(H - H0) < 0.25, `${k}: ${parts.length} parts, ${L.toFixed(2)} m long, ${H.toFixed(2)} m high, on the ground`);
+  }
+  const ms = vehicleMeshes('sedan', [[0, 0, 0], [3, 0, 1]]), pm = peopleMeshes([[0, 0], [1, 1]]);
+  ok(ms.length >= 5 && ms.every((m) => m.count === 2) && pm.length === 4, `two sedans as ${ms.length} instanced parts, two people as ${pm.length}`);
+  ok(['hatchback', 'sedan', 'suv', 'van'].includes(kindAt(1, 2, false)) && VEHICLE_KINDS.includes(kindAt(3, 4, true)), 'a parking bay holds a car, a road any kind');
+}
+
+// a parking lot laid to the rules: bays 2.5 × 5 on 6 m aisles, a way in from the road, no bay on a road or outside the lot
+{
+  const ring = [-25, 20, 25, 20, 25, 60, -25, 60];
+  const p: ProProject = { ...DEFAULT_PROJECT, width: 60, depth: 80, scheme: { buildings: [], elements: [{ id: 'lot1', kind: 'lot', spine: [], depth: 0, floors: 0, ring }, { id: 'r1', kind: 'road', spine: [-28, 66, 28, 66], depth: 6, floors: 0 }] } } as ProProject;
+  const G = evaluate(p).d.ground.map, L = fromFlat(ring);
+  const onRoad = G.bays.filter((q) => area(inter(fromFlat(q), G.road)) > 0.05).length, outside = G.bays.filter((q) => area(inter(fromFlat(q), L)) < 12.4).length;
+  const sized = G.bays.every((q) => Math.abs(Math.hypot(q[2] - q[0], q[3] - q[1]) - 2.5) < 0.01 && Math.abs(Math.hypot(q[4] - q[2], q[5] - q[3]) - 5) < 0.01);
+  ok(G.bays.length > 20 && sized && onRoad === 0 && outside === 0, `a 50 × 40 m lot: ${G.bays.length} bays of 2.5 × 5 m, ${onRoad} on a road, ${outside} outside the lot`);
+  ok(G.road.length > 0 && G.entries.length >= 1 && G.entries.every((e) => Math.hypot(e[2] - e[0], e[3] - e[1]) < 30), `a way in from the road beside it (${G.entries.length}, ${G.entries.map((e) => Math.hypot(e[2] - e[0], e[3] - e[1]).toFixed(1) + ' m').join(', ')})`);
+  ok(area(G.lotIsland) > 20, `a planted margin and islands (${Math.round(area(G.lotIsland))} m²)`);
 }
 
 console.log(bad ? `${bad} FAILED` : 'ALL OK');

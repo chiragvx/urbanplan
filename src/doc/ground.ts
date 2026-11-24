@@ -24,6 +24,9 @@ export interface GroundMap {
   fire: MP;
   /** parking lots (and the open-ground parking's rows and aisles); their planted islands */
   lot: MP; lotIsland: MP;
+  /** the lots' bays (quads, the back edge first) and their ways in: each a centre line from the lot to the road, 6 m
+   *  wide, two-way (x0, z0 at the lot, x1, z1 at the road) */
+  bays: number[][]; entries: number[][];
   /** paving round the buildings and the paths to them; garden paths */
   apron: MP; path: MP;
   /** gardens' lawns and shrub beds; the rest of the open ground, planted */
@@ -233,35 +236,51 @@ function bandIn(R: Pt[][], v0: number, v1: number): [number, number][] {
 
 /** bays (quads, the back edge first), planted islands, the rows and aisles as one surface, the direction they run */
 export interface BayLayout { bays: number[][]; islands: number[][]; paved: MP; angle: number }
+/** a cross aisle every so far along the rows (m): no row aisle runs further than this from one */
+export const CROSS_EVERY = 48;
 
-/** Bays (2.5 × 5 m, 90°) packed into a shape: double rows either side of 6 m aisles, at whichever of `angles` and
- *  offset across fits the most; with `islands`, a planted island at each end of a long row and every twelve bays. */
-export function layBays(m: MP, angles: number[], islands = true): BayLayout {
+/** Bays (2.5 × 5 m, 90°) packed into a shape: double rows either side of 6 m two-way aisles, at whichever of `angles`
+ *  and offset across fits the most; with `islands`, a planted island at each end of a long row and every twelve bays.
+ *  With `access` (a point on the lot's edge, toward the road), a spine aisle 6 m wide runs across the rows through it,
+ *  every row aisle opening onto it, out to that edge (clipped to `clip`, the lot before its planted margin), and another
+ *  every CROSS_EVERY m along long rows: a lot you drive into and round, not rows of dead ends. */
+export function layBays(m: MP, angles: number[], islands = true, access: [number, number] | null = null, clip: MP = m): BayLayout {
   let best: { n: number; a: number; o: number } = { n: 0, a: angles[0] ?? 0, o: 0 };
   const M = BAY_L * 2 + AISLE;
-  const plan = (a: number, o: number, emit: ((u0: number, v0: number, u1: number, v1: number, t: 'bay' | 'isle' | 'aisle', hi?: boolean) => void) | null) => {
+  const plan = (a: number, o: number, emit: ((u0: number, v0: number, u1: number, v1: number, t: 'bay' | 'isle' | 'aisle' | 'spine', hi?: boolean) => void) | null) => {
     const c = Math.cos(a), s = Math.sin(a);
     const R: Pt[][] = m.flatMap((p) => p.map((r) => r.map(([x, z]) => [x * c + z * s, -x * s + z * c] as Pt)));
-    let V0 = Infinity, V1 = -Infinity;
-    for (const r of R) for (const [, v] of r) { V0 = Math.min(V0, v); V1 = Math.max(V1, v); }
-    let n = 0;
+    let V0 = Infinity, V1 = -Infinity, U0 = Infinity, U1 = -Infinity;
+    for (const r of R) for (const [u, v] of r) { V0 = Math.min(V0, v); V1 = Math.max(V1, v); U0 = Math.min(U0, u); U1 = Math.max(U1, u); }
+    // (the cross aisles: through the access, then every CROSS_EVERY m either way)
+    const X: number[] = [];
+    if (access) { const ua = access[0] * c + access[1] * s; for (let x = ua; x > U0 - AISLE; x -= CROSS_EVERY) X.push(x); for (let x = ua + CROSS_EVERY; x < U1 + AISLE; x += CROSS_EVERY) X.push(x); }
+    let n = 0, rv0 = Infinity, rv1 = -Infinity;
     for (let v = V0 + o - M; v < V1; v += M) {
       const aisle = bandIn(R, v + BAY_L, v + BAY_L + AISLE);
       if (!aisle.length) continue;
       for (const [r0, r1] of [[v, v + BAY_L], [v + BAY_L + AISLE, v + M]]) {
-        for (const [u0, u1] of cut(bandIn(R, r0, r1), aisle)) {
+        let segs = cut(bandIn(R, r0, r1), aisle);
+        for (const x of X) segs = less(segs, x - AISLE / 2, x + AISLE / 2);
+        for (const [u0, u1] of segs) {
           const k = Math.floor((u1 - u0) / BAY_W + 1e-6);
           if (k < 1) continue;
+          rv0 = Math.min(rv0, v); rv1 = Math.max(rv1, v + M);
           const st = u0 + (u1 - u0 - k * BAY_W) / 2;
           for (let i = 0; i < k; i++) {
             const isle = islands && k >= 8 && (i === 0 || i === k - 1 || i % 12 === 6);
             if (!isle) n++;
             emit?.(st + i * BAY_W, r0, st + (i + 1) * BAY_W, r1, isle ? 'isle' : 'bay', r0 > v);
           }
-          emit?.(st, v + BAY_L, st + k * BAY_W, v + BAY_L + AISLE, 'aisle');
+          // (the aisle runs on to a cross aisle it ends near)
+          let a0 = st, a1 = st + k * BAY_W;
+          for (const x of X) { if (Math.abs(a0 - (x + AISLE / 2)) < BAY_W * 1.5) a0 = x; if (Math.abs(a1 - (x - AISLE / 2)) < BAY_W * 1.5) a1 = x; }
+          emit?.(a0, v + BAY_L, a1, v + BAY_L + AISLE, 'aisle');
         }
       }
     }
+    // (each cross aisle from the first row to the last, and on to the access's edge)
+    if (emit && rv0 < rv1) for (const x of X) { const va = access ? -access[0] * s + access[1] * c : rv0; emit(x - AISLE / 2, Math.min(rv0, va), x + AISLE / 2, Math.max(rv1, va), 'spine'); }
     return n;
   };
   for (const a of angles) for (let o = 0; o < M; o += 2) {
@@ -272,14 +291,15 @@ export function layBays(m: MP, angles: number[], islands = true): BayLayout {
   if (!best.n) return out;
   const c = Math.cos(best.a), s = Math.sin(best.a);
   const w = (u: number, v: number) => [u * c - v * s, u * s + v * c];
-  const pave: MP[] = [];
+  const pave: MP[] = [], spine: MP[] = [];
   plan(best.a, best.o, (u0, v0, u1, v1, t, hi) => {
     // (a bay's first edge is its back, the third its mouth on the aisle)
     const q = hi ? [...w(u1, v1), ...w(u0, v1), ...w(u0, v0), ...w(u1, v0)] : [...w(u0, v0), ...w(u1, v0), ...w(u1, v1), ...w(u0, v1)];
     if (t === 'bay') out.bays.push(q); else if (t === 'isle') out.islands.push(q);
-    pave.push(fromFlat(q));
+    (t === 'spine' ? spine : pave).push(fromFlat(q));
   });
-  out.paved = union(...pave);
+  // (a cross aisle only where it joins the rows to each other or to the access: clipped to the lot)
+  out.paved = union(...pave, inter(union(...spine), clip));
   return out;
 }
 
@@ -404,14 +424,56 @@ export function layGround(I: GroundIn): GroundOut {
   // the fire tender's way: kept clear of parking; across a garden it's a paved walk
   const fireAll = diff(inter(fromFlats(I.fire), net), taken);
   // lots, each on what's left of it
-  const lotBays: BayLayout[] = [], lots: MP[] = [], isles: MP[] = [];
+  const lotBays: BayLayout[] = [], lots: MP[] = [], isles: MP[] = [], entries: number[][] = [];
+  // (a lot's way in: from the point of its edge nearest the road, a 6 m two-way drive to the road, if it's short and
+  // clear of the buildings; a lot already on the road opens onto it there)
+  const wayIn = (m: MP): { at: [number, number]; drive: MP; line: number[] } | null => {
+    // (the points of its edge, nearest the road first; the first whose drive is clear of the buildings)
+    const cand: [number, number, number, number, number][] = [];
+    for (const p of m) { const r = p[0]; for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+      const L = Math.hypot(r[i][0] - r[j][0], r[i][1] - r[j][1]), k = Math.max(1, Math.ceil(L / 1.5));
+      for (let t = 0; t < k; t++) { const x = r[j][0] + ((r[i][0] - r[j][0]) * (t + 0.5)) / k, z = r[j][1] + ((r[i][1] - r[j][1]) * (t + 0.5)) / k, [px, pz, d] = nearest(road, x, z); if (d <= 30) cand.push([x, z, px, pz, d]); }
+    } }
+    cand.sort((a, b) => a[4] - b[4]);
+    const [cx, cz] = centre(m[0][0]);
+    for (const [x, z, px0, pz0, d] of cand.slice(0, 60)) {
+      // (on the road already: the way out is from the lot's middle through that point)
+      const cd = Math.hypot(x - cx, z - cz) || 1;
+      const ux = d > 0.3 ? (px0 - x) / d : (x - cx) / cd, uz = d > 0.3 ? (pz0 - z) / d : (z - cz) / cd;
+      const px = d > 0.3 ? px0 : x + ux * 0.3, pz = d > 0.3 ? pz0 : z + uz * 0.3;
+      // (the drive runs a little into the lot and onto the road, so it joins both; clear of the buildings by a metre)
+      const line = [x - ux * 1.5, z - uz * 1.5, px + ux * 0.8, pz + uz * 0.8];
+      const drive = inter(stroke(line, AISLE, false, true), net);
+      if (area(inter(drive, grow(build, 1))) > 0.5) continue;
+      return { at: [x, z], drive, line: [x, z, px, pz] };
+    }
+    return null;
+  };
+  // (each separate piece of a lot laid on its own, with its own way in)
+  const layLot = (m: MP, angles: number[]) => {
+    const lay: BayLayout = { bays: [], islands: [], paved: [], angle: angles[0] ?? 0 }, pv: MP[] = [];
+    for (const poly of m) {
+      const pm: MP = [poly];
+      if (area(pm) < 60) continue;
+      const w = road.length ? wayIn(pm) : null;
+      const l = layBays(shrink(pm, 1.2), angles, true, w?.at ?? null, pm);
+      if (!l.bays.length) continue;
+      lay.bays.push(...l.bays); lay.islands.push(...l.islands); lay.angle = l.angle;
+      pv.push(inter(l.paved, pm));
+      if (w) { pv.push(diff(w.drive, road)); entries.push(w.line); }
+    }
+    const paved = union(...pv);
+    lay.paved = paved;
+    return { lay, paved };
+  };
   for (const L of I.lots) {
     const m = diff(inter(fromFlat(L), net), taken, fireAll);
-    const lay = layBays(shrink(m, 0.3), anglesFor(fromFlat(L), I.axis));
+    const { lay, paved } = layLot(m, anglesFor(fromFlat(L), I.axis));
     lotBays.push(lay);
-    lots.push(m);
-    isles.push(...lay.islands.map(fromFlat));
-    taken = union(taken, m);
+    lots.push(paved);
+    // (what the rows leave of the lot is planted)
+    isles.push(...lay.islands.map(fromFlat), diff(m, paved));
+    taken = union(taken, m, paved);
   }
   // gardens, each on what's left of it
   const gardens: MP[] = [];
@@ -422,13 +484,14 @@ export function layGround(I: GroundIn): GroundOut {
   let surfaceBays: BayLayout | null = null;
   if (I.surface) {
     const m = diff(inter(fromFlat(I.surface), net), taken, fire, grow(build, 1.5));
-    surfaceBays = layBays(m, anglesFor(net, I.axis));
-    const used = inter(surfaceBays.paved, m);
+    const { lay, paved } = layLot(m, anglesFor(net, I.axis));
+    surfaceBays = lay;
+    const used = paved;
     lots.push(used);
     isles.push(...surfaceBays.islands.map(fromFlat));
     taken = union(taken, used);
   }
-  const lot = union(...lots), lotIsland = inter(union(...isles), lot);
+  const lot = diff(union(...lots), ...isles.filter((x) => x.length)), lotIsland = diff(union(...isles), road);
   // paving round the buildings, and a path from each to the nearest road
   const open = diff(net, taken, fire);
   const walks: MP[] = [];
@@ -454,13 +517,14 @@ export function layGround(I: GroundIn): GroundOut {
   line(green, 1.8, 7, rand, wallLine, 3, (x, z) => !near(x, z));
   wallLine.forEach((t, i) => { if (i % 2) { t.kind = 1; t.r = 2.2 + rand() * 0.8; } });
   plants.push(...wallLine);
-  for (const q of lotIsland) { const [x, z] = centre(q[0]); plants.push({ x, z, r: 2.2 + rand() * 0.8, kind: 1 }); }
+  // (a shade tree on each island at a row's end, not on the lots' planted margins)
+  for (const q of lotIsland) if (area([q]) < 30) { const [x, z] = centre(q[0]); plants.push({ x, z, r: 2.2 + rand() * 0.8, kind: 1 }); }
   scatter(shrink(green, 2.4), 9, rand, plants, [0, 0, 1, 2], fromFlats(I.build), 0.75);
   line(diff(green, shrink(green, 1.2)), 0.5, 2.4, rand, plants, 4, (x, z) => !near(x, z) && rand() < 0.5);
   for (const [x, z, r] of I.circles) if (r > 8) plants.push({ x, z, r: Math.min(5, r - 7), kind: 0 });
   const gardenArea = area(union(G.lawn, G.bed, G.path));
   return {
-    map: { road, island, fire, lot, lotIsland, apron, path: G.path, lawn: G.lawn, bed: G.bed, green, plants, benches: G.benches, gardenArea, openArea: area(diff(net, road, roofed, lot)) },
+    map: { road, island, fire, lot, lotIsland, bays: [...lotBays.flatMap((l) => l.bays), ...(surfaceBays?.bays ?? [])], entries, apron, path: G.path, lawn: G.lawn, bed: G.bed, green, plants, benches: G.benches, gardenArea, openArea: area(diff(net, road, roofed, lot)) },
     lotBays, surfaceBays,
   };
 }
@@ -468,7 +532,7 @@ export function layGround(I: GroundIn): GroundOut {
 function centre(r: Pt[]): Pt { let x = 0, z = 0; const n = r.length - 1 || 1; for (let i = 0; i < n; i++) { x += r[i][0]; z += r[i][1]; } return [x / n, z / n]; }
 
 /** An empty map (no plot). */
-export const NO_GROUND: GroundMap = { road: [], island: [], fire: [], lot: [], lotIsland: [], apron: [], path: [], lawn: [], bed: [], green: [], plants: [], benches: [], gardenArea: 0, openArea: 0 };
+export const NO_GROUND: GroundMap = { road: [], island: [], fire: [], lot: [], lotIsland: [], bays: [], entries: [], apron: [], path: [], lawn: [], bed: [], green: [], plants: [], benches: [], gardenArea: 0, openArea: 0 };
 
 /** A flat ring with the corners that hardly bend it dropped (Douglas–Peucker, `tol` metres). */
 export function simplify(r: number[], tol: number): number[] {
