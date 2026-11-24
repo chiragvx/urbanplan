@@ -559,6 +559,9 @@ li[aria-current="true"] > .bitem, li[aria-current="true"] > .fitem { border-colo
 .subfold { display: inline-flex; align-items: center; gap: 4px; justify-self: start; border: 0; background: none; padding: 2px 0; font: 500 12.5px/1.2 var(--up-font-body); color: var(--up-ink-2); cursor: pointer; }
 .subfold .ico { transition: transform .15s; }
 .subfold[aria-expanded="true"] .ico { transform: rotate(90deg); }
+.subfold.start-from { font-weight: 600; color: var(--up-ink); padding-top: 6px; border-top: 1px solid var(--up-line); justify-self: stretch; }
+.subfold.start-from small { margin-left: auto; font-weight: 400; color: var(--up-muted); }
+.gallery .start-note { color: var(--up-muted); font-size: 11.5px; line-height: 1.4; }
 
 .shape-it { display: grid; }
 .shape { display: grid; gap: 12px; }
@@ -1113,3 +1116,27 @@ details.chk.unchecked summary .ico { color: var(--up-muted); }
 .hseg { display: inline-flex; gap: 1px; padding: 2px; border-radius: 8px; background: var(--up-surface-2); }
 .hseg button { border: 0; background: none; border-radius: 6px; padding: 3px 7px; font-size: 12px; color: var(--up-ink-2); }
 .hseg button[aria-checked="true"] { background: var(--up-ink); color: var(--up-paper); }
+
+/* Design: the Floors section, made from the form */
+.floors-body .floors-h { margin: 10px 0 2px; font-size: 12px; font-weight: 600; color: var(--up-ink-2); }
+.floors-body .floors-at { font-size: 12px; color: var(--up-muted); min-width: 74px; }
+
+/* CAD: the four booleans' colours (add green, cut red, intersect violet, exclude amber), parts on the view, Combine */
+.hh.op-cut { color: #cf222e; }
+.hh.op-xor { color: #bc4c00; }
+.sil-cut.op-xor { fill: color-mix(in srgb, #bc4c00 12%, transparent); stroke: #bc4c00; stroke-dasharray: 2 1; }
+.hh.hh-pmove { width: 20px; height: 20px; border-radius: 50%; cursor: move; border: 2px solid currentColor; background: var(--up-paper); }
+.hpart { position: absolute; left: 0; top: 0; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; pointer-events: none; background: var(--up-paper); border: 1px solid currentColor; }
+.hpart.op-add { color: #1a7f37; } .hpart.op-cut { color: #cf222e; border-style: dashed; } .hpart.op-keep { color: #8250df; } .hpart.op-xor { color: #bc4c00; border-style: dashed; }
+.design-into { display: grid; gap: 6px; padding: 8px; border-radius: 8px; background: var(--up-surface-2, color-mix(in srgb, var(--up-ink) 5%, transparent)); font-size: 12px; color: var(--up-ink-2); }
+.part-new { display: grid; gap: 6px; margin-top: 6px; }
+.part-cad { flex-wrap: wrap; gap: 2px 8px; }
+.combine { display: grid; gap: 6px; }
+.combine-row { display: grid; gap: 4px; }
+.combine-n { font-size: 12px; color: var(--up-ink-2); }
+.combine-ops { display: flex; flex-wrap: wrap; gap: 2px 10px; }
+.combine .op-add { color: #1a7f37; } .combine .op-cut { color: #cf222e; } .combine .op-keep { color: #8250df; } .combine .op-xor { color: #bc4c00; }
+.flyout:has(.design-into) { width: 330px; max-width: calc(100vw - 96px); overflow-x: hidden; }
+.design-into .seg { width: 100%; min-width: 0; }
+.design-into .seg button { flex: 1 1 0; min-width: 0; padding: 4px 2px; }
+.flyout .gallery > * { min-width: 0; }

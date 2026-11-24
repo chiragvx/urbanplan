@@ -75,8 +75,11 @@ export function elevation(f: Form): { outline: number[]; lines: number[][]; top:
   const fl = previewFloors(f);
   const left: number[] = [], right: number[] = [], lines: number[][] = [];
   let x0 = Infinity, x1 = -Infinity;
+  // (parts added on a floor widen it as seen from the front: a podium, a wing)
+  const adds = f.carves.filter((c) => !c.off && opOf(c) === 'add').map((c) => ({ span: partT(c, fl.length), x: xs(sampleCurve(c.ring, 1.5)) }));
   for (const q of fl) {
-    const [a, b] = xs(q.ring);
+    let [a, b] = xs(q.ring);
+    for (const p of adds) if (q.t >= p.span[0] - 1e-6 && q.t <= p.span[1] + 1e-6) { a = Math.min(a, p.x[0]); b = Math.max(b, p.x[1]); }
     left.push(a, q.y, a, q.y + q.h); right.unshift(b, q.y + q.h, b, q.y);
     lines.push([a, q.y, b, q.y]);
     x0 = Math.min(x0, a); x1 = Math.max(x1, b);

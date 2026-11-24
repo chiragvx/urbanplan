@@ -4,6 +4,121 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-24 · CAD booleans: add, cut, intersect, exclude; Combine; parts as shapes (docs/plans/pro-design-freedom.md §3.6)
+
+**Why:** the user placed a Box and a Round that overlapped and asked how a designer cuts the cylinder out of the box without being confused. There was no way to: every Design shape made a new building, Parts offered only set pieces, and the overlap was only flagged as a fault. They asked for all the common CAD booleans and operations.
+
+**What changed:**
+- **Exclude** (xor) joins Add, Cut and Keep (now shown as Intersect) as what a part does (`PartOp` 'xor'; src/pro/form/lay.ts takes the overlap out of the floor and adds the rest of the part).
+- **Combine** (src/pro/combineUi.tsx, `combine` in src/pro/parts.ts):
+  - a shaped building overlapping another shaped one gets **Combine** on its bar, and a line at the top of the inspector: "Overlaps Building B: make them one", with Add, Cut, Intersect and Exclude;
+  - the other comes across as a part in the picked one's frame and the other building goes;
+  - floors: Add and Exclude make it as tall as the taller (an exclude adds the other alone above), Intersect as low as the lower;
+  - the toast says what didn't come across (a taper or twist, its own parts or spaces), and Ctrl+Z undoes it.
+- **Design into a building:** with a shaped building picked, the Design flyout says "Picked: Building A. What you make next is New · Add · Cut · Intersect · Exclude". With a boolean chosen, a shape lands as a part where it's clicked (its outline under the pointer first), or a footprint is drawn as one. The templates and the Courtyard are for new buildings only.
+- **Parts' Add:** a boolean, then Box, Round, L, U, Wedge (at the middle, sized to the plan; an add beside it), or Rectangle…, Polygon…, Circle… (arms Design's drawing tool into the building). The set pieces (podium, wing, notch, slot, trim) stay below.
+- **Each part, in the Parts list:** turn 15°, turn 90°, mirror left for right, mirror front for back (each a copy across the form's middle), copy. Parts are named for what they do and their shape ("Cut · Round", "Add · Building B").
+- **On the view:**
+  - each part is outlined at its lowest and highest floor with its corners up, solid for add and intersect and dashed for cut and exclude;
+  - a chip over it names it in its boolean's colour (green, red, violet, amber);
+  - a round handle at its middle moves it (0.5 m steps, Alt 0.1 m, arrow keys too).
+
+**How it was checked:**
+- `npx tsc` clean, `npm test` passes, `npm run build` OK. The `evaluate()` snapshot is unchanged.
+- tools/dev/test-design.ts, 17 new checks:
+  - each boolean's area for a 24 m round on a 30 × 20 box: Cut 184, Add 636, Intersect 416, Exclude 220 m²;
+  - a Parts-list part at the middle, sized, named and on all floors;
+  - a circle drawn on a building, in its frame;
+  - move, turn, mirror and copy;
+  - Combine: Cut keeps 7 floors and loses the overlap, Add goes to 8, Intersect keeps the overlap, Exclude adds the round alone above, and a twist is reported as not carried.
+- **In the browser,** on the user's Box (A) and Round (B):
+  - A's inspector read "Overlaps Building B: make them one" with the four booleans, and its bar showed Combine;
+  - Cut turned B into a part of A: the plate went from 595 to 346 m², the overlap fault cleared (5 fails to 1), and the cut showed dashed with its chip;
+  - the chip read "Cut · Cut · Building B", fixed to "Cut · Building B";
+  - Design with A picked showed the switch, and Cut offered Box, Round, L, U, Wedge, Rectangle, Polygon and Circle; the flyout was too narrow for the switch, widened to 330 px.
+  - The user was working in the same tab during the check, so the clicking stopped there. Their storage wasn't restored over their edits: the Cut done in the check is in their project (Ctrl+Z, or the Parts list, takes it out).
+
+**Left or known:**
+- A part can't yet be picked by clicking it on the view; its handles and the Parts list do that.
+- Parts are prisms: a tapered or twisted building combined loses its taper as a part (said in the toast).
+- Exclude doesn't record its inner faces as cut faces (no glazing drawn there).
+
+---
+
+## 2026-11-24 · Design: the form first, then its floors (docs/plans/pro-design-freedom.md §3.6)
+
+**Why:** the user said form design is the most important thing in Pro. The shelf's Building tab should be **Design**: basic shapes and CAD tools to design the form, then tools to make floors out of it. Until now a building from the shelf was a plain engine slab, which had no form to sculpt until "Shape it", and only a straight one could be shaped.
+
+**What changed:**
+- **The shelf:** Building is now **Design**, with a cube icon. The flyout says: make the form, then make its floors.
+- **Shapes** (src/pro/masses.ts, one click, long side to the road): Box, Round, L, U, Courtyard (the court a part cut through it), Wedge. Each shows its outline under the pointer before the click.
+- **Draw a footprint:**
+  - Rectangle: drag it out, or click its corners, or type width and depth;
+  - Polygon: click its corners;
+  - Circle: drag out its box; a long box gives an ellipse.
+  - A footprint is taken in the road's frame, about its middle.
+- **What lands:** each one lands as a **form**, ready to sculpt (rings, key floors, plan points, parts):
+  - in the project's use, so offices on an office project and none on a project with no use yet;
+  - about as tall as it is wide, then kept to the height limit and the floor area left (`placeMass` in src/pro/edit.ts, as templates are);
+  - on a plot still filled for you, the first mass takes the filled buildings' place.
+- **Start from…** the templates stays below. The engine's plain shapes (slab, tower, L, U, courtyard, a line of wings) are no longer offered; buildings already made with them still work and can still be shaped.
+- **The Floors section** in the inspector, right after Parts:
+  - Height (m), Floor to floor (m, or By use) and Floors: the height and the floor height cut the form into floors;
+  - what each range is for, bottom up, with "Floors on top" and "A ground floor" (shops);
+  - heights and double-height spaces by range, which was the Levels section.
+  - A floor-to-floor height for every floor is kept as a level range from floor 1 to 999, first in the list, so ranges set apart win over it.
+- The checklist's "Put a building on the plot" arms the Box.
+
+**How it was checked:**
+- `npx tsc` clean, `npm test` passes, `npm run build` OK.
+- tools/dev/test-design.ts (in `npm test`), 22 checks:
+  - each drawn footprint's area (a 30 × 20 rectangle, a 24 m circle, a polygon L either way round, one along a turned road), and that one under 3 m is refused;
+  - each shape's area, and the court as a cut part;
+  - the starting floors;
+  - the use following the project, and the height limit kept;
+  - the floor-to-floor height, a range set apart over it, By use, and the floors a height makes.
+- The `evaluate()` snapshot is unchanged.
+- **In the browser,** on the local commercial project:
+  - the shelf reads Select, Design, Draw, Plot, Measure, Outline, and the flyout shows Shapes, Draw a footprint and Start from…;
+  - a dragged circle landed as a 24 m round office mass of 12 floors, picked, with its rings;
+  - Floor to floor 4 m re-cut it to 11 floors, 44 m;
+  - A ground floor made floor 1 shops;
+  - the Courtyard's outline followed the pointer;
+  - the project was restored afterwards.
+
+**Left or known:**
+- §3.6's next list: dimensions typed on the view, offsets and fillets, parts drawn with the same tools, height dragged in metres, several masses joined.
+- The Courtyard's preview shows its outside only, not the court.
+- A drawn mass can land past the margins: it's flagged, not moved.
+
+---
+
+## 2026-11-24 · Start from…: a plain building first, templates behind a button (docs/plans/pro-design-freedom.md, step 8)
+
+**Why:**
+- The Building flyout opened on 19 housing-flavoured templates, with the plain shapes folded away under "Basic". The plan's main path is the other way round: draw a mass, shape it, then say what it's for.
+- A Twisted tower dropped on an office project came in as flats.
+
+**What changed:**
+- **The flyout** (src/pro/gallery.tsx): the plain shapes come first, in the project's use. **Start from…** (with the count) opens the templates, and stays open or shut for the browser session; picking a template keeps it open. A note says a template lands as parts and uses that can all be changed.
+- **Uses** (src/pro/edit.ts `placeTemplate`): a tower or sculpted template's floors of homes take the project's use (offices, shops, none…). Homes and public templates, and mixed projects, keep the template's.
+- **Parts** (src/pro/form/templates.ts):
+  - template parts have names: Podium, Sky garden, Glass slot, Court;
+  - Office on shops is a plain tower plate with a Podium part added on floors 1–2, so either can be changed on its own;
+  - the side-view thumbnails draw added parts, so the podium still shows.
+- **Where it came from:** the inspector's line under the name ends "from the Sky garden template".
+
+**How it was checked:**
+- `npx tsc` clean, `npm test` passes (5 new checks in tools/dev/test-parts.ts: the podium part, its area, named parts, uses following the project, a public template keeping its own), `npm run build` OK.
+- **Snapshot:** only the sample made from Office on shops moves. Its tower plate is 292.53 m² a floor, not 292.79, now that it's drawn rather than scaled from key floors; saved projects keep their stored forms.
+- **In the browser:** the flyout shows the six plain shapes, then "Start from… 19 templates", which opens the groups. The Office on shops thumbnail is 48 m wide at the base and about 32 m above.
+
+**Left or known:**
+- The shape presets (taper, twist, steps, wave, lean) stay in the Shape section, not Parts' Add menu: they set the whole form's key floors, and parts have none of their own yet.
+- Row houses still need a generator of their own. Templates set bands of floors, not spaces.
+
+---
+
 ## 2026-11-24 · Edit this floor: a floor's units by hand (docs/plans/pro-design-freedom.md §4.3)
 
 **Why:** a floor's units came only from the planner. A designer could steer them (use, flat sizes, spaces) but not say where a wall goes, which is the first thing asked of a floor plan.

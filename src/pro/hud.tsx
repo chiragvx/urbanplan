@@ -17,6 +17,7 @@ import { buildingQuads } from '../doc/site';
 import { shapeIt, withFloors } from './shapePanel';
 import { Icon } from './ui';
 import { BarExtras } from './formHud';
+import { CombineButton } from './combineUi';
 
 type Pt = [number, number];
 export interface Tx {
@@ -305,6 +306,7 @@ export function Hud({ view, p, e, picked, pick, up, tx, snap, live, readOnly, in
         {!inspecting && <><span class="hsep" />
         <BarExtras p={p} b={ownB} residential={ownB.form ? ownB.form.uses.some((u) => u.use === 'residential') : (ownB.use ?? plotUseOf(p)) === 'residential'} setB={setB} once={once} />
         <span class="hsep" /></>}
+        {!readOnly && <CombineButton p={p} e={e} id={br.b.id} once={once} pick={pick} toast={toast} />}
         {!inspecting && <button type="button" class="hinspect" data-tip="The inspector: all of it, its checks, systems and flat plans" onClick={inspect}><Icon n="panel" size={15} />Inspect</button>}
         <button type="button" aria-label="Deselect" data-tip="Deselect (Esc)" onClick={() => pick(null)}><Icon n="x" size={14} /></button>
       </div>

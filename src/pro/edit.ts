@@ -14,10 +14,13 @@
 // shows a short dashed guide. Moving a building snaps its corners the same way. Escape cancels, Delete removes
 // what's picked, the arrow keys nudge it a grid step (Shift: ten). Everything goes through `up`, so it undoes.
 import { DEFAULT_SITE, ELEMENTS, elementRings, roadFrame, buildingQuads, newBuildingId, pointIn, type SiteElement, type ElementKind } from '../doc/site';
-import { USE_TABLE } from '../doc/uses';
+import { floorUseOf, USE_TABLE } from '../doc/uses';
+import { drawnPlan, isDrawn, massForm, massHint, shapePlan, startFloors, type MassShape } from './masses';
+import { drawnPart, OP_LABEL, partName, shapePart } from './parts';
+import type { PartOp } from './form';
 import type { ProView, Overlay } from './scene';
 import type { Evaluated } from './evaluate';
-import { outline, ownScheme, type ProBuilding, type ProProject } from './project';
+import { outline, ownScheme, plotUseOf, type ProBuilding, type ProProject } from './project';
 import { featureOf, newId, type FeatureKind, type SiteFeature } from './siteObjects';
 import { layForm, sampleCurve, TEMPLATES, toLocal, toWorld, type Form, type FormLayout, type Pt, type UseBand, USE_INFO } from './form';
 
@@ -28,6 +31,8 @@ export type Tool =
   | { k: 'feature'; kind: FeatureKind }
   | { k: 'building'; shape: BuildingShape }
   | { k: 'template'; id: string }
+  /** Design: a mass, a shape clicked down or a footprint drawn, landing as a form to shape (./masses.ts) */
+  | { k: 'mass'; shape: MassShape; into?: { id: string; op: PartOp } }
   | { k: 'element'; kind: Extract<ElementKind, 'garden' | 'play' | 'trees' | 'lot' | 'road' | 'parking' | 'roundabout' | 'gate' | 'wall' | 'tank'> }
   /** two clicks: the distance between them, and from each to the buildable line */
   | { k: 'measure' };
@@ -65,6 +70,7 @@ const modeOf = (t: Tool): Mode | null => {
   if (t.k === 'feature') return featureOf(t.kind).shape;
   if (t.k === 'building') return t.shape === 'draw' ? 'line' : 'point';
   if (t.k === 'template') return 'point';
+  if (t.k === 'mass') return isDrawn(t.shape) ? 'area' : 'point';
   if (t.k === 'element') return t.kind === 'road' || t.kind === 'wall' ? 'line' : t.kind === 'roundabout' || t.kind === 'gate' || t.kind === 'tank' ? 'point' : 'area';
   if (t.k === 'measure') return 'line';
   return null;
@@ -151,6 +157,12 @@ export function placeTemplate(id: string, o: Pt, e: Evaluated): ProBuilding[] {
   let made: ReturnType<typeof tpl.make> = [];
   try { made = tpl.make(o, u, fit && fit.w > 4 && fit.d > 4 ? fit : undefined); } catch { return []; }
   if (!made.length) return [];
+  // (a tower or a sculpted form is a shape, not a use: its floors of homes take the project's use, so a Twisted tower
+  // dropped on an office project is offices and on one with no use yet has none; homes, public buildings and mixed
+  // projects keep the template's own)
+  const pu = floorUseOf(plotUseOf(e.p));
+  if (pu !== 'residential' && (tpl.group === 'tower' || tpl.group === 'sculpted'))
+    made = made.map((m) => ({ ...m, form: { ...m.form, uses: m.form.uses.map((u) => (u.use === 'residential' ? { ...u, use: pu } : u)) } }));
   // (each building's origin: the point, moved by its offset, along the road and back from it)
   const at = made.map((m): Pt => [o[0] + (m.offset?.[0] ?? 0) * u[0] + (m.offset?.[1] ?? 0) * v[0], o[1] + (m.offset?.[0] ?? 0) * u[1] + (m.offset?.[1] ?? 0) * v[1]]);
   // their extent round the point, along and across the road
@@ -169,6 +181,22 @@ export function placeTemplate(id: string, o: Pt, e: Evaluated): ProBuilding[] {
     const floors = form.uses.reduce((t, x) => t + x.floors, 0) || m.floors;
     return { id: newBuildingId(), name: m.name, floors, depth: Number.isFinite(z1 - z0) ? r2(Math.max(6, z1 - z0)) : 14, spine: [r2(ox), r2(oz), r2(ox + u[0]), r2(oz + u[1])], form };
   });
+}
+
+/** A mass where it was clicked or drawn (./masses.ts): a shape at a point, its long side along the front road, or a
+ *  footprint drawn; the project's use, floors about as tall as it is wide, then kept to the height limit and the
+ *  floor area left, as a template is. `null`: a footprint too small to build. */
+export function placeMass(shape: MassShape, P: number[], p: ProProject, e: Evaluated, nth: number): ProBuilding | null {
+  const F = roadFrame(e.r), u: Pt = [F.ux, F.uz];
+  let o: Pt, plan: Form['plan'], carves: Form['carves'] = [];
+  if (isDrawn(shape)) { const d = drawnPlan(shape, P, u); if (!d) return null; o = d.o; plan = d.plan; }
+  else { if (P.length < 2) return null; o = [P[0], P[1]]; ({ plan, carves } = shapePlan(shape)); }
+  const form = fitRules(massForm(plan, carves, startFloors(plan, e.r.rules.floorH), floorUseOf(plotUseOf(p))), e, 1);
+  let z0 = Infinity, z1 = -Infinity; for (const q of plan.pts) { z0 = Math.min(z0, q[1]); z1 = Math.max(z1, q[1]); }
+  return {
+    id: newBuildingId(), name: `Building ${String.fromCharCode(65 + nth)}`, floors: form.uses.reduce((t, x) => t + x.floors, 0),
+    depth: r2(Math.max(6, z1 - z0)), spine: [r2(o[0]), r2(o[1]), r2(o[0] + u[0]), r2(o[1] + u[1])], form,
+  };
 }
 
 /** A template as dropped on this plot: no taller than the height limit, and no more floor area than the FSI has left
@@ -219,6 +247,8 @@ export interface EditHost {
   frame?: (w: Picked) => void;
   /** a few words by the pointer: the length being drawn, what it snapped to, a typed number (null: none) */
   readout?: (r: { text: string; sub?: string; x: number; y: number; typed?: boolean } | null) => void;
+  /** a word for the user once something's done */
+  toast?: (s: string) => void;
 }
 
 type Drag =
@@ -304,6 +334,8 @@ export class CanvasEdit {
     if (t.k === 'plot') return 'Click the plot’s corners. Close it on the first corner, or press Enter.';
     if (t.k === 'feature') return featureOf(t.kind).hint;
     if (t.k === 'building') return BUILDING_SHAPES.find((s) => s.shape === t.shape)!.hint;
+    if (t.k === 'mass' && t.into) { const b = this.h.p().scheme?.buildings.find((x) => x.id === t.into!.id); return `${OP_LABEL[t.into.op]} with ${b?.name ?? 'the building'}: ${massHint(t.shape).replace(/^Click where (it|its middle|its corner) goes/, 'Click where it goes on the building')}`; }
+    if (t.k === 'mass') return massHint(t.shape);
     if (t.k === 'template') return `${TEMPLATES.find((x) => x.id === t.id)?.name ?? 'It'}: click where it goes.`;
     if (t.k === 'element') return ELEMENT_TOOLS.find((s) => s.kind === t.kind)!.hint;
     if (t.k === 'measure') return 'Click two points to measure between them; the readout gives the distance to the margin too.';
@@ -642,6 +674,17 @@ export class CanvasEdit {
         const bs = placeTemplate(this.tool.id, this.hover, this.h.e());
         this.ghost = bs.map((b) => formRing(b)).filter((r) => r.length >= 6);
       }
+      if (this.hover && this.tool.k === 'mass' && !isDrawn(this.tool.shape)) {
+        const into = this.tool.into, tb = into ? this.h.p().scheme?.buildings.find((x) => x.id === into.id) : undefined;
+        if (into && tb?.form) {
+          const c = shapePart(tb.form, this.tool.shape, into.op, toLocal(tb, this.hover[0], this.hover[1])), s = sampleCurve(c.ring, 1.5), w: number[] = [];
+          for (let i = 0; i + 1 < s.length; i += 2) w.push(...toWorld(tb, s[i], s[i + 1]));
+          this.ghost = [w];
+        } else {
+          const b = placeMass(this.tool.shape, this.hover, this.h.p(), this.h.e(), 0);
+          this.ghost = b ? [formRing(b)].filter((r) => r.length >= 6) : [];
+        }
+      }
       this.draw();
     }
   }
@@ -755,6 +798,27 @@ export class CanvasEdit {
       const b: ProBuilding = { id: newBuildingId(), floors: 0, ...geo, name: `Building ${String.fromCharCode(65 + s.buildings.length)}` };
       this.h.up({ scheme: { ...s, buildings: [...s.buildings, b] } });
       this.h.pick({ k: 'building', id: b.id });
+    }
+    if (t.k === 'mass' && t.into) {
+      // (into a building: the shape or the footprint as one of its parts, all its floors up)
+      const s = own(p, e), tb = s.buildings.find((x) => x.id === t.into!.id);
+      if (tb?.form) {
+        const c = isDrawn(t.shape) ? drawnPart(tb.form, tb, t.shape, P, t.into.op) : shapePart(tb.form, t.shape, t.into.op, toLocal(tb, P[0], P[1]));
+        if (c) {
+          const form = { ...tb.form, carves: [...tb.form.carves, c] };
+          this.h.up({ scheme: { ...s, buildings: s.buildings.map((x) => (x.id === tb.id ? { ...x, form } : x)) } });
+          this.h.pick({ k: 'building', id: tb.id });
+          this.h.toast?.(`${partName(form, c)}: a part of ${tb.name ?? 'the building'}. Drag its middle to move it, its edges to size it; Parts lists it.`);
+        }
+      }
+    } else if (t.k === 'mass') {
+      // (as a template does: on a plot still filled for the user, the first mass takes the filled buildings' place)
+      const s0 = own(p, e), s = p.scheme ? s0 : { ...s0, buildings: [] };
+      const b = placeMass(t.shape, P, p, e, s.buildings.length);
+      if (b) {
+        this.h.up({ scheme: { ...s, buildings: [...s.buildings, b] } });
+        this.h.pick({ k: 'building', id: b.id });
+      }
     }
     if (t.k === 'template') {
       // (on a plot still filled for the user, the template is the design: it takes the filled buildings' place;

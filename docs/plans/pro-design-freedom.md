@@ -151,6 +151,35 @@ The building's solid is the parts combined in order. Its floors are that solid *
 - **Constraints, lightly.** A part's numbers can be typed, and a part can be **snapped** to another (its top to another's floor, its face flush). A full constraint solver is out of scope: TestFit and Forma do without one (N1).
 - **Bake** turns a parts list into one plain prism per floor, for anyone who wants to push faces without history.
 
+### 3.6 Design: the form first, then its floors (the main requirement)
+
+**Said by the user on 2026-11-24:** form design is the most important thing in Pro. The shelf's Building tab is **Design**, and it is for designing the form: basic shapes and CAD tools to make the mass, then tools to make floors out of it. Everything about adding and shaping buildings answers to this.
+
+- **Make the mass** (src/pro/masses.ts). Everything lands as a form to sculpt at once, never a plain slab that needs "Shape it":
+  - **shapes**, one click, the long side along the front road: Box, Round, L, U, Courtyard (its court a cut part), Wedge;
+  - **footprints drawn**, CAD-like: Rectangle (dragged, or its corners clicked; width and depth can be typed), Polygon (corners clicked), Circle (dragged out over its box: an ellipse when the box is long);
+  - **Start from…** the templates, below.
+  - A mass starts in the project's use, about as tall as it is wide, then kept to the height limit and the floor area left, as a template is.
+- **Sculpt it**, as before: the rings on the view (width, lean, twist), key floors, the plan's points, parts that add, cut or keep.
+- **Make its floors** (the inspector's **Floors** section, right after Parts):
+  - the form's height and a floor-to-floor height cut it into floors: change the height and the floors follow; change the floor height and the height stays;
+  - what each range of floors is for, bottom up, with "Floors on top" and "A ground floor";
+  - heights and double-height voids by range, as Levels did.
+- **CAD booleans and part operations** (built 2026-11-24):
+  - **the four booleans** on every part: Add (union), Cut (subtract), Intersect (keep), Exclude (xor: the overlap out, the rest of it added);
+  - **Combine:** a shaped building that overlaps another gets "Combine" on its bar, and a line in the inspector: "Overlaps Building B: Add · Cut · Intersect · Exclude". The other comes into it as a part, from its own frame, with floors set by the boolean (an add or an exclude as tall as the taller, an intersect as low as the lower), and goes; what a part can't carry (a twist, its own parts) is said;
+  - **Design into the picked building:** with a shaped building picked, Design's switch (New · Add · Cut · Intersect · Exclude) makes the next shape or footprint one of its parts, where it's clicked or drawn;
+  - **Parts' Add:** choose the boolean, then any shape (at the middle, sized to the plan) or a footprint drawn on the view (Rectangle…, Polygon…, Circle…);
+  - **each part:** moved (its middle handle on the view, or the arrow keys), turned 15° or 90°, mirrored across the form's middle (left for right, front for back) as a copy, copied;
+  - **on the view:** each part outlined at its lowest and highest floor with its corners up, solid where it adds or intersects and dashed where it cuts or excludes, and a chip with its name in the boolean's colour (add green, cut red, intersect violet, exclude amber).
+- **Next, to make this a real CAD:**
+  - a footprint's corners and edges dimensioned and typed on the view;
+  - offsets and fillets on a plan;
+  - the mass's height dragged in metres, with the floors re-cut as it goes;
+  - floor plates cut from the form shown as you set the floor height;
+  - a part picked on the view by clicking it (today: its handles, and the Parts list);
+  - parts with key floors of their own (a tapered cut), and booleans of solids that aren't prisms (§3.3's second stage).
+
 ---
 
 ## 4. Spaces and use
@@ -354,6 +383,16 @@ Ordered so each step is useful alone, and the risky ones come after the cheap on
 - **Draw and curves (2026-11-23, asked for between steps 6 and 7): built.** The shelf's Grounds is now Draw. Lines and areas take vector-app curves (src/doc/curves.ts: nodes and handles kept, the line or ring the curve sampled, so the engine is unchanged), and a road ends at a road side where it's run out across one, with a join across the widening flared into the road outside. What's next uses the same model: step 5's drawn and split spaces, and parts' outlines, should keep `nodes` and `bez` and sample them, so a curved space or part costs nothing new below the editor.
 - **Step 7, checks as rows (2026-11-23): built.** src/pro/checkRows.ts: rows with what they apply to (NBC group, use, height), what they measure, the limit and the clause, run over each building's uses: fire tender access, travel to a stair, stair width for a floor's people, the narrowest stair, lifts, refuge floors, light and ventilation, room sizes, and the uses the DP zone allows (src/doc/zones.ts; the zone is set in the project panel). Exits by group (src/doc/egress.ts, groups A, B, D, E, F) also size the stairs; a use in another group, or no use yet, is "not checked", listed first in Approval and on the PDF's cover. Still left: NBC's tables and UDCPR Chapter 4 read clause by clause in place of the summaries, and travel measured along corridors rather than in a straight line.
 - **Edit this floor (2026-11-24, asked for after step 7): first part built.** §4.3: an X-rayed floor's units taken by hand, moved by corner and wall, split, merged, removed, their use and type set, on a run of floors or one; cut to the floor and clear of the cores, overlaps counted once. The `evaluate()` snapshot is byte-identical. Still to do: new units drawn, cores and corridors by hand, rooms.
+- **Step 8, "Start from…" (2026-11-24): built, but for the shape presets.**
+  - The Building flyout leads with a plain building (slab, tower, L, U, courtyard, drawn) in the project's use; "Start from…" opens the 19 templates (open or shut, kept for the browser session).
+  - A tower or sculpted template takes the project's use (offices on an office project, none on one with no use yet); homes and public templates keep their own.
+  - Template parts are named (Podium, Sky garden, Glass slot, Court). Office on shops' podium is now a part added on floors 1–2 under a plain tower plate, rather than key floors.
+  - The inspector says which template a building came from.
+  - The `evaluate()` snapshot moves on one sample only, the one built from Office on shops: its tower plate is 0.1% smaller per floor, as it's now drawn rather than scaled. Saved projects keep their stored forms.
+  - **Not done, on purpose:** the shape presets stay in the Shape section rather than Parts' Add menu. They set the whole form's key floors, and a part has no key floors of its own; they move when parts get them.
+  - Still to do: row houses (`houses`) as a generator; templates that lay down spaces as well as bands.
+- **Design, first part (2026-11-24, §3.6, the user's main requirement):** the shelf's Building is Design. Its shapes and its footprint tools (rectangle, polygon, circle) land as forms in the project's use, and the inspector's Floors section makes the floors from the form: height, floor-to-floor height, what each range is for, heights and voids. The `evaluate()` snapshot is unchanged. Next: §3.6's list.
+- **CAD booleans (2026-11-24, §3.6):** Add, Cut, Intersect and Exclude on every part; Combine for buildings that overlap; Design into the picked building; parts from any shape or drawn footprint; parts moved, turned, mirrored and copied; parts outlined on the view in their boolean's colour. The `evaluate()` snapshot is unchanged.
 
 **The first three steps (1–3) deliver most of what was asked in form:** any shape that can be described as joined and cut prisms, and a use given afterwards. Steps 5–7 make the use honest. Step 9 is interiors. Steps 10–12 extend reach.
 

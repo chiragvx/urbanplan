@@ -39,7 +39,9 @@ export interface KeyFloor {
 
 /** What a part does to the floors it spans: adds to them (union), cuts out of them (subtract), or keeps only
  *  where it overlaps them (intersect). */
-export type PartOp = 'add' | 'cut' | 'keep';
+/** what a part does to the floors it spans, the four booleans: add (union), cut (subtract), keep (intersect),
+ *  xor (exclude: what either has but not both) */
+export type PartOp = 'add' | 'cut' | 'keep' | 'xor';
 
 /** A part of the form (docs/plans/pro-design-freedom.md §3): a prism, its plan ring between two heights, that
  *  adds to, cuts out of or trims every floor between `from` and `to`. The plan drawn (with its key floors) is the

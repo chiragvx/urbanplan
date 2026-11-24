@@ -12,6 +12,8 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { drift, levelOf, opOf, partSpan, partT, sampleCurve, toLocal, toWorld, USE_INFO, type BuildingUse, type Carve, type Form, type KeyFloor, type Level, type PartOp, type Space } from './form';
+import { copiedPart, mirroredPart, movedPart, OPS, shapePart, turnedPart } from './parts';
+import { MASS_DRAW, MASS_SHAPES } from './masses';
 import { edgeNormal, floorsOfForm, NEW_PARTS, NEW_SPACES, newPart, newSpace, OP_LABEL, OP_TIP, partName, pushEdge, spaceName, spaceT, tOfFloor } from './parts';
 import { byUse } from '../doc/uses';
 import { keyAt, keyed, keysOf, previewFloors, sortedKeys, spanTo, yOfT } from './silhouette';
@@ -20,7 +22,8 @@ import { own, type CanvasEdit, type Picked } from './edit';
 import type { Evaluated } from './evaluate';
 import type { ProBuilding, ProProject } from './project';
 import type { ProView } from './scene';
-import { IconPick, ROOFS, rounded, roundness, same, SHAPES, SKINS, USE_FLOORS, USES, withForm, type Preset } from './shapePanel';
+import { floorHOf, floorsFor, isAll, withFloorH } from './masses';
+import { IconPick, ROOFS, rounded, roundness, same, setFloors, SHAPES, SKINS, USE_FLOORS, USES, withForm, type Preset } from './shapePanel';
 import { presetOf, PRESETS } from './design';
 import { UNIT_LABEL } from '../doc/site';
 import { Icon, Num, Range, Seg, Select, Toggle } from './ui';
@@ -66,7 +69,8 @@ interface Props {
 type FDrag =
   | { k: 's' | 'l' | 'r'; i: number; base: ProProject; e: Evaluated; f: Form; last?: number; acc?: number; timer: number; pending: Form | null; changed?: boolean }
   | { k: 'cut'; id: string; end: 'from' | 'to'; base: ProProject; e: Evaluated; f: Form; timer: number; pending: Form | null; changed?: boolean; s0: number; s1: number }
-  | { k: 'face'; list: 'carves' | 'spaces'; id: string; i: number; y: number; t: number; base: ProProject; e: Evaluated; f: Form; timer: number; pending: Form | null; changed?: boolean };
+  | { k: 'face'; list: 'carves' | 'spaces'; id: string; i: number; y: number; t: number; base: ProProject; e: Evaluated; f: Form; timer: number; pending: Form | null; changed?: boolean }
+  | { k: 'pmove'; id: string; y: number; t: number; x0: number; z0: number; base: ProProject; e: Evaluated; f: Form; timer: number; pending: Form | null; changed?: boolean };
 
 export function FormHud({ view, edit, p, e, picked, tx, live, readOnly, xray, setXray, toast }: Props) {
   const { root, at, box, ref, spans, span } = usePins(view);
@@ -90,7 +94,7 @@ export function FormHud({ view, edit, p, e, picked, tx, live, readOnly, xray, se
   const bb = bboxOf(plan), hw0 = Math.max(0.5, (bb.x1 - bb.x0) / 2);
   const keys = f && xray === null ? keysOf(f) : [];
   const W = (x: number, z: number, y: number): W3 => { const [X, Z] = toWorld(saved!, x, z); return [X, y, Z]; };
-  const ringKey = f && saved ? JSON.stringify([f.plan, f.keys, f.ease, f.uses, saved.spine, show]) : '';
+  const ringKey = f && saved ? JSON.stringify([f.plan, f.keys, f.ease, f.uses, f.carves, f.levels, saved.spine, show]) : '';
   useEffect(() => {
     if (!edit || !f || !saved || !show || xray !== null) return;
     const L: number[] = [];
@@ -98,7 +102,19 @@ export function FormHud({ view, edit, p, e, picked, tx, live, readOnly, xray, se
       const y = yOfT(fl, k.t), r = keyed(plan, k);
       for (let i = 0; i + 1 < r.length; i += 2) { const j = (i + 2) % r.length, a = toWorld(saved, r[i], r[i + 1]), b = toWorld(saved, r[j], r[j + 1]); L.push(a[0], y, a[1], b[0], y, b[1]); }
     }
-    edit.decor = pv ? { dashed: L } : { lines: L };
+    // (each part's outline at its lowest and highest floor, with its corners up: solid where it adds or intersects,
+    // dashed where it cuts or excludes, so what's taken away reads as taken away)
+    const solid: number[] = [], dash: number[] = [];
+    for (const c of f.carves) {
+      if (c.off) continue;
+      const [lo, hi] = partSpan(c, fl.length), a = fl[lo - 1], z = fl[hi - 1]; if (!a || !z) continue;
+      const s = sampleCurve(c.ring, 1.5), out = opOf(c) === 'cut' || opOf(c) === 'xor' ? dash : solid, few = s.length <= 40;
+      const ringAt = (t: number, y: number) => { const k = keyAt(f, t), [dx, dz] = drift(c.path, t), o: number[] = []; for (let i = 0; i + 1 < s.length; i += 2) { const [x, q] = through(k, s[i] + dx, s[i + 1] + dz), [X, Z] = toWorld(saved, x, q); o.push(X, y, Z); } return o; };
+      const r0 = ringAt(a.t, a.y + 0.05), r1 = ringAt(z.t, z.y + z.h);
+      for (const r of [r0, r1]) for (let i = 0; i < r.length; i += 3) { const j = (i + 3) % r.length; out.push(r[i], r[i + 1], r[i + 2], r[j], r[j + 1], r[j + 2]); }
+      if (few) for (let i = 0; i < r0.length; i += 3) out.push(r0[i], r0[i + 1], r0[i + 2], r1[i], r1[i + 1], r1[i + 2]);
+    }
+    edit.decor = pv ? { dashed: [...L, ...dash], lines: solid } : { lines: [...L, ...solid], dashed: dash };
     edit.draw();
     return () => { edit.decor = null; edit.draw(); };
   }, [ringKey, edit, !!pv, xray === null]);
@@ -140,6 +156,9 @@ export function FormHud({ view, edit, p, e, picked, tx, live, readOnly, xray, se
       const cb = bboxOf(sampleCurve(c.ring, 1));
       const ts = partT(c, fl.length);
       for (const end of ['from', 'to'] as const) { const t = ts[end === 'from' ? 0 : 1], k = keyAt(f, t), [ddx, ddz] = drift(c.path, t), [x, z] = through(k, cb.cx + ddx, cb.z0 + ddz); A.push([`c${end}${c.id}`, W(x, z, yOfT(fl, t))]); }
+      // (its middle, halfway up: drag it to move the part; its name over its top)
+      { const t = faceT(c, fl.length), k = keyAt(f, t), [ddx, ddz] = drift(c.path, t), [x, z] = through(k, cb.cx + ddx, cb.cz + ddz); A.push([`pm${c.id}`, W(x, z, yOfT(fl, t))]); }
+      { const t = ts[1], k = keyAt(f, t), [ddx, ddz] = drift(c.path, t), [x, z] = through(k, cb.cx + ddx, cb.cz + ddz), top = fl[partSpan(c, fl.length)[1] - 1]; A.push([`pc${c.id}`, W(x, z, top ? top.y + top.h + 1.5 : yOfT(fl, t))]); }
       // (each edge's middle, halfway up the part: push or pull it)
       if (c.ring.pts.length <= 12) {
         const t = faceT(c, fl.length), k = keyAt(f, t), [ddx, ddz] = drift(c.path, t), P = c.ring.pts;
@@ -175,6 +194,16 @@ export function FormHud({ view, edit, p, e, picked, tx, live, readOnly, xray, se
       if (d.list === 'spaces') return { ...d.f, spaces: (d.f.spaces ?? []).map((x) => (x.id === d.id ? pushEdge(x, d.i, dist) : x)) };
       return { ...d.f, carves: d.f.carves.map((x) => (x.id === d.id ? pushEdge(x, d.i, dist) : x)) };
     }
+    if (d.k === 'pmove') {
+      // (the pointer on the level halfway up the part, back through that floor's turn and scale: how far from where
+      // the drag began, in 0.5 m steps (Alt: 0.1 m))
+      const g = v.groundAt(ev.clientX, ev.clientY, d.y); if (!g) return null;
+      const k = keyAt(d.f, d.t), [qx, qz] = toLocal(saved, g[0], g[1]), [ux, uz] = unturn(k, qx, qz);
+      const lx = ux / (k.sx || 1), lz = uz / (k.sz || 1), step = ev.altKey ? 0.1 : 0.5;
+      const dx = Math.round((lx - d.x0) / step) * step, dz = Math.round((lz - d.z0) / step) * step;
+      if (!dx && !dz) return d.f;
+      return { ...d.f, carves: d.f.carves.map((x) => (x.id === d.id ? movedPart(x, dx, dz) : x)) };
+    }
     if (d.k === 'cut') {
       // (up the face: where the pointer is between the screen heights of the form's bottom and top)
       const t = Math.min(1, Math.max(0, (d.s0 - ev.clientY) / (d.s0 - d.s1 || 1)));
@@ -207,7 +236,7 @@ export function FormHud({ view, edit, p, e, picked, tx, live, readOnly, xray, se
   const start = (d: FDrag, ev: PointerEvent) => {
     ev.preventDefault(); ev.stopPropagation();
     (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
-    drag.current = d; tx.begin(); setDragging(d.k === 'cut' ? `c${d.end}${d.id}` : d.k === 'face' ? `${d.list === 'spaces' ? 'v' : 'e'}${d.i}${d.id}` : `${d.k}${d.i}`);
+    drag.current = d; tx.begin(); setDragging(d.k === 'cut' ? `c${d.end}${d.id}` : d.k === 'face' ? `${d.list === 'spaces' ? 'v' : 'e'}${d.i}${d.id}` : d.k === 'pmove' ? `pm${d.id}` : `${d.k}${d.i}`);
   };
   const down = (k: 's' | 'l' | 'r', i: number) => (ev: PointerEvent) => {
     if (!f || ev.button !== 0) return;
@@ -224,6 +253,20 @@ export function FormHud({ view, edit, p, e, picked, tx, live, readOnly, xray, se
     if (!f || ev.button !== 0 || !view) return;
     const t = faceT(c, fl.length);
     start({ k: 'face', list: 'carves', id: c.id, i, t, y: yOfT(fl, t), base: p, e, f, timer: 0, pending: null }, ev);
+  };
+  const downMove = (c: Carve) => (ev: PointerEvent) => {
+    if (!f || ev.button !== 0 || !view) return;
+    const t = faceT(c, fl.length), y = yOfT(fl, t), g = view.groundAt(ev.clientX, ev.clientY, y); if (!g) return;
+    const k = keyAt(f, t), [qx, qz] = toLocal(saved!, g[0], g[1]), [ux, uz] = unturn(k, qx, qz);
+    start({ k: 'pmove', id: c.id, t, y, x0: ux / (k.sx || 1), z0: uz / (k.sz || 1), base: p, e, f, timer: 0, pending: null }, ev);
+  };
+  /** a part's middle: the arrow keys move it (Shift: 2 m) */
+  const moveKeys = (c: Carve) => (ev: KeyboardEvent) => {
+    if (!f) return;
+    const s = ev.shiftKey ? 2 : 0.5, dx = ev.key === 'ArrowRight' ? s : ev.key === 'ArrowLeft' ? -s : 0, dz = ev.key === 'ArrowUp' ? s : ev.key === 'ArrowDown' ? -s : 0;
+    if (!dx && !dz) return;
+    ev.preventDefault(); ev.stopPropagation();
+    setForm({ ...f, carves: f.carves.map((x) => (x.id === c.id ? movedPart(x, dx, dz) : x)) });
   };
   const downSpace = (s: Space, i: number) => (ev: PointerEvent) => {
     if (!f || ev.button !== 0 || !view) return;
@@ -260,7 +303,7 @@ export function FormHud({ view, edit, p, e, picked, tx, live, readOnly, xray, se
     if (last && !live) { tx.live(withB(d.base, d.e, (b) => withForm(b, last))); d.changed = true; }
     else flush();
     drag.current = null; setDragging(null); setPv(null);
-    if (d.changed) tx.commit(`${d.k === 's' ? 'Width' : d.k === 'l' ? 'Lean' : d.k === 'r' ? 'Twist' : d.k === 'face' ? (d.list === 'spaces' ? 'Space' : 'Part') : 'Part height'} · ${name}`); else tx.cancel();
+    if (d.changed) tx.commit(`${d.k === 's' ? 'Width' : d.k === 'l' ? 'Lean' : d.k === 'r' ? 'Twist' : d.k === 'face' ? (d.list === 'spaces' ? 'Space' : 'Part') : d.k === 'pmove' ? 'Move part' : 'Part height'} · ${name}`); else tx.cancel();
   };
   const removeKey = (i: number) => {
     if (!f) return;
@@ -333,6 +376,8 @@ export function FormHud({ view, edit, p, e, picked, tx, live, readOnly, xray, se
       </>)}
       {f && xray === null && f.carves.filter((c) => !c.off).map((c) => { const nm = partName(f, c), sp = partSpan(c, floorsOfForm(f)); return <>
         {(['from', 'to'] as const).map((endK) => hh(`c${endK}${c.id}`, `hh-cut op-${opOf(c)}`, 'updown', `${nm} ${endK === 'from' ? 'starts at' : 'ends at'} floor ${sp[endK === 'from' ? 0 : 1]} · drag it`, downCut(c.id, endK), undefined, undefined, 11))}
+        {hh(`pm${c.id}`, `hh-pmove op-${opOf(c)}`, 'move', `${nm}: drag to move it (Alt: 10 cm steps), or the arrow keys`, downMove(c), moveKeys(c), undefined, 12)}
+        <span class={`hpart op-${opOf(c)}`} ref={ref(`pc${c.id}`)} aria-hidden="true">{nm.startsWith(OP_LABEL[opOf(c)]) ? nm : `${OP_LABEL[opOf(c)]} · ${nm}`}</span>
         {c.ring.pts.length <= 12 && c.ring.pts.map((_, i) => hh(`e${i}${c.id}`, `hh-face op-${opOf(c)}`, 'sideways', `${nm}: an edge · drag to push or pull it (Alt: 10 cm steps), or the arrow keys`, downFace(c, i), faceKeys(c, i), undefined, 10))}
       </>; })}
       {f && xray === null && (f.spaces ?? []).filter((s) => !s.off && s.ring.pts.length <= 12).map((s) => s.ring.pts.map((_, i) => hh(`v${i}${s.id}`, 'hh-face hh-space', 'sideways', `${spaceName(s)} (a space): an edge · drag to push or pull it, or the arrow keys`, downSpace(s, i), spaceKeys(s, i), undefined, 10)))}
@@ -428,6 +473,7 @@ export function ShapeBody({ b, setB }: BodyProps) {
 /** A formed building's parts, in order: each adds to, cuts out of or trims the floors it spans. An eye switches
  *  one off; the arrows reorder (a cut after an add cuts it too; before, it doesn't). */
 export function PartsBody({ b, setB }: BodyProps) {
+  const [op, setOp] = useState<PartOp>('cut');
   const f = b.form; if (!f) return null;
   const setF = setFormOf(setB), n = floorsOfForm(f);
   const setC = (id: string, fn: (c: Carve) => Carve) => setF((x) => ({ ...x, carves: x.carves.map((c) => (c.id === id ? fn(c) : c)) }));
@@ -438,7 +484,7 @@ export function PartsBody({ b, setB }: BodyProps) {
       <div class="part-h">
         <button type="button" class="part-eye" aria-pressed={!c.off} aria-label={c.off ? 'Switched off: switch it on' : 'Switch it off'} data-tip={c.off ? 'Off · switch it on' : 'Switch it off'} onClick={() => setC(c.id, (x) => ({ ...x, off: x.off ? undefined : true }))}><Icon n={c.off ? 'eyeoff' : 'eye'} size={14} /></button>
         <input class="part-n" aria-label="The part's name" value={partName(f, c)} onChange={(ev) => { const v = (ev.target as HTMLInputElement).value.trim(); setC(c.id, (x) => ({ ...x, name: v || undefined })); }} onKeyDown={(ev) => { ev.stopPropagation(); if (ev.key === 'Enter') (ev.target as HTMLInputElement).blur(); }} />
-        <Seg<PartOp> small ariaLabel="What it does" value={opOf(c)} set={(v) => setC(c.id, (x) => ({ ...x, op: v === 'cut' ? undefined : v }))} options={(['add', 'cut', 'keep'] as const).map((o) => ({ value: o, label: OP_LABEL[o], title: OP_TIP[o] }))} />
+        <Seg<PartOp> small ariaLabel="What it does" value={opOf(c)} set={(v) => setC(c.id, (x) => ({ ...x, op: v === 'cut' ? undefined : v }))} options={OPS.map((o) => ({ value: o, label: OP_LABEL[o], title: OP_TIP[o] }))} />
       </div>
       <div class="part-b">
         <Num label="From floor" value={partSpan(c, n)[0]} min={1} max={n} set={(v) => setC(c.id, (x) => onFloors(x, v, Math.max(v, partSpan(x, n)[1]), n))} />
@@ -449,9 +495,23 @@ export function PartsBody({ b, setB }: BodyProps) {
           <button type="button" class="hlink bad" aria-label="Remove it" data-tip="Remove it" onClick={() => setF((x) => ({ ...x, carves: x.carves.filter((y) => y.id !== c.id) }))}><Icon n="trash" size={14} /></button>
         </span>
       </div>
+      <div class="part-b part-cad" role="group" aria-label="Move, turn, mirror, copy">
+        <button type="button" class="hlink" data-tip="Turn it 15° (about its middle)" onClick={() => setC(c.id, (x) => turnedPart(x, 15))}><Icon n="rotate" size={14} />15°</button>
+        <button type="button" class="hlink" data-tip="Turn it a quarter" onClick={() => setC(c.id, (x) => turnedPart(x, 90))}><Icon n="rotate" size={14} />90°</button>
+        <button type="button" class="hlink" data-tip="A mirrored copy, across the form's middle, left for right" onClick={() => setF((x) => ({ ...x, carves: [...x.carves, mirroredPart(x, c, 'x')] }))}><Icon n="sideways" size={14} />Mirror</button>
+        <button type="button" class="hlink" data-tip="A mirrored copy, front for back" onClick={() => setF((x) => ({ ...x, carves: [...x.carves, mirroredPart(x, c, 'z')] }))}><Icon n="updown" size={14} />Mirror</button>
+        <button type="button" class="hlink" data-tip="A copy of it, a little along" onClick={() => setF((x) => ({ ...x, carves: [...x.carves, copiedPart(c)] }))}><Icon n="copy" size={14} />Copy</button>
+      </div>
       {opOf(c) === 'cut' && <Seg<Carve['face']> small ariaLabel="What's left at the cut" value={c.face} set={(v) => setC(c.id, (x) => ({ ...x, face: v }))} options={[{ value: 'glass', label: 'Glazed', title: 'The cut faces are glass' }, { value: 'open', label: 'Open', title: 'Left open: a terrace, a void through' }]} />}
     </div>)}
-    <div class="hrow part-add" role="group" aria-label="Add a part">
+    <div class="part-new" role="group" aria-label="Add a part">
+      <Seg<PartOp> small ariaLabel="The new part" value={op} set={setOp} options={OPS.map((o) => ({ value: o, label: OP_LABEL[o], title: OP_TIP[o] }))} />
+      <div class="hrow part-add">
+        {MASS_SHAPES.filter((s) => s.shape !== 'court').map((s) => <button type="button" class="hlink" data-tip={`${OP_LABEL[op]}: a ${s.label.toLowerCase()} ${op === 'add' ? 'beside it' : 'at its middle'}, all its floors up`} onClick={() => setF((x) => ({ ...x, carves: [...x.carves, shapePart(x, s.shape, op)] }))}><Icon n={s.icon} size={14} />{s.label}</button>)}
+        {MASS_DRAW.map((s) => <button type="button" class="hlink" data-tip={`${OP_LABEL[op]}: draw it on the view. ${s.hint}`} onClick={() => dispatchEvent(new CustomEvent('urbanplan:tool', { detail: { k: 'mass', shape: s.shape, into: { id: b.id, op } } }))}><Icon n={s.icon} size={14} />{s.label}…</button>)}
+      </div>
+    </div>
+    <div class="hrow part-add" role="group" aria-label="Add a ready part">
       {NEW_PARTS.map((k) => <button type="button" class="hlink" data-tip={k.tip} onClick={() => setF((x) => ({ ...x, carves: [...x.carves, newPart(x, k.kind)] }))}><Icon n={k.icon} size={14} />{k.label}</button>)}
     </div>
     {f.carves.length > 0 && <small>On the view: drag a part's edge handles to push or pull it, and its arrows up the face for its floors.</small>}
@@ -494,6 +554,41 @@ export function SpacesBody({ b, setB }: BodyProps) {
   </div>;
 }
 
+/** Make floors from the form (docs/plans/pro-design-freedom.md §3.6): its height and the floor-to-floor height cut it
+ *  into floors; what each range of floors is for, bottom up; and heights and double-height voids by range below. */
+export function FloorsBody({ b, setB, height, projectUse }: BodyProps & { height: number; projectUse: BuildingUse }) {
+  const f = b.form; if (!f) return null;
+  const setF = setFormOf(setB), n = floorsOfForm(f), fh = floorHOf(f);
+  const bands = f.uses;
+  const setBand = (i: number, o: Partial<Form['uses'][number]>) => setF((x) => ({ ...x, uses: x.uses.map((u, j) => (j === i ? { ...u, ...o } : u)) }));
+  let at = 1;
+  return <div class="parts floors-body">
+    <div class="part-b">
+      <Num label="Height" unit="m" step={0.5} value={Math.round(height * 10) / 10} min={3} max={900} set={(v) => setF((x) => setFloors(x, floorsFor(v, height, n)))} />
+      <Num label="Floor to floor" unit="m" step={0.1} value={fh ?? 0} zero="By use" min={0} max={12} set={(v) => setF((x) => { const y = withFloorH(x, v >= 2 ? v : undefined); return v >= 2 ? setFloors(y, Math.max(1, Math.round(height / v))) : y; })} />
+      <Num label="Floors" value={n} min={1} max={300} set={(v) => setF((x) => setFloors(x, v))} />
+    </div>
+    <small>The height and the floor-to-floor height cut the form into floors: change the height and the floors follow; change the floor height and it keeps its height.</small>
+    <h5 class="floors-h">What each range is for</h5>
+    {bands.map((u, i) => { const lo = at, hi = at + u.floors - 1; at = hi + 1; return <div class="part" key={i}>
+      <div class="part-h">
+        <span class="floors-at">{lo === hi ? `Floor ${lo}` : `Floors ${lo}–${hi}`}</span>
+        <Select<BuildingUse> size="sm" aria-label="Its use" value={u.use} onChange={(v) => setBand(i, { use: v })} options={USES.filter((x) => x !== 'parking').map((x) => ({ value: x, label: USE_INFO[x].label }))} />
+      </div>
+      <div class="part-b">
+        <Num label="Floors" value={u.floors} min={1} max={300} set={(v) => setBand(i, { floors: Math.max(1, v) })} />
+        <span class="part-acts">{bands.length > 1 && <button type="button" class="hlink bad" aria-label="Remove the range" data-tip="Remove the range: its floors go" onClick={() => setF((x) => ({ ...x, uses: x.uses.filter((_, j) => j !== i) }))}><Icon n="trash" size={14} /></button>}</span>
+      </div>
+    </div>; })}
+    <div class="hrow part-add" role="group" aria-label="Add a range of floors">
+      <button type="button" class="hlink" data-tip="A range on top, of the project's use" onClick={() => setF((x) => ({ ...x, uses: [...x.uses, { use: projectUse, floors: 2 }] }))}><Icon n="plus" size={14} />Floors on top</button>
+      {n >= 2 && <button type="button" class="hlink" data-tip="Its ground floor as a range of its own: shops, a lobby" onClick={() => setF((x) => { const u = x.uses.map((y) => ({ ...y })); if (u[0].floors <= 1) return x; u[0].floors -= 1; return { ...x, uses: [{ use: 'retail', floors: 1 }, ...u] }; })}><Icon n="shop" size={14} />A ground floor</button>}
+    </div>
+    <h5 class="floors-h">Heights and double-height spaces</h5>
+    <LevelsBody b={b} setB={setB} p={undefined as never} once={undefined as never} />
+  </div>;
+}
+
 /** A formed building's levels: floor heights set by range whatever the use, and floors left out (voids, so the
  *  floor below rises through them: a double-height lobby, an atrium, a hall). */
 export function LevelsBody({ b, setB }: BodyProps) {
@@ -503,8 +598,8 @@ export function LevelsBody({ b, setB }: BodyProps) {
   const setI = (i: number, o: Partial<Level>) => setL((l) => l.map((x, j) => (j === i ? { ...x, ...o } : x)));
   const voids = Array.from({ length: n }, (_, k) => levelOf(f.levels, k + 1).void).filter(Boolean).length;
   return <div class="parts">
-    <small>{L.length ? `${n} floors${voids ? `, ${voids} left open to the floor below` : ''}.` : 'Each floor takes its use’s height. Set a range apart for a height of its own, or leave its floor out for a double-height space.'}</small>
-    {L.map((l, i) => <div class="part" key={i}>
+    <small>{L.some((l) => !isAll(l)) ? `${n} floors${voids ? `, ${voids} left open to the floor below` : ''}.` : 'Each floor takes its use’s height. Set a range apart for a height of its own, or leave its floor out for a double-height space.'}</small>
+    {L.map((l, i) => !isAll(l) && <div class="part" key={i}>
       <div class="part-b">
         <Num label="From floor" value={Math.min(l.from, l.to)} min={1} max={n} set={(v) => setI(i, { from: v, to: Math.max(v, Math.max(l.from, l.to)) })} />
         <Num label="To floor" value={Math.max(l.from, l.to)} min={1} max={n} set={(v) => setI(i, { to: v, from: Math.min(v, Math.min(l.from, l.to)) })} />

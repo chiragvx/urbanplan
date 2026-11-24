@@ -13,7 +13,12 @@ import { ELEMENTS, SQFT, UNIT_LABEL, type SiteElement } from '../doc/site';
 import { featureOf, INTERNAL_WIDTHS, DEFAULT_LEVELS, PLINTH_MIN, roadWidths, type Levels, type SiteFeature } from './siteObjects';
 import { cap, DIRS, edgeFacing, withEdgeRoad } from './plotOps';
 import { ShapePanel, shapeIt, withFloors } from './shapePanel';
-import { LevelsBody, MixBody, PartsBody, SpacesBody, RoofBody, ShapeBody, SkinBody, StyleBody } from './formHud';
+import { FloorsBody, MixBody, PartsBody, SpacesBody, RoofBody, ShapeBody, SkinBody, StyleBody } from './formHud';
+import { floorUseOf } from '../doc/uses';
+import { TEMPLATES } from './form';
+import { CombineList } from './combineUi';
+/** the template a building came from, by name (none: drawn by hand) */
+const tplName = (b: ProBuilding) => (b.form?.template ? TEMPLATES.find((t) => t.id === b.form!.template)?.name : undefined);
 import { SystemsPanel } from './systemsPanel';
 import { mergeSettings, splitSettings } from './systems';
 import { FlatPlan } from './steps';
@@ -82,9 +87,10 @@ function BuildingInspector({ p, e, up, rooms, checks, pick, toast, xray, hide, r
   return (
     <Frame hide={hide}
       title={readOnly ? <b>{name}</b> : <input class="insp-name" value={name} aria-label="Name" onChange={(ev) => setB((b) => ({ ...b, name: (ev.target as HTMLInputElement).value.trim() || undefined }))} />}
-      meta={<>{br.floors} floors · {m(br.height)} · {nf(br.plate)} m² plate</>}
+      meta={<>{br.floors} floors · {m(br.height)} · {nf(br.plate)} m² plate{tplName(ownB) && <> · from the {tplName(ownB)} template</>}</>}
       actions={!readOnly && <><Btn kind="quiet" icon="copy" title="Duplicate (Ctrl+D)" onClick={dup} /><Btn kind="quiet" icon="trash" title="Remove (Delete)" onClick={del} /></>}>
       {deps.map((x) => <Note tone="bad">{x.text}</Note>)}
+      {!readOnly && <CombineList p={p} e={e} id={id} once={up} pick={pick} toast={toast} />}
       <Lines rows={[
         ['Built-up', sqft(bua)],
         ...(noUse ? [['Use', 'No use yet']] as [string, string][]
@@ -115,8 +121,8 @@ function BuildingInspector({ p, e, up, rooms, checks, pick, toast, xray, hide, r
             <Section title="Shape"><ShapeBody {...bp} /></Section>
             <ShapePanel b={ownB} floors={br.floors} set={setB} />
             <Section title="Parts" aside={ownB.form.carves.length ? <span class="sec-meta">{ownB.form.carves.length}</span> : undefined}><PartsBody {...bp} /></Section>
+            <Section title="Floors" sub="Made from the form: cut it into floors, then say what each range is for." aside={<span class="sec-meta">{br.floors} · {m(br.height)}</span>}><FloorsBody {...bp} height={br.height} projectUse={floorUseOf(plotUseOf(p))} /></Section>
             <Section title="Spaces" fold open={!!ownB.form.spaces?.length} aside={ownB.form.spaces?.length ? <span class="sec-meta">{ownB.form.spaces.length}</span> : undefined}><SpacesBody {...bp} /></Section>
-            <Section title="Levels" fold open={!!ownB.form.levels?.length} aside={ownB.form.levels?.length ? <span class="sec-meta">{ownB.form.levels.length}</span> : undefined}><LevelsBody {...bp} /></Section>
             <Section title="Roof"><RoofBody {...bp} /></Section>
             <Section title="Skin"><SkinBody {...bp} /></Section>
           </>

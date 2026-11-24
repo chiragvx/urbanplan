@@ -321,8 +321,8 @@ function App() {
   const doTask = (t: Task) => {
     if (t === 'purpose') { go('design'); setTimeout(() => findIn('What it’s for'), 40); toast('Say what it is and who it’s for: the rules, layout, parking and money follow.'); return; }
     if (t === 'plot') { setPicked({ k: 'plot' }); toast('The plot is picked: drag its corners, or set its size and roads in the inspector.'); return; }
-    if (t === 'building') { setTool({ k: 'building', shape: 'tower' } as Tool); toast('Click on the plot where the tower goes.'); return; }
-    if (t === 'moved') { const b = e.d.buildings[0]; if (b) { showBuilding(b.b.id); toast('Drag the arrow on its top for floors, or its middle to move it.'); } else { setTool({ k: 'building', shape: 'tower' } as Tool); toast('Put a building on the plot first: click where it goes.'); } return; }
+    if (t === 'building') { setTool({ k: 'mass', shape: 'box' } as Tool); toast('Click on the plot where it goes: a mass to sculpt.'); return; }
+    if (t === 'moved') { const b = e.d.buildings[0]; if (b) { showBuilding(b.b.id); toast('Drag the arrow on its top for floors, or its middle to move it.'); } else { setTool({ k: 'mass', shape: 'box' } as Tool); toast('Put a building on the plot first: click where it goes.'); } return; }
     if (t === 'numbers') { go('numbers'); return; }
     if (t === 'option') { optionActs.duplicate(); return; }
     setDialog('share');
@@ -367,6 +367,7 @@ function App() {
     const ce = new CanvasEdit(canvas.current!, {
       view: () => view.current, p: () => pRef.current, e: () => eRef.current, up: (o) => up(o), step: () => (pickedRef.current?.k === 'plot' ? 'site' : stepRef.current),
       picked: () => pickedRef.current, pick: (x) => setPicked(x), done: () => { setToolS(SELECT); ce.setTool(SELECT); }, hint: setHint, readOnly: () => roRef.current, frame: (w) => frameRef.current(w),
+      toast: (m) => toast(m),
       readout: (o) => { const el = readout.current; if (!el) return; if (!o) { el.hidden = true; return; } el.hidden = false; el.classList.toggle('typed', !!o.typed); el.style.transform = `translate(${Math.round(o.x + 16)}px,${Math.round(o.y + 18)}px)`; el.firstElementChild!.textContent = o.text; el.lastElementChild!.textContent = o.sub ?? ''; },
     });
     ce.snapOn = store.get<boolean>('urbanplan:pro:snap', true);
@@ -378,6 +379,12 @@ function App() {
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     return () => { ro.disconnect(); mo.disconnect(); ce.dispose(); v.dispose(); };
   }, []);
+  // (a tool armed from a panel: the Parts list's "draw a cut" arms Design's footprint tools into the building)
+  useEffect(() => {
+    const on = (ev: Event) => { const t = (ev as CustomEvent<Tool>).detail; if (t) setTool(t); };
+    addEventListener('urbanplan:tool', on);
+    return () => removeEventListener('urbanplan:tool', on);
+  });
   const maxFloor = Math.max(1, ...e.d.buildings.map((b) => b.floors));
   const xr = xray === null ? null : Math.min(xray, maxFloor);
   useEffect(() => {
@@ -750,7 +757,7 @@ function App() {
           });
         }} onPointerLeave={() => { setHover(null); setHb(null); cancelAnimationFrame(hbFrame.current); }} />
         <ResultBar e={e} deal={deal} sum={sum} go={(s) => { if (!narrow && (s === 'numbers' || s === 'approve') && report === s) setReport(null); else go(s); }} statement={() => { if (narrow) { setDialog('area'); return; } if (report === 'numbers') { setReport(null); return; } go('numbers'); findIn('Area statement'); }} vs={vsBase ? { on: vsOn, set: setVsOn, name: vsBase.name, fig: vsFig } : null} />
-        {!locked && <Shelf tool={tool} setTool={setTool} outline={!narrow && !phone ? { on: olOn, toggle: () => setOlOpen(!olOpen) } : undefined} hint={hint ? <div class="drawhint" role="status"><span>{hint}</span><button type="button" class="linkbtn" onClick={() => setTool(SELECT)}>Done</button></div> : null} />}
+        {!locked && <Shelf tool={tool} setTool={setTool} target={(() => { const b = picked?.k === 'building' ? p.scheme?.buildings.find((x) => x.id === picked.id) : undefined; return b?.form ? { id: b.id, name: b.name ?? 'the building' } : undefined; })()} outline={!narrow && !phone ? { on: olOn, toggle: () => setOlOpen(!olOpen) } : undefined} hint={hint ? <div class="drawhint" role="status"><span>{hint}</span><button type="button" class="linkbtn" onClick={() => setTool(SELECT)}>Done</button></div> : null} />}
         {olOn && <Outline p={p} e={e} checks={checks} picked={picked} pick={(x) => { setToolS(SELECT); edit.current?.setTool(SELECT); setPicked(x); }} show={showBuilding} frame={frameRing} hidden={hidden} locked={lockedIds} toggle={toggleOl} reorder={reorder} notes={countsByThing(noteThreads)} close={() => setOlOpen(false)} />}
         {p.blank && !locked && tool.k === 'select' && !cmode && <EmptyState p={p} ways={{
           find: () => { up({ blank: undefined }); openWay('survey'); },

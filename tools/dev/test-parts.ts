@@ -7,6 +7,8 @@ import { evaluate } from '../../src/pro/evaluate';
 import { scrutiny, scrutinySummary } from '../../src/pro/scrutiny';
 import { subjectsOf, farthestFromStair } from '../../src/pro/checkRows';
 import { groupOf } from '../../src/doc/egress';
+import { TEMPLATES } from '../../src/pro/form';
+import { placeTemplate } from '../../src/pro/edit';
 import { sampleBez, smoothHandles, moveHandle } from '../../src/doc/curves';
 import { withNodes, nodesOf, trimAtFront, joinOf, type SiteElement } from '../../src/doc/site';
 
@@ -172,6 +174,21 @@ ok(tgt.d.parking.want === Math.ceil(e0.d.parking.need * 1.5), `a target of 150%:
   const lt = homes.find((c) => c.key === 'light:0'), rm = homes.find((c) => c.key === 'rooms:0');
   ok(!!lt && !homes.some((c) => c.key === 'light'), `light and ventilation by building: ${lt?.proposed} (${lt?.status})`);
   ok(rm?.status === 'warn' && rm.proposed === 'rooms not laid out', 'room sizes by building: rooms not laid out, without rooms');
+}
+
+// step 8: templates as parts and uses
+{
+  const off = TEMPLATES.find((t) => t.id === 'office')!.make([0, 0], [1, 0])[0].form;
+  const Lo = lay(off, 30);
+  ok(off.carves.some((c) => c.name === 'Podium' && c.op === 'add' && c.lo === 1 && c.hi === 2) && !off.keys.length, 'Office on shops: its podium is a part added on floors 1–2, the tower a plain plate');
+  ok(Lo.floors[0].area > Lo.floors[2].area * 1.8 && near(Lo.floors[0].area, 48 * 36, 30), `the podium is wider than the tower (${Math.round(Lo.floors[0].area)} vs ${Math.round(Lo.floors[2].area)} m²)`);
+  ok(TEMPLATES.every((t) => t.make([0, 0], [1, 0]).every((m) => m.form.carves.every((c) => !!c.name))), 'every template part has a name');
+  const proj = (use: ProProject['use']): ProProject => ({ ...DEFAULT_PROJECT, use, scheme: { buildings: [], elements: [] } } as ProProject);
+  const at = (p: ProProject) => { const e = evaluate(p); return placeTemplate('twist', [e.r.footprint[0] ?? 0, e.r.footprint[1] ?? 0], e)[0]?.form?.uses.map((u) => u.use) ?? []; };
+  const uh = at(proj('residential')), uo = at(proj('commercial')), un = at(proj('none'));
+  ok(uh.every((u) => u === 'residential') && uo.length > 0 && uo.every((u) => u === 'office') && un.every((u) => u === 'none'), `a tower template takes the project's use (homes: ${uh}; offices: ${uo}; no use: ${un})`);
+  const e = evaluate(proj('commercial')), lib = placeTemplate('library', [e.r.footprint[0], e.r.footprint[1]], e)[0];
+  ok(!!lib && lib.form!.uses.every((u) => u.use === 'library'), 'a public template keeps its own use');
 }
 
 console.log(bad ? `${bad} FAILED` : 'ALL OK');

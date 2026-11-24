@@ -83,7 +83,7 @@ export function lay(b: SiteBuilding & { form?: Form }, ctx: FormContext): FormLa
     let shape: MP = selfCrosses(outer) ? union(mpOf(outer)) : mpOf(outer);
     const cuts: Local['cuts'] = [];
     // the parts in order: a run of cuts in one go (as all a form's carves were cut before parts), an add unioned,
-    // a keep intersected
+    // a keep intersected, an exclude (xor) as both
     let body: MP | null = null, splits = false;
     for (let i = 0; i < carves.length;) {
       const op = opOf(carves[i].c);
@@ -98,8 +98,10 @@ export function lay(b: SiteBuilding & { form?: Form }, ctx: FormContext): FormLa
         continue;
       }
       const m = mpOf(ccw(carves[i].ring));
-      body = op === 'add' ? union(body ?? shape, m) : inter(body ?? shape, m);
-      shape = op === 'add' ? union(shape, m) : inter(shape, m);
+      // (exclude: what either has but not both, the overlap taken out of the floor and the rest of the part added)
+      const xor = (a: MP) => union(diff(a, m), diff(m, a));
+      body = op === 'add' ? union(body ?? shape, m) : op === 'xor' ? xor(body ?? shape) : inter(body ?? shape, m);
+      shape = op === 'add' ? union(shape, m) : op === 'xor' ? xor(shape) : inter(shape, m);
       i++;
     }
     if (splits) split.push(level);

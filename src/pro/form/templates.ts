@@ -102,14 +102,13 @@ const roundT = one('round', 'Round tower', 'tower', 'A cylinder ringed with balc
   form({ plan: ellipse(30, 30, 12), uses: homes(36) }, 'round'));
 
 const officePodium = one('office', 'Office on shops', 'tower', 'Offices over a two-floor shopping podium.', 48, 36, 0.6, 1.3, () => {
-  const pod = 2, tower = 28, n = pod + tower, t0 = (pod - 1) / (n - 1), t1 = pod / (n - 1);
+  const pod = 2, tower = 28, n = pod + tower;
+  // (the tower's plate, and the podium a part added on the floors of shops: change either on its own)
+  const w = 48 * 0.66, d = 36 * 0.72;
   return form({
-    plan: rect(48, 36),
-    keys: [
-      { t: t0 + (t1 - t0) * 0.25, sx: 1, sz: 1, dx: 0, dz: 0, rot: 0 },
-      { t: t0 + (t1 - t0) * 0.75, sx: 0.66, sz: 0.72, dx: 4, dz: 2, rot: 0 },
-    ],
-    ease: 'linear', uses: [{ use: 'retail', floors: pod }, { use: 'office', floors: tower }]
+    plan: rectAt(4 - w / 2, 2 - d / 2, 4 + w / 2, 2 + d / 2),
+    carves: [{ id: 'podium', name: 'Podium', op: 'add', ring: rect(48, 36), from: 0, to: (pod - 1) / (n - 1), lo: 1, hi: pod, face: 'glass' }],
+    uses: [{ use: 'retail', floors: pod }, { use: 'office', floors: tower }]
   }, 'office');
 });
 
@@ -144,7 +143,7 @@ const waveBlock = one('wave', 'Wave block', 'sculpted', 'A rippling block with d
 
 const monolith = many('monolith', 'Monolith', 'sculpted', 'A white tower split by a zig-zag glass slot.', 58, 34, 0.6, 1.25, () => {
   const zig = [0, 0.18, 0.36, 0.54, 0.72, 0.9, 1].map((t, i) => ({ t, dx: i % 2 ? 3.2 : -3.2, dz: 0 }));
-  const slot = (z0: number, z1: number, id: string): Carve => ({ id, ring: rectAt(-1.5, z0, 1.5, z1), from: 0.04, to: 1, path: zig, face: 'glass' });
+  const slot = (z0: number, z1: number, id: string): Carve => ({ id, name: 'Glass slot', ring: rectAt(-1.5, z0, 1.5, z1), from: 0.04, to: 1, path: zig, face: 'glass' });
   const tower = form({
     plan: rect(26, 26), round: 0.12, uses: homes(44),
     carves: [slot(-14, -5.5, 'front'), slot(5.5, 14, 'back')],
@@ -180,8 +179,8 @@ const skyGarden = one('skygarden', 'Sky garden tower', 'sculpted', 'Open-air gar
   form({
     plan: rect(30, 30), uses: homes(40),
     carves: [
-      { id: 'garden-1', ring: rectAt(7, 7, 16, 16), from: 0.42, to: 0.5, face: 'open' },
-      { id: 'garden-2', ring: rectAt(-16, -16, -7, -7), from: 0.74, to: 0.82, face: 'open' },
+      { id: 'garden-1', name: 'Sky garden', ring: rectAt(7, 7, 16, 16), from: 0.42, to: 0.5, face: 'open' },
+      { id: 'garden-2', name: 'Sky garden, higher', ring: rectAt(-16, -16, -7, -7), from: 0.74, to: 0.82, face: 'open' },
     ],
   }, 'skygarden'));
 
@@ -190,7 +189,7 @@ const skyGarden = one('skygarden', 'Sky garden tower', 'sculpted', 'Open-air gar
 const courtyard = one('courtyard', 'Courtyard homes', 'homes', 'A block of flats round a green court.', 50, 40, 0.65, 1.4, () =>
   form({
     plan: rrect(50, 40, 3), uses: homes(9),
-    carves: [{ id: 'court', ring: rrect(26, 16, 2), from: 0, to: 1, face: 'open' }],
+    carves: [{ id: 'court', name: 'Court', ring: rrect(26, 16, 2), from: 0, to: 1, face: 'open' }],
   }, 'courtyard'));
 
 const twinSlab = many('twinslab', 'Twin slabs', 'homes', 'Two long slabs of flats, a garden between.', 56, 47, 0.5, 1.3, () => {

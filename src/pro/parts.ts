@@ -3,19 +3,26 @@
 // projects load as they were. Here: their names, their heights as floors, and the new parts the Parts list adds.
 import { opOf, partSpan, sampleCurve, USE_INFO, type BuildingUse, type Carve, type Curve, type Form, type PartOp, type Pt, type Space } from './form';
 import { slotCarve } from './silhouette';
+import { toLocal, toWorld } from './form';
+import { drawnPlan, shapePlan, type MassShape } from './masses';
+import type { ProBuilding } from './project';
 
-export const OP_LABEL: Record<PartOp, string> = { add: 'Add', cut: 'Cut', keep: 'Keep' };
+/** the four booleans, in the order a CAD lists them */
+export const OPS: PartOp[] = ['add', 'cut', 'keep', 'xor'];
+export const OP_LABEL: Record<PartOp, string> = { add: 'Add', cut: 'Cut', keep: 'Intersect', xor: 'Exclude' };
+export const OP_ICON: Record<PartOp, string> = { add: 'plus', cut: 'minus', keep: 'intersect', xor: 'exclude' };
 export const OP_TIP: Record<PartOp, string> = {
-  add: 'Adds to the floors it spans (a podium, a wing, a bridge)',
-  cut: 'Cuts out of the floors it spans (a slot, a notch, a void)',
-  keep: 'Keeps only what lies inside it on the floors it spans (trims the form to it)',
+  add: 'Union: adds to the floors it spans (a podium, a wing, a bridge)',
+  cut: 'Subtract: cuts out of the floors it spans (a slot, a notch, a void, a round hole)',
+  keep: 'Intersect: keeps only what lies inside it on the floors it spans (trims the form to it)',
+  xor: 'Exclude: what either has but not both: the overlap cut out, the rest of it added',
 };
 
 /** a part's name in the list: its own, else what it does and its place among those that do the same */
 export function partName(f: Form, c: Carve): string {
   if (c.name) return c.name;
   const op = opOf(c), same = f.carves.filter((x) => opOf(x) === op && !x.name), i = same.indexOf(c);
-  const base = op === 'add' ? 'Block' : op === 'keep' ? 'Trim' : c.path?.length ? 'Slot' : 'Cut';
+  const base = op === 'add' ? 'Block' : op === 'keep' ? 'Trim' : op === 'xor' ? 'Exclusion' : c.path?.length ? 'Slot' : 'Cut';
   return same.length > 1 ? `${base} ${i + 1}` : base;
 }
 
@@ -69,6 +76,73 @@ function shapedPart(f: Form, kind: NewPart): Carve {
   // an oval through the plan's corners' insides: a box with every point smooth
   const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2, rx = (b.w / 2) * 1.12, rz = (b.d / 2) * 1.12;
   return { id: id(), op: 'keep', ring: { pts: [[cx + rx, cz], [cx, cz + rz], [cx - rx, cz], [cx, cz - rz]], sharp: [false, false, false, false] }, from: 0, to: 1, face: 'glass' };
+}
+
+// ---------------------------------------------------------------- parts as CAD shapes (§3.6)
+
+const ringBox = (r: Curve) => { let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (const [x, z] of r.pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); } return { x0, x1, z0, z1, cx: (x0 + x1) / 2, cz: (z0 + z1) / 2, w: x1 - x0, d: z1 - z0 }; };
+const mapRing = (r: Curve, fn: (p: Pt) => Pt): Curve => ({ ...r, pts: r.pts.map((p) => { const [x, z] = fn(p); return [r2(x), r2(z)] as Pt; }) });
+const allFloors = (n: number, op: PartOp, ring: Curve, name?: string): Carve => ({ id: id(), op, ...(name ? { name } : {}), ring, from: 0, to: 1, lo: 1, hi: n, face: op === 'cut' ? 'open' : 'glass' });
+
+/** a part of a shape (Box, Round, L, U, Wedge…), all the floors up: at a point of the plan (local), at its own size;
+ *  else at the plan's middle, sized to it (a cut or an exclude half the plan's size, an intersect a little over it, so
+ *  it rounds the corners off, an add beside it at its own) */
+export function shapePart(f: Form, shape: MassShape, op: PartOp, at?: Pt): Carve {
+  const S = shapePlan(shape).plan, sb = ringBox(S), name = `${OP_LABEL[op]} · ${shapeLabel(shape)}`;
+  if (at) return allFloors(floorsOfForm(f), op, mapRing(S, ([x, z]) => [x - sb.cx + at[0], z - sb.cz + at[1]]), name);
+  const b = bounds(f);
+  const k = op === 'add' ? 1 : op === 'keep' ? Math.max(b.w / sb.w, b.d / sb.d) * 1.1 : Math.min((b.w * 0.5) / sb.w, (b.d * 0.5) / sb.d);
+  const cx = op === 'add' ? b.x1 + (sb.w * k) / 2 - 2 : (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
+  return allFloors(floorsOfForm(f), op, mapRing(S, ([x, z]) => [(x - sb.cx) * k + cx, (z - sb.cz) * k + cz]), name);
+}
+const shapeLabel = (s: MassShape) => ({ box: 'Box', round: 'Round', L: 'L', U: 'U', court: 'Courtyard', wedge: 'Wedge', rect: 'Rectangle', poly: 'Polygon', circle: 'Circle' } as Record<MassShape, string>)[s];
+
+/** a part from a footprint drawn on the map (world x, z pairs), in the building's frame */
+export function drawnPart(f: Form, b: Pick<ProBuilding, 'spine'>, shape: MassShape, P: number[], op: PartOp): Carve | null {
+  const [ax, az, bx, bz] = b.spine, L = Math.hypot(bx - ax, bz - az) || 1, u: Pt = [(bx - ax) / L, (bz - az) / L];
+  const d = drawnPlan(shape, P, u); if (!d) return null;
+  const [ox, oz] = toLocal(b, d.o[0], d.o[1]);
+  return allFloors(floorsOfForm(f), op, mapRing(d.plan, ([x, z]) => [x + ox, z + oz]), `${OP_LABEL[op]} · ${shapeLabel(shape)}`);
+}
+
+/** a part moved dx, dz (local metres) */
+export const movedPart = (c: Carve, dx: number, dz: number): Carve => ({ ...c, ring: mapRing(c.ring, ([x, z]) => [x + dx, z + dz]) });
+/** a part turned by deg degrees about its middle */
+export function turnedPart(c: Carve, deg: number): Carve {
+  const b = ringBox(c.ring), a = (deg * Math.PI) / 180, co = Math.cos(a), si = Math.sin(a);
+  return { ...c, ring: mapRing(c.ring, ([x, z]) => [b.cx + (x - b.cx) * co - (z - b.cz) * si, b.cz + (x - b.cx) * si + (z - b.cz) * co]) };
+}
+/** a part mirrored across the form's middle (axis 'x': left for right; 'z': front for back), as a new part */
+export function mirroredPart(f: Form, c: Carve, axis: 'x' | 'z'): Carve {
+  const b = bounds(f), mx = (b.x0 + b.x1) / 2, mz = (b.z0 + b.z1) / 2;
+  const ring = mapRing(c.ring, ([x, z]) => (axis === 'x' ? [2 * mx - x, z] : [x, 2 * mz - z]));
+  return { ...c, id: id(), ...(c.name ? { name: `${c.name}, mirrored` } : {}), ring: { ...ring, pts: ring.pts.slice().reverse(), ...(ring.sharp ? { sharp: ring.sharp.slice().reverse() } : {}) }, ...(c.path ? { path: c.path.map((q) => ({ ...q, dx: axis === 'x' ? -q.dx : q.dx, dz: axis === 'z' ? -q.dz : q.dz })) } : {}) };
+}
+/** a copy of a part, a little along */
+export const copiedPart = (c: Carve): Carve => ({ ...movedPart(c, 3, 3), id: id(), ...(c.name ? { name: `${c.name} copy` } : {}) });
+
+/** Combine: another building into this one, as one of its parts (the four booleans, as a CAD's on two solids).
+ *  The other's plan comes across in this one's frame; its floors set the part's (an add or an exclude makes this one
+ *  as tall as the taller; an intersect as low as the lower, since nothing outside the other stands); the other goes.
+ *  What the other had that a part can't carry (its taper or twist, its own parts and spaces) is listed in `lost`. */
+export function combine(target: ProBuilding, other: ProBuilding, op: PartOp): { b: ProBuilding; lost: string[] } | null {
+  const f = target.form, g = other.form; if (!f || !g) return null;
+  const lost: string[] = [];
+  if (g.keys.length) lost.push('its taper, lean or twist');
+  if (g.carves.length) lost.push(`its ${g.carves.length} part${g.carves.length > 1 ? 's' : ''}`);
+  if (g.spaces?.length) lost.push('its spaces');
+  const ring = mapRing(g.plan, ([x, z]) => { const [X, Z] = toWorld(other, x, z); return toLocal(target, X, Z); });
+  const nT = floorsOfForm(f), nO = floorsOfForm(g);
+  let uses = f.uses.map((u) => ({ ...u }));
+  const grow = (n: number) => { const d = n - nT; if (d > 0) uses = [...uses, { use: g.uses[g.uses.length - 1]?.use ?? uses[uses.length - 1].use, floors: d }]; };
+  const shrink = (n: number) => { let d = nT - n; for (let i = uses.length - 1; i >= 0 && d > 0; i--) { const t = Math.min(d, uses[i].floors - (i === 0 ? 1 : 0)); uses[i].floors -= t; d -= t; } uses = uses.filter((u) => u.floors > 0); };
+  if (op === 'add' || op === 'xor') grow(nO); else if (op === 'keep') shrink(nO);
+  const n = uses.reduce((s, u) => s + u.floors, 0);
+  const hi = op === 'keep' ? n : Math.min(n, nO), name = `${OP_LABEL[op]} · ${other.name ?? 'a building'}`;
+  const parts: Carve[] = [{ ...allFloors(n, op, ring, name), hi }];
+  // (an exclude with the other taller: above this one's top the other simply stands, so it's added there)
+  if (op === 'xor' && nO > nT) { parts[0] = { ...parts[0], hi: nT }; parts.push({ ...allFloors(n, 'add', ring, `${name}, above`), lo: nT + 1, hi: nO }); }
+  return { b: { ...target, floors: n, form: { ...f, uses, carves: [...f.carves, ...parts] } }, lost };
 }
 
 /** a part's ring with one edge (from point i to i + 1) pushed out along its normal by d metres (in, for negative) */
