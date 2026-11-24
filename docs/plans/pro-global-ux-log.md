@@ -36,9 +36,21 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
   - a 14-floor star with 30 mixed parts drawn with no console errors, its handles one part at a time, following the Parts list.
   - Each test was taken back out; the project is as it was.
 
-**Known:**
-- The first Circle… drag in the app added nothing, and the second did. It didn't happen again, and the cause isn't known: possibly the drag began on a handle.
+**Known (both fixed the same day, below):**
+- The first Circle… drag in the app added nothing, and the second did.
 - With many parts, all the outlines still show. They read as a tangle on 30 parts.
+
+**Follow-up, the same day: the two known items fixed.**
+- **A drawn shape that added nothing** (src/pro/edit.ts). A drag thinner than 1 m on a side quietly became the first corner of a click-the-corners outline. A footprint under 3 m was dropped and the tool ended, saying nothing. Now:
+  - a thin drag says "Too thin to be an area: drag at least 1 m each way, or click its corners";
+  - a footprint under 3 m says "Too small to be a footprint", whether it's a new building or drawn into one;
+  - either way the tool stays armed for another go.
+  Also, a drag's far corner snapped onto the line its first corner is on (seen in the app: "4.1 × 0.0 m on the edge") no longer folds the box flat: that side keeps the pointer's position.
+- **Outlines with many parts** (src/pro/formHud.tsx): with more than 4 parts, only the part in focus gets its full outline (bottom ring, top ring and corner lines). The rest get one ring at their top floor.
+- **Checked:**
+  - `npx tsc`, `npm test` and `npm run build` pass.
+  - In a second tab with storage writes blocked, so the user's project, open in the first tab, wasn't touched: the 30-part star read calmly in Shaded, with one ring per part and the focused one in full.
+  - Thin and small drags each gave their message, added nothing and kept the tool. A normal drag after them added the part.
 
 ---
 

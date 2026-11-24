@@ -627,7 +627,17 @@ export class CanvasEdit {
   }
   private moveIn(ev: PointerEvent, v: ProView) {
     const d = this.drag;
-    if (d?.kind === 'rect') { const g = this.snap(ev.clientX, ev.clientY, ev, { from: false }); if (g) { d.to = g; this.draw(); } return; }
+    if (d?.kind === 'rect') {
+      // (a snap pulls the far corner onto an edge or a corner; but where that would fold the box flat, the side the
+      // pointer has opened up under 1 m, as onto the line its first corner is on, that side keeps the pointer's)
+      const g = this.snap(ev.clientX, ev.clientY, ev, { from: false }), raw = v.groundAt(ev.clientX, ev.clientY);
+      if (g) {
+        const to: Pt = [g[0], g[1]];
+        if (raw) for (const i of [0, 1]) if (Math.abs(to[i] - d.from[i]) < 1 && Math.abs(raw[i] - d.from[i]) >= 1) to[i] = raw[i];
+        d.to = to; this.draw();
+      }
+      return;
+    }
     if (d?.kind === 'plan') {
       const b = this.h.p().scheme?.buildings.find((x) => x.id === d.id); if (!b?.form) return;
       // (the drag keeps its own copy of the plan: the next move builds on it, not on a render yet to come)
@@ -710,7 +720,8 @@ export class CanvasEdit {
         this.finish();
         return;
       }
-      // (a click: the first corner of an outline)
+      // (a drag that came out thinner than a metre: said, and still ready for another; a click: the first corner)
+      if (!click) { this.h.toast?.('Too thin to be an area: drag at least 1 m each way, or click its corners. Esc to stop.'); this.draw(); v.controls.enabled = true; return; }
       this.pts = [...d.from]; this.draw();
       v.controls.enabled = true;
       return;
@@ -780,6 +791,11 @@ export class CanvasEdit {
   }
 
   // ---------- finishing ----------
+  /** a footprint drawn too small to be one (under 3 m across): said, and the tool kept for another go */
+  private tooSmall() {
+    this.h.toast?.('Too small to be a footprint: drag at least 3 m each way, or click its corners. Still drawing; Esc to stop.');
+    this.draw(); this.tell();
+  }
   private finish() {
     const t = this.tool, P = this.pts, p = this.h.p(), e = this.h.e();
     this.pts = []; this.hover = null; this.ghost = []; this.guide = []; this.hotPt = null;
@@ -809,7 +825,7 @@ export class CanvasEdit {
           this.h.up({ scheme: { ...s, buildings: s.buildings.map((x) => (x.id === tb.id ? { ...x, form } : x)) } });
           this.h.pick({ k: 'building', id: tb.id });
           this.h.toast?.(`${partName(form, c)}: a part of ${tb.name ?? 'the building'}. Drag its middle to move it, its edges to size it; Parts lists it.`);
-        }
+        } else { this.tooSmall(); return; }
       }
     } else if (t.k === 'mass') {
       // (as a template does: on a plot still filled for the user, the first mass takes the filled buildings' place)
@@ -818,7 +834,7 @@ export class CanvasEdit {
       if (b) {
         this.h.up({ scheme: { ...s, buildings: [...s.buildings, b] } });
         this.h.pick({ k: 'building', id: b.id });
-      }
+      } else if (isDrawn(t.shape)) { this.tooSmall(); return; }
     }
     if (t.k === 'template') {
       // (on a plot still filled for the user, the template is the design: it takes the filled buildings' place;

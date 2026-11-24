@@ -97,7 +97,7 @@ export function FormHud({ view, edit, p, e, picked, tx, live, readOnly, xray, se
   const bb = bboxOf(plan), hw0 = Math.max(0.5, (bb.x1 - bb.x0) / 2);
   const keys = f && xray === null ? keysOf(f) : [];
   const W = (x: number, z: number, y: number): W3 => { const [X, Z] = toWorld(saved!, x, z); return [X, y, Z]; };
-  const ringKey = f && saved ? JSON.stringify([f.plan, f.keys, f.ease, f.uses, f.carves, f.levels, saved.spine, show]) : '';
+  const ringKey = f && saved ? JSON.stringify([f.plan, f.keys, f.ease, f.uses, f.carves, f.levels, saved.spine, show, focusPart]) : '';
   useEffect(() => {
     if (!edit || !f || !saved || !show || xray !== null) return;
     const L: number[] = [];
@@ -108,14 +108,17 @@ export function FormHud({ view, edit, p, e, picked, tx, live, readOnly, xray, se
     // (each part's outline at its lowest and highest floor, with its corners up: solid where it adds or intersects,
     // dashed where it cuts or excludes, so what's taken away reads as taken away)
     const solid: number[] = [], dash: number[] = [];
+    // (of many parts, the one in focus outlined in full; the rest by one ring at their top, so they read without a tangle)
+    const full = new Set(handled(f.carves, focusPart).map((c) => c.id));
     for (const c of f.carves) {
       if (c.off) continue;
+      const whole = full.has(c.id);
       const [lo, hi] = partSpan(c, fl.length), a = fl[lo - 1], z = fl[hi - 1]; if (!a || !z) continue;
       const s = sampleCurve(c.ring, 1.5), out = opOf(c) === 'cut' || opOf(c) === 'xor' ? dash : solid, few = s.length <= 40;
       const ringAt = (t: number, y: number) => { const k = keyAt(f, t), [dx, dz] = drift(c.path, t), o: number[] = []; for (let i = 0; i + 1 < s.length; i += 2) { const [x, q] = through(k, s[i] + dx, s[i + 1] + dz), [X, Z] = toWorld(saved, x, q); o.push(X, y, Z); } return o; };
-      const r0 = ringAt(a.t, a.y + 0.05), r1 = ringAt(z.t, z.y + z.h);
-      for (const r of [r0, r1]) for (let i = 0; i < r.length; i += 3) { const j = (i + 3) % r.length; out.push(r[i], r[i + 1], r[i + 2], r[j], r[j + 1], r[j + 2]); }
-      if (few) for (let i = 0; i < r0.length; i += 3) out.push(r0[i], r0[i + 1], r0[i + 2], r1[i], r1[i + 1], r1[i + 2]);
+      const r0 = whole ? ringAt(a.t, a.y + 0.05) : [], r1 = ringAt(z.t, z.y + z.h);
+      for (const r of whole ? [r0, r1] : [r1]) for (let i = 0; i < r.length; i += 3) { const j = (i + 3) % r.length; out.push(r[i], r[i + 1], r[i + 2], r[j], r[j + 1], r[j + 2]); }
+      if (few && whole) for (let i = 0; i < r0.length; i += 3) out.push(r0[i], r0[i + 1], r0[i + 2], r1[i], r1[i + 1], r1[i + 2]);
     }
     edit.decor = pv ? { dashed: [...L, ...dash], lines: solid } : { lines: [...L, ...solid], dashed: dash };
     edit.draw();
