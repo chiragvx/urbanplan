@@ -69,6 +69,7 @@ import { BuildingInfo, buildingName, MoneyView, Overview, RulesView, VIEW_OF, VI
 import { ShareBody } from './shareSheet';
 import { withFloors } from './shapePanel';
 import { pole } from './form/curve';
+import { coverLook, groundCutOf } from './groundPanel';
 import { Btn, cr, Dialog, download, Icon, Menu, nf, Num, pct, Range, Seg, Select, sqft, TooltipLayer, type MenuItem } from './ui';
 
 const KEY = 'urbanplan:pro:project', REF = 'urbanplan:pro:cloud', SEEN = 'urbanplan:pro:seen';
@@ -346,6 +347,10 @@ function App() {
   // ---------- the 3D ----------
   const canvas = useRef<HTMLCanvasElement>(null), view = useRef<ProView | null>(null);
   const [xray, setXray] = useState<number | null>(null);
+  /** the ground's cut-away under the plot (docs/plans/plot-ground.md §5) */
+  const [cut, setCutS] = useState(false);
+  /** …and cut through the middle, the front half taken away */
+  const [sect, setSect] = useState(true);
   const [hover, setHover] = useState<Picked | null>(null);
   /** the building under the pointer (select tool): the cursor says it can be picked, and a tag names it until the first pick */
   const [hb, setHb] = useState<{ id: string; x: number; y: number } | null>(null);
@@ -387,6 +392,8 @@ function App() {
   });
   const maxFloor = Math.max(1, ...e.d.buildings.map((b) => b.floors));
   const xr = xray === null ? null : Math.min(xray, maxFloor);
+  const cutOn = cut && !!p.ground;
+  const setCut = (on: boolean) => { if (on && mode === 'wire') setMode('shaded'); setCutS(on); };
   useEffect(() => {
     setHover(null);
     const o = outline(p);
@@ -397,10 +404,11 @@ function App() {
       roads: roadLines(o.ring, o.roads).map((l) => ({ pts: l.pts, today: l.road.today })),
       dsOf: (i) => dsOfBuilding(p, idx[i], e.ds, e.d.buildings[idx[i]]?.b.id), rooms: all ? rooms : idx.map((i) => rooms[i]), roomColor: ROOM_COLOR,
       features: hidden.size ? p.features?.filter((f) => !hidden.has(f.id)) : p.features, levels: p.levels, north: p.north, sel: picked?.k === 'building' ? picked.id : null, forms: e.forms, at: p.at ?? null, city: p.city, cores: xr !== null ? idx.map((i) => buildingCores(e, i)) : undefined,
+      ground: p.ground ? { cover: coverLook(p.ground.cover), cut: cutOn ? { ...groundCutOf(e)!, section: sect } : null } : undefined,
     });
     edit.current?.draw();
     applySun();
-  }, [e, xr, rooms, picked, hidden]);
+  }, [e, xr, rooms, picked, hidden, cutOn, sect]);
   useEffect(() => { edit.current?.draw(); }, [step]);
   const applySun = () => {
     const [lat, lon] = CITY_LATLON[p.city] ?? [18.52, 73.86];
@@ -480,6 +488,7 @@ function App() {
       if (!narrow && ev.key === '1') { if (inspOn && !picked) setProjOpen(false); else go('design'); return; }
       if (i >= 0 && STEPS[i]) { go(STEPS[i].key); return; }
       if (ev.key === 'x') setXray((v) => (v === null ? Math.max(1, Math.round(maxFloor / 2)) : null));
+      if (ev.key === 'g' && p.ground) setCut(!cutOn);
       if (ev.key === ']' ) setXray((v) => (v === null ? null : Math.min(maxFloor, v + 1)));
       if (ev.key === '[') setXray((v) => (v === null ? null : Math.max(1, v - 1)));
       if (ev.key === 'f') frameIt(picked);
@@ -580,6 +589,7 @@ function App() {
       A('From the street', 'street', () => cam('street'), { kind: 'View', keys: 'S', words: 'camera eye level' }),
       A('From above', 'top', () => cam('top'), { kind: 'View', keys: 'T', words: 'camera top' }),
       A(xr === null ? 'X-ray a floor' : 'Stop the X-ray', 'layers', () => setXray(xr === null ? Math.max(1, Math.round(maxFloor / 2)) : null), { kind: 'View', keys: 'X', words: 'floor plan section inside' }),
+      ...(p.ground ? [A(cutOn ? 'Hide the ground' : 'The ground, cut away', 'strata', () => setCut(!cutOn), { kind: 'View', keys: 'G', words: 'soil geology strata basement foundation piles bedrock water' })] : []),
       A(mode === 'wire' ? 'Shaded view' : 'Wireframe view', mode === 'wire' ? 'shade' : 'wire', () => setMode(mode === 'wire' ? 'shaded' : 'wire'), { kind: 'View', words: 'render materials wireframe shaded' }),
       A(sun.on ? 'Sun off' : 'Sun and shadows', 'sun', () => { if (!sun.on && mode === 'wire') setMode('shaded'); setSun({ ...sun, on: !sun.on }); }, { kind: 'View', words: 'shadow daylight time' }),
       A(panel ? 'Hide the sheet' : 'Show the sheet', 'panel', () => setPanel(!panel), { kind: 'View', keys: '\\' }),
@@ -796,6 +806,10 @@ function App() {
             { value: 'wire', label: 'Wireframe', icon: 'wire', checked: mode === 'wire' && xr === null, disabled: xr !== null, title: xr !== null ? 'X-ray is always shaded' : 'Wireframe: low-poly lines' },
             { value: 'shaded', label: 'Shaded', icon: 'shade', checked: mode === 'shaded' || xr !== null, title: 'Shaded: materials, windows, sun' },
           ]} ariaLabel="Drawn as" />
+          {p.ground && <div class="tgroup">
+            <button type="button" aria-pressed={cutOn} data-tip="The ground cut away under the plot: its layers, the water, the basements and the foundations (G)" onClick={() => setCut(!cutOn)}><Icon n="strata" size={16} />Ground</button>
+            {cutOn && <button type="button" aria-pressed={sect} data-tip={sect ? 'Cut through the middle: the front half taken away. Click for the whole block' : 'The whole block. Click to cut through the middle'} onClick={() => setSect(!sect)}>Section</button>}
+          </div>}
           {xr !== null && <div class="tgroup floor">
             <button type="button" onClick={() => setXray(Math.max(1, xr - 1))} aria-label="Floor down" data-tip="Floor down ([)"><Icon n="minus" size={14} /></button>
             <b>Floor {xr}<small> of {maxFloor}</small></b>
@@ -810,6 +824,8 @@ function App() {
               { label: 'Above', icon: 'top', sub: 'T', onSelect: () => cam('top') },
               { heading: 'Show' },
               { label: 'X-ray, a floor at a time', checked: xr !== null, sub: 'X', onSelect: () => setXray(xr === null ? Math.max(1, Math.round(maxFloor / 2)) : null) },
+              ...(p.ground ? [{ label: 'The ground, cut away', checked: cutOn, sub: 'G', onSelect: () => setCut(!cutOn) }] : []),
+              ...(cutOn ? [{ label: 'Section through the middle', checked: sect, sub: sect ? 'The front half taken away' : 'The whole block', onSelect: () => setSect(!sect) }] : []),
               ...(!locked ? [{ label: 'Snapping', checked: snap, sub: snap ? 'Hold Alt to move freely' : 'Off', onSelect: () => setSnap(!snap) }] : []),
             ]} />
           </div>
@@ -929,7 +945,7 @@ function ResultBar({ e, deal, sum, go, statement, vs }: { e: ReturnType<typeof e
         <small>{forWhom ? `${unused ? 'no use yet' : e.p.purpose === 'client' ? 'for a client' : e.p.purpose === 'own' ? 'own use' : 'nothing sold'} · land aside` : 'public: nothing sold'}</small>
       </button>
       <button type="button" class="kpi" onClick={() => go('numbers')}>
-        <span>Build per m²</span><b>{d.bua > 0 ? `₹${nf((d.money.build + d.money.parking + d.money.soft) / d.bua)}` : '—'}</b>
+        <span>Build per m²</span><b>{d.bua > 0 ? `₹${nf((d.money.build + d.money.parking + d.money.soft + (d.money.ground ?? 0)) / d.bua)}` : '—'}</b>
         <small>built-up, land aside</small>
       </button>
       </> : <>
@@ -1058,7 +1074,7 @@ function People({ pid, role, close }: { pid: string; role: 'owner' | 'editor' | 
 type Box = { x0: number; z0: number; x1: number; z1: number; h: number };
 
 function Keys({ close }: { close: () => void }) {
-  const rows: [string, string][] = [['Ctrl K', 'Search: actions, buildings, settings'], ['1 · N · A', 'The project’s settings · the Numbers report · the Approval report'], ['\\', 'Show or hide the sheet'], ['/', 'Pin the sheet beside the view, or float it'], ['F6 · Shift+F6', 'Move between the top bar, the steps, the sheet and the view'], ['R · Shift+R', 'Turn the picked building 15°'], ['+ −', 'A floor more or less on the picked building'], ['Ctrl+D', 'Duplicate the picked building'], ['M', 'Measure'], ['X', 'X-ray floor on or off'], ['[  ]', 'Floor down / up'], ['F', 'Frame what’s picked (nothing picked: the whole site)'], ['S · T', 'Camera: street, from above'], ['Drag · Right-drag · Wheel', 'Orbit about the point under the pointer · pan across the ground · zoom toward the pointer'], ['Double-click', 'Frame a building (on open ground: the whole site)'], ['P', 'The plan from above, or back to 3D'], ['V', 'Back to picking'], ['Enter · Esc · Backspace', 'Drawing: finish, cancel, take back a point'], ['Shift', 'Drawing: keep a line square to the road'], ['Alt', 'Hold while dragging: no snapping'], ['← → ↑ ↓', 'Nudge what’s picked a grid step (Shift: ×10)'], ['Delete', 'Remove what’s picked'], ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · redo'], ['↑ ↓ in a number', 'Step it (Shift: ×10)'], ['Esc', 'Close this; let go of what’s picked; close the sheet']];
+  const rows: [string, string][] = [['Ctrl K', 'Search: actions, buildings, settings'], ['1 · N · A', 'The project’s settings · the Numbers report · the Approval report'], ['\\', 'Show or hide the sheet'], ['/', 'Pin the sheet beside the view, or float it'], ['F6 · Shift+F6', 'Move between the top bar, the steps, the sheet and the view'], ['R · Shift+R', 'Turn the picked building 15°'], ['+ −', 'A floor more or less on the picked building'], ['Ctrl+D', 'Duplicate the picked building'], ['M', 'Measure'], ['X', 'X-ray floor on or off'], ['G', 'The ground cut away under the plot (once its ground is said)'], ['[  ]', 'Floor down / up'], ['F', 'Frame what’s picked (nothing picked: the whole site)'], ['S · T', 'Camera: street, from above'], ['Drag · Right-drag · Wheel', 'Orbit about the point under the pointer · pan across the ground · zoom toward the pointer'], ['Double-click', 'Frame a building (on open ground: the whole site)'], ['P', 'The plan from above, or back to 3D'], ['V', 'Back to picking'], ['Enter · Esc · Backspace', 'Drawing: finish, cancel, take back a point'], ['Shift', 'Drawing: keep a line square to the road'], ['Alt', 'Hold while dragging: no snapping'], ['← → ↑ ↓', 'Nudge what’s picked a grid step (Shift: ×10)'], ['Delete', 'Remove what’s picked'], ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · redo'], ['↑ ↓ in a number', 'Step it (Shift: ×10)'], ['Esc', 'Close this; let go of what’s picked; close the sheet']];
   return <Dialog title="Keyboard shortcuts" close={close}><dl class="lines keys">{rows.map(([a, b]) => <div><dt><kbd>{a}</kbd></dt><dd>{b}</dd></div>)}</dl></Dialog>;
 }
 

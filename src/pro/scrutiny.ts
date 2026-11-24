@@ -89,6 +89,15 @@ export function scrutiny(e: Evaluated, rooms?: RoomsLike): Check[] {
   });
   if (hasBuildings) add({ key: 'coverage', group: 'Building', rule: 'Ground coverage', clause: `${code} (no separate cap for residential in this table, as assumed)`, required: 'inside the margins', proposed: `${Math.round(d.coverage * 100)}% of the plot`, status: 'info' });
 
+  // ---- the ground: each building's foundation, the basements' dig, what to watch (./foundation.ts) ----
+  if (e.ground && hasBuildings) {
+    const G = e.ground;
+    for (const f of G.buildings) add({ key: `foundation:${f.id}`, group: 'Building', rule: `Foundation · ${f.name}`, clause: f.kind === 'piles' || f.kind === 'piled-raft' || f.kind === 'ureamed' ? 'IS 2911 (as assumed)' : f.kind === 'raft' ? 'IS 2950 (as assumed)' : 'IS 1904; IS 6403 (as assumed)', required: `bears ${f.q} kN/m² (net)`, proposed: `${f.label} at ${f.depth} m on ${f.on.replace('-', ' ')}${f.piles ? `, ${f.piles.n} piles ${f.piles.dia} m × ${f.piles.length} m` : ''}`, status: 'info', note: f.why.join(' ') });
+    for (const x of G.flags) add({ key: `ground:${x.key}`, group: 'Building', rule: x.rule, clause: x.clause, required: 'feasible on this ground', proposed: x.text, status: x.status });
+    const holes = Math.max(2, Math.ceil(r.area / 1000));
+    add({ key: 'soil-report', group: 'Building', rule: 'Soil investigation', clause: 'IS 1892 (as assumed: a borehole about every 1,000 m², to below the founding level)', required: `about ${holes} boreholes, to at least ${Math.round(Math.max(...G.buildings.map((f) => f.depth + (f.piles?.length ?? 0)), 6) + 3)} m`, proposed: e.p.ground?.src === 'report' ? 'from a soil report' : (e.p.ground?.holes?.length ?? 0) > 1 ? `${e.p.ground!.holes!.length} boreholes given` : 'as assumed for the area', status: e.p.ground?.src === 'report' ? 'pass' : 'warn', note: 'The foundations and basements here are a feasibility estimate: a soil investigation and a structural engineer confirm them.' });
+  }
+
   // ---- fire and safety ----
   const H = d.height;
   if (hasBuildings) {

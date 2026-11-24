@@ -29,6 +29,8 @@ import type { Check, CheckStatus } from './scrutiny';
 import type { FlatRooms } from './rooms';
 import { documents, fees, nocs, PERMISSION_LABEL, permissionOf, stages } from './approvals';
 import { buildingCores, type CoreDetail } from './coreDetail';
+import { groundCutOf } from './groundPanel';
+import { GROUND_PRESETS, logText, runsOf, SOILS } from './ground';
 import type { Opening } from './openings';
 
 const W = 420, H = 297, PAD = 10, TB = 92; // sheet, border, title block width (mm)
@@ -37,7 +39,7 @@ const SCALES = [50, 100, 200, 250, 500, 1000, 2000];
 const f2 = (v: number) => (Math.round(v * 100) / 100).toFixed(2);
 const nf = (v: number) => Math.round(v).toLocaleString('en-IN');
 const m2 = (v: number) => `${f2(v)} m²`;
-const rs = (v: number) => (v >= 1e7 ? `Rs ${(v / 1e7).toFixed(2)} crore` : v >= 1e5 ? `Rs ${(v / 1e5).toFixed(2)} lakh` : `Rs ${nf(v)}`);
+const rs = (v: number): string => (v < 0 ? `−${rs(-v)}` : v >= 1e7 ? `Rs ${(v / 1e7).toFixed(2)} crore` : v >= 1e5 ? `Rs ${(v / 1e5).toFixed(2)} lakh` : `Rs ${nf(v)}`);
 const letter = (i: number) => String.fromCharCode(65 + i);
 const pts = (q: number[], T: (x: number, z: number) => [number, number]) => { const o: string[] = []; for (let i = 0; i < q.length; i += 2) o.push(T(q[i], q[i + 1]).map((v) => v.toFixed(2)).join(',')); return o.join(' '); };
 const mid = (q: number[]): [number, number] => { let x = 0, z = 0; for (let i = 0; i < q.length; i += 2) { x += q[i]; z += q[i + 1]; } return [x / (q.length / 2), z / (q.length / 2)]; };
@@ -735,13 +737,21 @@ function Section({ e, no, total }: { e: Evaluated; no: number; total: number }) 
   const placed = spans.map(([a, c]) => { const x = cursor; cursor += c - a + 10; return { x, w: c - a }; });
   const levelsOf = (bi: number) => { const b = d.buildings[bi]; const hs = b.laid ? b.laid.floors.map((f) => f.h) : Array(b.floors).fill(fh0); return hs; };
   const topOf = (bi: number) => under * fh0 + levelsOf(bi).reduce((s, h) => s + h, 0);
-  const totalW = Math.max(10, cursor - 10), up = Math.max(10, ...d.buildings.map((_, bi) => topOf(bi) + MR + 1)), down = nB * BH + PIT + 1;
+  // (the plot's ground under it, when said: the layers, the water, each building's foundation to depth)
+  const G = e.ground, gcut = G ? groundCutOf(e) : null, gruns = e.p.ground ? runsOf(e.p.ground.layers) : [];
+  const FD = gcut ? Math.min(gcut.floor, Math.max(nB * BH + PIT + 4, ...G!.buildings.map((f) => f.depth + (f.piles?.length ?? 0) + (f.raft ?? 0) + 2))) : 0;
+  const totalW = Math.max(10, cursor - 10), up = Math.max(10, ...d.buildings.map((_, bi) => topOf(bi) + MR + 1)), down = Math.max(nB * BH + PIT + 1, FD);
   const need = Math.max((totalW + 30) * 1000 / AREA.w, (up + down + 14) * 1000 / AREA.h);
   const scale = SCALES.find((s) => s >= need) ?? 2000, k = 1000 / scale;
   const gx = AREA.x + (AREA.w - totalW * k) / 2, gy = AREA.y + 14 + up * k;
   const X = (m: number) => gx + m * k, Y = (m: number) => gy - m * k;
   return (
     <Frame e={e} title="Section A–A" no={no} total={total} scale={`1:${scale}`}>
+      {gcut && <g>
+        {gruns.map((s) => s.top < FD && <rect x={AREA.x} y={Y(-s.top)} width={AREA.w} height={(Math.min(s.bottom, FD) - s.top) * k} fill={SOILS[s.kind].colour} fill-opacity="0.22" />)}
+        {gruns.map((s) => s.top < FD && <text x={AREA.x + 1} y={Y(-s.top) + 2.6} font-size="2" fill="#333">{`${SOILS[s.kind].short.toUpperCase()}${s.top > 0 ? ` FROM −${f2(s.top)}` : ''}`}</text>)}
+        {gcut.water !== null && gcut.water < FD && <g><line x1={AREA.x} y1={Y(-gcut.water)} x2={AREA.x + AREA.w} y2={Y(-gcut.water)} stroke="#3b82c4" stroke-width="0.4" stroke-dasharray="2 1" /><text x={AREA.x + AREA.w - 1} y={Y(-gcut.water) - 0.8} font-size="2" text-anchor="end" fill="#3b82c4">{`WATER −${f2(gcut.water)}`}</text></g>}
+      </g>}
       <line x1={AREA.x} y1={gy} x2={AREA.x + AREA.w} y2={gy} stroke="#111" stroke-width="0.6" />
       <text x={AREA.x} y={gy - 1} font-size="2.4">GROUND LEVEL ±0.00</text>
       {d.buildings.map((b, bi) => {
@@ -789,6 +799,13 @@ function Section({ e, no, total }: { e: Evaluated; no: number; total: number }) 
           <Dim a={[X(x + w) + 8, Y(0)]} b={[X(x + w) + 8, Y(top)]} label={`${f2(top)} M`} />
           {nB > 0 && <Dim a={[X(x + w) + 8, Y(bottom)]} b={[X(x + w) + 8, Y(0)]} label={`${f2(-bottom)} M`} />}
           {levels.filter((l) => l.y >= 0).slice(0, 1).map((l) => <Dim a={[X(x + w) + 3, Y(l.y)]} b={[X(x + w) + 3, Y(l.y + l.h)]} label={`${f2(l.h)}`} />)}
+          {(() => { const f = G?.buildings.find((q) => q.id === b.b.id); if (!f) return null; const top0 = -f.depth;
+            return <g>
+              {f.raft && <rect x={X(x)} y={Y(top0)} width={w * k} height={f.raft * k} fill="#b9b4aa" stroke="#111" stroke-width="0.25" />}
+              {f.piles && (() => { const N = Math.max(2, Math.min(12, Math.round(w / 4))); return Array.from({ length: N }, (_, i) => { const px = x + (w * (i + 0.5)) / N; return <rect x={X(px) - (f.piles!.dia * k) / 2} y={Y(top0 - (f.raft ?? 0.8))} width={Math.max(0.3, f.piles!.dia * k)} height={f.piles!.length * k} fill="#8d8a83" stroke="#111" stroke-width="0.15" />; }); })()}
+              {(f.kind === 'footings' || f.kind === 'rock') && (() => { const N = Math.max(2, Math.min(10, Math.round(w / 6))); return Array.from({ length: N }, (_, i) => { const px = x + (w * (i + 0.5)) / N; return <rect x={X(px) - 1.2 * k} y={Y(top0)} width={2.4 * k} height={0.6 * k} fill="#b9b4aa" stroke="#111" stroke-width="0.2" />; }); })()}
+              <text x={X(x + w / 2)} y={Y(top0 - (f.raft ?? 0) - (f.piles?.length ?? 0.6)) + 3} font-size="2" text-anchor="middle">{`${f.label.toUpperCase()}${f.piles ? ` ${f.piles.n} × Ø${Math.round(f.piles.dia * 1000)}, ${f2(f.piles.length)} M` : ''} AT −${f2(f.depth)}`}</text>
+            </g>; })()}
           <text x={X(x + w / 2)} y={Y(bottom - PIT) + 6} font-size="3" font-weight="700" text-anchor="middle">{`BUILDING ${letter(bi)}`}</text>
         </g>;
       })}
@@ -866,6 +883,28 @@ function scrutinyBlocks(e: Evaluated, checks: Check[]): Block[] {
     cols: [{ h: 'Result', w: 0.07 }, { h: 'Rule', w: 0.17 }, { h: 'Required', w: 0.25 }, { h: 'Proposed', w: 0.27 }, { h: 'Clause', w: 0.24 }],
     rows: checks.filter((c) => c.group === g).map((c): Cell[] => [STATUS[c.status], { t: c.rule, b: true }, c.required, c.note ? `${c.proposed}. ${c.note}` : c.proposed, c.clause]),
   }));
+}
+
+/** the plot's ground and what it makes of the scheme (./foundation.ts), as tables for the sheet */
+function groundBlocks(e: Evaluated): Block[] {
+  const g = e.p.ground!, G = e.ground!, R = runsOf(g.layers), out: Block[] = [];
+  const src = g.src === 'report' ? 'from a soil report' : g.src === 'preset' ? `typical for the area (${GROUND_PRESETS.find((x) => x.id === g.preset)?.label ?? ''}), as assumed` : 'as said by the user';
+  out.push({ title: 'The ground', sub: `${src}; seismic zone ${G.zone}`, cols: [{ h: 'From', w: 0.15, end: true }, { h: 'To', w: 0.15, end: true }, { h: 'Layer', w: 0.45 }, { h: 'Bears (kN/m²)', w: 0.25, end: true }],
+    rows: [...R.map((r): Cell[] => [f2(r.top), Number.isFinite(r.bottom) ? f2(r.bottom) : 'below', { t: SOILS[r.kind].label, b: true }, String(r.sbc)]), ['Water', '', g.water === null ? 'none found' : `at ${f2(g.water)} m, at its highest`, '']] });
+  if (g.holes?.length) out.push({ title: 'Boreholes', cols: [{ h: 'Hole', w: 0.15 }, { h: 'At (x, z)', w: 0.25 }, { h: 'Log', w: 0.6 }], rows: g.holes.map((h, i) => [`BH-${i + 1}`, `${f2(h.at[0])}, ${f2(h.at[1])}`, logText(h.layers)]) });
+  out.push({ title: 'Foundations', cols: [{ h: 'Building', w: 0.18 }, { h: 'Foundation', w: 0.3 }, { h: 'Why', w: 0.52 }],
+    rows: G.buildings.map((f) => [{ t: f.name, b: true }, `${f.label} at ${f2(f.depth)} m on ${SOILS[f.on].short.toLowerCase()}${f.piles ? `; ${f.piles.n} piles Ø${Math.round(f.piles.dia * 1000)} mm, ${f2(f.piles.length)} m` : ''}${f.raft ? `; raft ${f2(f.raft)} m` : ''}. ${f.q} kN/m² on ${f.sbc}.`, f.why.join(' ')]) });
+  if (G.dig) out.push({ title: 'The basements’ dig', sub: `${G.dig.n} level${G.dig.n > 1 ? 's' : ''}, ${f2(G.dig.depth)} m deep over ${Math.round(G.dig.area).toLocaleString('en-IN')} m²; about ${G.dig.months} months`, cols: [{ h: 'Item', w: 0.5 }, { h: 'Quantity', w: 0.25, end: true }, { h: 'Cost', w: 0.25, end: true }],
+    rows: [...G.dig.byLayer.map((x): Cell[] => [`Dig: ${SOILS[x.kind].short.toLowerCase()} (${x.dig})`, `${Math.round(x.vol).toLocaleString('en-IN')} m³`, rs(x.cost)]),
+      ...(G.dig.shore ? [[G.dig.shore.label, `${Math.round(G.dig.shore.area).toLocaleString('en-IN')} m²`, rs(G.dig.shore.cost)] as Cell[]] : []),
+      ...(G.dig.rockFace ? [['Rock face, bolted and shotcreted', `${Math.round(G.dig.rockFace.area).toLocaleString('en-IN')} m²`, rs(G.dig.rockFace.cost)] as Cell[]] : []),
+      ...(G.dig.water.below ? [['Dewatering', `${f2(G.dig.water.head)} m head`, rs(G.dig.water.dewater)], ['Tanking', '', rs(G.dig.water.tanking)], ...(G.dig.water.uplift ? [['Anchors against uplift', '', rs(G.dig.water.anchors)]] : [])] as Cell[][] : [])] });
+  out.push({ title: 'The money', sub: 'What the ground costs, against the ordinary foundation and dig the build and parking rates carry', cols: [{ h: 'Line', w: 0.65 }, { h: 'Amount', w: 0.35, end: true }],
+    rows: [['Excavation and levelling', rs(G.lines.excavation)], ['Shoring', rs(G.lines.shoring)], ['Water', rs(G.lines.water)], ['Foundations', rs(G.lines.foundations)], [{ t: 'The ground, all in', b: true }, { t: rs(G.lines.total), b: true }], ['Less: an ordinary site', rs(-G.lines.ordinary)], [{ t: 'Added to the cost', b: true }, { t: rs(G.lines.net), b: true }], ['Months added to the programme', String(G.months)]] });
+  out.push({ title: 'Basements worth digging', cols: [{ h: 'Level', w: 0.3 }, { h: 'Over ordinary ground, a bay', w: 0.7, end: true }], rows: [...G.cap.perBay.map((v, i): Cell[] => [`Basement ${i + 1}`, rs(v)]), [{ t: `Up to ${G.cap.max}`, b: true }, G.cap.why]] });
+  if (G.flags.length) out.push({ title: 'To watch', cols: [{ h: 'What', w: 0.3 }, { h: 'Why', w: 0.7 }], rows: G.flags.map((x) => [{ t: x.rule, b: true }, x.text]) });
+  out.push({ title: 'Note', cols: [{ h: '', w: 1 }], rows: [['A feasibility estimate. The layers, bearing figures and rates are assumptions to confirm: a soil investigation (IS 1892) and a structural engineer decide the foundations and the dig.']] });
+  return out;
 }
 
 function permissionBlocks(e: Evaluated): Block[] {
@@ -964,6 +1003,7 @@ export function sheetDefs({ e, checks, rooms }: SetInput): SheetDef[] {
     ...(e.d.buildings.length ? [{ title: 'Section A–A', draw: (no: number, total: number) => <Section e={e} no={no} total={total} /> }] : []),
     { title: 'Area statement', draw: (no, total) => <AreaStatement e={e} no={no} total={total} /> },
   );
+  if (e.ground) { const pages = flow(groundBlocks(e), 2); pages.forEach((page, i) => list.push({ title: pages.length > 1 ? `Ground and foundations (${i + 1} of ${pages.length})` : 'Ground and foundations', draw: (no, total) => <TableSheet e={e} title="Ground and foundations" heading={i ? 'Ground and foundations (continued)' : 'Ground and foundations: a feasibility estimate'} page={page} no={no} total={total} /> })); }
   const tables = (title: string, heading: string, pages: Placed[][]) => pages.forEach((page, i) => list.push({ title: pages.length > 1 ? `${title} (${i + 1} of ${pages.length})` : title, draw: (no, total) => <TableSheet e={e} title={title} heading={i ? `${heading} (continued)` : heading} page={page} no={no} total={total} /> }));
   tables('Schedules', 'Schedules', flow(scheduleBlocks(e, rooms), 2));
   tables('Scrutiny report', 'Scrutiny report: every rule checked (advisory)', flow(scrutinyBlocks(e, checks), 1));

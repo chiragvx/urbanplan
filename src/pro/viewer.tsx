@@ -70,7 +70,7 @@ export function Overview({ p, e }: { p: ProProject; e: Evaluated }) {
 }
 
 export function MoneyView({ e, deal }: { e: Evaluated; deal: DealResult }) {
-  if (!deal.earns) return <Section title="Cost"><Lines rows={[['To build', cr(e.d.money.cost)], ['Per m² built-up', e.d.bua > 0 ? `₹${nf((e.d.money.build + e.d.money.parking + e.d.money.soft) / e.d.bua)}` : '—']]} /><p class="hint-line">A public scheme: nothing is sold.</p></Section>;
+  if (!deal.earns) return <Section title="Cost"><Lines rows={[['To build', cr(e.d.money.cost)], ['Per m² built-up', e.d.bua > 0 ? `₹${nf((e.d.money.build + e.d.money.parking + e.d.money.soft + (e.d.money.ground ?? 0)) / e.d.bua)}` : '—']]} /><p class="hint-line">A public scheme: nothing is sold.</p></Section>;
   return (
     <>
       <Section title="Result">

@@ -4,11 +4,10 @@
 // precinct's own rules when there is one. Thresholds are rules of thumb from design codes and guidelines (cited
 // inline), for discussion, not a statutory check.
 import { FIRE_H, FIRE_W, roadFrame } from '../doc/site';
-import { bearingOf, chhajjaOn, climateOf, compositionOf, landscapeOf, lightingOf, paletteOf, signageOf, siteKitOf, zonesOf, ZONED_FROM } from './design';
+import { bearingOf, chhajjaOn, climateOf, compositionOf, lightingOf, paletteOf, signageOf, siteKitOf, zonesOf, ZONED_FROM } from './design';
 import type { Evaluated } from './evaluate';
 import { dsOfBuilding } from './evaluate';
 import { precinctOf } from './heritage';
-import { plantingOf } from './landscape';
 import { facadeBays } from './openings';
 import { PALETTE_SLOTS, PALETTE_TOLERANCE, sharesOf } from './palette';
 
@@ -75,10 +74,11 @@ export function review(e: Evaluated): Review {
   add('Street', 'Warm light, kept off the sky', li.facade === 'none' || (li.kelvin <= 3000 && li.shielded), li.facade === 'none' ? 'No facade lighting' : `${li.kelvin} K, ${li.shielded ? 'shielded' : 'not shielded'}`);
 
   // landscape
-  const land = landscapeOf(ds), area = r.netArea || 0;
-  const garden = d.ground.map.plants.filter((t) => t.kind <= 1).length, extra = plantingOf(r, land, d.buildings.flatMap((b) => b.quads)).trees.length;
+  const area = r.netArea || 0;
+  // (the trees the user placed on the site: none are laid out for them)
+  const placed = (e.p.features ?? []).filter((f) => f.kind === 'tree').length;
   const need = Math.ceil(area / PLOT_PER_TREE);
-  add('Landscape', `A tree for every ${PLOT_PER_TREE} m² of plot`, garden + extra >= need, `${garden + extra} planted, ${need} asked (one per ${PLOT_PER_TREE} m², as assumed)`);
+  add('Landscape', `A tree for every ${PLOT_PER_TREE} m² of plot`, placed >= need, `${placed} placed, ${need} asked (one per ${PLOT_PER_TREE} m², as assumed)`);
 
   // entry and exit, the wall and the internal roads (rules of thumb as assumed: NBC 2016 Part 4's fire tender access,
   // the accessibility guidelines' 1.2 m clear path, a DCR's 1.5 m solid wall on a road side and gates kept off junctions)

@@ -121,7 +121,9 @@ export const buaOf = (b: Pick<BuildingReport, 'laid' | 'plate' | 'floors' | 'use
 /** Things on the site besides the buildings: a parking building, a surface lot and a garden are areas (a ring, drawn
  *  or dragged out; the lot and the garden laid out on what the roads and buildings leave of them); an internal road
  *  is a centre line and a width, a roundabout a point and a width. */
-export type ElementKind = 'parking' | 'lot' | 'garden' | 'road' | 'roundabout' | 'gate' | 'wall' | 'play' | 'tank' | 'trees';
+export type ElementKind = 'parking' | 'lot' | 'garden' | 'road' | 'roundabout' | 'gate' | 'wall' | 'play' | 'tank' | 'trees' | 'pool';
+/** a pool's deck round its water (m): the drawn area is the pool with its deck */
+export const POOL_DECK = 1.5;
 export interface SiteElement extends SiteBuilding {
   kind: ElementKind;
   /** an area's outline (x,z,…); older ones were a spine and a depth, read as the strip along it */
@@ -151,6 +153,7 @@ export const ELEMENTS: { value: ElementKind; label: string; title: string; len: 
   { value: 'garden', label: 'Garden', title: 'Lawn, paths and trees on whatever of it the buildings leave: drag out its area', len: 30, depth: 20 },
   { value: 'play', label: 'Play area', title: 'A play area (counts as open space): drag out its area', len: 14, depth: 12 },
   { value: 'trees', label: 'Trees', title: 'A stand of trees: drag out its area', len: 16, depth: 10 },
+  { value: 'pool', label: 'Swimming pool', title: 'A pool with its deck (1.5 m round the water): drag out its area', len: 15, depth: 9 },
   { value: 'road', label: 'Internal road', title: 'Click its line, Enter to finish; a gate where it meets a road', len: 0, depth: 7 },
   { value: 'roundabout', label: 'Roundabout', title: 'A roundabout or turning circle: click where it goes', len: 18, depth: 18 },
   { value: 'gate', label: 'Gate', title: 'A gate in the compound wall: click the plot’s edge', len: 6, depth: 0.4 },
@@ -175,7 +178,7 @@ export function circleRing(e: SiteBuilding, sides = 20): number[] {
   return out;
 }
 function spineCentreOf(sp: number[]): [number, number] { let x = 0, z = 0; const n = sp.length / 2; for (let i = 0; i < sp.length; i += 2) { x += sp[i]; z += sp[i + 1]; } return [x / n, z / n]; }
-export const isArea = (e: { kind: ElementKind }) => e.kind === 'parking' || e.kind === 'lot' || e.kind === 'garden' || e.kind === 'play' || e.kind === 'trees';
+export const isArea = (e: { kind: ElementKind }) => e.kind === 'parking' || e.kind === 'lot' || e.kind === 'garden' || e.kind === 'play' || e.kind === 'trees' || e.kind === 'pool';
 /** an area's outline: as drawn, or the strip along its spine */
 export function ringOf(e: SiteElement): number[] {
   if (e.ring && e.ring.length >= 6) return e.ring;
@@ -216,6 +219,8 @@ export interface PlotSite {
   stilt: boolean; podium: number; basements: number; surface?: boolean;
   /** surface bays as asked for (unset: the optimiser's call) */
   surfacePick?: boolean;
+  /** the most basements the plot's ground makes worth digging (unset: no limit but the usual four) */
+  maxBasements?: number;
   /** parking wanted over what the code asks, as a multiple ("ample parking": 1.5); unset or 1: the code's */
   parkTarget?: number;
   cost: Partial<Costs & UseRates>;
@@ -382,6 +387,9 @@ export interface SiteReport {
     /** by use, when a building is formed (empty otherwise); whether anything earns at all (a public scheme only costs) */
     uses: UseLine[]; earns: boolean;
     land: number; premium: number; tdr: number; ancillary: number; build: number; parking: number; soft: number;
+    /** what the plot's ground adds over the ordinary foundation and dig the build and parking rates carry (negative:
+     *  saves); unset when no ground is said (src/pro/foundation.ts) */
+    ground?: number;
     cost: number; profit: number; margin: number;
     /** month by month: net cash, and the running total */
     flow: number[]; cum: number[];
@@ -547,10 +555,10 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
   for (let i = 0; i < B.length; i++) for (let j = i + 1; j < B.length; j++) {
     if (B[i].quads.some((a) => B[j].quads.some((c) => convexOverlap(a, c)))) B[i].overlap = B[j].overlap = true;
   }
-  // (and into a parking building, a road or a roundabout: lots and gardens give way)
+  // (and into a parking building, a pool, a road or a roundabout: lots and gardens give way)
   const els = (site.elements ?? []).filter((e) => elementRings(e).length > 0);
   const solid = els.filter((e) => e.kind === 'road' || e.kind === 'roundabout' || e.kind === 'tank').flatMap(elementRings);
-  const decks = els.filter((e) => e.kind === 'parking').map(ringOf);
+  const decks = els.filter((e) => e.kind === 'parking' || e.kind === 'pool').map(ringOf);
   for (const x of B) if (x.quads.some((a) => solid.some((c) => convexOverlap(a, c)) || decks.some((c) => mpArea(inter(fromFlat(a), fromFlat(c))) > 0.5))) x.overlap = true;
   // floors: as asked, then the rest of the FSI shared out a floor at a time, lowest building first
   // (a formed building's floors are its form's: they don't take a share of what's left)
@@ -633,7 +641,7 @@ export function solveSite(r: PlotReport, site: PlotSite, use: PlotUse = 'residen
   const laid: ReturnType<typeof layGround> = bare ? { map: { ...NO_GROUND, openArea: r.netArea }, lotBays: [], surfaceBays: null } : layGround({
     net: r.net, wall: ground.wall, gates: ground.gates,
     lines: [...ground.drive.map((pts) => ({ pts, w: ground.driveW })), ...ground.roads], circles: ground.circles,
-    build: buildings.flatMap((b) => b.quads), structures: [...decks, ...els.filter((e) => e.kind === 'tank').flatMap(elementRings)], fire: buildings.filter((b) => b.fireOk).flatMap((b) => b.fire),
+    build: buildings.flatMap((b) => b.quads), structures: [...els.filter((e) => e.kind === 'parking').map(ringOf), ...els.filter((e) => e.kind === 'tank').flatMap(elementRings)], pools: els.filter((e) => e.kind === 'pool').map(ringOf), fire: buildings.filter((b) => b.fireOk).flatMap((b) => b.fire),
     lots: lots.map(ringOf), gardens: [...(site.rg ? [site.rg] : []), ...els.filter((e) => e.kind === 'garden').map(ringOf), ...playOrTrees],
     surface: site.surface && buildings.length && r.net.length >= 6 ? inset(r.net, r.edges.map(() => false), 0, 1.5) : null,
     axis: [F0.ux, F0.uz], seed: hashIds(site),
@@ -822,6 +830,7 @@ export function departuresOf(r: PlotReport, d: SiteReport): Departure[] {
 
 /** Basement levels needed for the parking (with the stilt and podiums as they are), at most `max`. */
 export function basementsToFit(r: PlotReport, site: PlotSite, use: PlotUse, max = 4): number {
+  max = Math.min(max, site.maxBasements ?? max);
   for (let b = 0; b <= max; b++) {
     const x = solveSite(r, { ...site, basements: b }, use);
     if (x.parking.have >= (x.parking.want ?? x.parking.need)) return b;

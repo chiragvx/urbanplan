@@ -1,7 +1,7 @@
 // Design: a building's form made by the designer (docs/plans/pro-design-freedom.md §3.6). Two ways in, both landing
 // as a form to shape at once (its rings, key floors, parts, levels and uses), never a plain slab:
-// - a shape, one click where it goes, its long side along the front road: a box, a round, an L, a U, a courtyard
-//   (a cut part through it, so the court can be moved or filled), a wedge;
+// - a base primitive, one click where it goes, its long side along the front road: a box, a round, a wedge. Anything
+//   more (an L, a U, a courtyard) is made from these by the booleans, so each piece stays a part to move or change;
 // - a footprint drawn, CAD-like: a rectangle (dragged, or its corners clicked), a polygon (its corners clicked), a
 //   circle or ellipse (dragged out over its box).
 // A mass starts at a number of floors of the project's use; its floors are then made from it (the floors' heights,
@@ -9,13 +9,11 @@
 import type { Carve, Curve, Form, Level, Pt } from './form';
 
 export type MassShape = 'box' | 'round' | 'L' | 'U' | 'court' | 'wedge' | 'rect' | 'poly' | 'circle';
-/** the shapes placed with one click, and the footprints drawn */
+/** the base primitives placed with one click, and the footprints drawn (L, U and courtyard stay as shapes for what was
+ *  made with them before, and for templates, but aren't offered: they're booleans of these) */
 export const MASS_SHAPES: { shape: MassShape; label: string; icon: string; hint: string }[] = [
   { shape: 'box', label: 'Box', icon: 'box', hint: 'Click where it goes: a box 30 × 20 m, its long side to the road.' },
   { shape: 'round', label: 'Round', icon: 'circle', hint: 'Click where its middle goes: a round tower 24 m across.' },
-  { shape: 'L', label: 'L', icon: 'lshape', hint: 'Click where its corner goes.' },
-  { shape: 'U', label: 'U', icon: 'ushape', hint: 'Click where its middle goes.' },
-  { shape: 'court', label: 'Courtyard', icon: 'court', hint: 'Click where its middle goes: a block round a court (the court is a part: move it, fill it).' },
   { shape: 'wedge', label: 'Wedge', icon: 'wedge', hint: 'Click where it goes: a triangle, its long side to the road.' },
 ];
 export const MASS_DRAW: { shape: MassShape; label: string; icon: string; hint: string }[] = [

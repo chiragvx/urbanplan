@@ -48,7 +48,7 @@ export function Gallery({ tool, setTool: set, target }: { tool: Tool; setTool: (
         <span>Picked: <b>{target.name}</b>. What you make next is</span>
         <Seg<PartOp | 'new'> small value={mode} set={setInto} ariaLabel="What it makes" options={[{ value: 'new', label: 'New', title: 'A new building of its own' }, ...OPS.map((o) => ({ value: o, label: OP_LABEL[o], title: OP_TIP[o].replace('the floors it spans', `${target.name}`) }))]} />
       </div>}
-      {([['Shapes', MASS_SHAPES.filter((s) => mode === 'new' || s.shape !== 'court')], ['Draw a footprint', MASS_DRAW]] as const).map(([label, list]) => <div class="tgrp" role="group" aria-label={label}>
+      {([['Shapes', MASS_SHAPES], ['Draw a footprint', MASS_DRAW]] as const).map(([label, list]) => <div class="tgrp" role="group" aria-label={label}>
         <h4>{label}</h4>
         <div class="toolgrid">
           {list.map((s) => { const t: Tool = { k: 'mass', shape: s.shape, ...(mode !== 'new' && target ? { into: { id: target.id, op: mode } } : {}) }, pressed = tool.k === 'mass' && tool.shape === s.shape && (tool.into?.op ?? 'new') === mode; return <button type="button" aria-pressed={pressed} data-tip={s.hint} onClick={() => setTool(pressed ? { k: 'select' } : t)}><Icon n={s.icon} size={16} /><span>{s.label}</span></button>; })}

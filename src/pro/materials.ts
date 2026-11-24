@@ -8,7 +8,9 @@ export type MaterialCategory =
   | 'tile' | 'flooring' | 'roofing' | 'railing';
 export type MaterialFinish = 'matt' | 'satin' | 'gloss' | 'textured';
 /** How the surface reads at a distance: drawn by the swatches and the facade preview. */
-export type MaterialPattern = 'plain' | 'brick' | 'stone' | 'plank' | 'tile' | 'stripe' | 'louvre';
+export type MaterialPattern = 'plain' | 'brick' | 'stone' | 'plank' | 'tile' | 'stripe' | 'louvre'
+  /** the ground's own (./ground.ts): sand's ripples, black cotton's cracks, gravel and murum, rock */
+  | 'sand' | 'cracked' | 'gravel' | 'rock';
 
 /** A real product a material can stand for (not used yet: every generic material leaves it undefined).
  *  - maker: the brand ("Asian Paints", "Kajaria", "Alstrong")

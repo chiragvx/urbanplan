@@ -10,6 +10,7 @@ import type { Compiler } from '../doc/compile';
 import type { PlotObj } from '../doc/types';
 import { withShops, type Shops } from './mixed';
 import { keepOutOf, type Levels, type SiteFeature } from './siteObjects';
+import { basementCap } from './foundation';
 
 export type ProCity = 'pune' | 'pune-congested' | 'mumbai-island' | 'mumbai-suburbs';
 export const CITIES: { value: ProCity; label: string; code: PlotCode; note: string }[] = [
@@ -107,6 +108,9 @@ export interface ProProject {
   at?: [number, number];
   /** the plot's levels */
   levels?: Levels;
+  /** what the plot is made of: its surface, the layers down to the rock, the water, boreholes and spot heights
+   *  (./ground.ts). Unset: ordinary ground, today's figures (docs/plans/plot-ground.md) */
+  ground?: import('./ground').PlotGround;
   /** where north is: degrees the plot is turned clockwise (0: north is straight back from the front road) */
   north?: number;
   /** what "Fill the plot" is asked for */
@@ -317,7 +321,9 @@ export function generate(p: ProProject, r: PlotReport, specRate = 0, premium = 0
   const cost = { ...(p.costs ?? {}), ...(p.rents ?? {}), build: c.build + specRate, ...(p.land ? { land: p.land } : {}), sale: p.sale > 0 ? p.sale : Math.round((c.sale * (1 + premium)) / 50) * 50, ...(p.shops && p.shops.sale > 0 ? { retail: p.shops.sale } : {}) };
   const f = fillOf(p);
   const base: PlotSite = {
-    ...siteDefaults(use), ...parkingOf(f), ...(f.parkTarget && f.parkTarget > 1 ? { parkTarget: f.parkTarget } : {}), mix: p.mix, ...(p.sizes ? { sizes: p.sizes } : {}), cost, keepOut: keepOutOf(p.features),
+    ...siteDefaults(use), ...parkingOf(f), ...(f.parkTarget && f.parkTarget > 1 ? { parkTarget: f.parkTarget } : {}), mix: p.mix,
+    // (the plot's ground caps the basements worth digging: ./foundation.ts)
+    ...(p.ground ? { maxBasements: basementCap(p.ground, r, r.rules.floorH, (cost as { parking?: number }).parking ?? c.parking).max } : {}), ...(p.sizes ? { sizes: p.sizes } : {}), cost, keepOut: keepOutOf(p.features),
     design: { ...DEFAULT_DESIGN, type: p.typology, maxFloors: p.maxFloors, maxBuildings: f.buildings, spacing: f.spacing, access: f.access, green: f.green, ...kit },
   };
   // the user's own buildings: as they stand, checked

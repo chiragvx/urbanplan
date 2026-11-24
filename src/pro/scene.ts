@@ -17,9 +17,10 @@ import { detailOf, loadScans } from './render/textures';
 import { FrameWatch, guessTier, saveTier, savedTier, SPEC, type Tier } from './render/quality';
 import { cutFace, flat, GeoBuf, prism, type Hole } from './render/geo';
 import { buildingOutline, crossings, endExt } from './render/outline';
-import { inside as inMP, union as unionMP, fromFlat as mpOf, offset as offsetMP } from '../doc/ground';
+import { inside as inMP, union as unionMP, fromFlat as mpOf, offset as offsetMP, diff as diffMP } from '../doc/ground';
 import { GLASS, litShare, withRooms } from './render/glass';
-import { carMeshes, gridIn, loadModels, markings, modelMeshes, peopleMeshes, treeMeshes, type ModelPart, type Tree } from './render/entourage';
+import { carMeshes, gridIn, loadModels, markings, modelMeshes, peopleMeshes, type ModelPart } from './render/entourage';
+import { surfaceMaterial, surfaceOfCover, surfaceOfRoad, treeMeshes, type Placed as Tree } from './render/landscape';
 import { pathSky, pixelsToPng } from './render/still';
 import { neighbourMesh, neighbours } from './render/context';
 import type { CoreDetail } from './coreDetail';
@@ -34,7 +35,7 @@ import { frameOf, layForm, type Form, type FormLayout } from './form';
 import { buildForm, disposeBuilt, layoutHash, setMaterialResolver, type Built, type Look } from './form/mesh';
 import { facadeBays, type FloorPlan, type Opening } from './openings';
 import { plantingOf } from './landscape';
-import { pointIn } from '../doc/site';
+import { elementRings, pointIn, POOL_DECK } from '../doc/site';
 
 import { SHOP_W, type Shops } from './mixed';
 import { roadFrame } from '../doc/site';
@@ -58,6 +59,19 @@ export interface ViewData {
   cores?: CoreDetail[][];
   /** the formed buildings' layouts by building id (Evaluated.forms); unset, worked out here from each one's form */
   forms?: Record<string, FormLayout>;
+  /** the plot's ground (./ground.ts): the look of its surface, and the cut-away of what's under it when shown */
+  ground?: { cover: { id: string; colour: string; pattern: LibMaterial['pattern'] } | null; cut: GroundCut | null };
+}
+/** what's under the plot, drawn as a cut-away block: the layers, the water, the basements' dig, each building's
+ *  raft, footings or piles, the boreholes (all depths in metres below the ground) */
+export interface GroundCut {
+  runs: { colour: string; top: number; bottom: number; pattern?: string }[]; water: number | null; floor: number;
+  dig: { depth: number; levels: number; bh: number } | null;
+  found: { id: string; kind: string; depth: number; raft?: number; piles?: { n: number; dia: number; length: number } }[];
+  holes: { at: [number, number]; runs: { colour: string; top: number; bottom: number }[] }[];
+  /** cut through the plot's middle, the front half taken away: the ground, the basements, the foundations and the
+   *  buildings in section */
+  section?: boolean;
 }
 /** a formed building as drawn: its layout, what it was drawn with, and the meshes (kept while nothing changes) */
 interface FormEntry { L: FormLayout; hash: string; key: string; built: Built }
@@ -95,7 +109,7 @@ function jaaliTexture(): THREE.Texture | null {
  *  colours: for the path tracer, which reads plain meshes */
 function bakeInstances(im: THREE.InstancedMesh): THREE.BufferGeometry | null {
   const base = (im.geometry.index ? im.geometry.toNonIndexed() : im.geometry.clone());
-  for (const k of Object.keys(base.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'color') base.deleteAttribute(k);
+  for (const k of Object.keys(base.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'color' && k !== 'uv') base.deleteAttribute(k);
   if (!base.attributes.normal) base.computeVertexNormals();
   const n = base.attributes.position.count, own = base.attributes.color as THREE.BufferAttribute | undefined;
   const out: THREE.BufferGeometry[] = [], m = new THREE.Matrix4(), c = new THREE.Color();
@@ -116,14 +130,16 @@ function bakeInstances(im: THREE.InstancedMesh): THREE.BufferGeometry | null {
 }
 /** a baked geometry split by colour, one plain geometry per colour (the path tracer ignores vertex colours) */
 function splitByColour(g: THREE.BufferGeometry): { colour: THREE.Color; geo: THREE.BufferGeometry }[] {
-  const P = g.attributes.position as THREE.BufferAttribute, N = g.attributes.normal as THREE.BufferAttribute, C = g.attributes.color as THREE.BufferAttribute;
-  const groups = new Map<string, { colour: THREE.Color; p: number[]; n: number[] }>();
+  const P = g.attributes.position as THREE.BufferAttribute, N = g.attributes.normal as THREE.BufferAttribute, C = g.attributes.color as THREE.BufferAttribute, U = g.attributes.uv as THREE.BufferAttribute | undefined;
+  // (colours rounded to 5 bits a channel: leaves and bark vary a little card to card, and shouldn't make a mesh each)
+  const q = (x: number) => Math.round(Math.min(1, x) * 31) / 31;
+  const groups = new Map<string, { colour: THREE.Color; p: number[]; n: number[]; u: number[] }>();
   for (let t = 0; t < P.count; t += 3) {
-    const col = new THREE.Color(C.getX(t), C.getY(t), C.getZ(t)), k = col.getHexString();
-    let gr = groups.get(k); if (!gr) { gr = { colour: col, p: [], n: [] }; groups.set(k, gr); }
-    for (let v = t; v < t + 3; v++) { gr.p.push(P.getX(v), P.getY(v), P.getZ(v)); gr.n.push(N.getX(v), N.getY(v), N.getZ(v)); }
+    const col = new THREE.Color(q(C.getX(t)), q(C.getY(t)), q(C.getZ(t))), k = col.getHexString();
+    let gr = groups.get(k); if (!gr) { gr = { colour: col, p: [], n: [], u: [] }; groups.set(k, gr); }
+    for (let v = t; v < t + 3; v++) { gr.p.push(P.getX(v), P.getY(v), P.getZ(v)); gr.n.push(N.getX(v), N.getY(v), N.getZ(v)); if (U) gr.u.push(U.getX(v), U.getY(v)); }
   }
-  return [...groups.values()].map((gr) => { const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(gr.p, 3)); geo.setAttribute('normal', new THREE.Float32BufferAttribute(gr.n, 3)); return { colour: gr.colour, geo }; });
+  return [...groups.values()].map((gr) => { const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(gr.p, 3)); geo.setAttribute('normal', new THREE.Float32BufferAttribute(gr.n, 3)); if (gr.u.length) geo.setAttribute('uv', new THREE.Float32BufferAttribute(gr.u, 2)); return { colour: gr.colour, geo }; });
 }
 
 class Boxes {
@@ -178,6 +194,8 @@ export class ProView {
   wire = new Wire();
   mode: RenderMode = 'wire';
   private xrayOn = false;
+  /** the ground's cut-away is shown: the disc round the plot hidden, so the block reads */
+  private cutOn = false;
   private ground: THREE.Mesh;
   private fog = new THREE.FogExp2('#dde4ec', 0.0011);
   private sky = new THREE.Color('#e4e4e2');
@@ -238,8 +256,8 @@ export class ProView {
     const gg = new THREE.CircleGeometry(900, 72), gp = gg.attributes.position as THREE.BufferAttribute, guv = new Float32Array(gp.count * 2);
     for (let i = 0; i < gp.count; i++) { guv[i * 2] = gp.getX(i); guv[i * 2 + 1] = -gp.getY(i); }
     gg.setAttribute('uv', new THREE.BufferAttribute(guv, 2));
-    const gd = detailOf({ id: 'ground-earth', category: 'stone', name: 'Ground', colour: '#c4bdab', finish: 'textured', rate: 0, pattern: 'plain' } as LibMaterial, SPEC[this.tier].tex);
-    const ground = new THREE.Mesh(gg, new THREE.MeshStandardMaterial({ color: albedo('#c4bdab'), roughness: 1, map: gd?.map ?? null, normalMap: gd?.normal ?? null }));
+    // (open ground round the site: dry earth and scrub, ./render/landscape)
+    const ground = new THREE.Mesh(gg, surfaceMaterial('field', SPEC[this.tier].tex));
     ground.rotation.x = -Math.PI / 2; ground.position.y = -0.02; ground.receiveShadow = true;
     this.ground = ground;
     this.over.renderOrder = 10;
@@ -583,7 +601,7 @@ export class ProView {
   setMode(m: RenderMode) { this.mode = m; this.apply(); }
   private apply() {
     const w = this.wired;
-    this.root.visible = !w; this.ground.visible = !w; this.wire.group.visible = w;
+    this.root.visible = !w; this.ground.visible = !w && !this.cutOn; this.wire.group.visible = w;
     // (after dark the Preetham sky gives way to a night blue: below the horizon it turns brown)
     this.skyL.sky.visible = !w && this.night < 0.6;
     this.ctx.visible = !w;
@@ -781,7 +799,7 @@ export class ProView {
         const g = bakeInstances(im);
         if (!g) return;
         const src = im.material as THREE.MeshStandardMaterial;
-        for (const part of splitByColour(g)) baked.push(new THREE.Mesh(part.geo, new THREE.MeshStandardMaterial({ color: part.colour.multiply(src.color ?? new THREE.Color(1, 1, 1)), roughness: src.roughness ?? 0.8, metalness: src.metalness ?? 0 })));
+        for (const part of splitByColour(g)) baked.push(new THREE.Mesh(part.geo, new THREE.MeshStandardMaterial({ color: part.colour.multiply(src.color ?? new THREE.Color(1, 1, 1)), roughness: src.roughness ?? 0.8, metalness: src.metalness ?? 0, ...(src.map && part.geo.attributes.uv ? { map: src.map, alphaTest: src.alphaTest, side: src.side } : {}) })));
         g.dispose(); hidden.push(im); im.visible = false;
       });
       for (const m of baked) this.scene.add(m);
@@ -898,10 +916,14 @@ export class ProView {
       const [x0, z0, x1, z1] = rd.pts, L = Math.hypot(x1 - x0, z1 - z0), ux = (x1 - x0) / L, uz = (z1 - z0) / L, nx = -uz * rd.today / 2, nz = ux * rd.today / 2;
       const a = [x0 + ux * 240, z0 + uz * 240], b = [x1 - ux * 240, z1 - uz * 240];
       if (rd.today >= 6) marks.push({ pts: [a[0], a[1], b[0], b[1]], w: rd.today, edges: true });
-      mesh(flat([a[0] + nx, a[1] + nz, b[0] + nx, b[1] + nz, b[0] - nx, b[1] - nz, a[0] - nx, a[1] - nz], 0.01), M.road, false);
+      mesh(flat([a[0] + nx, a[1] + nz, b[0] + nx, b[1] + nz, b[0] - nx, b[1] - nz, a[0] - nx, a[1] - nz], 0.01), surfaceMaterial('asphalt-worn', SPEC[this.tier].tex), false);
     }
     for (const lr of r.lostRings) mesh(flat(lr, 0.03), M.dp, false);
-    mesh(flat(r.net, 0.04), M.paving, false);
+    // (the plot in what its surface is, when its ground is said: sand, black cotton, murum, rock, grass)
+    const cover = v.ground?.cover, cutting = !!v.ground?.cut;
+    // (./render/landscape: the cover's own surface; with nothing said, the paver blocks most sites are finished in)
+    const plotMat = surfaceMaterial(cover ? surfaceOfCover(cover.id) : 'pavers', SPEC[this.tier].tex, cutting ? { transparent: true, opacity: 0.4 } : {});
+    mesh(flat(r.net, 0.04), plotMat, false);
     if (r.footprint.length >= 6) {
       const p = r.footprint, pts: THREE.Vector3[] = [];
       for (let i = 0; i <= p.length; i += 2) pts.push(new THREE.Vector3(p[i % p.length], 0.08, p[(i + 1) % p.length]));
@@ -915,28 +937,40 @@ export class ProView {
     const G = d.ground.map, flatMP = (m: MP, y: number, mt: THREE.Material) => { for (const t of triangles(m)) if (t.length >= 6) { const a = groundGeos.get(mt) ?? []; a.push(flat(t, y)); groundGeos.set(mt, a); } };
     // (the internal roads in the site kit's surface)
     const KIT = siteKitOf(ds);
-    const roadMat = mat(SURFACE_COLOUR[KIT.road.surface], { roughness: KIT.road.surface === 'asphalt' ? 0.95 : 0.85 });
+    const tex = SPEC[this.tier].tex, roadMat = surfaceMaterial(surfaceOfRoad(KIT.road.surface), tex);
     flatMP(G.road, 0.05, roadMat);
     // (where an internal road leaves the plot: on across the widening to the road outside, flared at its kerb)
-    for (const j of d.ground.joins ?? []) mesh(flat(j, 0.045), roadMat, false); flatMP(G.lot, 0.05, mat('#8b8e95', { roughness: 0.95 })); flatMP(G.path, 0.06, M.paving);
-    flatMP(G.lawn, 0.06, mat('#9fb889')); flatMP(G.bed, 0.07, mat('#6f8f5a'));
+    for (const j of d.ground.joins ?? []) mesh(flat(j, 0.045), roadMat, false); flatMP(G.lot, 0.05, surfaceMaterial(KIT.road.surface === 'pavers' ? 'concrete' : 'pavers', tex)); flatMP(G.path, 0.06, surfaceMaterial('tiles-path', tex));
+    // (the open green the plan leaves is grassed; its lawns, beds and paths lie on it)
+    flatMP(G.green, 0.055, surfaceMaterial('lawn', tex));
+    flatMP(G.lawn, 0.06, surfaceMaterial('lawn', tex));
+    // (the play areas and tree groves drawn on the site: a rubber play surface, a mulched bed)
+    for (const e of d.site.elements ?? []) if (e.kind === 'play' || e.kind === 'trees') for (const rg of elementRings(e)) mesh(flat(rg, 0.065), surfaceMaterial(e.kind === 'play' ? 'rubber-red' : 'mulch', tex), false);
+    // (a pool: its deck in timber over the drawn area, the water inset by the deck behind a granite coping 300 wide,
+    // the water a hand below the coping's top; its tiled sides show through the shallows)
+    for (const e of d.site.elements ?? []) if (e.kind === 'pool') for (const rg of elementRings(e)) {
+      mesh(flat(rg, 0.07), surfaceMaterial('deck', tex), false);
+      const wet = offsetMP(mpOf(rg), -POOL_DECK), lip = diffMP(offsetMP(wet, 0.3), wet);
+      for (const t of triangles(lip)) if (t.length >= 6) mesh(prism(t, 0.07, 0.2), surfaceMaterial('granite', tex), true);
+      for (const t of triangles(wet)) if (t.length >= 6) { mesh(flat(t, 0.12), surfaceMaterial('pool-water', tex), false); }
+    } flatMP(G.bed, 0.07, surfaceMaterial('mulch', tex));
     // (the planting as its species: ./render/entourage.ts)
     const trunks = new Boxes(), trees: Tree[] = [];
     const treeAt = (x: number, z: number, cr: number, kind = 1) => { trees.push({ x, z, r: cr, kind }); };
-    for (const t of G.plants) trees.push({ x: t.x, z: t.z, r: Math.max(0.5, t.r), kind: t.kind });
+    // (trees only where the user put them, as site features; of the laid-out garden only its low shrubs in the beds)
+    for (const t of G.plants) if (t.kind === 4) trees.push({ x: t.x, z: t.z, r: Math.max(0.5, t.r), kind: t.kind });
     for (const f of v.features ?? []) {
       const F = featureOf(f.kind);
-      if (f.kind === 'tree' && f.pts.length >= 2) { treeAt(f.pts[0], f.pts[1], f.r ?? F.r); continue; }
+      if (f.kind === 'tree' && f.pts.length >= 2) { treeAt(f.pts[0], f.pts[1], f.r ?? F.r, f.species ?? 1); continue; }
       if (f.kind === 'pole' && f.pts.length >= 2) { trunks.add(f.pts[0], 4.5, f.pts[1], 1, 0, 0.35, 9, 0.35); continue; }
       const sh = shapeOf(f);
-      const tone = f.kind === 'water' ? mat('#7fa6c4', { roughness: 0.2 }) : f.kind === 'structure' ? mat('#b9b2a6') : f.kind === 'nobuild' ? mat('#e5484d', { transparent: true, opacity: 0.16 }) : mat('#9a9a9a');
+      const tone = f.kind === 'water' || f.kind === 'well' ? surfaceMaterial('water', SPEC[this.tier].tex) : f.kind === 'structure' ? mat('#b9b2a6') : f.kind === 'nobuild' ? mat('#e5484d', { transparent: true, opacity: 0.16 }) : mat('#9a9a9a');
       if (f.kind === 'structure') { for (const t of triangles(sh)) if (t.length >= 6) mesh(prism(t, 0, 4), tone); }
       else flatMP(sh, 0.08, tone);
       if (f.kind !== 'nobuild') flatMP(keptOf(f), 0.075, mat('#e5484d', { transparent: true, opacity: 0.1 }));
     }
-    // the design system's planting: an avenue or rows of trees, a hedge along the boundary
+    // the design system's planting: its hedge along the boundary (its trees are not drawn: trees are the user's to place)
     const plant = plantingOf(r, landscapeOf(ds), d.buildings.flatMap((b) => b.quads));
-    for (const [x, z] of plant.trees) treeAt(x, z, 2.4, landscapeOf(ds).trees === 'avenue' ? 3 : 0);
     for (const [g, gs] of groundGeos) { const m2 = mergeGeometries(gs); gs.forEach((x) => x.dispose()); if (m2) mesh(m2, g, false); }
     const hedge = new Boxes();
     for (const [x0, z0, x1, z1] of plant.hedges) { const L = Math.hypot(x1 - x0, z1 - z0); if (L > 0.5) hedge.add((x0 + x1) / 2, 0.6, (z0 + z1) / 2, (x1 - x0) / L, (z1 - z0) / L, L, 1.2, 0.8); }
@@ -1012,7 +1046,8 @@ export class ProView {
     }
     // ---- the site kit: the compound wall, its gates, the internal roads' kerbs, footpaths, poles and trees
     {
-      const wm = mat(materialOf(KIT.wall.material).colour, { roughness: 0.85 }), walls = new Boxes(), metal = new Boxes(), cabin = new Boxes();
+      // (the wall in its own material from the library, textured from the world: ./render/pbr.ts)
+      const wm = this.lib.surface(KIT.wall.material, materialOf(KIT.wall.material).colour), walls = new Boxes(), metal = new Boxes(), cabin = new Boxes();
       const N = r.net; let ncx = 0, ncz = 0;
       for (let i = 0; i < N.length; i += 2) { ncx += N[i]; ncz += N[i + 1]; }
       ncx /= Math.max(1, N.length / 2); ncz /= Math.max(1, N.length / 2);
@@ -1058,7 +1093,7 @@ export class ProView {
       const R = KIT.road, kerbs = new Boxes(), paths = new Boxes(), poles = new Boxes();
       const lines = [...d.ground.drive.map((pts) => ({ pts, w: d.ground.driveW })), ...d.ground.roads];
       for (const ln of lines) {
-        let run = 0, nextPole = R.poles * 0.5, nextTree = 4;
+        let run = 0, nextPole = R.poles * 0.5;
         for (let i = 0; i + 3 < ln.pts.length; i += 2) {
           const x0 = ln.pts[i], z0 = ln.pts[i + 1], x1 = ln.pts[i + 2], z1 = ln.pts[i + 3], L = Math.hypot(x1 - x0, z1 - z0);
           if (L < 0.5) continue;
@@ -1074,14 +1109,13 @@ export class ProView {
           }
           const side = hw + 0.4 + (R.footpath > 0.2 ? R.footpath : 0);
           while (R.poles > 1 && nextPole <= run + L) { const t = nextPole - run, px = x0 + ux * t + nx * side, pz = z0 + uz * t + nz * side; if (free(px, pz)) { poles.add(px, 3.75, pz, ux, uz, 0.14, 7.5, 0.14); poles.add(px - nx * 0.5, 7.5, pz - nz * 0.5, nx, nz, 1.0, 0.08, 0.08); lamps.add(px - nx * 0.9, 7.42, pz - nz * 0.9, ux, uz, 0.25, 0.06, 0.4); } nextPole += R.poles; }
-          while (R.trees && nextTree <= run + L) { const t = nextTree - run, px = x0 + ux * t - nx * (side + 0.6), pz = z0 + uz * t - nz * (side + 0.6); if (free(px, pz)) treeAt(px, pz, 2.0, 3); nextTree += 9; }
           run += L;
         }
       }
-      add(kerbs.mesh(mat('#c9c6bf'), true)); add(paths.mesh(mat('#cfc9bd', { roughness: 0.9 }), false)); add(poles.mesh(mat('#3b3d42', { roughness: 0.5, metalness: 0.4 }), true));
+      add(kerbs.mesh(surfaceMaterial('kerb', tex, { world: true }), true)); add(paths.mesh(surfaceMaterial('concrete', tex, { world: true }), false)); add(poles.mesh(mat('#3b3d42', { roughness: 0.5, metalness: 0.4 }), true));
     }
     add(trunks.mesh(mat('#6b5440'), true, trunkGeo));
-    for (const im of treeMeshes(trees, this.tier !== 'draft', this.lib.other('plants', () => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 })))) add(im);
+    for (const im of treeMeshes(trees, this.tier !== 'draft')) add(im);
     // road markings: dashes down the middle, edge lines on the public roads
     for (const ln of [...d.ground.drive.map((pts) => ({ pts, w: d.ground.driveW, edges: false })), ...d.ground.roads.map((x) => ({ pts: x.pts, w: x.w, edges: false }))]) marks.push(ln);
     // (internal markings only where there is road: a road a building has grown over is cut back, and so are its lines)
@@ -1544,6 +1578,19 @@ export class ProView {
       sc.left = -R; sc.right = R; sc.top = R; sc.bottom = -R; sc.near = 1; sc.far = 800; sc.updateProjectionMatrix();
       this.sun.position.set(cx - 120, 220, cz - 90);
     }
+    this.cutOn = !!v.ground?.cut;
+    if (v.ground?.cut) this.groundCut(v.ground.cut, r, d, add);
+    // (the section: every material in the scheme clipped at a plane through the plot's middle, across the road's
+    // line, the front half taken away; the materials are shared, so it's set, or cleared, on all of them each time)
+    const plane = v.ground?.cut?.section ? new THREE.Plane(new THREE.Vector3(0, 0, 1), -(minZ + maxZ) / 2) : null;
+    if (plane) {
+      // (the cut's edge drawn: a frame down the block's face, so the section reads as cut)
+      const z = (minZ + maxZ) / 2 + 0.02, F0 = v.ground!.cut!.floor, lp = [minX, 0.1, z, maxX, 0.1, z, maxX, 0.1, z, maxX, -F0, z, maxX, -F0, z, minX, -F0, z, minX, -F0, z, minX, 0.1, z];
+      const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(lp, 3));
+      add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: '#e5484d' })));
+    }
+    this.renderer.localClippingEnabled = !!plane;
+    this.root.traverse((o) => { const ms = (o as THREE.Mesh).material; if (!ms) return; for (const m of Array.isArray(ms) ? ms : [ms]) { const had = !!m.clippingPlanes?.length; if (plane || had) { m.clippingPlanes = plane ? [plane] : null; m.clipShadows = !!plane; if (had !== !!plane) m.needsUpdate = true; } } });
     this.wire.set({ r, d, roads: v.roads, shops: v.shops, features: v.features, levels: v.levels, north: v.north, sel: v.sel, forms, skinOf: (id) => {
       const bi = d.buildings.findIndex((x) => x.b.id === id), bds = (bi >= 0 ? v.dsOf?.(bi) : undefined) ?? ds, f = d.buildings[bi]?.b as { form?: Form } | undefined;
       const lang = languageOf(bds);
@@ -1552,5 +1599,93 @@ export class ProView {
     this.north = v.north ?? 0;
     this.xrayOn = v.xray !== null;
     this.apply();
+  }
+
+  /** The cut-away under the plot (docs/plans/plot-ground.md §5): the plot's block of earth, layer by layer and see-
+   *  through, the water as a sheet, the basements as the hole dug with their floors, each building's raft, footings
+   *  or piles to depth, and the boreholes as thin columns of their logs. */
+  private groundCut(C: GroundCut, r: PlotReport, d: SiteReport, add: (o: THREE.Object3D | null) => THREE.Object3D | null) {
+    const ring = r.net; if (ring.length < 6) return;
+    const see = (colour: string, opacity: number) => this.lib.other(`cut|${colour}|${opacity}`, () => new THREE.MeshStandardMaterial({ color: albedo(colour), roughness: 1, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide }));
+    const solid = (colour: string) => this.lib.other(`cuts|${colour}`, () => new THREE.MeshStandardMaterial({ color: albedo(colour), roughness: 0.9 }));
+    // (a layer cut in section: solid, in its soil's texture)
+    const earth = (colour: string, pattern: string) => this.lib.other(`cutx|${colour}|${pattern}|${SPEC[this.tier].tex}`, () => {
+      const dt = detailOf({ id: `strata-${colour}`, category: 'stone', name: colour, colour, finish: 'textured', rate: 0, pattern } as LibMaterial, SPEC[this.tier].tex);
+      return new THREE.MeshStandardMaterial({ color: albedo(colour), roughness: 1, map: dt?.map ?? null, normalMap: dt?.normal ?? null, side: THREE.DoubleSide });
+    });
+    const put = (g: THREE.BufferGeometry, m: THREE.Material, order = 0) => { const x = new THREE.Mesh(g, m); x.renderOrder = order; add(x); return x; };
+    let z0r = Infinity, z1r = -Infinity; for (let i = 1; i < ring.length; i += 2) { z0r = Math.min(z0r, ring[i]); z1r = Math.max(z1r, ring[i]); }
+    // (in section, the plot's outline cut at the plane through its middle, the back half kept: each layer is then a
+    // solid slice whose cut face is the section)
+    const zc = C.section ? (z0r + z1r) / 2 : null;
+    const half = (R: number[]): number[] => {
+      if (zc === null) return R;
+      const out: number[] = [], n = R.length / 2;
+      for (let k = 0; k < n; k++) {
+        const ax = R[2 * k], az = R[2 * k + 1], bx = R[(2 * k + 2) % R.length], bz = R[(2 * k + 3) % R.length], ain = az >= zc, bin = bz >= zc;
+        if (ain) out.push(ax, az);
+        if (ain !== bin) { const t = (zc - az) / (bz - az); out.push(ax + (bx - ax) * t, zc); }
+      }
+      return out;
+    };
+    // (the basements' hole: the parking level's area, as a ring shrunk about the plot's middle)
+    const lv = d.parking.levels.find((l) => l.kind === 'basement');
+    const inner = (() => { const out: number[] = []; let cx = 0, cz = 0; for (let i = 0; i < ring.length; i += 2) { cx += ring[i]; cz += ring[i + 1]; } cx /= ring.length / 2; cz /= ring.length / 2; const A0 = Math.abs(ring.reduce((a, _, i) => (i % 2 ? a : a + ring[i] * ring[(i + 3) % ring.length] - ring[(i + 2) % ring.length] * ring[i + 1]), 0)) / 2, k = lv && A0 > 0 ? Math.sqrt(Math.min(1, lv.area / A0)) : 0.9; for (let i = 0; i < ring.length; i += 2) out.push(cx + (ring[i] - cx) * k, cz + (ring[i + 1] - cz) * k); return out; })();
+    const base = half(ring), around = C.dig && zc !== null ? diffMP(mpOf(base), mpOf(half(inner))).map((p) => p[0].flatMap((q) => [q[0], q[1]])).filter((q) => q.length >= 6) : [base];
+    // (the layers, each a slab of the plot's outline: the top one under the surface, the last to the block's floor;
+    // in section a solid slice, the basements' hole taken out above their floor)
+    for (const s of C.runs) {
+      const y1 = -s.top, y0 = -Math.min(s.bottom, C.floor); if (y1 - y0 <= 0.02) continue;
+      if (zc === null) { put(prism(ring, y0, y1 - 0.01, false), see(s.colour, 0.42), 1); continue; }
+      const m = earth(s.colour, s.pattern ?? 'plain'), dg = C.dig ? -C.dig.depth : 0;
+      if (C.dig && y1 > dg && y0 < dg) { for (const q of around) put(prism(q, dg, y1 - 0.01), m); put(prism(base, y0, dg - 0.01), m); }
+      else for (const q of (C.dig && y0 >= dg ? around : [base])) put(prism(q, y0, y1 - 0.01), m);
+    }
+    put(flat(base, -C.floor, true), zc === null ? see(C.runs[C.runs.length - 1]?.colour ?? '#555', 0.8) : earth(C.runs[C.runs.length - 1]?.colour ?? '#555', C.runs[C.runs.length - 1]?.pattern ?? 'plain'), 1);
+    // (a line round each layer's top on the block's faces, so the layers read from any side)
+    const pts: number[] = [];
+    for (const s of C.runs) if (s.top > 0 && s.top < C.floor) for (let i = 0; i < base.length; i += 2) { const j = (i + 2) % base.length; pts.push(base[i], -s.top + 0.02, base[i + 1], base[j], -s.top + 0.02, base[j + 1]); }
+    for (let i = 0; i < base.length; i += 2) pts.push(base[i], 0, base[i + 1], base[i], -C.floor, base[i + 1]);
+    const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: '#2b2b2b', transparent: true, opacity: 0.5 })));
+    if (C.water !== null && C.water < C.floor) {
+      const wy = -C.water, wet = C.dig && C.water < C.dig.depth ? around : [base];
+      for (const q of wet) put(flat(q, wy + 0.03), see('#3b82c4', 0.45), 2);
+      // (in section, the water's line along the cut face)
+      if (zc !== null) { let a = Infinity, b2 = -Infinity; for (let i = 0; i < base.length; i += 2) if (Math.abs(base[i + 1] - zc) < 1e-6) { a = Math.min(a, base[i]); b2 = Math.max(b2, base[i]); } if (a < b2) { const wl = new THREE.BufferGeometry(); wl.setAttribute('position', new THREE.Float32BufferAttribute([a, wy, zc - 0.03, b2, wy, zc - 0.03], 3)); add(new THREE.LineSegments(wl, new THREE.LineBasicMaterial({ color: '#2f7fd1' }))); } }
+    }
+    // (the basements: the hole dug, its floors)
+    if (C.dig) {
+      put(prism(half(inner), -C.dig.depth, -0.05, false), zc === null ? see('#1f2328', 0.5) : solid('#d9d5cc'), 3);
+      for (let k = 1; k <= C.dig.levels; k++) put(flat(half(inner), -k * C.dig.bh + 0.02), solid('#9a978f'), 3);
+      for (let k = 1; k < C.dig.levels; k++) put(flat(half(inner), -k * C.dig.bh + 0.2, true), solid('#9a978f'), 3);
+    }
+    // (each building's foundation under it: a raft, pads, or piles on a grid over its footprint)
+    const piles = new Boxes(), pads = new Boxes(), cyl = new THREE.CylinderGeometry(0.5, 0.5, 1, 10);
+    for (const f of C.found) {
+      const b = d.buildings.find((x) => x.b.id === f.id); if (!b) continue;
+      const rings = b.laid ? [b.laid.outline] : b.quads;
+      if (f.raft) for (const q of rings) if (q.length >= 6) put(prism(q, -f.depth - f.raft, -f.depth), solid('#b9b4aa'), 4);
+      let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+      for (const q of rings) for (let i = 0; i < q.length; i += 2) { x0 = Math.min(x0, q[i]); x1 = Math.max(x1, q[i]); z0 = Math.min(z0, q[i + 1]); z1 = Math.max(z1, q[i + 1]); }
+      const inQ = (x: number, z: number) => rings.some((q) => { let c = false; for (let i = 0, j = q.length - 2; i < q.length; j = i, i += 2) { if (q[i + 1] > z !== q[j + 1] > z && x < ((q[j] - q[i]) * (z - q[i + 1])) / (q[j + 1] - q[i + 1]) + q[i]) c = !c; } return c; });
+      const n = f.piles ? Math.min(240, f.piles.n) : f.kind === 'footings' || f.kind === 'rock' ? Math.max(4, Math.round(b.plate / 30)) : 0;
+      if (!n) continue;
+      const step = Math.max(1.5, Math.sqrt(((x1 - x0) * (z1 - z0)) / (n * 1.3)));
+      // (in section, the piles along the cut, half of each standing proud of its face)
+      const zs = zc !== null && zc > z0 && zc < z1 ? [zc + 0.02] : null;
+      for (let x = x0 + step / 2; x < x1; x += step) for (const z of zs ?? Array.from({ length: Math.max(0, Math.ceil((z1 - z0 - step / 2) / step)) }, (_, k) => z0 + step / 2 + k * step)) {
+        if (!inQ(x, zs ? z + 0.1 : z)) continue;
+        if (f.piles) piles.add(x, -f.depth - f.piles.length / 2, z, 1, 0, f.piles.dia, f.piles.length, f.piles.dia);
+        else pads.add(x, -f.depth - 0.3, z, 1, 0, Math.min(step * 0.6, 2.4), 0.6, Math.min(step * 0.6, 2.4));
+      }
+    }
+    add(piles.mesh(solid('#8d8a83'), false, cyl)); add(pads.mesh(solid('#b9b4aa'), false));
+    // (the boreholes: a thin column of each log)
+    const bh = new Boxes(), tones = new Map<string, Boxes>();
+    for (const h of C.holes) for (const s of h.runs) { const y1 = -s.top, y0 = -Math.min(s.bottom, C.floor); if (y1 - y0 < 0.02) continue; const B = tones.get(s.colour) ?? new Boxes(); B.add(h.at[0], (y0 + y1) / 2, h.at[1], 1, 0, 0.5, y1 - y0, 0.5); tones.set(s.colour, B); }
+    for (const [c, B] of tones) add(B.mesh(solid(c), false, cyl));
+    for (const h of C.holes) bh.add(h.at[0], 0.6, h.at[1], 1, 0, 0.12, 1.2, 0.12);
+    add(bh.mesh(solid('#e5484d'), false));
   }
 }

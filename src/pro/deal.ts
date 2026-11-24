@@ -76,7 +76,7 @@ export function applyDeal(e: Evaluated, deal: Deal): DealResult {
   // the buyers' price: the scheme's revenue spread over every saleable m² (flats and shops at their own rates)
   const perM2 = carpet > 0 ? M.revenue / carpet : 0;
   const fsiCost = M.premium + M.tdr + M.ancillary;
-  const buildAll = M.build + M.parking + M.soft;
+  const buildAll = M.build + M.parking + M.soft + (M.ground ?? 0);
   const notes: string[] = [];
   let land = M.land, revenue = M.revenue, ownerCarpet = 0;
   let owner = { label: 'Landowner', value: M.land, note: 'Paid for the land at the start.' };
@@ -152,6 +152,8 @@ export function applyDeal(e: Evaluated, deal: Deal): DealResult {
     ...(earns ? [{ label: 'Construction', amount: M.build, kind: 'out' as const }]
       : [{ label: 'Construction', amount: M.build - sys, kind: 'out' as const }, { label: 'Building systems', amount: sys, kind: 'out' as const }]),
     { label: 'Parking levels', amount: M.parking, kind: 'out' },
+    // (the plot's ground over ordinary ground: dearer digging, shoring, water, piles; or a saving on good ground)
+    ...(M.ground ? [{ label: M.ground >= 0 ? 'Ground works, over an ordinary site' : 'Ground works, less than an ordinary site', amount: M.ground, kind: 'out' as const }] : []),
     { label: earns ? 'Soft costs' : 'Fees, consultants, approvals', amount: M.soft, kind: 'out' },
     { label: 'Stamp duty', amount: stampDuty, kind: 'out' },
     ...extraLines.filter((x) => x.amount > 0),

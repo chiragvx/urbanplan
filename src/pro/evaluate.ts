@@ -9,7 +9,8 @@ import type { Shops } from './mixed';
 import { planFloor, schedule, type FloorPlan, type ScheduleRow, type UnitCheck } from './openings';
 import { generate, loadOf, plotReport, type ProProject } from './project';
 import { siteSystems, type SystemsResult } from './systems';
-import { DEFAULT_SITE, SQFT } from '../doc/site';
+import { cashflow, DEFAULT_SITE, SQFT } from '../doc/site';
+import { groundWorks, type GroundWorks } from './foundation';
 import { layForm, type FormLayout } from './form';
 
 export interface Evaluated {
@@ -35,6 +36,9 @@ export interface Evaluated {
   facade: Takeoff;
   /** those quantities per m² of built-up, as the finishes were priced with */
   finishQty: FinishQty;
+  /** the plot's ground worked through the scheme (./foundation.ts): foundations, the basements' dig, cut and fill,
+   *  the money's lines; null when no ground is said (ordinary ground, today's figures) */
+  ground: GroundWorks | null;
 }
 
 /** the systems a typical construction rate already carries, ₹ per sq ft of built-up (as assumed) */
@@ -86,8 +90,20 @@ export function evaluate(p: ProProject): Evaluated {
     ({ d, shops } = generate(p, r, used + sysRate, ds.premium, forms, kit)); sys = sysOf(d);
     plans = planAll(d); M = measure(d, plans);
   }
+  // (the plot's ground: what it adds over ordinary ground goes into the money, and its months into the programme)
+  const ground = p.ground ? groundWorks(p.ground, r, d, { floorH: ds.floorH, levels: p.levels, north: p.north, city: p.city, userBasements: p.fill?.basements, parkingRate: d.money.costs.parking }) : null;
+  if (ground) d = withGround(d, ground);
   const rows = schedule(d, plans, ds, (bi, ui) => (shops?.removed.get(bi)?.has(ui) ? shops.upperOf[bi] : 0));
   // (a formed building's typical floor repeats only on the floors like it)
   const checks = plans.flatMap((pl, i) => pl.checks.map((c) => ({ ...c, floors: d.buildings[i].repeats ?? d.buildings[i].floors })));
-  return { p, ds, r, full, d, shops, plans, rows, checks, rate: used, sys, sysRate, forms, facade: M.T, finishQty: M.q };
+  return { p, ds, r, full, d, shops, plans, rows, checks, rate: used, sys, sysRate, forms, facade: M.T, finishQty: M.q, ground };
+}
+
+/** the scheme's money with the ground's line in: its cost, profit and margin, and the cash flow over the months the
+ *  ground adds */
+export function withGround(d: SiteReport, g: GroundWorks): SiteReport {
+  const M = d.money, add = g.lines.net, costs = { ...M.costs, months: M.costs.months + g.months };
+  const cost = M.cost + add, profit = M.revenue - cost;
+  const cash = cashflow(M.land + M.premium + M.tdr + M.ancillary, M.build + M.parking + M.soft + add, M.sales, costs, M.exit);
+  return { ...d, money: { ...M, costs, ground: add, cost, profit, margin: M.revenue ? profit / M.revenue : 0, ...cash } };
 }

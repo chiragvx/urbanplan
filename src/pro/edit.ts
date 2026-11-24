@@ -22,6 +22,7 @@ import type { ProView, Overlay } from './scene';
 import type { Evaluated } from './evaluate';
 import { outline, ownScheme, plotUseOf, type ProBuilding, type ProProject } from './project';
 import { featureOf, newId, type FeatureKind, type SiteFeature } from './siteObjects';
+import { hubMoved, hubOf, joined, netTargets, POLE_H } from './utilityNet';
 import { layForm, sampleCurve, TEMPLATES, toLocal, toWorld, type Form, type FormLayout, type Pt, type UseBand, USE_INFO } from './form';
 
 export type BuildingShape = 'slab' | 'tower' | 'L' | 'U' | 'court' | 'draw';
@@ -33,7 +34,7 @@ export type Tool =
   | { k: 'template'; id: string }
   /** Design: a mass, a shape clicked down or a footprint drawn, landing as a form to shape (./masses.ts) */
   | { k: 'mass'; shape: MassShape; into?: { id: string; op: PartOp } }
-  | { k: 'element'; kind: Extract<ElementKind, 'garden' | 'play' | 'trees' | 'lot' | 'road' | 'parking' | 'roundabout' | 'gate' | 'wall' | 'tank'> }
+  | { k: 'element'; kind: Extract<ElementKind, 'garden' | 'play' | 'trees' | 'pool' | 'lot' | 'road' | 'parking' | 'roundabout' | 'gate' | 'wall' | 'tank'> }
   /** two clicks: the distance between them, and from each to the buildable line */
   | { k: 'measure' };
 export const SELECT: Tool = { k: 'select' };
@@ -53,6 +54,7 @@ export const ELEMENT_TOOLS: { kind: Extract<Tool, { k: 'element' }>['kind']; lab
   { kind: 'garden', label: 'Garden', icon: 'leaf', hint: 'Drag out its area, or click its corners.' },
   { kind: 'play', label: 'Play area', icon: 'play', hint: 'Drag out its area, or click its corners.' },
   { kind: 'trees', label: 'Trees', icon: 'tree', hint: 'Drag out the stand, or click its corners.' },
+  { kind: 'pool', label: 'Pool', icon: 'wave', hint: 'Drag out the pool with its deck (1.5 m round the water), or click its corners.' },
   { kind: 'lot', label: 'Car lot', icon: 'car', hint: 'Surface bays: drag out the area, or click its corners.' },
   { kind: 'parking', label: 'Parking tower', icon: 'layers', hint: 'A multi-storey car park: drag out its area.' },
   { kind: 'road', label: 'Road', icon: 'road', hint: 'Click along it, double-click or Enter to finish.' },
@@ -343,11 +345,13 @@ export class CanvasEdit {
   }
 
   // ---------- snapping ----------
-  private cache: { e: Evaluated | null; ex: string | undefined; pts: number[]; segs: number[] } = { e: null, ex: undefined, pts: [], segs: [] };
-  /** what pulls: the corners and edges of the plot, its buildable line and the other buildings */
-  private targets(ex?: string): { pts: number[]; segs: number[] } {
-    const e = this.h.e(), c = this.cache;
-    if (c.e !== e || c.ex !== ex) {
+  private cache: { e: Evaluated | null; key: string; pts: number[]; segs: number[] } = { e: null, key: '', pts: [], segs: [] };
+  /** what pulls: the corners and edges of the plot, its buildable line and the other buildings; for a utility, a road
+   *  or anything else on the grounds (`net`), the things on the plot too: the poles, the lines' nodes and the lines,
+   *  the tanks, the roads (./utilityNet.ts). `at`: spots being moved off, whose joined nodes go along */
+  private targets(ex?: string, net = false, at?: Pt[]): { pts: number[]; segs: number[] } {
+    const e = this.h.e(), c = this.cache, key = JSON.stringify([ex ?? '', net, at ?? []]);
+    if (c.e !== e || c.key !== key) {
       const p = this.h.p(), rings: number[][] = [e.r.net, outline(p).ring, e.r.footprint];
       for (const br of e.d.buildings) {
         if (br.b.id === ex) continue;
@@ -359,7 +363,11 @@ export class CanvasEdit {
         if (!r || r.length < 4) continue;
         for (let i = 0; i + 1 < r.length; i += 2) { const j = (i + 2) % r.length; pts.push(r[i], r[i + 1]); segs.push(r[i], r[i + 1], r[j], r[j + 1]); }
       }
-      this.cache = { e, ex, pts, segs };
+      if (net) {
+        const n = netTargets((p.features ?? []).filter((f) => !this.locked.has(f.id)), e.d.site.elements ?? [], { ex, at });
+        pts.push(...n.pts); segs.push(...n.segs);
+      }
+      this.cache = { e, key, pts, segs };
     }
     return { pts: this.cache.pts, segs: this.cache.segs };
   }
@@ -371,10 +379,10 @@ export class CanvasEdit {
     return GRIDS.find((g) => g * ppm >= 7) ?? GRIDS[GRIDS.length - 1];
   }
   /** The correction that snaps any of some points (where they'd go) onto what pulls them; see the top of the file. */
-  private snapSet(cand: Pt[], o: { ex?: string; from?: Pt | null; shift?: boolean; extra?: number[] } = {}): Snapped {
+  private snapSet(cand: Pt[], o: { ex?: string; from?: Pt | null; shift?: boolean; extra?: number[]; net?: boolean; at?: Pt[] } = {}): Snapped {
     const v = this.h.view(), none: Snapped = { d: [0, 0], guide: [], hot: null };
     if (!v || !cand.length) return none;
-    const T = this.targets(o.ex), tp = o.extra?.length ? [...T.pts, ...o.extra] : T.pts;
+    const T = this.targets(o.ex, o.net, o.at), tp = o.extra?.length ? [...T.pts, ...o.extra] : T.pts;
     const S = (x: number, z: number) => v.toScreen(x, 0, z);
     const cs = cand.map(([x, z]) => S(x, z)), ts: [number, number][] = [];
     for (let j = 0; j + 1 < tp.length; j += 2) ts.push(S(tp[j], tp[j + 1]));
@@ -436,13 +444,15 @@ export class CanvasEdit {
     return { d, guide: lines, hot: cand.length === 1 ? [cand[0][0] + d[0], cand[0][1] + d[1]] : null, why: lines.length ? 'in line with a corner' : `${g} m grid` };
   }
   /** the pointer on the ground, snapped (for drawing and placing) */
-  private snap(px: number, py: number, ev: { shiftKey: boolean; altKey: boolean }, o: { ex?: string; extra?: number[]; from?: boolean } = {}): Pt | null {
+  private snap(px: number, py: number, ev: { shiftKey: boolean; altKey: boolean }, o: { ex?: string; extra?: number[]; from?: boolean; net?: boolean; at?: Pt[] } = {}): Pt | null {
     const v = this.h.view(); if (!v) return null;
     const g = v.groundAt(px, py); if (!g) return null;
     this.guide = []; this.hotPt = null;
     if (!this.snapOn || ev.altKey) return [r2(g[0]), r2(g[1])];
     const from = o.from !== false && this.pts.length >= 2 ? [this.pts[this.pts.length - 2], this.pts[this.pts.length - 1]] as Pt : null;
-    const s = this.snapSet([g], { ex: o.ex, from, shift: ev.shiftKey, extra: [...(o.extra ?? []), ...this.pts] });
+    // (the things on the plot pull too while drawing or moving anything but a building: see `targets`)
+    const t = this.tool.k, net = o.net ?? !(t === 'building' || t === 'mass' || t === 'template' || t === 'plot');
+    const s = this.snapSet([g], { ex: o.ex, from, shift: ev.shiftKey, extra: [...(o.extra ?? []), ...this.pts], net, at: o.at });
     this.guide = s.guide; this.hotPt = s.hot; this.why = s.why ?? null;
     return [r2(g[0] + s.d[0]), r2(g[1] + s.d[1])];
   }
@@ -450,7 +460,7 @@ export class CanvasEdit {
   private why: string | null = null;
   /** A handle on the view (./hud.tsx) dragged to the pointer: snapped as drawing is (`extra`: more points to snap to,
    *  such as the thing's own other points), its guide drawn. */
-  snapAt(px: number, py: number, ev: { shiftKey: boolean; altKey: boolean }, o: { ex?: string; extra?: number[] } = {}): Pt | null {
+  snapAt(px: number, py: number, ev: { shiftKey: boolean; altKey: boolean }, o: { ex?: string; extra?: number[]; net?: boolean; at?: Pt[] } = {}): Pt | null {
     const g = this.snap(px, py, ev, { ...o, from: false });
     this.draw();
     return g;
@@ -612,8 +622,10 @@ export class CanvasEdit {
       if (b) corners = cornersOf(b, e, br?.quads);
     } else if (what?.k === 'element') {
       const el = (e.d.site.elements ?? []).find((x) => x.id === what.id);
+      // (a tank or a roundabout by its middle, so it lands square on a line's node or a pole)
+      const h = el ? hubOf(el) : null;
       const r = el?.ring && el.ring.length >= 6 ? el.ring : el?.spine ?? [];
-      for (let i = 0; i + 1 < r.length; i += 2) corners.push([r[i], r[i + 1]]);
+      if (h) corners.push(h); else for (let i = 0; i + 1 < r.length; i += 2) corners.push([r[i], r[i + 1]]);
     } else if (what?.k === 'feature') {
       const f = (p.features ?? []).find((x) => x.id === what.id);
       for (let i = 0; f && i + 1 < f.pts.length; i += 2) corners.push([f.pts[i], f.pts[i + 1]]);
@@ -667,7 +679,10 @@ export class CanvasEdit {
       let [dx, dz] = d.acc;
       this.guide = []; this.hotPt = null;
       if (this.snapOn && !ev.altKey && d.corners.length) {
-        const s = this.snapSet(d.corners.map(([x, z]) => [x + dx, z + dz] as Pt), { ex: d.what?.k === 'building' ? d.what.id : undefined });
+        // (a thing on the grounds or a feature: the things on the plot pull it too, but not itself, nor the line nodes
+        // joined to a point thing, which go along with it)
+        const w = d.what, mine = w?.k === 'feature' || w?.k === 'element';
+        const s = this.snapSet(d.corners.map(([x, z]) => [x + dx, z + dz] as Pt), { ex: w && w.k !== 'plot' ? w.id : undefined, net: mine, at: mine && d.corners.length === 1 ? d.corners : undefined });
         dx += s.d[0]; dz += s.d[1]; this.guide = s.guide; this.hotPt = s.hot; this.why = s.why ?? null;
       }
       dx = r2(dx); dz = r2(dz);
@@ -805,7 +820,8 @@ export class CanvasEdit {
     if (t.k === 'plot') this.h.up({ shape: 'poly', ring: P, edgeRoads: Array.from({ length: P.length / 2 }, (_, i) => (i === 0 ? { today: p.road, dp: p.dpRoad } : null)) });
     if (t.k === 'feature') {
       const F = featureOf(t.kind), f: SiteFeature = { id: newId(), kind: t.kind, pts: P, ...(F.shape === 'point' ? { r: F.r } : {}), clear: F.clear };
-      this.h.up({ features: [...(p.features ?? []), f] });
+      // (a pole put on a line, or a line's nodes on another line: joined there, ./utilityNet.ts)
+      this.h.up({ features: joined([...(p.features ?? []), f], f.id) });
       this.h.pick({ k: 'feature', id: f.id });
     }
     if (t.k === 'building') {
@@ -907,13 +923,30 @@ export class CanvasEdit {
     v.overlay(o);
   }
 
+  /** the feature under the pointer: a point one (a pole by its post, as tall as it's drawn) first, as it sits on the
+   *  lines; then a line anywhere along it, not only at its nodes; then an area */
   private featureAt(px: number, py: number): SiteFeature | null {
     const v = this.h.view(); if (!v) return null;
-    const g = v.groundAt(px, py); if (!g) return null;
-    const rect = this.canvas.getBoundingClientRect();
-    for (const f of [...(this.h.p().features ?? [])].reverse().filter((x) => !this.locked.has(x.id))) {
-      if (featureOf(f.kind).shape === 'area' ? pointIn(f.pts, g[0], g[1]) : (() => { for (let i = 0; i + 1 < f.pts.length; i += 2) { const [qx, qy] = v.toScreen(f.pts[i], 0, f.pts[i + 1]); if (Math.hypot(qx - (px - rect.left), qy - (py - rect.top)) < 16) return true; } return false; })()) return f;
+    const g = v.groundAt(px, py);
+    const rect = this.canvas.getBoundingClientRect(), sx = px - rect.left, sy = py - rect.top;
+    /** the pointer's distance on screen to the segment a → b (in the world) */
+    const off = (ax: number, ay: number, az: number, bx: number, by: number, bz: number) => {
+      const a = v.toScreen(ax, ay, az), b = v.toScreen(bx, by, bz), ex = b[0] - a[0], ey = b[1] - a[1], L2 = ex * ex + ey * ey;
+      const t = L2 < 1e-6 ? 0 : Math.max(0, Math.min(1, ((sx - a[0]) * ex + (sy - a[1]) * ey) / L2));
+      return Math.hypot(a[0] + ex * t - sx, a[1] + ey * t - sy);
+    };
+    const fs = [...(this.h.p().features ?? [])].reverse().filter((x) => !this.locked.has(x.id));
+    for (const f of fs) {
+      if (featureOf(f.kind).shape !== 'point' || f.pts.length < 2) continue;
+      if (off(f.pts[0], 0, f.pts[1], f.pts[0], f.kind === 'pole' ? POLE_H : 0, f.pts[1]) < 14) return f;
     }
+    for (const f of fs) {
+      if (featureOf(f.kind).shape !== 'line') continue;
+      for (let i = 0; i + 3 < f.pts.length; i += 2) if (off(f.pts[i], 0, f.pts[i + 1], f.pts[i + 2], 0, f.pts[i + 3]) < 10) return f;
+      if (f.pts.length === 2 && off(f.pts[0], 0, f.pts[1], f.pts[0], 0, f.pts[1]) < 14) return f;
+    }
+    if (!g) return null;
+    for (const f of fs) if (featureOf(f.kind).shape === 'area' && pointIn(f.pts, g[0], g[1])) return f;
     return null;
   }
   private elementAt(px: number, py: number, e: Evaluated): SiteElement | null {
@@ -939,10 +972,18 @@ const shift = (pts: number[], dx: number, dz: number) => pts.map((q, i) => r2(q 
 /** the project with a building, a thing or a feature moved (a formed building moves with its spine) */
 export function moved(p: ProProject, e: Evaluated, what: Picked, dx: number, dz: number): Partial<ProProject> {
   if (!what || what.k === 'plot') return {};
-  if (what.k === 'feature') return { features: (p.features ?? []).map((f) => (f.id === what.id ? { ...f, pts: shift(f.pts, dx, dz) } : f)) };
+  // (a pole, a well or a tank takes the line nodes on it along, and a pole is joined to a line it lands on:
+  // ./utilityNet.ts)
+  if (what.k === 'feature') {
+    const f0 = (p.features ?? []).find((f) => f.id === what.id), h = f0 ? hubOf(f0) : null;
+    const fs = (p.features ?? []).map((f) => (f.id === what.id ? { ...f, pts: shift(f.pts, dx, dz) } : f));
+    return { features: h ? hubMoved(fs, h, dx, dz, what.id) : fs };
+  }
   const s = own(p, e);
   if (what.k === 'building') return { scheme: { ...s, buildings: s.buildings.map((b) => (b.id === what.id ? { ...b, spine: shift(b.spine, dx, dz) } : b)) } };
-  return { scheme: { ...s, elements: s.elements.map((x) => (x.id === what.id ? { ...x, spine: shift(x.spine, dx, dz), ...(x.ring ? { ring: shift(x.ring, dx, dz) } : {}), ...(x.nodes ? { nodes: shift(x.nodes, dx, dz) } : {}) } : x)) } };
+  const x0 = s.elements.find((x) => x.id === what.id), h = x0 ? hubOf(x0) : null;
+  const scheme = { ...s, elements: s.elements.map((x) => (x.id === what.id ? { ...x, spine: shift(x.spine, dx, dz), ...(x.ring ? { ring: shift(x.ring, dx, dz) } : {}), ...(x.nodes ? { nodes: shift(x.nodes, dx, dz) } : {}) } : x)) };
+  return h && p.features?.length ? { scheme, features: hubMoved(p.features, h, dx, dz) } : { scheme };
 }
 /** the project without it */
 export function removed(p: ProProject, e: Evaluated, what: Picked): Partial<ProProject> {

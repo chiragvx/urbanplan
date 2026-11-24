@@ -22,9 +22,12 @@ export function albedo(hex: string): THREE.Color {
   return c;
 }
 
-/** world-projected UVs for instanced boxes: vertical faces along their run and up, flat ones in plan (metres) */
-function boxUV(m: THREE.Material) {
-  m.onBeforeCompile = (s) => {
+/** world-projected UVs for instanced boxes: vertical faces along their run and up, flat ones in plan (metres). Runs
+ *  after any shader change the material already has (./landscape/material.ts adds one) */
+export function boxUV(m: THREE.Material) {
+  const before = m.onBeforeCompile.bind(m), key = m.customProgramCacheKey.bind(m)();
+  m.onBeforeCompile = (s, r) => {
+    before(s, r);
     s.uniforms.uBevel = BEVEL;
     s.vertexShader = 'uniform float uBevel;\n' + s.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
 #ifdef USE_INSTANCING
@@ -47,10 +50,13 @@ function boxUV(m: THREE.Material) {
     #ifdef USE_NORMALMAP
       vNormalMapUv = ( normalMapTransform * vec3( buv, 1.0 ) ).xy;
     #endif
+    #ifdef USE_ROUGHNESSMAP
+      vRoughnessMapUv = ( roughnessMapTransform * vec3( buv, 1.0 ) ).xy;
+    #endif
   }
 #endif`);
   };
-  m.customProgramCacheKey = () => 'boxuv';
+  m.customProgramCacheKey = () => `boxuv|${key}`;
 }
 
 export class Materials {
@@ -77,7 +83,7 @@ export class Materials {
       const rough = f === 'gloss' ? 0.28 : f === 'satin' ? 0.5 : f === 'textured' ? 0.95 : cat === 'wood' ? 0.7 : 0.88;
       const p: THREE.MeshPhysicalMaterialParameters = { color: albedo(colour), roughness: rough, metalness: metal ? 0.75 : 0, ...o };
       const d = mat ? detailOf(mat, this.tex) : null;
-      if (d) { p.map = d.map; p.normalMap = d.normal; p.normalScale = new THREE.Vector2(0.8, 0.8); }
+      if (d) { p.map = d.map; p.normalMap = d.normal; p.normalScale = new THREE.Vector2(0.8, 0.8); if (d.rough) { p.roughnessMap = d.rough; p.roughness = 1; } }
       const m = metal && f === 'gloss' ? new THREE.MeshPhysicalMaterial({ ...p, clearcoat: 0.5, clearcoatRoughness: 0.2 }) : new THREE.MeshStandardMaterial(p);
       boxUV(m);
       return m;

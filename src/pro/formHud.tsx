@@ -14,7 +14,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { drift, levelOf, opOf, partSpan, partT, sampleCurve, toLocal, toWorld, USE_INFO, type BuildingUse, type Carve, type Form, type KeyFloor, type Level, type PartOp, type Space } from './form';
 import { copiedPart, mirroredPart, movedPart, OPS, shapePart, turnedPart } from './parts';
 import { MASS_DRAW, MASS_SHAPES } from './masses';
-import { edgeNormal, floorsOfForm, NEW_PARTS, NEW_SPACES, newPart, newSpace, OP_LABEL, OP_TIP, partName, pushEdge, spaceName, spaceT, tOfFloor } from './parts';
+import { edgeNormal, floorsOfForm, NEW_SPACES, newSpace, OP_LABEL, OP_TIP, partName, pushEdge, spaceName, spaceT, tOfFloor } from './parts';
 import { byUse } from '../doc/uses';
 import { keyAt, keyed, keysOf, previewFloors, sortedKeys, spanTo, yOfT } from './silhouette';
 import { usePins, type Tx } from './hud';
@@ -526,12 +526,9 @@ export function PartsBody({ b, setB }: BodyProps) {
     <div class="part-new" role="group" aria-label="Add a part">
       <Seg<PartOp> small ariaLabel="The new part" value={op} set={setOp} options={OPS.map((o) => ({ value: o, label: OP_LABEL[o], title: OP_TIP[o] }))} />
       <div class="hrow part-add">
-        {MASS_SHAPES.filter((s) => s.shape !== 'court').map((s) => <button type="button" class="hlink" data-tip={`${OP_LABEL[op]}: a ${s.label.toLowerCase()} ${op === 'add' ? 'beside it' : 'at its middle'}, all its floors up`} onClick={() => setF((x) => ({ ...x, carves: [...x.carves, shapePart(x, s.shape, op)] }))}><Icon n={s.icon} size={14} />{s.label}</button>)}
+        {MASS_SHAPES.map((s) => <button type="button" class="hlink" data-tip={`${OP_LABEL[op]}: a ${s.label.toLowerCase()} ${op === 'add' ? 'beside it' : 'at its middle'}, all its floors up`} onClick={() => setF((x) => ({ ...x, carves: [...x.carves, shapePart(x, s.shape, op)] }))}><Icon n={s.icon} size={14} />{s.label}</button>)}
         {MASS_DRAW.map((s) => <button type="button" class="hlink" data-tip={`${OP_LABEL[op]}: draw it on the view. ${s.hint}`} onClick={() => dispatchEvent(new CustomEvent('urbanplan:tool', { detail: { k: 'mass', shape: s.shape, into: { id: b.id, op } } }))}><Icon n={s.icon} size={14} />{s.label}…</button>)}
       </div>
-    </div>
-    <div class="hrow part-add" role="group" aria-label="Add a ready part">
-      {NEW_PARTS.map((k) => <button type="button" class="hlink" data-tip={k.tip} onClick={() => setF((x) => ({ ...x, carves: [...x.carves, newPart(x, k.kind)] }))}><Icon n={k.icon} size={14} />{k.label}</button>)}
     </div>
     {f.carves.length > 0 && <small>On the view: drag a part's edge handles to push or pull it, and its arrows up the face for its floors.</small>}
   </div>;

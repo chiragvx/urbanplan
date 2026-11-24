@@ -22,7 +22,7 @@ const ft = (kind: Extract<Tool, { k: 'feature' }>['kind'], label?: string): Item
 const CATS: { id: Cat; label: string; hint: string; items: Item[] }[] = [
   { id: 'access', label: 'Access', hint: "Lines: click along, Enter to finish; type a length while drawing. A road that ends on the plot's edge joins the road outside. Curves: Alt-drag a point, or double-click it.", items: [el('road'), el('roundabout'), el('gate'), el('wall')] },
   { id: 'parking', label: 'Parking', hint: 'Drag out the area, or click its corners.', items: [el('lot'), el('parking')] },
-  { id: 'landscape', label: 'Landscape', hint: 'Drag out the area, or click its corners. Curves: Alt-drag a corner, or double-click it.', items: [el('garden'), el('play'), el('trees')] },
+  { id: 'landscape', label: 'Landscape', hint: 'Drag out the area, or click its corners. Curves: Alt-drag a corner, or double-click it.', items: [el('garden'), el('play'), el('trees'), el('pool')] },
   { id: 'utilities', label: 'Utilities', hint: 'New and existing services. What runs over or under the plot keeps its clearance clear.', items: [el('tank'), ft('power'), ft('pole'), ft('well'), ft('water')] },
   { id: 'existing', label: 'Existing', hint: "What's there already: each keeps its clearance clear.", items: [ft('tree', 'Existing tree'), ft('structure'), ft('nobuild')] },
 ];

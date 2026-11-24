@@ -20,6 +20,7 @@ import { CombineList } from './combineUi';
 /** the template a building came from, by name (none: drawn by hand) */
 const tplName = (b: ProBuilding) => (b.form?.template ? TEMPLATES.find((t) => t.id === b.form!.template)?.name : undefined);
 import { SystemsPanel } from './systemsPanel';
+import { FoundationBody, GroundBody } from './groundPanel';
 import { mergeSettings, splitSettings } from './systems';
 import { FlatPlan } from './steps';
 import type { FlatRooms } from './rooms';
@@ -27,6 +28,7 @@ import type { Check } from './scrutiny';
 import { checkBuilding, STATUS_ICON } from './viewer';
 import { USE_LABEL } from './deal';
 import { Btn, Icon, Lines, Note, nf, Num, pct, Section, Select, sqft, Toggle } from './ui';
+import { SPECIES } from './render/landscape/trees';
 
 interface Props {
   p: ProProject; e: Evaluated; up: (o: Partial<ProProject>) => void;
@@ -139,6 +141,9 @@ function BuildingInspector({ p, e, up, rooms, checks, pick, toast, xray, hide, r
           : <p class="hint-line"><Icon n="check" size={14} />Nothing flagged for {name}.</p>}
         <Btn kind="quiet" icon="layers" onClick={() => xray(Math.max(1, Math.round(br.floors / 2)))}>X-ray it</Btn>
       </Section>
+      <Section title="Foundation" fold open={!!e.ground} aside={e.ground ? <span class="sec-meta">{e.ground.buildings.find((f) => f.id === id)?.label ?? ''}</span> : undefined}>
+        <FoundationBody f={e.ground?.buildings.find((f) => f.id === id)} basements={d.site.basements} />
+      </Section>
       <fieldset disabled={readOnly}>
         <Section title="Systems" fold open={false} sub="Stairs, lifts, ducts, plumbing, power and fire: sized for it, each one yours to set."><SystemsPanel b={br} settings={mergeSettings(p.systems?.byBuilding?.[id], p.systems?.site)} under={d.under} floorH={r.rules.floorH} code={r.code} name={name} basements={d.site.basements} bays={d.parking.have}
           set={(x) => { const { building, plant } = splitSettings(x); up({ systems: { site: plant, byBuilding: { ...(p.systems?.byBuilding ?? {}), [id]: building } } }); }} /></Section>
@@ -232,6 +237,9 @@ function PlotInspector({ p, e, up, hide, readOnly }: Props) {
           {L.slope > 0 && <Select<number> label="Falls toward" value={L.dir} onChange={(v) => setLv({ dir: v })} options={DIRS.map((x, i) => ({ value: i * 45, label: cap(x) }))} />}
           {L.plot < PLINTH_MIN && <Note tone="warn">The plinth must stand at least {PLINTH_MIN} m over the road.</Note>}
         </Section>
+        <Section title="Ground" sub="What the plot is made of: its basements and foundations are worked out from it." aside={p.ground ? <span class="sec-meta">{p.ground.src === 'report' ? 'from a report' : p.ground.src === 'preset' ? 'typical' : 'yours'}</span> : undefined}>
+          <GroundBody p={p} e={e} up={up} />
+        </Section>
         <Section title="North">
           <Num label="North (degrees)" value={north} set={(v) => up({ north: ((Math.round(v) % 360) + 360) % 360 })} min={0} max={359} step={5} unit="°" hint={p.at ? 'Set from the plot’s place on the map' : 'Or drag the compass'} />
         </Section>
@@ -259,6 +267,7 @@ function ObjectInspector({ p, e, up, picked, pick, toast, hide, readOnly }: Prop
         {el?.kind === 'parking' && <Num label="Levels" value={el.levels ?? 3} set={(v) => setEl((x) => ({ ...x, levels: Math.max(1, Math.min(12, v)) }))} min={1} max={12} />}
         {(el?.kind === 'roundabout' || el?.kind === 'tank') && <Num label="Across" value={el.depth} set={(v) => setEl((x) => ({ ...x, depth: Math.max(2, Math.min(60, v)) }))} min={2} max={60} step={0.5} unit="m" />}
         {f && <>
+          {f.kind === 'tree' && <Select<string> label="Species" value={String(f.species ?? 1)} onChange={(v) => setF({ species: Number(v) })} options={SPECIES.map((s, i) => ({ value: String(i), label: s.label }))} />}
           {F!.shape === 'point' && <Num label={f.kind === 'tree' ? 'Canopy' : 'Radius'} value={f.r ?? F!.r} set={(v) => setF({ r: Math.max(0.2, Math.min(30, v)) })} min={0.2} max={30} step={0.5} unit="m" />}
           <Num label="Kept clear" value={f.clear ?? F!.clear} set={(v) => setF({ clear: Math.max(0, Math.min(60, v)) })} min={0} max={60} step={0.5} unit="m" />
           <label class="f"><span class="f-l">What it is</span><input class="txt" value={f.note ?? ''} placeholder={f.kind === 'nobuild' ? 'Why: an easement…' : 'A note'} onChange={(ev) => setF({ note: (ev.target as HTMLInputElement).value || undefined })} /></label>

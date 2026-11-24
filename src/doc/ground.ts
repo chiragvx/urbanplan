@@ -377,6 +377,8 @@ export interface GroundIn {
   lines: { pts: number[]; w: number; closed?: boolean }[]; circles: number[][];
   /** building plates, car parks, the fire tender's way round tall buildings */
   build: number[][]; structures: number[][]; fire: number[][];
+  /** pools with their decks: kept clear like a structure, but open space (a pool counts in the recreational open space) */
+  pools?: number[][];
   /** lots and gardens as drawn (their order: an earlier one keeps what it shares with a later one) */
   lots: number[][]; gardens: number[][];
   /** bays on the rest of the open ground, inside this (the plot less a strip along the wall) */
@@ -396,7 +398,8 @@ export function layGround(I: GroundIn): GroundOut {
   // (never under a building: a road a building has grown over is cut back, clear of its faces)
   const road = diff(inter(union(...I.lines.map((l) => stroke(l.pts, l.w, l.closed)), ...I.circles.map(([x, z, r]) => disc(x, z, r, 32))), net), islands, offset(fromFlats(I.build), 1.2));
   const island = inter(islands, net);
-  const build = inter(fromFlats([...I.build, ...I.structures]), net);
+  const build = inter(fromFlats([...I.build, ...I.structures, ...(I.pools ?? [])]), net);
+  const roofed = I.pools?.length ? inter(fromFlats([...I.build, ...I.structures]), net) : build;
   let taken = union(road, island, build);
   // the fire tender's way: kept clear of parking; across a garden it's a paved walk
   const fireAll = diff(inter(fromFlats(I.fire), net), taken);
@@ -457,7 +460,7 @@ export function layGround(I: GroundIn): GroundOut {
   for (const [x, z, r] of I.circles) if (r > 8) plants.push({ x, z, r: Math.min(5, r - 7), kind: 0 });
   const gardenArea = area(union(G.lawn, G.bed, G.path));
   return {
-    map: { road, island, fire, lot, lotIsland, apron, path: G.path, lawn: G.lawn, bed: G.bed, green, plants, benches: G.benches, gardenArea, openArea: area(diff(net, road, build, lot)) },
+    map: { road, island, fire, lot, lotIsland, apron, path: G.path, lawn: G.lawn, bed: G.bed, green, plants, benches: G.benches, gardenArea, openArea: area(diff(net, road, roofed, lot)) },
     lotBays, surfaceBays,
   };
 }

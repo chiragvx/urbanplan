@@ -87,7 +87,7 @@ export interface Scheme {
 export function schemes(r: PlotReport, design: Design, use: PlotUse, under = 1, site?: PlotSite): Scheme[] {
   // (pure, and slow: kept for the same plot, settings and fixed elements, so reshaping the buildings by hand doesn't
   // plan the whole site again on every move)
-  const fixedEls = (site?.elements ?? []).filter((e) => !e.auto && (e.kind === 'parking' || e.kind === 'road' || e.kind === 'roundabout' || e.kind === 'tank')).map((e) => [e.kind, e.spine, e.ring, e.depth]);
+  const fixedEls = (site?.elements ?? []).filter((e) => !e.auto && (e.kind === 'parking' || e.kind === 'road' || e.kind === 'roundabout' || e.kind === 'tank' || e.kind === 'pool')).map((e) => [e.kind, e.spine, e.ring, e.depth]);
   const fixedB = handPlaced(site).map((b) => [b.spine, b.depth, b.closed, b.floors]);
   const key = JSON.stringify([r.net, r.edges, r.bua, r.area, r.rules, r.code, r.parts, design, use, under, fixedEls, fixedB, site?.keepOut ?? null]);
   const hit = SCHEMES.get(key);
@@ -117,7 +117,7 @@ function schemesOf(r0: PlotReport, design: Design, use: PlotUse, under: number, 
   const NL = F.toL(r.net);
   // what's placed by hand and stays put: parking buildings, roads, roundabouts (lots and gardens give way)
   const fixed = [
-    ...(site?.elements ?? []).filter((e) => !e.auto && (e.kind === 'parking' || e.kind === 'road' || e.kind === 'roundabout' || e.kind === 'tank'))
+    ...(site?.elements ?? []).filter((e) => !e.auto && (e.kind === 'parking' || e.kind === 'road' || e.kind === 'roundabout' || e.kind === 'tank' || e.kind === 'pool'))
       .flatMap(elementRings).map((q) => box(F.toL(q), ROAD_SET)),
     // (the buildings placed by hand, with a fire tender's way round them)
     ...hand.flatMap(buildingQuads).map((q) => box(F.toL(q), FIRE_GAP + FIRE_W)),

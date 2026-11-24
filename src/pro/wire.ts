@@ -6,10 +6,10 @@
 // under a second; nothing moves). Edges that stay are untouched. With reduced motion the change is simply made.
 import * as THREE from 'three';
 import type { PlotReport } from '../doc/plot';
-import { elementRings, isArea, offsetSpine, type SiteReport } from '../doc/site';
+import { elementRings, isArea, offsetSpine, POOL_DECK, type SiteReport } from '../doc/site';
 import type { Shops } from './mixed';
 import { featureOf, keptOf, levelAt, type Levels, type SiteFeature } from './siteObjects';
-import { outlines } from '../doc/ground';
+import { fromFlat, offset, outlines } from '../doc/ground';
 import { frameOf, type FormLayout, type Roof, type Shell, type Skin } from './form';
 import { canonical, canonOf, formMass, loftPair, roofLines } from './form/mesh';
 
@@ -108,12 +108,11 @@ function edges(v: WireData): { k: string; a: V3; b: V3; w: number }[] {
     for (const rg of elementRings(e)) {
       ring(rg, 0, 0.55);
       if (e.kind === 'play') hatchIn(rg, 0.22, 1.6);
+      if (e.kind === 'pool') for (const w of outlines(offset(fromFlat(rg), -POOL_DECK))) { ring(w, 0.12, 0.6); hatchIn(w, 0.12, 1.2); }
       if (e.kind === 'parking' && isArea(e)) { const top = (e.levels ?? 2) * 3; ring(rg, top, 0.55); for (let i = 0; i < rg.length; i += 2) add([rg[i], 0, rg[i + 1]], [rg[i], top, rg[i + 1]], 0.55); }
       if (e.kind === 'tank') { for (let i = 0; i < rg.length; i += 2) add([rg[i], 0, rg[i + 1]], [rg[i], 4, rg[i + 1]], 0.4); ring(rg, 4, 0.5); }
     }
   }
-  const plants = G.map.plants;
-  for (let k = 0; k < plants.length; k += Math.max(1, Math.ceil(plants.length / 160))) { const t = plants[k]; if (t.kind <= 1) tree(t.x, t.z, Math.max(1.5, t.r), 0.38); }
 
   // obstructions and no-build zones: each as itself, the ground kept clear round it dashed
   for (const f of v.features ?? []) {

@@ -4,6 +4,167 @@ Newest first. Each entry gives the phase, what changed, how it was checked, and 
 
 ---
 
+## 2026-11-24 · Pools as a site element
+
+**Why:** the user asked for pools as a site element.
+
+**What changed:**
+- **A new site element, Swimming pool** (src/doc/site.ts):
+  - You drag out its area like a garden or a play area.
+  - The drawn area is the pool with its deck: the water is inset 1.5 m (`POOL_DECK`).
+  - It is on the Draw tools (src/pro/edit.ts, "Pool") and on the Landscape shelf (src/pro/shelf.tsx).
+- **Nothing is laid over it:**
+  - Gardens, paths, beds and plants keep clear of it, and a building drawn over it is flagged as overlapping.
+  - The optimiser keeps it where it is drawn (src/doc/optimise.ts).
+- **It counts as open space:** a pool is allowed in the recreational open space.
+  - The ground layout takes pools separately (`pools` in src/doc/ground.ts).
+  - Pools are kept clear like a structure but are not taken off the open area.
+- **In the scene** (src/pro/scene.ts):
+  - a timber deck over the drawn area;
+  - a flamed granite coping, 300 wide, standing just above the deck;
+  - pool water a hand below the coping's top.
+- **In the wireframe** (src/pro/wire.ts): the water's edge is drawn and hatched inside the deck outline.
+
+**Checked:**
+- tsc passes.
+- npm test is all OK. test-landscape adds a pool case: the pool is kept, nothing is laid over it, the garden round it is, and the open area is the same with and without it.
+- The build is OK.
+- In the app, in a separate tab with saving blocked: a pool in a garden, shaded at Draft and in wireframe. The deck, coping and water show, and the garden path goes round them. No console errors from the pool. (One error came from a malformed test call with no buildings list, not a user path.)
+
+**Left or known to be off:**
+- Site elements have no cost lines, so a pool adds nothing to cost yet.
+- The pool's depth and sides aren't modelled: the water is a flat surface with no basin below.
+- Its shape follows the drawn area only (no freeform or kidney shapes).
+
+---
+
+## 2026-11-24 · Realism, second part: water, play surfaces, walls in their material, richer building textures
+
+**Why:** the user asked to continue on more materials.
+
+**What changed:**
+- **New landscape surfaces** (src/pro/render/landscape/surfaces.ts):
+  - still water and pool water: deep to shallow colour, wrapping wind ripples, mirror-smooth;
+  - rubber play surface (EPDM granules), blue and red;
+  - timber deck with board gaps, grain and screw pairs;
+  - flamed granite 600 × 300;
+  - cobbles 100 square.
+
+  31 surfaces in all.
+- **In the scene:**
+  - a site's water features and wells are water;
+  - play areas drawn or laid by the plan are red rubber;
+  - tree groves are mulch;
+  - the compound wall is its design system's library material (it was a flat colour);
+  - kerbs and footpaths take their texture from the world, so it no longer stretches along each piece.
+  - `boxUV` (src/pro/render/pbr.ts) is now shared and chains after other shader changes; it also places the roughness map.
+- **Building materials** (src/pro/render/textures.ts):
+  - every library material gets a roughness map: the face as its finish (gloss tiles 0.18, satin 0.45, textured 0.93), joints and pores rough;
+  - ashlar stones each take their own shade;
+  - marble-look slabs get veins;
+  - fair-faced concrete gets form-tie holes, four to a 1200 × 600 panel.
+
+**Checked:** tsc; npm test, all OK (test-landscape covers the new surfaces for range, repeatability and no seam); build OK. In the app, in a separate tab with saving blocked: top, street and close views at Draft and High, with the pond, play area, wall, kerbs and trees; no console errors.
+
+**Left or known to be off:** water is a flat, still surface (no animation, no transparency to a bed below). Pools aren't a site element yet, so 'pool-water' and 'deck' have no user. Building facades have no weathering (rain streaks, splash at the base) yet.
+
+---
+
+## 2026-11-24 · Utilities on the plot: power lines snap to poles, stay joined and move together
+
+**Why:** the user reported that the utilities on the plot (power lines, poles or transformers, wells, the water tank) didn't snap and didn't work. In the app: a power line's nodes snapped only to the plot, the buildable line and the buildings, so a line couldn't be put on a pole. Moving a pole left the line where it was. A click on the middle of a line picked the plot, as a line could only be picked within 16 px of one of its nodes. A node clicked and then Delete removed the whole line, as the handle never took focus.
+
+**What changed:**
+- **The utilities as one network** (src/pro/utilityNet.ts, new, pure): a join is where things are, not a stored link. A line node on a pole, a tank or another line's node is joined to it. `netTargets` gives what a utility snaps to: poles', wells' and tanks' middles, the power lines' nodes and lines, the roads' nodes, centre lines and edges, walls, gates, and the areas' corners and edges. `carry` and `hubMoved` take the line nodes on a pole or a tank along when it moves. `joinOnto` and `joined` give a line a node where a pole is put on it, or where another line's end lands on it, so they're joined from then on. `nodeMoved` drags a line's node and takes the other lines' nodes joined there along. The pole it was on stays.
+- **Snapping** (src/pro/edit.ts): drawing anything but a building, or moving a feature or a thing on the grounds, now snaps to the things on the plot as well as the plot and the buildings. A thing being moved never snaps to itself or to the line nodes it carries. A tank snaps by its middle, not its 1 m stub's ends. The targets cache is keyed on what's excluded as well as the evaluation.
+- **Moving** (src/pro/edit.ts `moved`, used by dragging and the arrow keys): a pole, a well or a tank moved takes the line nodes on it along, and a pole moved onto a line joins it. A whole line moved leaves the poles where they are. A pole put down with the tool joins the line it lands on (`finish`).
+- **Picking** (src/pro/edit.ts `featureAt`): point features first, as they sit on the lines; a pole by its 9 m post, not only its foot. Then a line anywhere along it (10 px), then an area.
+- **Node handles** (src/pro/objHud.tsx): a dragged node snaps to the things on the plot, and it joins or carries as above. A node pressed takes keyboard focus, so Delete removes that node (a line keeps at least 2) instead of the whole line.
+
+**How it was checked:**
+- New tools/dev/test-utilities.ts in `npm test`: 28 checks on the targets, carry, joins, node drags, and `moved()` for a pole, a whole line and a tank. tsc clean, npm test all OK, npm run build OK.
+- In the app, in a separate tab with saving blocked, Plan then 3D. A click on a line's middle picks the line. + then Delete adds a node and takes it away; the line stays. A pole dragged 11.5 m takes the line's end along. A line's end dragged off a pole leaves the pole, and dropped 2 px from an off-grid pole (-20.37, 40.13) lands exactly on it. A pole placed with the tool on a line gets a node in the line. In 3D, a click 15 px up the post picks the pole, and dragging it bends the line with it.
+
+**Left or known to be off:**
+- Joins go by position (within 5 cm). Two lines drawn through the same spot without a node there are crossing, not joined, until a pole or a node is put there.
+- A line's node dragged off a pole detaches it; to move them together, drag the pole.
+- The snap word by the pointer ("corner") stays after a drag until the pointer moves again. That's old, and the same for buildings.
+- For realism: a power line is still a 0.6 m grey strip on the ground with a clearance band. There are no wires, no poles at its nodes unless placed, and no sag. A pole is a plain 9 m box with no cross-arm, insulators or transformer. A well is a flat disc, and the tank a plain cylinder. A real look would draw poles at the line's nodes (RCC or steel, cross-arms), wires with catenary sag at about 7 to 9 m, a pole-mounted or plinth transformer, a well's parapet, and a tank on its staging. All are small instanced meshes in src/pro/scene.ts (features loop), reusing `hubOf` and the joins to know which nodes have poles.
+
+---
+
+## 2026-11-24 · Realism, first part: a landscape kit (surfaces and trees grown in code)
+
+**Why:** the user asked for realistic textures for roads, earth, trees and the rest of the landscaping, modular by design.
+
+**What changed:**
+- **A landscape kit**, src/pro/render/landscape/:
+  - noise.ts: tileable value and fractal noise, a tileable Voronoi, and a Field (colour, height, roughness) that recipes paint into.
+  - surfaces.ts: a registry, `SURFACES`, one entry per surface. Each entry is the tile it repeats over in metres, its bump, and a paint recipe. There are 24: asphalt (new and worn), sawcut concrete, kerb, grey and red paver blocks, Kota stone, path tiles, grass pavers, lawn, wild grass, bark mulch, earth, dry open ground, fill, silt, black cotton (cracked), stiff and soft clay, sand, gravel, murum, basalt, weathered rock. Recipes that differ only in colour share a maker (soil, cracked, stones, rock, units, grass). `surfaceOfCover` and `surfaceOfRoad` map the ground covers and the site kit's road surfaces onto them.
+  - material.ts: a surface becomes a material with a real-colour map, a normal map and a roughness map, cached. A macro pass varies the colour ±15% at 11× the tile, so large areas don't show the repeat. Drawn at 256 px even in Draft, 512 at Standard, 1024 at High.
+  - trees.ts: a registry, `SPECIES`: rain tree, round shade tree (neem, karanj), coconut palm, ashoka, shrub. Each is grown in code: tapered, barked limbs branching to a set depth, and a crown of alpha-cut leaf sprays (pinnate, broad, drooping, small, palm fronds) with outward normals. There are 3 variants per species and near and far detail; trees are instanced and cast leaf-shaped shadows.
+- **The scene** (src/pro/scene.ts) asks the kit for every ground surface:
+  - outside roads are worn asphalt;
+  - internal roads take the site kit's surface;
+  - parking is pavers (concrete when the drive is pavers);
+  - paths are path tiles;
+  - the plan's open green is lawn (before, it wasn't drawn), with lawns and beds (mulch) on it;
+  - kerbs and footpaths are kerb stone and concrete;
+  - the plot takes its ground cover's surface, else pavers;
+  - the open ground round the site is dry scrub.
+  - The old low-poly trees (src/build/plants.ts) are no longer used by Pro; the old trees are still used by src/scene/world.ts.
+- **Placed trees have a species** (`SiteFeature.species`; a Species picker beside Canopy in the inspector).
+- **Path-traced stills** keep the leaves' and bark's maps and alpha (the bake keeps uv and rounds colours, so leaves don't split into a mesh per shade).
+
+**Checked:** tsc; npm test, 13 suites all OK, with the new tools/dev/test-landscape.ts. It checks each surface for colours in range, repeatable painting and no seam at the wrap, and each species, variant and detail for finite geometry, normalised to a canopy of 1. Build OK. In the app, in a separate tab with saving blocked, at Draft and Standard: no visible tiling on the open ground; the paver drive, lawn and kerbs read; all five species side by side; no console errors.
+
+**Left or known to be off:** footpaths and kerbs are instanced boxes, so their texture stretches along a piece. The surfaces are procedural, not photo-scanned (the scanned-set loader in render/textures.ts still covers the building materials only). Water (ponds, pools) has no surface yet. The ground map still lays plants that aren't drawn.
+
+---
+
+## 2026-11-24 · Trees only where the user puts them; the Ground panel fits its width
+
+**Why:** the user found the trees laid out automatically "nonsensical" and asked for them to go unless added. The plot inspector's Ground section ran wider than the panel and scrolled sideways.
+
+**What changed:**
+- **Trees** (src/pro/scene.ts, src/pro/wire.ts): the 3D view and the wireframe draw only trees placed as site features (Site's Tree). Gone: the trees the ground map scatters in the garden, along the wall and on parking islands; the design system's avenue or dense rows; the trees every 9 m along internal roads. The garden's low shrubs in the beds and the design system's hedge stay. The ground map still lays its plants (other code reads them); they're just not drawn as trees.
+- **Review** (src/pro/review.ts): "A tree for every N m² of plot" now counts the trees the user placed, so it agrees with what's drawn. Most schemes will show it unmet until trees are placed.
+- **Ground panel** (src/pro/groundPanel.tsx, pro.css): the quick fields are Top layer full width, then Rock at and Water at side by side. The log's table is now a list of layers, each a name row (swatch, kind, remove) over Thick and Bears. The log column is 60 px wide. The inspector's body has a `minmax(0, 1fr)` column, so nothing in it can push it wider.
+
+**Checked:** tsc, npm test (all 12 OK). In the app, in a separate tab with saving blocked: the inspector body's scroll width equals its width; a generated slab scheme shows no trees, then the two placed trees, no console errors.
+
+---
+
+## 2026-11-24 · The plot's ground: geology, foundations, basements, 3D cut-away (docs/plans/plot-ground.md, all 7 steps)
+
+**Why:** the user asked for a geology layer on the plot: a surface cover, levels across the plot, and the layers of earth down to rock, with each building's basements and foundations decided from what the user says is in the ground. Mid-way they asked for 3D cut-aways, a sweep across elevations, plots and buildings, and a report.
+
+**What changed:**
+- **The ground** (src/pro/ground.ts, new): 11 soil kinds with presumptive bearing, unit weight, how they dig, whether they stand, swell or liquefy; a surface cover; layers, water table, boreholes (blended by inverse distance) and spot heights; six presets (Pune typical, Pune rock, Mumbai suburbs, Mumbai island, sandy, clay); a borehole log pasted as text is read (`parseLog`).
+- **Foundations and the dig** (src/pro/foundation.ts, new): per building, footings, footings on rock, raft, piles or piled raft, or under-reamed piles in black cotton, with the reason; the dig by layer, shoring type, dewatering, tanking, uplift anchors; cut and fill for the levels; flags (water, shoring, liquefaction, basements on a slope, more basements than the ground makes worth it). The money takes only the net over an ordinary site (stiff clay, murum, then rock), so a project with no ground keeps its figures exactly.
+- **Basements:** the engine digs no more basements than the ground makes worth it (`basementCap` into `PlotSite.maxBasements`, src/doc/site.ts). A count the user asks for is kept and flagged.
+- **Where it shows:** Plot inspector's Ground section (presets, cover, quick fields, a draggable log, layers table, boreholes, spot heights, what it makes of the scheme); a Foundation section on each building; the deal's "Ground works, over an ordinary site" line; Scrutiny rows; Approvals documents (soil report; excavation and shoring design past 6 m); the Section sheet draws strata, water and foundations; a new "Ground and foundations" sheet. DXF is unchanged on purpose (PreDCR format).
+- **3D cut-away** (src/pro/scene.ts): toolbar Ground (key g) and Section. Ground shows the layers under the plot; Section cuts the block through the middle: textured solid layers, the basements' hole, water, rafts, piles on the cut face, boreholes. New soil textures (sand, cracked, gravel, rock).
+
+**How it was checked:**
+- `npx tsc` clean, `npm test` all OK (new tools/dev/test-ground.ts: model, log parsing, boreholes, a 150-case matrix, hand cases), `npm run build` OK.
+- tools/dev/sweep-ground.ts (not in npm test, ~3.5 min): 4 cities × 9 grounds × 4 elevations × 4 plots × 3 builds, rotated to 576 cases. All OK. It found the ordinary baseline was stiff clay to 60 m, which put towers on friction piles and gave a net of −₹18 cr; fixed to clay, murum, rock. Net now −0.2% to 13.7% of cost.
+- In the app, in a separate tab with saving blocked: Mumbai suburbs 22-floor tower with 2 basements, and Pune typical on a 6% slope with slabs; the cut-away, section, foundations and panel render, no console errors.
+
+**Left or known to be off:** rates and bearing figures are presumptive and labelled "as assumed"; the elevation changes cut and fill but barely the net (about 0.3 points); the basement cap seldom bites on the presets (most cases keep 2); spot heights don't yet tilt the 3D ground surface; no settlement check.
+
+---
+
+## 2026-11-24 · Design offers only base primitives (docs/plans/pro-design-freedom.md §3.6)
+
+**Why:** the user asked for only base primitives in the Design tab.
+
+**What changed:** the Design tab's Shapes are Box, Round and Wedge (src/pro/masses.ts `MASS_SHAPES`). L, U and Courtyard are gone from it; they're made by the booleans from primitives, each piece a part to move or change. The same list feeds the Parts panel's new-part buttons, so it offers the same three plus the drawn Rectangle, Polygon and Circle. The "ready parts" row (podium, wing, notch, slot, trim) is gone from Parts too. Those shapes and part kinds stay in the code for projects and templates already made with them (`shapePlan`, `newPart`).
+
+**Checked:** tsc, npm test (all OK), build. In the app, in a separate tab with saving blocked: Design lists Box, Round, Wedge and the three drawn footprints; Parts on a picked building lists the same, and there's no ready-parts row.
+
+---
+
 ## 2026-11-24 · Booleans hardened: cut faces, a stress test, many parts (docs/plans/pro-design-freedom.md §3.6)
 
 **Why:** the user found the shaded 3D broken after a boolean. They asked for the key use to be tested until it can't break, with radically different shapes and many cuts and booleans.

@@ -16,6 +16,8 @@ export interface SiteFeature {
   pts: number[];
   /** a point's radius: a tree's canopy, a well (m) */
   r?: number;
+  /** a tree's species (src/pro/render/landscape/trees.ts SPECIES; default the round shade tree) */
+  species?: number;
   /** ground kept clear round it (m) */
   clear?: number;
   /** what it is, in a few words (a no-build zone's reason) */

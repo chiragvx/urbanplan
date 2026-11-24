@@ -1,37 +1,9 @@
-// Life round the buildings: the planting as its five species (src/build/plants.ts: rain tree, round, palm, ashoka,
-// shrub), each instanced with its own green, size and turn; cars parked in the lots and along the road; people at the
+// Life round the buildings (the trees are grown in ./landscape/trees.ts): cars parked in the lots and along the road; people at the
 // entrance and on the paths. Low-poly and clean rather than photographic (where web viewers look worst), placed by a
 // seeded hash so the same scheme always looks the same. Road markings: centre dashes and edge lines.
 import * as THREE from 'three';
-import { plantGeometries, PLANT_GREENS } from '../../build/plants';
-
-let near: THREE.BufferGeometry[] | null = null, far: THREE.BufferGeometry[] | null = null;
-const plants = (detail: boolean) => (detail ? (near ??= plantGeometries(true)) : (far ??= plantGeometries(false)));
 const hash = (x: number, z: number, k = 0) => { const s = Math.sin(x * 12.9898 + z * 78.233 + k * 37.719) * 43758.5453; return s - Math.floor(s); };
 const dummy = new THREE.Object3D();
-
-export interface Tree { x: number; z: number; r: number; kind: number }
-
-/** the trees as instanced species: one mesh per kind */
-export function treeMeshes(trees: Tree[], detail: boolean, mat: THREE.Material): THREE.InstancedMesh[] {
-  const geos = plants(detail), out: THREE.InstancedMesh[] = [];
-  for (let k = 0; k < geos.length; k++) {
-    const T = trees.filter((t) => t.kind === k);
-    if (!T.length) continue;
-    const im = new THREE.InstancedMesh(geos[k], mat, T.length), col = new THREE.Color();
-    T.forEach((t, i) => {
-      const h = hash(t.x, t.z), s = t.r * (0.85 + 0.3 * h);
-      dummy.position.set(t.x, 0, t.z); dummy.rotation.set(0, h * Math.PI * 2, 0); dummy.scale.setScalar(s); dummy.updateMatrix();
-      im.setMatrixAt(i, dummy.matrix);
-      const g = PLANT_GREENS[k]; col.setHex(g[Math.floor(hash(t.z, t.x, 1) * g.length) % g.length]);
-      im.setColorAt(i, col);
-    });
-    im.castShadow = true; im.receiveShadow = true;
-    im.computeBoundingSphere();
-    out.push(im);
-  }
-  return out;
-}
 
 const CAR_COLOURS = ['#e8e8e6', '#1c1d20', '#8d9196', '#b3262a', '#2f4a6b', '#c9c3b5', '#4a4d52', '#f2f0ea'];
 const PEOPLE = ['#3b4a5c', '#8a3b3b', '#d9c7a8', '#2f2f33', '#5b6e4a', '#c6a35a', '#ece7dc'];

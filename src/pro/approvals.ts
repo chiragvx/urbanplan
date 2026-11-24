@@ -92,6 +92,9 @@ export function documents(e: Evaluated, kind: PermissionKind = 'new'): DocItem[]
   if (r.lost > 0.5) list.push({ title: 'Road widening handover', note: 'The strip in the DP road line, handed over for the FSI credit.', from: 'owner' });
   if (d.height > FIRE_H) list.push({ title: 'Fire NOC (provisional)', note: 'Over 15 m.', from: 'authority' });
   if (d.bua >= EC_FROM) list.push({ title: 'Environment clearance', note: 'SEIAA, from 20,000 m² of built-up area.', from: 'authority' });
+  // (the ground: a soil report, and the structural engineer's word on the foundations it leads to)
+  if (d.site.basements > 0 || e.p.ground) list.push({ title: 'Soil investigation report', note: 'Boreholes to below the founding level (IS 1892): it confirms the layers, the water and the bearing assumed here.', from: 'architect' });
+  if (e.ground && e.ground.dig && e.ground.dig.depth > 6) list.push({ title: 'Excavation and shoring design', note: `A ${Math.round(e.ground.dig.depth)} m dig beside the boundaries: its support, and the neighbours' condition surveyed before it starts.`, from: 'architect' });
   return list;
 }
 

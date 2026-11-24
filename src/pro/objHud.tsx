@@ -18,6 +18,7 @@ import { ELEMENT_TOOLS, own, removed, type CanvasEdit, type Picked } from './edi
 import { ELEMENTS, isArea, nodesOf, roadFrame, withNodes, type SiteElement } from '../doc/site';
 import { moveHandle, smoothHandles, type Handles } from '../doc/curves';
 import { featureOf, INTERNAL_WIDTHS, type SiteFeature } from './siteObjects';
+import { nodeMoved } from './utilityNet';
 import { usePins, type Tx } from './hud';
 import { Icon } from './ui';
 
@@ -147,10 +148,14 @@ export function ObjectHud({ view, edit, p, e, picked, pick, tx, snap, readOnly, 
       else B[d.i] = moveHandle(B[d.i], d.key.startsWith('hi') ? 0 : 1, ox, oz, ev.altKey);
       return withPts(d.base, d.e, d.pts, B);
     }
-    // a point: snapped as drawing is, to the plot, the margins, the buildings and its own other points
+    // a point: snapped as drawing is, to the plot, the margins, the buildings, its own other points and the things on
+    // the plot (poles, the lines' nodes, tanks, roads: ./utilityNet.ts), but not itself nor the nodes joined to it
     const extra: number[] = []; pairs(d.pts).forEach(([x, z], i) => { if (i !== d.i) extra.push(x, z); });
-    const g = edit?.snapAt(ev.clientX, ev.clientY, ev, { extra }) ?? view.groundAt(ev.clientX, ev.clientY);
+    const was: Pt = [d.pts[d.i * 2], d.pts[d.i * 2 + 1]];
+    const g = edit?.snapAt(ev.clientX, ev.clientY, ev, { extra, ex: f?.id ?? el!.id, net: true, at: [was] }) ?? view.groundAt(ev.clientX, ev.clientY);
     if (!g) return null;
+    // (a feature's node: the other lines joined there go along, and it joins a line it's put on)
+    if (f) return { features: nodeMoved(d.base.features ?? [], f.id, d.i, g[0], g[1]) };
     const np = [...d.pts]; np[d.i * 2] = r2(g[0]); np[d.i * 2 + 1] = r2(g[1]);
     return withPts(d.base, d.e, np);
   };
@@ -163,6 +168,9 @@ export function ObjectHud({ view, edit, p, e, picked, pick, tx, snap, readOnly, 
   const down = (key: string, i: number) => (ev: PointerEvent) => {
     if (ev.button !== 0) return;
     ev.preventDefault(); ev.stopPropagation();
+    // (a point pressed takes the keys, so Delete then takes that point away, not the whole line: the press's default,
+    // which would have focused it, is prevented above)
+    (ev.currentTarget as HTMLElement).focus({ preventScroll: true });
     tx.begin();
     if (key.startsWith('m')) {
       // (a new point between two: put in, then dragged; the curves keep their handles)
